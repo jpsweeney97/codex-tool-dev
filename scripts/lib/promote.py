@@ -31,7 +31,9 @@ def _deterministic_automation_id(template_file: Path) -> str:
     return h[:16]
 
 
-def promote_automation_template(src_template: Path, dest_root: Path, manifest: InstallManifest) -> None:
+def promote_automation_template(
+    src_template: Path, dest_root: Path, manifest: InstallManifest
+) -> None:
     if not src_template.exists():
         raise ValueError(
             f"promote_automation_template failed: missing template file. Got: {str(src_template)!r}"
@@ -48,4 +50,3 @@ def promote_automation_template(src_template: Path, dest_root: Path, manifest: I
         f"automation:{src_template.stem}",
         {"src": str(src_template), "dest": str(dest_file), "id": automation_id},
     )
-

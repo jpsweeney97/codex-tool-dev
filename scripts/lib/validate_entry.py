@@ -12,7 +12,11 @@ def validate(kind: str, name: str | None, repo_root: Path) -> list[str]:
     if kind == "all":
         failures.extend(lint_skills(repo_root / ".codex" / "skills"))
         failures.extend(lint_agents(repo_root / ".codex" / "agents"))
-        failures.extend(lint_automation_templates(repo_root / ".codex" / "automations" / "templates"))
+        failures.extend(
+            lint_automation_templates(
+                repo_root / ".codex" / "automations" / "templates",
+            )
+        )
         return failures
 
     if kind == "skill":
@@ -59,4 +63,3 @@ def parse_validate_args(argv: list[str]) -> tuple[str, str | None]:
     kind = args.kind or "all"
     name = getattr(args, "name", None)
     return kind, name
-

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 _SKILL_REQUIRED_HEADINGS = [
     "# ",
     "## Trigger / when to use",
@@ -35,6 +34,8 @@ def lint_skills(skills_dir: Path, only_name: str | None = None) -> list[str]:
             continue
         if not skill.is_dir():
             continue
+        if skill.name.startswith("_"):
+            continue
         skill_md = skill / "SKILL.md"
         if not skill_md.exists():
             failures.append(f"skill lint failed: missing SKILL.md. Got: {str(skill_md)!r}")
@@ -43,7 +44,19 @@ def lint_skills(skills_dir: Path, only_name: str | None = None) -> list[str]:
         for heading in _SKILL_REQUIRED_HEADINGS:
             if heading not in text:
                 failures.append(
-                    f"skill lint failed: missing required heading {heading!r}. Got: {str(skill_md)!r}"
+                    "skill lint failed: missing required heading "
+                    f"{heading!r}. Got: {str(skill_md)!r}"
+                )
+
+        # Minimal safety checks: require explicit approval language if destructive commands appear.
+        destructive_markers = ["rm ", " rm-", "git reset", "trash "]
+        if any(m in text for m in destructive_markers):
+            approval_markers = ["approval", "confirm", "explicit"]
+            if not any(m in text.lower() for m in approval_markers):
+                failures.append(
+                    "skill lint failed: mentions destructive actions "
+                    "without explicit approval gating. "
+                    f"Got: {str(skill_md)!r}"
                 )
     return failures
 
@@ -60,7 +73,7 @@ def lint_agents(agents_dir: Path, only_name: str | None = None) -> list[str]:
         for heading in _AGENT_REQUIRED_HEADINGS:
             if heading not in text:
                 failures.append(
-                    f"agent lint failed: missing required heading {heading!r}. Got: {str(agent_md)!r}"
+                    "agent lint failed: missing required heading "
+                    f"{heading!r}. Got: {str(agent_md)!r}"
                 )
     return failures
-

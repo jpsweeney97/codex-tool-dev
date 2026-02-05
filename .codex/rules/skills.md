@@ -6,6 +6,7 @@ These rules are **blocking**. Read them before creating or editing any file unde
 
 - Each skill lives in `.codex/skills/<name>/SKILL.md`.
 - Skill directory names use `kebab-case`.
+- Do not edit `.codex/skills/_template/` directly except to improve the template.
 
 ## Required sections (minimum)
 
@@ -36,3 +37,9 @@ These rules are **blocking**. Read them before creating or editing any file unde
 - Include at least one happy-path example and one edge-case example.
 - Verification must be executable (commands or explicit checks).
 
+## Recommended workflow
+
+1. Copy `.codex/skills/_template/` to `.codex/skills/<new-skill-name>/`
+2. Replace placeholders in `SKILL.md`
+3. Add a scenario in `tests/scenarios/skills/`
+4. Run `uv run scripts/validate skill <new-skill-name>`

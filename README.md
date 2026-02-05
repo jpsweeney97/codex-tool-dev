@@ -23,6 +23,12 @@ Dev artifacts live in this repo under `.codex/`. Promotion is the only operation
 uv run scripts/validate
 ```
 
+### 2a) Run scenario tests
+
+```bash
+uv run scripts/test --kind all
+```
+
 Targeted validation:
 
 ```bash
@@ -69,4 +75,3 @@ Before creating or editing any extension, read the relevant rule:
 - Promotion validates first and fails fast.
 - Promotion writes backups and a local install manifest under `/Users/jp/.codex`.
 - No destructive actions without explicit user approval.
-

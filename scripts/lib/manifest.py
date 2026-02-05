@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from tomlkit import document, dumps, parse
@@ -13,18 +13,18 @@ class InstallManifest:
     doc: object
 
     @classmethod
-    def load_or_create(cls, path: Path) -> "InstallManifest":
+    def load_or_create(cls, path: Path) -> InstallManifest:
         if path.exists():
             return cls(path=path, doc=parse(path.read_text(encoding="utf-8")))
         d = document()
-        d["generated_at"] = datetime.now(timezone.utc).isoformat()
+        d["generated_at"] = datetime.now(UTC).isoformat()
         d["items"] = {}
         return cls(path=path, doc=d)
 
     def record(self, key: str, value: dict[str, object]) -> None:
         items = self.doc["items"]
         value = dict(value)
-        value["updated_at"] = datetime.now(timezone.utc).isoformat()
+        value["updated_at"] = datetime.now(UTC).isoformat()
         items[key] = value
 
     def save(self) -> None:

@@ -18,9 +18,9 @@ Provide structured, deterministic outputs for repository maintenance tasks.
 
 - Use short sections with bullet points.
 - Include file paths and commands in backticks.
+- Include the sections `Repo layout`, `validate`, and `promote` when summarizing how to work in this repo.
 
 ## Escalation and approval rules
 
 - If a command will write outside the workspace, request approval first.
 - If unsure about scope, ask for clarification before making broad changes.
-
