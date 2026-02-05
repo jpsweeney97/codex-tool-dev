@@ -1,0 +1,12 @@
+{
+  "name": "codex-tool-dev",
+  "private": true,
+  "workspaces": [
+    "packages/*/*"
+  ],
+  "scripts": {
+    "build": "npm -ws run build",
+    "test": "npm -ws run test"
+  }
+}
+

@@ -1,0 +1,10 @@
+id: example-agent-basic
+artifact: agent
+name: example-agent
+prompt: "Summarize the repository layout and how to validate changes."
+expect:
+  must_include:
+    - "Repo layout"
+    - "validate"
+    - "promote"
+

@@ -1,0 +1,11 @@
+.DS_Store
+node_modules/
+dist/
+build/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+tmp/
+.codex/local/
