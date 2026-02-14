@@ -24,6 +24,16 @@ If `prompt_density` is unspecified, default to `balanced`.
 - `balanced`: keep the full structure with moderate detail (default).
 - `max`: allow richer detail and nuance, but still obey the 2000-char `SORA_PROMPT` hard limit.
 
+### Quick / Minimal FINAL Shortcut (Deterministic)
+If the user explicitly requests a quick/short/minimal paste-ready output (e.g.
+“quick final”, “short final”, “minimal final”, “minimum viable”, “tldr”), treat
+this as:
+- Mode: `FINAL`
+- `prompt_density=minimal`
+
+Do not reinterpret “quick/minimal” as “no questions” unless the user also
+explicitly says “FINAL (no questions)” or “no questions”.
+
 ## 2) Choose Shot Structure
 - `single_shot`: write one continuous shot.
 - `split_into_shots`: write 2–3 shot blocks (max 3), keeping palette anchors consistent.
@@ -146,6 +156,20 @@ Each must:
 - avoid new characters unless explicitly adding one extra character
 
 Allowed single-variable changes: lighting, lens/DOF, pacing, intensity, one prop/landmark.
+
+### Remix / Variant Commands (When User Requests Iteration)
+If the user asks for a variant based on a prior `FINAL`, follow these command
+semantics:
+- `REMIX <n>`: apply remix nudge #`n` (1-based) from the most recent `FINAL`
+  and re-output a full `FINAL`.
+  - If `n` is not an integer or is out of range, fail fast and ask for a valid
+    nudge index.
+- `TWEAK: <instruction>`: apply a single change while keeping all other locked
+  decisions stable, then re-output a full `FINAL`.
+  - If the tweak implies multiple unrelated changes, ask 1 CLARIFY question to
+    prioritize.
+- `VARIANTS x<k>`: only when explicitly requested; output `k` separate `FINAL`
+  blocks (k must be 2–4), each differing by exactly one variable.
 
 ## 10) Length Budget (Hard Constraint)
 Hard limit: the combined character count of:

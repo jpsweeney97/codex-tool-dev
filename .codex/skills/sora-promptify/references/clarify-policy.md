@@ -11,6 +11,47 @@ Tone intent:
 - Keep each round light: a short reflection + one decision.
 - Avoid “form energy”: do not dump many fields or enumerate every possible setting detail.
 
+## UX Track: Story / Character-First (Selected)
+When the user preference is “story/character-driven”, bias CLARIFY questions and
+wording toward:
+- character intent and emotional turn
+- stakes (even small ones) and social dynamics
+- comedic/tension timing
+- a clean ending beat / button
+
+De-emphasize:
+- lens jargon, DOF jargon, stabilization jargon (unless user asked)
+- “settings panel” recaps
+
+Hard constraint: still ensure the scene is filmable and coherent (no silent
+assumptions that would change the story).
+
+### Deterministic Activation (Signals)
+Treat the user as requesting story/character-first UX if they include any of:
+- `CHARACTER_FIRST: yes`
+- “character-first”
+- “focus on story”
+- “less camera talk”
+- “collaborative ideation” / “ideating session” (when they explicitly contrast it with technical settings)
+
+### Writers' Room Micro-Pitches (Hard Requirement)
+In story/character-first UX, each CLARIFY round must include exactly two
+micro-pitches immediately before the multiple-choice options:
+
+- `Take A:` 1–2 sentences (max 240 characters)
+- `Take B:` 1–2 sentences (max 240 characters)
+
+Rules:
+- Takes must differ by a story variable (tone, intent, social dynamic, timing,
+  ending button). They must not differ primarily by camera tech.
+- Each take must reference at least one concrete detail from the user’s raw text.
+- If dialogue is present/central, each take should imply a different delivery
+  style or comedic/tension button.
+- Do not introduce new major characters, brands, or copyrighted references.
+
+Then ask one question of the form:
+- “Which take is closer?” with A/B + `Other: …`
+
 ## Canonical Questions (Ordered)
 Q1 Physics mode:
 - A) Grounded-real (plausible distances/forces) [default]
@@ -69,6 +110,71 @@ Pick questions using `references/question-bank.md`:
 - Prefer questions with an explicit “Other: …” escape hatch so the user is never
   forced into your menu.
 
+### Story / Character-First Deterministic Gates (Less Scripted, Still Reliable)
+In story/character-first UX, avoid rigid question scripts. Instead, use
+deterministic gates: ask a question only when ambiguity/risk is present, and
+skip it when the user has already made it clear.
+
+Hard priority: if any guardrails are missing (privacy/faces, readable text/logos,
+safety/content boundaries), ask a guardrail gate first.
+- Use the narrative templates in `references/question-bank.md` under:
+  - `Character-First Guardrail Phrasing (Templates)`
+
+Then, for the remaining questions, evaluate gates in this order and ask the
+first gate that is triggered:
+
+Gate 1 — Consent to invent:
+- Trigger if the raw text is evocative but underspecified (you would otherwise
+  need to invent 2+ story specifics: who exactly, what exactly happens next, or
+  what the button ending is).
+- Ask: `Consent to invent`
+
+Gate 2 — Tone / genre mix:
+- Trigger if tone is not explicit or could plausibly read two ways (funny vs
+  tense vs earnest).
+- Ask: `Tone / genre mix`
+
+Gate 3 — Audience POV:
+- Trigger if the premise contains social judgment/cringe potential or a moral
+  stance (complaining, public ranting, awkward confession, petty escalation,
+  confrontation), and the viewer alignment is not explicit.
+- Ask: `Audience POV`
+
+Gate 4 — Primary subject of attention:
+- Trigger if it’s unclear whether the clip should live on performance, hands,
+  the place, or crowd reactions.
+- Ask: `Primary subject of attention`
+
+Gate 5 — Self-awareness / performance for camera:
+- Trigger if it’s unclear whether the character is aware they’re being filmed,
+  or if that awareness changes the comedy/drama.
+- Ask: `Self-awareness / performance for camera`
+
+Gate 6 — Ending beat:
+- Trigger if the ending/button is not implied, or if the premise needs a clear
+  “landing” to feel authored.
+- Ask: `Ending beat`
+
+Gate 7 — Dialogue intent:
+- Trigger if speech is central and it’s unclear whether we should avoid clear
+  words, go silent, or preserve 1–2 lines; or if it’s unclear what the speech is
+  about.
+- Ask: `Dialogue policy` and/or `What is the preserved dialogue about`
+
+Gate 8 — Shot plan (pacing tool, not tech):
+- Trigger if timing depends on structure (awkward build vs punchy cut timing),
+  and the user hasn’t implied one-take vs cuts.
+- Ask: `Shot plan` phrased as pacing/timing
+
+Gate 9 — Look (supporting vibe):
+- Trigger if the desired vibe could be phone-viral vs doc vs cinematic, and the
+  user hasn’t implied a look.
+- Ask: `Style preset` phrased as vibe/texture
+
+Tie-break (deterministic):
+- If multiple gates are triggered equally, prefer asking `Tone / genre mix`
+  unless the “Consent to invent” gate is triggered (in that case ask consent first).
+
 ## Option Presentation Policy (Two Directions by Default)
 To avoid the CLARIFY flow feeling like a form, do **not** present the full option
 menu most of the time.
@@ -118,9 +224,56 @@ confirm any option that materially changes the result (e.g. `shot_policy`,
 
 ## Conversational UX (Hard Guidance)
 Within `CLARIFYING_QUESTIONS`, structure each round like:
-1) `What we’ve decided:` and `Next creative pick(s):` (brief).
+1) `Locked so far:` and `Still open:` (brief; follow canonical keying).
 2) A 1–2 sentence “creative reflection” (what you’re picturing; what’s strong).
 3) One multiple-choice question (unless bundling was requested).
+4) Close with `Answers:` and `Reply like:` lines (see below).
+
+### One Good Note (Hard Requirement)
+In `CLARIFY`, include exactly one optional “note” line before the question. This
+should feel like a director/actor note from a creative partner.
+
+Format (exact label):
+- `One good note:` <one sentence>
+
+Constraints:
+- Must be one sentence (no semicolons; no lists).
+- Must be actionable and small (timing, performance, intention, social dynamic,
+  or ending button).
+- Must not introduce new requirements, new characters, or new locations.
+- Must not mention technical camera settings unless the user explicitly asked
+  for technical guidance.
+
+Examples:
+- `One good note: Let the laugh catch them off-guard before they try again, so it feels like a real private moment.`
+- `One good note: Keep the pettiness escalating in tiny steps so the riders’ reactions can build into the button.`
+
+### Reflection Checklist (Hard)
+The creative reflection must include all of the following, in 1–2 sentences:
+- 1 concrete detail from the user’s raw text (a setting, prop, action, or line)
+- 1 character/relationship inference framed as a suggestion (use “feels like” /
+  “we could” / “I’m seeing”)
+- 1 timing/stakes note (what escalates, what turns, or what lands at the end)
+
+Avoid in story/character-first mode:
+- lens/DOF terms unless user asked
+- “schema”/“policy”/“mode”/“SORA_OPTIONS” meta-talk
+
+### Reply Friction Rules (Hard)
+To keep replies effortless (especially on mobile), the end of every CLARIFY round
+must include:
+- An `Answers:` hint line.
+- A concrete `Reply like:` example.
+
+Formatting:
+- If 1 question was asked:
+  - End with `Answers: A` (or `Answers: A/B/C`) and then `Reply like: A`
+- If multiple questions were bundled:
+  - End with `Answers: 1B 2A 3C ...` and then `Reply like: 1B 2A`
+
+Acceptable user replies:
+- Just the letter(s) (preferred), e.g. `A` or `1B 2A`
+- The full option text (still accept, but normalize to letter internally)
 
 ## Delivery Script (Use This For Any Question)
 Goal: make each question feel like a collaborative creative beat — not a bank lookup.
@@ -138,6 +291,28 @@ Keep it tight:
 Examples (swap in the current question’s topic):
 - “I’m seeing this as a candid phone moment that escalates fast, with one clean camera idea we can execute. We can either keep it as a single one-take that feels real, or do a couple simple cuts for punchier emphasis. Which way should we lock it in? (I’d lean one-take for authenticity.)”
 - “This already has a strong vibe — I just want to tune the ‘chaos dial’ so it stays readable. We can keep it clean and safe, or allow one tiny harmless mishap for comedy. What feels right?”
+
+## Locked State Canonical Keys (CLARIFY)
+In `Locked so far:`, use stable human-readable keys so users can refer back to
+them conversationally (“keep everything, switch Look to doc texture”).
+
+Canonical keys (omit unknowns; keep order when present):
+1) `Format:`
+2) `Look:`
+3) `Edit feel:`
+4) `Chaos dial:`
+5) `Dialogue:`
+6) `Physics:` (only when relevant)
+7) `Safety / privacy / text:`
+
+Value vocabulary (use these phrases):
+- Look: `phone-footage`, `doc texture`, `cinematic polish`, `stylized/animated`, `other`
+- Edit feel: `one-take`, `a few clean cuts`, `storyboard beats`, `other`
+- Chaos dial: `low`, `medium`, `high`, `other`
+- Dialogue: `implied`, `none`, `preserve 1–2 short lines`, `other`
+- Safety / privacy / text: `safe default`, `controlled risk`, `user-specified`
+
+Do not include internal identifiers (e.g. `smartphone_real`) in this recap.
 
 ## Curation Recipes (How to Collapse Menus Into Two Directions)
 Use these when a question bank entry has 4–5 options, but you want to present a simple A/B + `Other` experience.
@@ -210,9 +385,10 @@ Avoid:
   (core controls first, then anchors, then optional refinements).
 - Start each CLARIFY round by recapping the current state **inside**
   `CLARIFYING_QUESTIONS`:
-  - `What we’ve decided:` bullet list (only items that have been explicitly provided
-    or chosen in earlier answers).
-  - `Next creative pick(s):` bullet list (the next 2–5 important unknowns framed
-    as upcoming creative decisions).
+  - `Locked so far:` bullet list (only items that have been explicitly provided
+    or chosen in earlier answers; use the canonical keys).
+  - `Still open:` bullet list (the next 1–5 important unknowns framed as upcoming
+    creative decisions).
 - Include reply hint exactly as: `Answers: 1B 2A 3C ...`
+- Immediately after `Answers:`, include: `Reply like: 1B 2A`
 - Output only `CLARIFYING_QUESTIONS` section in CLARIFY mode.

@@ -15,6 +15,9 @@ Collaboration-first intent:
 - Offer 1–2 concrete creative options (not endless menus), then let the user steer.
 - Produce `FINAL` once the concept feels coherent enough to shoot.
 - Respect “FINAL / no questions” when explicitly requested.
+- If the user asks for a story/character-driven session, prioritize tone, stakes,
+  timing, and character intent over technical camera talk.
+- Include a “One good note” line in CLARIFY (see `references/clarify-policy.md`).
 
 Default app assumptions:
 - Orientation: Portrait (9:16)
@@ -45,11 +48,20 @@ Apply defaults when omitted:
 Note: these defaults are applied in `FINAL` mode. In `CLARIFY` mode, ask
 interactive questions instead of silently applying defaults.
 
+## UX Mode Signals (Optional)
+If the user explicitly signals a UX preference, honor it deterministically:
+- `CHARACTER_FIRST: yes` or “character-first” or “focus on story”: prioritize story/character questions and wording (see `references/clarify-policy.md`).
+- `DIRECTOR_FIRST: yes` or “director-mode” or “camera-first”: prioritize camera/coverage questions and wording.
+
 ## Interaction Shortcuts
 - **Force `FINAL` (no questions):** user explicitly says “FINAL” / “no questions” / “just write the prompt”.
 - **Force `CLARIFY`:** user says “ask me questions first” / “ask me options”.
 - **Continue clarifying:** user says “more questions” / “keep clarifying”.
 - **Proceed to `FINAL`:** user answers “Yes — generate FINAL now” to the confirmation question.
+- **Quick / minimal `FINAL`:** user says “quick” / “short” / “minimal” / “minimum viable” / “tldr”
+  (or similar) *and* indicates they want a paste-ready prompt now (e.g. “quick final”, “short final”).
+  - Output mode remains `FINAL`, but set `prompt_density=minimal` deterministically.
+  - Do not skip required sub-blocks; compress them.
 
 ## Output Contract
 Produce exactly one mode.
@@ -64,15 +76,18 @@ Rules:
 - Default UI pattern: **two curated directions + escape hatch**
   - Prefer presenting 2 strong, scene-appropriate options (A/B) plus `Other: …`.
   - Only present 4–5 options when the user asks for the full menu, or when the extra nuance is genuinely critical to the outcome.
-- Start with a short state recap inside `CLARIFYING_QUESTIONS`:
-  - `What we’ve decided:` bullet list (previous choices / explicit constraints).
-  - `Next creative pick(s):` bullet list (next 2–5 unknowns framed as upcoming creative decisions).
+- Start with a short state recap inside `CLARIFYING_QUESTIONS` using this exact structure:
+  - `Locked so far:` bullet list (previous choices / explicit constraints; see “Locked State Canonical Keys” below).
+  - `Still open:` bullet list (next 1–5 unknowns framed as upcoming creative decisions).
 - Tone guidelines (keep it human):
   - Include a 1–2 sentence creative reflection before the question (e.g. what’s compelling / what you’re picturing).
   - Use natural phrasing; avoid reading out internal option names (e.g. say “phone-footage” not `smartphone_real`).
   - Offer choices that feel like creative directions, not survey answers.
 - Prefer including an `Other: …` option so the user can override the menu.
 - Include: `Answers: 1B 2A 3C ...`
+- Always include a single-line reply example immediately after `Answers:`:
+  - If 1 question: `Reply like: A`
+  - If bundled: `Reply like: 1B 2A`
 - Do not output final sections.
 
 ### Mode B: FINAL
@@ -117,6 +132,24 @@ In `FINAL` mode, the contents of `SORA_PROMPT` must be wrapped in a fenced Markd
 - Resolve contradictory camera directives to one primary setup.
 - Preserve user-specified constraints.
 - Infer missing details minimally; avoid named brands and copyrighted characters.
+
+## Locked State Canonical Keys (CLARIFY)
+In `CLARIFY`, the `Locked so far:` block must use a stable, human-readable set of keys (omit unknowns):
+- `Format:` (only if not default: portrait 9:16, ~15s)
+- `Look:` phone-footage | doc texture | cinematic polish | stylized/animated | other
+- `Edit feel:` one-take | a few clean cuts | storyboard beats | other
+- `Chaos dial:` low | medium | high | other
+- `Dialogue:` implied | none | preserve 1–2 short lines | other
+- `Physics:` grounded-real | heightened | mixed | other (only if relevant)
+- `Safety / privacy / text:` safe default | controlled risk | user-specified
+
+## Remix / Variant Commands (FINAL)
+If the user provides a prior `FINAL` (or says “use the last one”) and asks for a variant, prefer these deterministic commands:
+- `REMIX <n>`: re-output a full `FINAL` applying remix nudge #`n` (1-based) from the most recent `FINAL`.
+  - If `n` is out of range, fail fast and ask for a valid index.
+- `TWEAK: <instruction>`: re-output a full `FINAL` with all locked decisions preserved, applying only the tweak.
+  - If the tweak would force multiple unrelated changes, ask 1 CLARIFY question to pick the priority.
+- `VARIANTS x<k>`: only when explicitly requested; output `k` separate `FINAL` blocks (k must be 2–4) that differ by exactly one variable each.
 
 ## References
 Load only what is needed:

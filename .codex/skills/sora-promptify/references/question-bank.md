@@ -16,9 +16,34 @@ Formatting requirements:
   - Add `Recommended: <letter> — <one-line rationale>` immediately under the option list.
 - Keep answers easy to type: A/B/C/D (use E only when needed).
 - End with reply hint: `Answers: 1B 2A 3C ...`
+- Immediately after `Answers:`, include `Reply like:` example:
+  - Single question: `Reply like: A`
+  - Bundled: `Reply like: 1B 2A`
 - Prefer including an “Other: …” option so the user can escape the menu.
 
+## Creative Dials (User-Facing Vocabulary)
+When curating any question into A/B + `Other`, phrase the choices in terms of
+these stable “dials” so users can direct revisions without re-answering a form:
+- `Look` dial: phone-footage | doc texture | cinematic polish | stylized/animated
+- `Edit feel` dial: one-take | a few clean cuts | storyboard beats
+- `Chaos dial`: low | medium | high
+- `Dialogue` dial: implied | none | preserve 1–2 short lines
+- `Safety / privacy / text` dial: safe default | controlled risk | user-specified
+
+These are intentionally memorable. Use them in your natural language reflection
+and in `Locked so far:` recaps. Do not expose internal option names.
+
 ## Global Intent (Ask When Missing)
+
+### Consent to invent (story detail invention boundaries)
+Ask early in story/character-first flows when the user’s raw text is evocative
+but underspecified, to avoid either hijacking the story or interrogating them.
+
+- A) Invent lightly (add 1–2 tasteful specifics that fit the vibe). [default]
+- B) Stick strictly to my text (no new story beats; no new characters).
+- C) Invent boldly (add 2–4 specifics + a clean ending button). (Higher risk)
+- D) Other: (describe what I can/can’t invent)
+Recommended: A — Keeps it collaborative without drifting off-brief.
 
 ### Must-haves (success criteria)
 - A) Surprise me — no must-haves; improvise within the vibe. [default]
@@ -41,6 +66,15 @@ Recommended: B — One or two guardrails avoids “cool, but not what I meant.�
 - D) Crowd / background reactions (social vibe, chaos, energy).
 - E) Other: (describe what the camera “cares about”)
 Recommended: A — Performance-forward clips usually feel the most alive.
+
+### Audience POV (who the viewer is aligned with)
+This is a story lever: it changes tone, reactions, and what feels “funny vs mean”.
+
+- A) With them (rooting for them; their vulnerability reads as human). [default]
+- B) At them (we’re judging them a bit; comedic cringe / social pressure).
+- C) Split (starts with them, flips to “oh no” as it escalates).
+- D) Other: (describe the audience alignment)
+Recommended: A — “With them” usually reads warmer and more shareable.
 
 ### Tone / genre mix (pick the dominant vibe)
 - A) Funny / playful (light stakes, strong timing). [default]
@@ -365,6 +399,47 @@ Pick the single highest-priority unanswered question in this order:
 10) Physics mode (only if stunts/scale/implausibility appear).
 
 If the user asks to bundle questions, pick up to 5 using the same priority list.
+
+## Story / Character-First UX (Question Choice Bias)
+When the user signals they want a story/character-driven ideation session (e.g.
+“focus on the story”, “character-first”, “less camera talk”), bias selection and
+phrasing as follows:
+- Prefer: tone/genre mix, self-awareness, ending beat, primary subject of
+  attention, dialogue intent (what it’s about), and “anything else happens” beats.
+- De-emphasize: color grade, DOF, stabilization, lens talk unless requested.
+- Keep camera questions framed as pacing/timing choices (“one-take for awkward
+  build” vs “two cuts for punchline timing”), not as technical settings.
+
+### Character-First Guardrail Phrasing (Templates)
+When guardrails are missing (privacy/faces, readable text/logos, safety/content
+boundaries), ask them first — but phrase them as story constraints that protect
+the vibe and keep iteration smooth.
+
+Hard rules:
+- Do not say “policy”, “mode”, “schema”, or “settings”.
+- Keep it framed in narrative terms (“what’s allowed on screen”), not technical
+  compliance terms.
+- Still provide A/B + `Other: …` and include `Recommended:` when helpful.
+
+Examples (choose the one that fits):
+
+Faces / privacy (crowds):
+- A) Keep background riders anonymous (faces not clearly identifiable). [default]
+- B) Faces are fine; normal crowd visibility.
+- C) Other: (describe privacy constraints)
+Recommended: A — Keeps it feeling real without “uncanny face” distractions.
+
+Text / logos (signs, ads, screens):
+- A) No readable ads/signs; everything stays indistinct in the background. [default]
+- B) A specific sign/text matters (I’ll specify exact words). (High risk)
+- C) Other: (describe what text, if any, must be readable)
+Recommended: A — Prevents the scene from breaking on a tiny background detail.
+
+Safety / escalation:
+- A) Social tension only (no physical contact; no throwing; no damage). [default]
+- B) Tiny safe mishap is okay (minor spill/bump; nobody hurt).
+- C) Other: (list 1–3 boundaries)
+Recommended: A — Keeps the timing and reactions readable.
 
 ## Proceed-to-FINAL Confirmation (When Ready)
 When you believe you are ready to produce `FINAL` (and the user has not requested
