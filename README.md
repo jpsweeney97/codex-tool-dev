@@ -20,29 +20,29 @@ Dev artifacts live in this repo under `.codex/`. Promotion is the only operation
 ### 2) Validate
 
 ```bash
-uv run scripts/validate
+./scripts/validate
 ```
 
 ### 2a) Run scenario tests
 
 ```bash
-uv run scripts/test --kind all
+./scripts/test --kind all
 ```
 
 Targeted validation:
 
 ```bash
-uv run scripts/validate skill example-skill
-uv run scripts/validate agent example-agent
-uv run scripts/validate automation example-automation
+./scripts/validate skill example-skill
+./scripts/validate agent example-agent
+./scripts/validate automation example-automation
 ```
 
 ### 3) Promote to `/Users/jp/.codex`
 
 ```bash
-uv run scripts/promote skill example-skill
-uv run scripts/promote agent example-agent
-uv run scripts/promote automation example-automation
+./scripts/promote skill example-skill
+./scripts/promote agent example-agent
+./scripts/promote automation example-automation
 ```
 
 ## Repo layout

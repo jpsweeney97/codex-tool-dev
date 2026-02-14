@@ -92,5 +92,20 @@ def run_scenarios(scenarios_root: Path, kinds: list[str]) -> list[str]:
                         [f"{scenario_file.name}: {msg}" for msg in _check_contains(text, must)]
                     )
 
+            if kind == "evals":
+                must_exist = expect.get("must_exist")
+                if isinstance(must_exist, list):
+                    for rel in must_exist:
+                        if not isinstance(rel, str) or not rel.strip():
+                            failures.append(
+                                f"{scenario_file.name}: scenario failed: invalid must_exist entry. Got: {rel!r}"
+                            )
+                            continue
+                        path = scenarios_root.parents[1] / rel
+                        if not path.exists():
+                            failures.append(
+                                f"{scenario_file.name}: scenario failed: missing expected file. Got: {str(path)!r}"
+                            )
+
             _ = _normalize_prompt(prompt)
     return failures

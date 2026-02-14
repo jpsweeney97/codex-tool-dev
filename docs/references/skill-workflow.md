@@ -25,8 +25,8 @@ This repo is set up so skills are:
 5. Validate and test:
 
    ```bash
-   uv run scripts/validate skill log-triage
-   uv run scripts/test --kind skills
+   ./scripts/validate skill log-triage
+   ./scripts/test --kind skills
    ```
 
 ## Promote (install) a skill
@@ -34,17 +34,16 @@ This repo is set up so skills are:
 Promote into production target `/Users/jp/.codex`:
 
 ```bash
-uv run scripts/promote skill log-triage
+./scripts/promote skill log-triage
 ```
 
 Safe testing into a temporary home:
 
 ```bash
-CODEX_HOME=/tmp/codex-home-test uv run scripts/promote skill log-triage
+CODEX_HOME=/tmp/codex-home-test ./scripts/promote skill log-triage
 ```
 
 ## Conventions
 
 - Directories under `.codex/skills/` starting with `_` are treated as templates and skipped by linters.
 - Skills must include a `Verification` section with executable checks when possible.
-

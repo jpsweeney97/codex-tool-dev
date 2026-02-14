@@ -1,0 +1,94 @@
+{
+  "schema": "sora-promptify-run-summary-v1",
+  "rows": 30,
+  "fail_key": "dialogue_ownership_split_across_mouths",
+  "by_variant": {
+    "A": {
+      "rows": 15,
+      "fail_count": 0,
+      "fail_rate": 0.0,
+      "fail_flag_counts": {
+        "dialogue_action_mismatch": 0,
+        "dialogue_ownership_split_across_mouths": 0,
+        "dialogue_text_not_preserved": 1,
+        "physics_plausibility_break": 0,
+        "role_action_mismatch": 0
+      },
+      "scores": {
+        "identity_continuity": {
+          "count": 15,
+          "mean": 5.0
+        },
+        "wardrobe_prop_continuity": {
+          "count": 15,
+          "mean": 4.2
+        },
+        "dialogue_attribution_continuity": {
+          "count": 15,
+          "mean": 5.0
+        },
+        "lip_sync_plausibility": {
+          "count": 15,
+          "mean": 4.533333333333333
+        },
+        "temporal_coherence": {
+          "count": 15,
+          "mean": 3.6666666666666665
+        },
+        "camera_realism": {
+          "count": 15,
+          "mean": 2.8666666666666667
+        }
+      }
+    },
+    "B": {
+      "rows": 15,
+      "fail_count": 1,
+      "fail_rate": 0.06666666666666667,
+      "fail_flag_counts": {
+        "dialogue_action_mismatch": 0,
+        "dialogue_ownership_split_across_mouths": 1,
+        "dialogue_text_not_preserved": 0,
+        "physics_plausibility_break": 0,
+        "role_action_mismatch": 0
+      },
+      "scores": {
+        "identity_continuity": {
+          "count": 15,
+          "mean": 5.0
+        },
+        "wardrobe_prop_continuity": {
+          "count": 15,
+          "mean": 4.8
+        },
+        "dialogue_attribution_continuity": {
+          "count": 15,
+          "mean": 4.666666666666667
+        },
+        "lip_sync_plausibility": {
+          "count": 15,
+          "mean": 4.866666666666666
+        },
+        "temporal_coherence": {
+          "count": 15,
+          "mean": 3.7333333333333334
+        },
+        "camera_realism": {
+          "count": 15,
+          "mean": 3.1333333333333333
+        }
+      }
+    }
+  },
+  "A_to_B": {
+    "fail_count_delta": 1,
+    "score_mean_deltas": {
+      "identity_continuity": 0.0,
+      "wardrobe_prop_continuity": 0.5999999999999996,
+      "dialogue_attribution_continuity": -0.33333333333333304,
+      "lip_sync_plausibility": 0.33333333333333304,
+      "temporal_coherence": 0.06666666666666687,
+      "camera_realism": 0.2666666666666666
+    }
+  }
+}

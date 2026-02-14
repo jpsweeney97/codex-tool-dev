@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sora-promptify runs/*.jsonl line schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["brief_id", "variant_id", "variant_key"],
+  "properties": {
+    "brief_id": { "type": "string", "minLength": 1 },
+    "variant_id": { "type": "string", "minLength": 1 },
+    "variant_key": { "type": "string", "enum": ["A", "B", "C", "D"] },
+    "generation_id": { "type": "string" },
+    "video_path": { "type": "string" },
+    "sora_settings": { "type": "object" },
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "identity_continuity": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "wardrobe_prop_continuity": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "dialogue_attribution_continuity": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "lip_sync_plausibility": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "temporal_coherence": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "camera_realism": { "type": "integer", "minimum": 0, "maximum": 5 }
+      }
+    },
+    "fail_flags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "notes": { "type": "string" }
+  }
+}
+

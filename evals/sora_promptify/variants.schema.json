@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sora-promptify variants.jsonl line schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "brief_id",
+    "variant_id",
+    "variant_key",
+    "options",
+    "sora_prompt"
+  ],
+  "properties": {
+    "brief_id": { "type": "string", "minLength": 1 },
+    "variant_id": { "type": "string", "minLength": 1 },
+    "variant_key": {
+      "type": "string",
+      "enum": ["A", "B", "C", "D"]
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prompt_density", "coherence_mode", "speaker_binding"],
+      "properties": {
+        "prompt_density": { "type": "string", "enum": ["minimal", "balanced", "max"] },
+        "coherence_mode": { "type": "string", "enum": ["reality_first", "storyboard_first", "hybrid"] },
+        "speaker_binding": { "type": "string", "enum": ["normal", "strict"] }
+      }
+    },
+    "sora_prompt": { "type": "string", "minLength": 1, "maxLength": 2000 }
+  }
+}
+

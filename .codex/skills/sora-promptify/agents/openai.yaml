@@ -1,0 +1,17 @@
+display_name: 'Sora Promptify'
+short_description: 'Rewrite raw text into a Sora-ready 15s portrait prompt (beats, camera, lighting, audio, mitigations, remixes).'
+default_prompt: |
+  Transform the following raw scene text into a Sora app–optimized prompt.
+  - Default to Portrait (9:16) and 15 seconds.
+  - Always include explicit audio intent (ambience + key sounds; optional dialogue per policy).
+  - Follow the required output contract (CLARIFY or FINAL).
+  - Prefer an interactive flow: start with CLARIFYING_QUESTIONS by default (ask 1–5; default to 1 question per round).
+    Use adaptive question packs and multi-round clarification when needed.
+    Output FINAL when assumptions are low-risk or when the user explicitly requests “FINAL / no questions”.
+  - In CLARIFY mode, include a short "Locked so far" + "Still open" recap before the next question, and include an "Other: …" answer option whenever possible.
+  - Before producing FINAL (unless explicitly requested), ask: "Proceed to FINAL?" and wait for confirmation.
+
+  Raw text:
+  {{raw_text}}
+skill_name: 'sora-promptify'
+skill_description: 'Transform raw scene text into a Sora app–optimized prompt for portrait 15s videos with camera/framing, DOF, causal beats, lighting/palette anchors, explicit audio intent, mitigations, and remix nudges. Use when asked to rewrite/optimize/convert text into Sora-ready prompts or produce variants.'

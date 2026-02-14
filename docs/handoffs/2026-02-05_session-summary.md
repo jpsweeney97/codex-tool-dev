@@ -38,7 +38,7 @@ Added the initial repo scaffold, including:
 
 Promotion was smoke-tested by promoting into a temporary home:
 
-- `CODEX_HOME=/tmp/codex-home-test uv run scripts/promote ...`
+- `CODEX_HOME=/tmp/codex-home-test ./scripts/promote ...`
 
 ### `27496ae` — Strengthen skill development foundation
 
@@ -61,8 +61,8 @@ Added the “robust foundation” for skill development:
 
 Quality checks run after these changes:
 
-- `uv run scripts/validate all`
-- `uv run scripts/test --kind all`
+- `./scripts/validate all`
+- `./scripts/test --kind all`
 - `ruff check .`
 
 ## How to use what was built
@@ -70,28 +70,28 @@ Quality checks run after these changes:
 ### Validate artifacts
 
 ```bash
-uv run scripts/validate all
-uv run scripts/validate skill <skill-name>
-uv run scripts/validate agent <agent-name>
-uv run scripts/validate automation <template-name>
+./scripts/validate all
+./scripts/validate skill <skill-name>
+./scripts/validate agent <agent-name>
+./scripts/validate automation <template-name>
 ```
 
 ### Run scenario tests
 
 ```bash
-uv run scripts/test --kind all
+./scripts/test --kind all
 ```
 
 ### Promote into production target
 
 ```bash
-uv run scripts/promote skill <skill-name>
+./scripts/promote skill <skill-name>
 ```
 
 Safe promotion into a temp home:
 
 ```bash
-CODEX_HOME=/tmp/codex-home-test uv run scripts/promote skill <skill-name>
+CODEX_HOME=/tmp/codex-home-test ./scripts/promote skill <skill-name>
 ```
 
 ## Guardrails added this session
@@ -99,4 +99,3 @@ CODEX_HOME=/tmp/codex-home-test uv run scripts/promote skill <skill-name>
 - Repository-wide scan to avoid Claude-specific language in `codex-tool-dev` returned no matches.
 - Promotion writes backups (`.bak-<timestamp>`) and records installs in an install manifest under the target CODEX_HOME.
 - Linters enforce required sections for skills/agents and required keys for automation templates.
-

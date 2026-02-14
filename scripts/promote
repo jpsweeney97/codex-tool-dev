@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S /Users/jp/Projects/active/codex-tool-dev/scripts/python
 from __future__ import annotations
 
 import argparse
