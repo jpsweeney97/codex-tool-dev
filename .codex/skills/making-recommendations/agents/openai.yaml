@@ -1,0 +1,7 @@
+interface:
+  display_name: "Making Recommendations"
+  short_description: "Compare options and recommend a clear course"
+  default_prompt: "Use $making-recommendations to compare the viable options, rank them, and recommend the best path with trade-offs."
+
+policy:
+  allow_implicit_invocation: false

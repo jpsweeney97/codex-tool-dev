@@ -1,0 +1,7 @@
+interface:
+  display_name: "Next Steps"
+  short_description: "Turn findings into a dependency-aware action plan"
+  default_prompt: "Use $next-steps to turn these findings into a dependency-aware strategic plan with phases, decision gates, and a critical path."
+
+policy:
+  allow_implicit_invocation: false

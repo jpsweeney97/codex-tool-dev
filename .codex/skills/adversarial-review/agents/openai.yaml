@@ -1,0 +1,7 @@
+interface:
+  display_name: "Adversarial Review"
+  short_description: "Stress-test proposals with structured critique"
+  default_prompt: "Use $adversarial-review to stress-test this proposal, rank the main risks, and explain what would need to change."
+
+policy:
+  allow_implicit_invocation: false

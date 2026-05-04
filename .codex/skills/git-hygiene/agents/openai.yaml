@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Hygiene"
+  short_description: "Audit repo clutter and apply approved cleanup lanes"
+  default_prompt: "Use $git-hygiene to audit this repository, organize the cleanup by lane, and execute only the approved lanes without skipping preview."

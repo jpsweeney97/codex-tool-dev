@@ -1,0 +1,7 @@
+interface:
+  display_name: "Scrutinize"
+  short_description: "Maximum-scrutiny review that assumes rejection"
+  default_prompt: "Use $scrutinize to challenge the premise, hunt for failure modes, and give a reject-until-proven-credible review."
+
+policy:
+  allow_implicit_invocation: false

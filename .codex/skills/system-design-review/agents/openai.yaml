@@ -1,0 +1,7 @@
+interface:
+  display_name: "System Design Review"
+  short_description: "Review architectures through weighted design lenses"
+  default_prompt: "Use $system-design-review to review this architecture, surface inherited defaults and tensions, and end with the sharpest next questions."
+
+policy:
+  allow_implicit_invocation: false

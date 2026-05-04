@@ -1,0 +1,4 @@
+interface:
+  display_name: "Markdown Reformat"
+  short_description: "Turn rough text into clean Markdown"
+  default_prompt: "Use $markdown-reformat to turn this rough document into clean Markdown while preserving meaning and structure."

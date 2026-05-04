@@ -1,0 +1,7 @@
+interface:
+  display_name: "Implementation Review"
+  short_description: "Adversarial review against plans or specs"
+  default_prompt: "Use $implementation-review to review this completed code against the spec, build a requirements ledger, and try to falsify each requirement before giving a verdict."
+
+policy:
+  allow_implicit_invocation: false

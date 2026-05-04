@@ -1,0 +1,4 @@
+interface:
+  display_name: "Claude Code Docs"
+  short_description: "Authoritative Claude Code docs with citations"
+  default_prompt: "Use $claude-code-docs to answer from the official Claude Code docs with inline chunk_id citations."
