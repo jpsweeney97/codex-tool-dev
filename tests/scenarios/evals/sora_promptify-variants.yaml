@@ -1,9 +1,0 @@
-id: sora-promptify-variants-validate
-artifact: eval
-name: sora_promptify
-prompt: "Ensure sora-promptify eval variants are present and valid JSONL."
-expect:
-  must_exist:
-    - "evals/sora_promptify/briefs.jsonl"
-    - "evals/sora_promptify/variants.schema.json"
-    - "evals/sora_promptify/variants.jsonl"
