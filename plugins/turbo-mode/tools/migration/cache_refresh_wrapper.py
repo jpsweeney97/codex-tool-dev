@@ -469,6 +469,15 @@ def restore_cache_roots(backup_root: Path, failed_root: Path) -> None:
             shutil.copytree(backup, cache_root)
 
 
+def quarantine_cache_roots(quarantine_root: Path) -> None:
+    if quarantine_root.exists():
+        shutil.rmtree(quarantine_root)
+    quarantine_root.mkdir(parents=True, exist_ok=True)
+    for cache_root in CACHE_ROOTS:
+        if cache_root.exists():
+            shutil.move(str(cache_root), str(quarantine_root / cache_root.name))
+
+
 def register_repo_marketplace(evidence_root: Path) -> None:
     existing = current_marketplace_stanza()
     if existing.get("source_type") == "local" and existing.get("source") == str(REPO_ROOT):
@@ -577,9 +586,10 @@ def install_and_inventory(run_id: str, evidence_root: Path, metadata: dict[str, 
         {"id": 7, "method": "hooks/list", "params": {"cwds": [str(scratch)]}},
     ]
     transcript = app_server_roundtrip(requests)
-    inventory = validate_inventory_contract(transcript)
     transcript_path = evidence_root / "app-server-install-inventory.transcript.json"
+    transcript_path.parent.mkdir(parents=True, exist_ok=True)
     transcript_path.write_text(json.dumps(transcript, indent=2), encoding="utf-8")
+    inventory = validate_inventory_contract(transcript)
     write_json(
         EVIDENCE_ROOT / "hook-inventory.summary.json",
         {
@@ -640,7 +650,7 @@ def validate_plugin_list_response(response: dict[str, Any]) -> list[str]:
     if missing:
         fail("inventory contract", "plugin/list missing Turbo Mode plugins", missing)
     if "/plugin-dev/" in serialized:
-        fail("inventory contract", "plugin/list contains plugin-dev path", missing)
+        fail("inventory contract", "plugin/list contains plugin-dev path", response)
     return sorted(EXPECTED_PLUGINS)
 
 
@@ -1357,6 +1367,7 @@ def execute(run_id: str) -> None:
                 evidence_root / f"{cache_root.parent.name}-{cache_root.name}.before.SHA256SUMS",
                 metadata,
             )
+        quarantine_cache_roots(evidence_root / "preinstall-cache")
         shutil.copy2(config_backup, CONFIG_PATH)
         register_repo_marketplace(evidence_root)
         install_and_inventory(run_id, evidence_root, metadata)

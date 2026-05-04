@@ -333,6 +333,11 @@ def test_cache_refresh_execute_acquires_lock_and_disarms(
         "write_manifest_snapshot",
         lambda *args, **kwargs: events.append("snapshot"),
     )
+    monkeypatch.setattr(
+        cache_refresh_wrapper,
+        "quarantine_cache_roots",
+        lambda *args, **kwargs: events.append("quarantine"),
+    )
 
     cache_refresh_wrapper.execute("run")
 
@@ -343,6 +348,7 @@ def test_cache_refresh_execute_acquires_lock_and_disarms(
         "process-check",
         "snapshot",
         "snapshot",
+        "quarantine",
         "marketplace",
         "inventory",
         "equality",
@@ -419,6 +425,32 @@ def test_inventory_contract_rejects_missing_ticket_hook() -> None:
 
     with pytest.raises(migration_common.MigrationError, match="Ticket Bash preToolUse hook"):
         cache_refresh_wrapper.validate_inventory_contract(transcript)
+
+
+def test_install_inventory_writes_transcript_before_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transcript = [
+        {"direction": "recv", "body": {"id": 3, "result": {}}},
+        {"direction": "recv", "body": {"id": 4, "result": {}}},
+    ]
+    monkeypatch.setattr(cache_refresh_wrapper, "EVIDENCE_ROOT", tmp_path / "evidence")
+    monkeypatch.setattr(cache_refresh_wrapper, "app_server_roundtrip", lambda requests: transcript)
+
+    with pytest.raises(migration_common.MigrationError, match="missing app-server responses"):
+        cache_refresh_wrapper.install_and_inventory(
+            "run",
+            tmp_path / "local",
+            {"run_id": "run", "mode": "cache-refresh-execute"},
+        )
+
+    written = json.loads(
+        (tmp_path / "local/app-server-install-inventory.transcript.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert written == transcript
 
 
 def test_register_repo_marketplace_replaces_conflicting_source(
