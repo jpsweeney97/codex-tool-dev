@@ -338,6 +338,11 @@ def test_cache_refresh_execute_acquires_lock_and_disarms(
         "quarantine_cache_roots",
         lambda *args, **kwargs: events.append("quarantine"),
     )
+    monkeypatch.setattr(
+        cache_refresh_wrapper,
+        "quarantine_personal_marketplace",
+        lambda *args, **kwargs: events.append("personal-marketplace") or None,
+    )
 
     cache_refresh_wrapper.execute("run")
 
@@ -349,6 +354,7 @@ def test_cache_refresh_execute_acquires_lock_and_disarms(
         "snapshot",
         "snapshot",
         "quarantine",
+        "personal-marketplace",
         "marketplace",
         "inventory",
         "equality",
@@ -580,6 +586,37 @@ def test_rollback_ignores_stale_empty_backup_before_cache_mutation(
 
     assert hook.is_file()
     assert not failed_root.exists()
+
+
+def test_rollback_restores_personal_marketplace_backup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text("[features]\nplugin_hooks = true\n", encoding="utf-8")
+    backup = tmp_path / "local/cache-refresh/personal-marketplace.before.json"
+    backup.parent.mkdir(parents=True)
+    backup.write_text('{"name":"turbo-mode"}\n', encoding="utf-8")
+    personal = tmp_path / ".agents/plugins/marketplace.json"
+    monkeypatch.setattr(cache_refresh_wrapper, "CONFIG_PATH", config)
+    monkeypatch.setattr(cache_refresh_wrapper, "CACHE_ROOTS", [])
+    monkeypatch.setattr(cache_refresh_wrapper, "EVIDENCE_ROOT", tmp_path / "evidence")
+    monkeypatch.setattr(cache_refresh_wrapper, "PERSONAL_MARKETPLACE_PATH", personal)
+
+    cache_refresh_wrapper.rollback(
+        metadata={"run_id": "run", "mode": "cache-refresh-execute"},
+        evidence_root=tmp_path / "local/cache-refresh",
+        config_backup=tmp_path / "local/cache-refresh/config.before.toml",
+        backup_root=tmp_path / "local/cache-refresh/cache-backup",
+        failed_root=tmp_path / "local/cache-refresh/failed-cache",
+        reason="test failure after personal marketplace quarantine",
+        pre_cache_manifests={},
+        prior_marketplace_stanza={},
+        personal_marketplace_backup=backup,
+    )
+
+    assert personal.read_text(encoding="utf-8") == '{"name":"turbo-mode"}\n'
+    assert not backup.exists()
 
 
 def test_installed_smoke_covers_step12_contract() -> None:

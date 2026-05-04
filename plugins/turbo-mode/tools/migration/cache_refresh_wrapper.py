@@ -49,6 +49,7 @@ EXPECTED_PLUGINS = {
     "handoff": "./plugins/turbo-mode/handoff/1.6.0",
     "ticket": "./plugins/turbo-mode/ticket/1.4.0",
 }
+PERSONAL_MARKETPLACE_PATH = Path("/Users/jp/.agents/plugins/marketplace.json")
 REQUIRED_PREFLIGHT_SUMMARIES = {
     "runtime-preflight.summary.json": "runtime-preflight",
     "path-probe-fault-test.summary.json": "path-probe-fault-test",
@@ -476,6 +477,33 @@ def quarantine_cache_roots(quarantine_root: Path) -> None:
     for cache_root in CACHE_ROOTS:
         if cache_root.exists():
             shutil.move(str(cache_root), str(quarantine_root / cache_root.name))
+
+
+def quarantine_personal_marketplace(evidence_root: Path) -> Path | None:
+    if not PERSONAL_MARKETPLACE_PATH.exists():
+        return None
+    backup = evidence_root / "personal-marketplace.before.json"
+    if backup.exists():
+        backup.unlink()
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(PERSONAL_MARKETPLACE_PATH), str(backup))
+    return backup
+
+
+def restore_personal_marketplace(backup: Path | None) -> str:
+    if backup is None:
+        return "not_present"
+    if not backup.exists():
+        return "backup_missing"
+    PERSONAL_MARKETPLACE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if PERSONAL_MARKETPLACE_PATH.exists():
+        fail(
+            "personal marketplace restore",
+            "destination already exists",
+            str(PERSONAL_MARKETPLACE_PATH),
+        )
+    shutil.move(str(backup), str(PERSONAL_MARKETPLACE_PATH))
+    return "restored"
 
 
 def register_repo_marketplace(evidence_root: Path) -> None:
@@ -1266,6 +1294,7 @@ def rollback(
     reason: str,
     pre_cache_manifests: dict[str, dict[str, str]],
     prior_marketplace_stanza: dict[str, Any],
+    personal_marketplace_backup: Path | None = None,
 ) -> None:
     cache_restore_result = "skipped_pre_cache_mutation"
     if pre_cache_manifests:
@@ -1273,12 +1302,14 @@ def rollback(
         cache_restore_result = "restored"
     if config_backup.exists():
         shutil.copy2(config_backup, CONFIG_PATH)
+    personal_marketplace_restore = restore_personal_marketplace(personal_marketplace_backup)
     verify_rollback_restored(pre_cache_manifests, prior_marketplace_stanza)
     write_json(
         evidence_root / "ROLLBACK_COMPLETE.json",
         {
             "run_metadata": metadata,
             "cache_restore": cache_restore_result,
+            "personal_marketplace_restore": personal_marketplace_restore,
             "reason": reason,
             "result": "ROLLBACK_COMPLETE",
         },
@@ -1345,6 +1376,7 @@ def execute(run_id: str) -> None:
     disarmed = False
     pre_cache_manifests: dict[str, dict[str, str]] = {}
     prior_marketplace_stanza: dict[str, Any] = {}
+    personal_marketplace_backup: Path | None = None
     write_json(
         EVIDENCE_ROOT / "cache-refresh-execute.start.summary.json",
         {
@@ -1368,6 +1400,7 @@ def execute(run_id: str) -> None:
                 metadata,
             )
         quarantine_cache_roots(evidence_root / "preinstall-cache")
+        personal_marketplace_backup = quarantine_personal_marketplace(evidence_root)
         shutil.copy2(config_backup, CONFIG_PATH)
         register_repo_marketplace(evidence_root)
         install_and_inventory(run_id, evidence_root, metadata)
@@ -1396,6 +1429,7 @@ def execute(run_id: str) -> None:
                 reason=str(exc),
                 pre_cache_manifests=pre_cache_manifests,
                 prior_marketplace_stanza=prior_marketplace_stanza,
+                personal_marketplace_backup=personal_marketplace_backup,
             )
         raise
     finally:
