@@ -2,7 +2,7 @@
 
 ## Status
 
-Design accepted in discussion on 2026-05-04 and repaired after scrutiny on 2026-05-04. This document is a design spec only. It does not authorize an implementation until a separate implementation plan exists.
+Design accepted in discussion on 2026-05-04 and repaired after scrutiny on 2026-05-04. This document is a design spec only. It does not authorize an implementation until a    separate implementation plan exists.
 
 ## Purpose
 
@@ -153,15 +153,22 @@ Diff categories:
 - `removed`: present in cache, absent from source.
 - `changed`: present in both, different SHA256.
 
-The safety classifier operates on canonical refresh paths and returns exactly one external outcome per changed path:
+The safety classifier operates on canonical refresh paths and returns two independent fields per changed path:
 
-- `fast-safe-with-covered-smoke`: eligible for `--refresh` after the process gate passes, with named smoke coverage.
-- `guarded-only`: requires `--guarded-refresh`.
-- `coverage-gap-fail`: not eligible for mutation until the implementation adds a deterministic smoke mapping or reclassifies the path as guarded-only.
+- `mutation_mode`: `fast`, `guarded`, or `blocked`.
+- `coverage_status`: `covered` or `coverage_gap`.
+
+The user-facing path outcome is derived from those fields:
+
+| Derived outcome | Rule |
+| --- | --- |
+| `fast-safe-with-covered-smoke` | `mutation_mode=fast` and `coverage_status=covered` |
+| `guarded-only` | `mutation_mode=guarded` and `coverage_status=covered` |
+| `coverage-gap-fail` | any path with `coverage_status=coverage_gap`, regardless of mutation mode |
 
 ## Safety Classification
 
-Unmatched paths are an internal reason code, not an external classifier result. An unmatched path must be reported externally as `guarded-only` with reason `unmatched-path`. False guarded is acceptable; false fast is not. Classification uses Python `fnmatch`-style glob patterns against canonical refresh paths.
+Unmatched paths are an internal reason code, not an external classifier result. An unmatched non-executable path must be reported externally as `guarded-only` with reason `unmatched-path`. An unmatched executable path, new executable path, or changed command-shape-bearing path without deterministic smoke must be reported externally as `coverage-gap-fail`. False guarded is acceptable; false fast is not. False covered is not acceptable. Classification uses Python `fnmatch`-style glob patterns against canonical refresh paths.
 
 ### Guarded-Only Paths
 
@@ -232,18 +239,19 @@ Required smoke mapping:
 | `ticket/1.4.0/HANDBOOK.md` | Light smoke unless command-shape triggers fire; command-shape triggers require matching Ticket command-shape smoke or coverage-gap failure |
 | README files | Light smoke unless command-shape triggers fire; command-shape triggers require matching command-shape smoke or coverage-gap failure |
 | CHANGELOG files | Light smoke unless command-shape triggers fire; command-shape triggers require matching command-shape smoke or coverage-gap failure |
-| `pyproject.toml`, `uv.lock` | At least one installed command through the documented `uv run --project "$PLUGIN_ROOT/pyproject.toml"` shape |
+| Handoff `pyproject.toml`, Handoff `uv.lock` | At least one installed Handoff command through the documented `uv run --project "$PLUGIN_ROOT/pyproject.toml"` shape |
+| Ticket `pyproject.toml`, Ticket `uv.lock` | At least one installed Ticket command through the canonical `python3 -B <PLUGIN_ROOT>/scripts/<script>.py` launcher |
 
 ### Coverage-Gap Fail Paths
 
-These paths look lower risk than hook or Ticket engine paths, but they are executable or command-shape-bearing surfaces without a named deterministic smoke in this design. They must fail mutation until coverage is added or the path is reclassified as guarded-only:
+These paths look lower risk than hook or Ticket engine paths, but they are executable or command-shape-bearing surfaces without a named deterministic smoke in this design. They must fail mutation until deterministic coverage is added and the path is explicitly reclassified with both `mutation_mode` and `coverage_status`:
 
 ```text
 handoff/1.6.0/scripts/distill.py
 handoff/1.6.0/scripts/ticket_parsing.py
 ```
 
-Any new executable path under either plugin root is also `coverage-gap-fail` unless it is explicitly classified as guarded-only or added to the fast-safe-with-covered-smoke table with a smoke mapping.
+Any new executable path under either plugin root is `coverage-gap-fail` unless it is explicitly added to a table with both a mutation mode and deterministic smoke mapping. Existing executable paths absent from the guarded-only and fast-safe-with-covered-smoke tables also default to `coverage-gap-fail`. New or unmatched executable paths are not allowed to become merely `guarded-only` by default.
 
 ### Concrete Classification Examples
 
@@ -253,8 +261,8 @@ Any new executable path under either plugin root is also `coverage-gap-fail` unl
 - `handoff/1.6.0/scripts/defer.py`: guarded-only.
 - `handoff/1.6.0/hooks/hooks.json`: guarded-only, even though the current expected Handoff hook manifest is empty.
 - `ticket/1.4.0/skills/ticket/SKILL.md`: fast-safe-with-covered-smoke only when command-shape triggers have matching smoke; otherwise coverage-gap-fail.
-- `ticket/1.4.0/scripts/ticket_engine_core.py`: guarded-only.
-- `ticket/1.4.0/scripts/new_helper.py`: guarded-only until explicitly classified.
+- `ticket/1.4.0/scripts/ticket_engine_core.py`: guarded-only with required guarded Ticket engine smoke.
+- `ticket/1.4.0/scripts/new_helper.py`: coverage-gap-fail until explicitly classified with deterministic smoke.
 
 ### Atomicity Certification
 
@@ -272,6 +280,24 @@ A future design may add an explicitly named concurrent refresh mode only after a
 Use app-server `plugin/install` as the primary install mechanism.
 
 Do not implement direct file copy as the normal refresh path. File copy can make hashes match while bypassing the runtime install contract. The tool should use source/cache equality as a verification gate after app-server install, not as a substitute for install.
+
+### App-Server Request Contract
+
+The implementation must pin the app-server JSON-RPC shape used for install and inventory. The request sequence is:
+
+1. `initialize` with `clientInfo.name = "turbo-mode-installed-refresh"` and `capabilities.experimentalApi = true`.
+2. `initialized`.
+3. `plugin/install` for Handoff:
+   - `marketplacePath = "/Users/jp/Projects/active/codex-tool-dev/.agents/plugins/marketplace.json"`
+   - `pluginName = "handoff"`
+   - `remoteMarketplaceName = null`
+4. `plugin/install` for Ticket with the same `marketplacePath`, `pluginName = "ticket"`, and `remoteMarketplaceName = null`.
+5. `plugin/read` for Handoff and Ticket with the same `marketplacePath`, `pluginName`, and `remoteMarketplaceName = null`.
+6. `plugin/list` with the same `marketplacePath` and `remoteMarketplaceName = null`.
+7. `skills/list` with `cwds` pointing at the disposable smoke repo.
+8. `hooks/list` with `cwds` pointing at the disposable smoke repo.
+
+Any app-server response schema drift is a hard failure until the inventory parser and evidence schema are updated. The transcript stays local-only; commit-safe evidence records request methods, response status summaries, and transcript SHA256.
 
 ## Shared Helper Boundary
 
@@ -293,7 +319,7 @@ The refresh tool must be launched from an external maintenance shell, not from a
 Process census command:
 
 ```bash
-ps -axo pid,ppid,command
+ps -ww -axo pid,ppid,command
 ```
 
 The process gate must use a structured classifier, not raw substring matching. Each `ps` row is parsed into:
@@ -399,7 +425,7 @@ All four surfaces must align after install. A source/cache equality pass alone i
 
 For successful `--guarded-refresh` runs that disable hooks, final inventory and smoke must be collected after restoring config and starting a fresh app-server process. The app-server child used while hooks were disabled cannot be reused for final `hooks/list` proof, because it may reflect stale in-memory config or plugin state.
 
-Rollback inventory proof uses the same app-server inventory checks, but compares against the pre-refresh inventory and expected config state rather than the attempted post-install target. Because app-server may hold in-memory plugin state from a failed install attempt, rollback proof must terminate the failed-run app-server child and start a fresh app-server process before collecting restored inventory. A rollback summary may not report `ROLLBACK_COMPLETE` or `RESTORE_COMPLETE` until config hash, cache manifests, plugin enablement, runtime inventory, and hook inventory match the pre-run state.
+Rollback inventory proof uses the same app-server inventory checks, but compares against the pre-refresh inventory and byte-for-byte config SHA256 rather than the attempted post-install target. Because app-server may hold in-memory plugin state from a failed install attempt, rollback proof must terminate the failed-run app-server child and start a fresh app-server process before collecting restored inventory. A rollback summary may not report `ROLLBACK_COMPLETE` or `RESTORE_COMPLETE` until config hash, cache manifests, plugin enablement, runtime inventory, and hook inventory match the pre-run state.
 
 ## Smoke Tiers
 
@@ -413,7 +439,8 @@ Required checks:
 - Source/cache equality.
 - Handoff search or triage.
 - Ticket read list and query.
-- For changed `pyproject.toml` or `uv.lock`, at least one installed command executed through the documented `uv run --project "$PLUGIN_ROOT/pyproject.toml"` shape for the affected plugin.
+- For changed Handoff `pyproject.toml` or `uv.lock`, at least one installed Handoff command executed through the documented `uv run --project "$PLUGIN_ROOT/pyproject.toml"` shape.
+- For changed Ticket `pyproject.toml` or `uv.lock`, at least one installed Ticket command executed through the canonical `python3 -B <PLUGIN_ROOT>/scripts/<script>.py` launcher. Ticket dependency-file smoke must not substitute Handoff's `uv run --project` shape unless the Ticket hook policy and documented launcher are deliberately redesigned.
 - Any changed fast-safe-with-covered-smoke executable path with a path-specific smoke available.
 
 ### `standard`
@@ -451,7 +478,7 @@ Smoke selection is diff-aware:
 - A changed Handoff skill with command-shape triggers requires a Handoff command-shape smoke when the documented command can be executed deterministically. If there is no stable skill-execution API or deterministic command path for the changed instruction, the result is `coverage-gap-fail`, not a weaker light smoke.
 - Any changed skill, reference, README, or CHANGELOG file that changes command-shape instructions must be paired with a smoke that exercises that documented command shape. If the tool cannot determine whether the change is command-shape-affecting, it must require `standard` smoke or fail with a coverage gap.
 - Any changed guarded-only Ticket engine or hook path requires at least `standard`, and the tool should recommend `full`.
-- If a changed executable path has no path-specific smoke, the tool must classify the change as guarded-only or fail the run until coverage is added.
+- If a changed executable path has no path-specific smoke, the tool must classify the change as `coverage-gap-fail` until deterministic coverage is added.
 
 Command-shape triggers for skill, reference, README, and CHANGELOG docs:
 
@@ -562,7 +589,13 @@ Stale evidence rejection:
 
 - A summary is current only when its `RUN_ID`, repo `HEAD`, tool SHA256, source manifest SHA256, pre-refresh cache manifest SHA256, post-refresh cache manifest SHA256, and evidence schema version match the run being reported.
 - The metadata validator must recompute the current repo `HEAD`, worktree tool SHA256, manifest digests, config digest, inventory summary digests, and smoke summary digest before accepting the summary.
-- The summary must include SHA256 digests for the metadata-validation and redaction-validation summaries that accepted it. To avoid a self-referential digest, validators must define a stable validated payload projection that excludes only the validator-result digest fields. A commit-safe summary is not complete until those validator summary digests are present and match local-only evidence.
+- The summary must include SHA256 digests for the metadata-validation and redaction-validation summaries that accepted it. To avoid a self-referential digest, validators use this algorithm:
+  1. Build the candidate commit-safe summary with `metadata_validation_summary_sha256 = null` and `redaction_validation_summary_sha256 = null`.
+  2. Run metadata and redaction validators against the candidate summary.
+  3. Write local-only validator summaries whose own payloads include the SHA256 of the candidate summary.
+  4. Insert the two validator summary SHA256 values into the final commit-safe summary.
+  5. Re-run validators in final mode, where the validated payload projection is the final summary with only `metadata_validation_summary_sha256` and `redaction_validation_summary_sha256` set back to null.
+  6. Accept only if the final-mode validator summaries prove that projected payload digest equals the original candidate summary digest and that the validator summary digests match the final summary fields.
 - Reusing an older local-only evidence directory for a new commit-safe summary is forbidden unless the summary explicitly records that it is a post-commit binding artifact and validates the original source/cache proof digest.
 - Dirty-state policy must be explicit. The default should fail if relevant source, marketplace, or refresh-tool files are modified outside the committed `HEAD`.
 
@@ -571,6 +604,27 @@ Stale evidence rejection:
 Both mutation modes take a refresh lock before installation. The lock prevents concurrent refresh tools from racing each other.
 
 Both mutation modes require a no-concurrent-hook-consumer process check until app-server install atomicity is separately certified.
+
+## Crash And Restart Recovery
+
+Mutation modes must leave a local-only run-state marker before the first app-server install request and clear it only after final status is written. The marker records:
+
+- `RUN_ID`
+- mode
+- repo `HEAD`
+- tool SHA256
+- pre-refresh config SHA256
+- pre-refresh cache manifest SHA256 values
+- snapshot paths
+- current phase
+
+At startup, mutation modes must check for abandoned run-state markers before taking the refresh lock. If a marker exists, the tool must refuse ordinary mutation and enter a recovery decision path:
+
+- `--dry-run` and `--plan-refresh` report `blocked-preflight` and identify the abandoned run-state marker.
+- `--refresh --recover <RUN_ID>` restores cache snapshots, verifies unchanged config hash, starts a fresh app-server, and proves restored inventory before allowing another mutation.
+- `--guarded-refresh --recover <RUN_ID>` restores config and cache snapshots, starts a fresh app-server, and proves restored plugin enablement and hook inventory before allowing another mutation.
+
+If the marker exists but a required snapshot is missing or digest verification fails, the tool must fail closed and point to the local-only recovery evidence. It must not attempt a new install over an unclassified abandoned partial refresh.
 
 ## Failure Behavior
 
@@ -633,9 +687,13 @@ For release-like use, warn when source behavior changes but `.codex-plugin/plugi
 - Handoff hook inventory assertion matches current truth: expected empty Handoff hook inventory for Handoff 1.6.0.
 - Classifier tests use canonical `<plugin>/<version>/<relative_path>` keys and assert concrete Handoff and Ticket examples.
 - Classifier tests assert `fast-safe-with-covered-smoke`, `guarded-only`, and `coverage-gap-fail` outcomes.
+- Classifier tests assert that `ticket/1.4.0/scripts/new_helper.py` and any other new executable path are `coverage-gap-fail`, not guarded-only.
+- Classifier tests assert separate `mutation_mode` and `coverage_status` fields, so guarded mutation cannot imply covered smoke.
 - Smoke selection is diff-aware for changed executable and skill-command paths.
 - Skill/reference/README/CHANGELOG command-shape triggers force matching smoke or a coverage-gap failure.
-- `pyproject.toml` and `uv.lock` changes require at least one installed command through the documented `uv run --project "$PLUGIN_ROOT/pyproject.toml"` shape.
+- Handoff `pyproject.toml` and `uv.lock` changes require at least one installed command through the documented `uv run --project "$PLUGIN_ROOT/pyproject.toml"` shape.
+- Ticket `pyproject.toml` and `uv.lock` changes require at least one installed command through the canonical `python3 -B <PLUGIN_ROOT>/scripts/<script>.py` launcher.
+- App-server install and inventory tests assert the pinned request payloads, including `marketplacePath` and `remoteMarketplaceName = null`.
 - All modes write local-only evidence.
 - `--record-summary` writes a redaction-safe summary suitable for commit, and refresh-specific metadata/redaction validators accept it.
-- Tests cover empty/no-diff, fast-safe-with-covered-smoke diff, guarded-only diff, unmatched-path reason, coverage-gap diff, generated residue, Handoff expected-empty hook inventory, marketplace mismatch, structured process-gate self-block/exemption behavior, active Ticket hook process blockers, harmless `codex` path non-blockers, truncated or unparseable process rows, app-server failure, guarded successful hook-disable fresh-inventory proof, `--refresh` partial-install restore with fresh-inventory proof, command-shape smoke escalation, dependency-file installed-command smoke, stale evidence rejection, redaction rejection, and rollback failure.
+- Tests cover empty/no-diff, fast-safe-with-covered-smoke diff, guarded-only diff, unmatched-path reason, coverage-gap diff, generated residue, Handoff expected-empty hook inventory, marketplace mismatch, structured process-gate self-block/exemption behavior, active Ticket hook process blockers, harmless `codex` path non-blockers, wide `ps -ww` process census, truncated or unparseable process rows, app-server failure, abandoned run-state recovery, guarded successful hook-disable fresh-inventory proof, `--refresh` partial-install restore with fresh-inventory proof, command-shape smoke escalation, plugin-specific dependency-file installed-command smoke, stale evidence rejection, validator digest bootstrap, redaction rejection, and rollback failure.
