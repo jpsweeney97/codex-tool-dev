@@ -39,6 +39,12 @@ The command help and startup banner must make the UX split explicit:
 - `--dry-run` and `--plan-refresh` are routine commands and may be run from a Codex session because they do not mutate the installed cache.
 - `--refresh` and `--guarded-refresh` are external-shell maintenance operations. Running either mutation mode from an active Codex Desktop or Codex CLI conversation is expected to self-block.
 
+Terminology:
+
+- **Non-mutating routine developer commands**: `--dry-run`, `--plan-refresh`, local-only evidence review, and local-only prune preview. These may run from Codex sessions because they do not mutate installed cache, global config, or runtime state.
+- **Maintenance-window mutation**: `--refresh`, `--guarded-refresh`, and explicit recovery runs launched from an external shell during an operator-enforced exclusive maintenance window. These are allowed by this design when their gates pass.
+- **Routine mutation**: any installed-cache, global-config, or runtime mutation attempted as a normal in-session developer convenience command without the external-shell maintenance-window contract. Routine mutation remains blocked until sentinel-aware hook consumers or another enforceable exclusion mechanism is certified.
+
 ## Modes
 
 ### `--dry-run`
@@ -108,12 +114,14 @@ If the required inputs cannot be computed consistently, the status is `blocked-p
 | `guarded-refresh-required` | source/cache drift exists, at least one changed path is `guarded-only`, all changed paths are covered, and preflight state allows external-shell `--guarded-refresh` if the later mutation process gate passes |
 | `coverage-gap-blocked` | at least one changed path is `coverage-gap-fail`; no mutation command may be emitted |
 | `blocked-preflight` | generated residue, abandoned run state, missing roots, unparseable config, marketplace metadata failure, or other non-runtime preflight failure blocks planning |
-| `repairable-runtime-config-mismatch` | filesystem diff alone would otherwise require `--guarded-refresh` or no source/cache mutation, and the only mismatch is a conflicting Turbo Mode marketplace registration that guarded refresh is allowed to repair |
+| `repairable-runtime-config-mismatch` | the only runtime/config mismatch is a conflicting Turbo Mode marketplace registration that guarded refresh is allowed to repair; this status wins even when source/cache drift is otherwise fast-safe, guarded-only, or absent |
 | `unrepairable-runtime-config-mismatch` | plugin enablement state, requested read-only runtime inventory, config parse state, missing config sections, or any mismatch outside guarded marketplace-registration repair is not aligned |
 | `filesystem-no-drift` | source/cache manifests match and config preflight passes, but read-only runtime inventory was not requested, so runtime alignment is unproven |
 | `no-drift` | source/cache manifests match, config preflight passes, and requested read-only runtime inventory aligns |
 
 `no-drift` must not be emitted when runtime inventory was not checked. Use `filesystem-no-drift` instead.
+
+When `runtime_config_state=repairable-mismatch`, `selected_mutation_mode` must be `guarded-refresh`. `--plan-refresh` emits only a guarded external-shell command for that status, even if the source/cache diff would otherwise be `refresh-allowed`, because marketplace repair mutates global config and uses guarded config snapshot and rollback semantics.
 
 ### `--refresh`
 
@@ -797,13 +805,22 @@ Mutation modes must write a local-only run-state marker before any config, cache
 
 For `--guarded-refresh`, the original config bytes must be snapshotted before changing `features.plugin_hooks` or marketplace registration. Config mutation must be an atomic write using a temp file, fsync, and replace. Rollback and explicit `--recover` must fail closed if the current config SHA256 no longer matches the tool's expected intermediate config state, because that indicates external config mutation during the run or after a crash. In that case the tool must not blindly overwrite unrelated user edits; it must leave local-only recovery evidence and require manual operator decision.
 
-At startup, mutation modes must check for abandoned run-state markers before taking the refresh lock. If a marker exists, the tool must refuse ordinary mutation and enter a recovery decision path:
+At startup, all modes may do an advisory marker scan before taking the refresh lock. A pre-lock marker scan can only report that marker state exists; it must not decide that the marker is abandoned. If a marker exists, ordinary mutation must refuse and explicit recovery must acquire the refresh lock before acting on the marker:
 
-- `--dry-run` and `--plan-refresh` report `blocked-preflight` and identify the abandoned run-state marker.
+- `--dry-run` and `--plan-refresh` report `blocked-preflight` and identify the run-state marker without classifying it as abandoned.
 - `--refresh --recover <RUN_ID>` restores cache snapshots, verifies unchanged config hash, starts a fresh app-server, and proves restored inventory before allowing another mutation.
 - `--guarded-refresh --recover <RUN_ID>` restores config and cache snapshots, starts a fresh app-server, and proves restored plugin enablement and hook inventory before allowing another mutation.
 
-If the marker exists but a required snapshot is missing or digest verification fails, the tool must fail closed and point to the local-only recovery evidence. It must not attempt a new install over an unclassified abandoned partial refresh.
+After recovery lock acquisition, if the marker exists but a required snapshot is missing or digest verification fails, the tool must fail closed and point to the local-only recovery evidence. It must not attempt a new install over an unclassified partial refresh.
+
+Recovery lock ordering:
+
+- Pre-lock marker reads are advisory only. They may report `blocked-preflight` for `--dry-run` and `--plan-refresh`, or tell mutation callers that recovery is required, but they must not restore files, edit config, clear markers, or classify a run as abandoned.
+- Ordinary mutation modes and `--recover` modes must acquire the same refresh lock before acting on any marker state.
+- After acquiring the lock, the tool must re-read the marker and lock-owner metadata, verify the lock owner is not a live active refresh, and confirm that the marker's `RUN_ID`, repo `HEAD`, tool SHA256, and lock-owner SHA256 match the recovery request.
+- If the lock is still held by another process, recovery fails before mutation with an active-run blocker. A held lock wins over marker contents.
+- If the lock is acquired but marker metadata indicates an owner process that is still alive with the same PID/start-time, recovery fails closed and records an inconsistent-owner blocker.
+- Only after lock acquisition and active-owner rejection may `--recover` treat the marker as abandoned and restore config or cache snapshots.
 
 ## Failure Behavior
 
@@ -861,6 +878,8 @@ This design is not a single-helper-script task. The implementation plan must spl
 7. `--guarded-refresh` mutation path with hook-disable, config rollback, and fresh app-server final inventory.
 8. Phase-aware local-only evidence, retention/review commands, commit-safe summary validators, and redaction gates.
 
+The lock/recovery checkpoint must include active-owner fixtures: marker present with held lock, marker present with stale owner and free lock, marker present with live PID/start-time but free lock, and recovery requested for a mismatched `RUN_ID`.
+
 Each checkpoint must have its own commit and verification gate. The full acceptance matrix should not be implemented as one undifferentiated script change.
 
 ## Acceptance Criteria
@@ -870,6 +889,7 @@ Each checkpoint must have its own commit and verification gate. The full accepta
 - `--dry-run` and `--plan-refresh` distinguish `filesystem-no-drift`, `no-drift`, `repairable-runtime-config-mismatch`, and `unrepairable-runtime-config-mismatch`.
 - `--dry-run` and `--plan-refresh` persist separate `filesystem_state`, `coverage_state`, `runtime_config_state`, `preflight_state`, and `selected_mutation_mode` fields, then derive terminal status through the documented precedence table.
 - `no-drift` is emitted only when source/cache manifests match, config preflight passes, and requested read-only runtime inventory aligns; otherwise matching manifests use `filesystem-no-drift`, `repairable-runtime-config-mismatch`, or `unrepairable-runtime-config-mismatch`.
+- `repairable-runtime-config-mismatch` always selects `guarded-refresh`, including when source/cache drift is otherwise fast-safe or absent.
 - `--plan-refresh` emits a guarded repair command only for `repairable-runtime-config-mismatch`; it emits no mutation command for `unrepairable-runtime-config-mismatch`.
 - `--dry-run` and `--plan-refresh` report `coverage-gap-blocked` without emitting a mutation command when coverage is missing.
 - `--refresh` refuses guarded-only diffs, including unmatched paths reported as `guarded-only` with reason `unmatched-path`.
@@ -889,6 +909,7 @@ Each checkpoint must have its own commit and verification gate. The full accepta
 - Routine mutation remains blocked until a sentinel-aware hook-consumer design or other enforceable exclusion mechanism exists; sampled process evidence is not described as machine-wide exclusion.
 - Mutation runs include pre-mutation, pre-install, and post-mutation process censuses.
 - `MUTATION_COMPLETE_EXCLUSIVITY_UNPROVEN` writes durable local-only evidence before clearing the run-state marker and is not release/maintenance-window certified.
+- `--recover` cannot restore files, edit config, clear markers, or classify a run as abandoned until it acquires the refresh lock and proves no active owner remains.
 - Evidence validators accept legitimate fail-closed runs without requiring fake app-server, smoke, or rollback-success artifacts from phases that were never reached.
 - Commit-safe summaries include runtime/config mismatch, cache parent metadata, unexpected-side-effect scan, post-mutation process census, app-server/runtime identity, and exclusivity-status fields.
 - App-server/runtime identity evidence records `codex --version`, executable path/hash or unavailable reason, `initialize` `serverInfo`, protocol capabilities, parser version, and accepted response schema version.
