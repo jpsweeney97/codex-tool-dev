@@ -465,6 +465,39 @@ def test_rollback_verifies_restored_config_and_cache_manifests(
         )
 
 
+def test_rollback_ignores_stale_empty_backup_before_cache_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text("[features]\nplugin_hooks = true\n", encoding="utf-8")
+    cache_root = tmp_path / "cache/ticket/1.4.0"
+    cache_root.mkdir(parents=True)
+    hook = cache_root / "hooks/ticket_engine_guard.py"
+    hook.parent.mkdir()
+    hook.write_text("hook", encoding="utf-8")
+    backup_root = tmp_path / "local/cache-refresh/cache-backup"
+    backup_root.mkdir(parents=True)
+    failed_root = tmp_path / "local/cache-refresh/failed-cache"
+    monkeypatch.setattr(cache_refresh_wrapper, "CONFIG_PATH", config)
+    monkeypatch.setattr(cache_refresh_wrapper, "CACHE_ROOTS", [cache_root])
+    monkeypatch.setattr(cache_refresh_wrapper, "EVIDENCE_ROOT", tmp_path / "evidence")
+
+    cache_refresh_wrapper.rollback(
+        metadata={"run_id": "run", "mode": "cache-refresh-execute"},
+        evidence_root=tmp_path / "local/cache-refresh",
+        config_backup=tmp_path / "local/cache-refresh/config.before.toml",
+        backup_root=backup_root,
+        failed_root=failed_root,
+        reason="process check failed before backup",
+        pre_cache_manifests={},
+        prior_marketplace_stanza={},
+    )
+
+    assert hook.is_file()
+    assert not failed_root.exists()
+
+
 def test_installed_smoke_covers_step12_contract() -> None:
     expected = {
         "handoff-search",

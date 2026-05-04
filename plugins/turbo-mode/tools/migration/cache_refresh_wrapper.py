@@ -129,7 +129,6 @@ def dry_run(run_id: str) -> None:
     readiness = verify_dry_run_prerequisites(run_id, metadata)
     evidence_root = local_only_root(run_id, "cache-refresh")
     backup_root = evidence_root / "cache-backup"
-    backup_root.mkdir(parents=True, exist_ok=True)
     write_json(
         Path(
             "plugins/turbo-mode/evidence/2026-05-04-source-migration/cache-refresh-dry-run.summary.json"
@@ -449,11 +448,11 @@ def write_manifest_snapshot(root: Path, output: Path, metadata: dict[str, Any]) 
 
 
 def backup_cache_roots(backup_root: Path) -> None:
+    if backup_root.exists():
+        shutil.rmtree(backup_root)
     backup_root.mkdir(parents=True, exist_ok=True)
     for cache_root in CACHE_ROOTS:
         destination = backup_root / cache_root.name
-        if destination.exists():
-            shutil.rmtree(destination)
         shutil.copytree(cache_root, destination)
 
 
@@ -1229,14 +1228,21 @@ def rollback(
     pre_cache_manifests: dict[str, dict[str, str]],
     prior_marketplace_stanza: dict[str, Any],
 ) -> None:
-    if backup_root.exists():
+    cache_restore_result = "skipped_pre_cache_mutation"
+    if pre_cache_manifests:
         restore_cache_roots(backup_root, failed_root)
+        cache_restore_result = "restored"
     if config_backup.exists():
         shutil.copy2(config_backup, CONFIG_PATH)
     verify_rollback_restored(pre_cache_manifests, prior_marketplace_stanza)
     write_json(
         evidence_root / "ROLLBACK_COMPLETE.json",
-        {"run_metadata": metadata, "reason": reason, "result": "ROLLBACK_COMPLETE"},
+        {
+            "run_metadata": metadata,
+            "cache_restore": cache_restore_result,
+            "reason": reason,
+            "result": "ROLLBACK_COMPLETE",
+        },
     )
     write_json(
         EVIDENCE_ROOT / "cache-refresh-rollback.summary.json",
