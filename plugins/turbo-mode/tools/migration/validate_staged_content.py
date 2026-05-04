@@ -101,11 +101,19 @@ class PathLike(str):
 
 def run_validation(args: argparse.Namespace) -> None:
     staged = staged_names(str(args.repo_root))
+    if not staged:
+        fail("validate staged paths", "staged index is empty", args.repo_root)
     allowed = [args.expected_staged_root.rstrip("/") + "/"] + args.expected_staged_file
+    missing_files = [rel for rel in args.expected_staged_file if rel not in staged]
+    if missing_files:
+        fail("validate staged paths", "expected staged files missing", missing_files)
+    staged_root_prefix = args.expected_staged_root.rstrip("/") + "/"
+    if not any(rel.startswith(staged_root_prefix) for rel in staged):
+        fail("validate staged paths", "expected staged root missing", args.expected_staged_root)
     unexpected = [
         rel
         for rel in staged
-        if not rel.startswith(args.expected_staged_root.rstrip("/") + "/")
+        if not rel.startswith(staged_root_prefix)
         and rel not in args.expected_staged_file
     ]
     if unexpected:
@@ -124,11 +132,17 @@ def run_validation(args: argparse.Namespace) -> None:
         if rel.startswith("plugins/turbo-mode/handoff/1.6.0/")
         or rel.startswith("plugins/turbo-mode/ticket/1.4.0/")
     }
+    if not prefixed_expected:
+        fail(
+            "validate staged source",
+            "source manifest has no expected source entries",
+            source_manifest,
+        )
     actual = staged_manifest(
         str(args.repo_root),
         ["plugins/turbo-mode/handoff/1.6.0", "plugins/turbo-mode/ticket/1.4.0"],
     )
-    if actual and prefixed_expected and actual != prefixed_expected:
+    if actual != prefixed_expected:
         fail(
             "validate staged source",
             "source manifest mismatch",

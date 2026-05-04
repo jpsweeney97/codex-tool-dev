@@ -250,6 +250,30 @@ def test_staged_content_cli_parses_local_only_output_as_path(
     assert parsed_args["local_only_output"] == tmp_path / "out.json"
 
 
+def test_staged_content_rejects_empty_index(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = type(
+        "Args",
+        (),
+        {
+            "run_id": "run",
+            "repo_root": tmp_path,
+            "expected_staged_root": "plugins/turbo-mode",
+            "expected_staged_file": [".agents/plugins/marketplace.json", ".gitignore"],
+            "source_manifest": "source-files.SHA256SUMS",
+            "marketplace": ".agents/plugins/marketplace.json",
+            "tool_root": "plugins/turbo-mode/tools/migration",
+            "local_only_output": None,
+        },
+    )()
+    monkeypatch.setattr(validate_staged_content, "staged_names", lambda repo_root: [])
+
+    with pytest.raises(migration_common.MigrationError, match="staged index is empty"):
+        validate_staged_content.run_validation(args)
+
+
 def test_fault_harness_cleans_all_scenarios(tmp_path: Path) -> None:
     result = migration_common.run_fake_fault_tests(
         tmp_path,
