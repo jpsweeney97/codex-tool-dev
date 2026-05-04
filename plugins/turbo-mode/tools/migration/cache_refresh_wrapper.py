@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import queue
 import shutil
 import subprocess
+import threading
 import time
 import tomllib
 from pathlib import Path
@@ -54,6 +56,17 @@ REQUIRED_PREFLIGHT_SUMMARIES = {
     "path-probe-execute.summary.json": "path-probe-execute",
 }
 RUNTIME_PREFLIGHT_TOOL_PATH = "plugins/turbo-mode/tools/migration/migration_common.py"
+REQUEST_TIMEOUT_SECONDS = 30.0
+REQUIRED_HANDOFF_SKILLS = {
+    "handoff:quicksave",
+    "handoff:save",
+    "handoff:summary",
+    "handoff:load",
+    "handoff:search",
+    "handoff:defer",
+    "handoff:triage",
+    "handoff:distill",
+}
 
 FAULTS = [
     FaultScenario("registration-failure-after-config-backup", ("config.before.toml",)),
@@ -280,7 +293,18 @@ def app_server_roundtrip(requests: list[dict[str, object]]) -> list[dict[str, ob
     )
     assert proc.stdin is not None
     assert proc.stdout is not None
+    output: queue.Queue[str | None] = queue.Queue()
     transcript: list[dict[str, object]] = []
+
+    def read_stdout() -> None:
+        try:
+            for line in proc.stdout:
+                output.put(line)
+        finally:
+            output.put(None)
+
+    reader = threading.Thread(target=read_stdout, daemon=True)
+    reader.start()
     try:
         for request in requests:
             proc.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
@@ -288,12 +312,15 @@ def app_server_roundtrip(requests: list[dict[str, object]]) -> list[dict[str, ob
             transcript.append({"direction": "send", "body": request})
             if "id" not in request:
                 continue
-            deadline = time.monotonic() + 30
+            deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
             while time.monotonic() < deadline:
-                response_line = proc.stdout.readline()
-                if not response_line:
-                    time.sleep(0.05)
+                remaining = max(0.0, deadline - time.monotonic())
+                try:
+                    response_line = output.get(timeout=min(0.1, remaining))
+                except queue.Empty:
                     continue
+                if response_line is None:
+                    fail("app-server request", "stdout closed before response", request)
                 try:
                     response = json.loads(response_line)
                 except json.JSONDecodeError:
@@ -314,6 +341,7 @@ def app_server_roundtrip(requests: list[dict[str, object]]) -> list[dict[str, ob
             proc.kill()
             _stdout, stderr = proc.communicate(timeout=5)
         transcript.append({"direction": "stderr", "body": stderr})
+        reader.join(timeout=1)
     return transcript
 
 
@@ -497,6 +525,7 @@ def install_and_inventory(run_id: str, evidence_root: Path, metadata: dict[str, 
         {"id": 7, "method": "hooks/list", "params": {"cwds": [str(scratch)]}},
     ]
     transcript = app_server_roundtrip(requests)
+    inventory = validate_inventory_contract(transcript)
     transcript_path = evidence_root / "app-server-install-inventory.transcript.json"
     transcript_path.write_text(json.dumps(transcript, indent=2), encoding="utf-8")
     write_json(
@@ -505,9 +534,120 @@ def install_and_inventory(run_id: str, evidence_root: Path, metadata: dict[str, 
             "run_metadata": metadata,
             "raw_transcript_sha256": sha256_file(transcript_path),
             "requests": [request.get("method") for request in requests],
+            "inventory": inventory,
             "result": "APP_SERVER_INSTALL_AND_INVENTORY_COMPLETE",
         },
     )
+
+
+def response_by_id(transcript: list[dict[str, object]]) -> dict[int, dict[str, Any]]:
+    responses: dict[int, dict[str, Any]] = {}
+    for item in transcript:
+        if item.get("direction") != "recv":
+            continue
+        body = item.get("body")
+        if not isinstance(body, dict):
+            continue
+        response_id = body.get("id")
+        if isinstance(response_id, int):
+            responses[response_id] = body
+    return responses
+
+
+def walk_json(value: object) -> list[object]:
+    items = [value]
+    if isinstance(value, dict):
+        for child in value.values():
+            items.extend(walk_json(child))
+    elif isinstance(value, list):
+        for child in value:
+            items.extend(walk_json(child))
+    return items
+
+
+def json_contains(value: object, needle: str) -> bool:
+    return needle in json.dumps(value, sort_keys=True)
+
+
+def validate_plugin_read_response(response: dict[str, Any], plugin: str) -> str:
+    expected = str(REPO_ROOT / EXPECTED_PLUGINS[plugin].removeprefix("./"))
+    if json_contains(response, "/plugin-dev/"):
+        fail("inventory contract", "plugin/read contains plugin-dev path", plugin)
+    if not json_contains(response, expected):
+        fail(
+            "inventory contract", f"plugin/read missing repo source metadata for {plugin}", expected
+        )
+    return expected
+
+
+def validate_plugin_list_response(response: dict[str, Any]) -> list[str]:
+    serialized = json.dumps(response, sort_keys=True)
+    missing = [
+        f"{name}@turbo-mode" for name in EXPECTED_PLUGINS if f"{name}@turbo-mode" not in serialized
+    ]
+    if missing:
+        fail("inventory contract", "plugin/list missing Turbo Mode plugins", missing)
+    if "/plugin-dev/" in serialized:
+        fail("inventory contract", "plugin/list contains plugin-dev path", missing)
+    return sorted(EXPECTED_PLUGINS)
+
+
+def validate_skills_response(response: dict[str, Any]) -> list[str]:
+    serialized = json.dumps(response, sort_keys=True)
+    missing = sorted(skill for skill in REQUIRED_HANDOFF_SKILLS if skill not in serialized)
+    if missing:
+        fail("inventory contract", "skills/list missing Handoff skills", missing)
+    cache_prefix = "/Users/jp/.codex/plugins/cache/turbo-mode/handoff/1.6.0/skills/"
+    if cache_prefix not in serialized:
+        fail(
+            "inventory contract", "skills/list missing installed-cache Handoff paths", cache_prefix
+        )
+    if "/plugin-dev/" in serialized:
+        fail("inventory contract", "skills/list contains plugin-dev path", cache_prefix)
+    return sorted(REQUIRED_HANDOFF_SKILLS)
+
+
+def validate_hooks_response(response: dict[str, Any]) -> dict[str, Any]:
+    hooks = [
+        item
+        for item in walk_json(response)
+        if isinstance(item, dict)
+        and item.get("pluginId") == "ticket@turbo-mode"
+        and item.get("eventName") == "preToolUse"
+        and item.get("matcher") == "Bash"
+    ]
+    if len(hooks) != 1:
+        fail("inventory contract", "expected exactly one Ticket Bash preToolUse hook", len(hooks))
+    hook = hooks[0]
+    command = str(hook.get("command", ""))
+    source_path = str(hook.get("sourcePath", ""))
+    expected_prefix = "python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/"
+    expected_suffix = "/hooks/ticket_engine_guard.py"
+    expected_source = "/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+    if not command.startswith(expected_prefix) or not command.endswith(expected_suffix):
+        fail("inventory contract", "Ticket hook command mismatch", command)
+    if source_path != expected_source:
+        fail("inventory contract", "Ticket hook sourcePath mismatch", source_path)
+    if "/plugin-dev/" in command or "/plugin-dev/" in source_path:
+        fail("inventory contract", "Ticket hook contains plugin-dev path", hook)
+    return {"command": command, "sourcePath": source_path}
+
+
+def validate_inventory_contract(transcript: list[dict[str, object]]) -> dict[str, Any]:
+    responses = response_by_id(transcript)
+    required = {3, 4, 5, 6, 7}
+    missing = sorted(required - set(responses))
+    if missing:
+        fail("inventory contract", "missing app-server responses", missing)
+    return {
+        "plugin_read_sources": {
+            "handoff": validate_plugin_read_response(responses[3], "handoff"),
+            "ticket": validate_plugin_read_response(responses[4], "ticket"),
+        },
+        "plugin_list": validate_plugin_list_response(responses[5]),
+        "handoff_skills": validate_skills_response(responses[6]),
+        "ticket_hook": validate_hooks_response(responses[7]),
+    }
 
 
 def assert_forbidden_ticket_paths_absent() -> None:
@@ -672,11 +812,14 @@ def rollback(
     backup_root: Path,
     failed_root: Path,
     reason: str,
+    pre_cache_manifests: dict[str, dict[str, str]],
+    prior_marketplace_stanza: dict[str, Any],
 ) -> None:
     if backup_root.exists():
         restore_cache_roots(backup_root, failed_root)
     if config_backup.exists():
         shutil.copy2(config_backup, CONFIG_PATH)
+    verify_rollback_restored(pre_cache_manifests, prior_marketplace_stanza)
     write_json(
         evidence_root / "ROLLBACK_COMPLETE.json",
         {"run_metadata": metadata, "reason": reason, "result": "ROLLBACK_COMPLETE"},
@@ -689,6 +832,41 @@ def rollback(
             "result": "ROLLBACK_COMPLETE",
         },
     )
+
+
+def current_marketplace_stanza() -> dict[str, Any]:
+    config = validate_config_parseable()
+    marketplaces = config.get("marketplaces", {})
+    if not isinstance(marketplaces, dict):
+        return {}
+    turbo = marketplaces.get("turbo-mode", {})
+    if not isinstance(turbo, dict):
+        return {}
+    return dict(turbo)
+
+
+def verify_rollback_restored(
+    pre_cache_manifests: dict[str, dict[str, str]],
+    prior_marketplace_stanza: dict[str, Any],
+) -> None:
+    if pre_cache_manifests:
+        for cache_root in CACHE_ROOTS:
+            actual = file_manifest(cache_root)
+            expected = pre_cache_manifests.get(str(cache_root))
+            if actual != expected:
+                fail(
+                    "rollback verification",
+                    "restored cache manifest mismatch",
+                    {"cache_root": str(cache_root), "expected": expected, "actual": actual},
+                )
+    if prior_marketplace_stanza:
+        actual_stanza = current_marketplace_stanza()
+        if actual_stanza != prior_marketplace_stanza:
+            fail(
+                "rollback verification",
+                "restored marketplace stanza mismatch",
+                {"expected": prior_marketplace_stanza, "actual": actual_stanza},
+            )
 
 
 def execute(run_id: str) -> None:
@@ -706,6 +884,8 @@ def execute(run_id: str) -> None:
     lock_path = Path(LOCK_PATH_TEMPLATE.format(run_id=run_id))
     lock_fd = atomic_lock(lock_path)
     disarmed = False
+    pre_cache_manifests: dict[str, dict[str, str]] = {}
+    prior_marketplace_stanza: dict[str, Any] = {}
     write_json(
         EVIDENCE_ROOT / "cache-refresh-execute.start.summary.json",
         {
@@ -716,13 +896,14 @@ def execute(run_id: str) -> None:
     )
     try:
         capture_process_check(evidence_root, metadata, "before-hooks-disable")
+        prior_marketplace_stanza = current_marketplace_stanza()
         shutil.copy2(CONFIG_PATH, config_backup)
         set_plugin_hooks(False)
         shutil.copy2(CONFIG_PATH, evidence_root / "config.hooks-disabled.toml")
         capture_process_check(evidence_root, metadata, "before-cache-mutation")
         backup_cache_roots(backup_root)
         for cache_root in CACHE_ROOTS:
-            write_manifest_snapshot(
+            pre_cache_manifests[str(cache_root)] = write_manifest_snapshot(
                 cache_root,
                 evidence_root / f"{cache_root.parent.name}-{cache_root.name}.before.SHA256SUMS",
                 metadata,
@@ -753,6 +934,8 @@ def execute(run_id: str) -> None:
                 backup_root=backup_root,
                 failed_root=failed_root,
                 reason=str(exc),
+                pre_cache_manifests=pre_cache_manifests,
+                prior_marketplace_stanza=prior_marketplace_stanza,
             )
         raise
     finally:

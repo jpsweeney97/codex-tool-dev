@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import io
 import json
 import sys
@@ -351,3 +352,114 @@ def test_cache_refresh_execute_acquires_lock_and_disarms(
         (tmp_path / "evidence/cache-refresh-execute.summary.json").read_text(encoding="utf-8")
     )
     assert summary["result"] == "CACHE_REFRESH_DISARMED"
+
+
+def test_app_server_roundtrip_does_not_use_blocking_stdout_readline() -> None:
+    source = inspect.getsource(cache_refresh_wrapper.app_server_roundtrip)
+
+    assert ".stdout.readline()" not in source
+    assert "Queue" in source or "Thread" in source
+
+
+def test_inventory_contract_rejects_missing_ticket_hook() -> None:
+    transcript = [
+        {
+            "direction": "recv",
+            "body": {
+                "id": 3,
+                "result": {
+                    "source": {
+                        "path": (
+                            "/Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/"
+                            "handoff/1.6.0"
+                        )
+                    }
+                },
+            },
+        },
+        {
+            "direction": "recv",
+            "body": {
+                "id": 4,
+                "result": {
+                    "source": {
+                        "path": (
+                            "/Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/"
+                            "ticket/1.4.0"
+                        )
+                    }
+                },
+            },
+        },
+        {
+            "direction": "recv",
+            "body": {"id": 5, "result": {"plugins": ["handoff@turbo-mode", "ticket@turbo-mode"]}},
+        },
+        {
+            "direction": "recv",
+            "body": {
+                "id": 6,
+                "result": {
+                    "skills": [
+                        {
+                            "name": skill,
+                            "sourcePath": (
+                                "/Users/jp/.codex/plugins/cache/turbo-mode/handoff/1.6.0/"
+                                f"skills/{skill.removeprefix('handoff:')}/SKILL.md"
+                            ),
+                        }
+                        for skill in cache_refresh_wrapper.REQUIRED_HANDOFF_SKILLS
+                    ]
+                },
+            },
+        },
+        {"direction": "recv", "body": {"id": 7, "result": {"hooks": []}}},
+    ]
+
+    with pytest.raises(migration_common.MigrationError, match="Ticket Bash preToolUse hook"):
+        cache_refresh_wrapper.validate_inventory_contract(transcript)
+
+
+def test_rollback_verifies_restored_config_and_cache_manifests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text(
+        '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/before"\n',
+        encoding="utf-8",
+    )
+    config_backup = tmp_path / "config.before.toml"
+    config_backup.write_text(config.read_text(encoding="utf-8"), encoding="utf-8")
+    cache_root = tmp_path / "cache/handoff"
+    cache_root.mkdir(parents=True)
+    (cache_root / "file.txt").write_text("before", encoding="utf-8")
+    backup_root = tmp_path / "backup"
+    backup_root.mkdir()
+    failed_root = tmp_path / "failed"
+    monkeypatch.setattr(cache_refresh_wrapper, "CONFIG_PATH", config)
+    monkeypatch.setattr(cache_refresh_wrapper, "CACHE_ROOTS", [cache_root])
+    monkeypatch.setattr(cache_refresh_wrapper, "EVIDENCE_ROOT", tmp_path / "evidence")
+    monkeypatch.setattr(
+        cache_refresh_wrapper,
+        "restore_cache_roots",
+        lambda backup_root, failed_root: (cache_root / "file.txt").write_text(
+            "corrupt", encoding="utf-8"
+        ),
+    )
+    metadata = {"run_id": "run", "mode": "cache-refresh-execute"}
+    pre_manifests = {
+        str(cache_root): {"file.txt": migration_common.sha256_file(cache_root / "file.txt")}
+    }
+
+    with pytest.raises(migration_common.MigrationError, match="restored cache manifest"):
+        cache_refresh_wrapper.rollback(
+            metadata=metadata,
+            evidence_root=tmp_path / "local",
+            config_backup=config_backup,
+            backup_root=backup_root,
+            failed_root=failed_root,
+            reason="test",
+            pre_cache_manifests=pre_manifests,
+            prior_marketplace_stanza={"source_type": "local", "source": "/before"},
+        )
