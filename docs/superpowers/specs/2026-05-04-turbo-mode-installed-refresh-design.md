@@ -2,7 +2,7 @@
 
 ## Status
 
-Design accepted in discussion on 2026-05-04 and repaired after scrutiny on 2026-05-04. This document is a design spec only. It does not authorize an implementation until a    separate implementation plan exists.
+This document is a design spec only. It does not authorize an implementation until a    separate implementation plan exists.
 
 ## Purpose
 
