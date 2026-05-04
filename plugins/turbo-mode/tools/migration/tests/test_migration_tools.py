@@ -88,6 +88,16 @@ def test_redaction_allows_plan_metadata_path() -> None:
     assert issues == []
 
 
+def test_redaction_allows_dist_artifact_metadata_path() -> None:
+    issues = validate_redaction.validate_text(
+        "evidence.json",
+        "/Users/jp/.codex/dist/turbo-mode-handoff-1.6.0-absolute-ingest-closeout/"
+        "turbo-mode-handoff-1.6.0-absolute-ingest.tgz\n",
+    )
+
+    assert issues == []
+
+
 def test_validate_metadata_detects_stale_run_id(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

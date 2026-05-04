@@ -28,7 +28,7 @@ ALLOWED_LOCAL_PATHS = [
     "/Users/jp/.codex/docs/plans",
     "/Users/jp/.codex/plugins/cache/turbo-mode",
     "/Users/jp/.codex/config.toml",
-    "/Users/jp/.codex/dist/turbo-mode-handoff-1.6.0-non-hook-closeout",
+    "/Users/jp/.codex/dist",
     "/private/tmp/turbo-mode",
 ]
 FORBIDDEN_LOCAL_PATHS = [
