@@ -9,6 +9,8 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 tmp/
+docs/handoffs/.session-state/
+docs/handoffs/archive/
 .codex/local/
 .codex/plugin-dev/**/.codex/ticket-tmp/
 .codex/plugin-dev/
