@@ -6,7 +6,7 @@ Design accepted in discussion on 2026-05-04 and repaired after scrutiny on 2026-
 
 ## Purpose
 
-Add a smaller repeatable tool for assessing and, during a controlled maintenance window, refreshing the live installed Turbo Mode plugins from the repo-local source authority without reusing the one-time source-migration wrapper as the normal interface.
+Add a repeatable control tool for assessing and, during a controlled maintenance window, refreshing the live installed Turbo Mode plugins from the repo-local source authority without reusing the one-time source-migration wrapper as the normal interface.
 
 The source-authority migration established:
 
@@ -50,10 +50,12 @@ Responsibilities:
 - Validate repo source roots exist.
 - Validate repo marketplace metadata points at the repo-local Handoff and Ticket source roots.
 - Validate installed cache roots are discoverable.
+- Validate global config marketplace registration and plugin enablement state.
+- Optionally collect read-only app-server inventory when requested by `--inventory-check`; this starts app-server but does not mutate installed cache or config.
 - Build source and cache manifests.
 - Compute the source/cache filesystem diff.
 - Classify changed paths as `fast-safe-with-covered-smoke`, `guarded-only`, or `coverage-gap-fail`.
-- Report one terminal plan status: `refresh-allowed`, `guarded-refresh-required`, `coverage-gap-blocked`, `blocked-preflight`, or `no-drift`.
+- Report one terminal plan status: `refresh-allowed`, `guarded-refresh-required`, `coverage-gap-blocked`, `blocked-preflight`, `runtime-config-mismatch`, `filesystem-no-drift`, or `no-drift`.
 - Write local-only dry-run evidence.
 
 ### `--plan-refresh`
@@ -65,13 +67,29 @@ Responsibilities:
 - Run all `--dry-run` checks.
 - Select the required mutation mode, smoke tier, and coverage requirements.
 - Emit the exact external-shell command that would be allowed if the process gate later passes.
-- Emit no mutation command when the terminal status is `coverage-gap-blocked`, `blocked-preflight`, or `no-drift`.
+- Emit no mutation command when the terminal status is `coverage-gap-blocked`, `blocked-preflight`, `runtime-config-mismatch`, `filesystem-no-drift`, or `no-drift`.
 - Emit stop conditions that would block mutation, including guarded-only paths, coverage gaps, generated residue, marketplace mismatch, and expected process blockers.
 - Write local-only plan evidence that can be compared with the later mutation run. The later mutation run must recompute manifests and must not trust the plan artifact as current proof.
 
+### Terminal Plan Status
+
+Non-mutating modes must keep filesystem drift, runtime/config state, and coverage gaps distinct:
+
+| Status | Meaning |
+| --- | --- |
+| `refresh-allowed` | source/cache drift exists, all changed paths are `fast-safe-with-covered-smoke`, and preflight state allows external-shell `--refresh` if the later mutation process gate passes |
+| `guarded-refresh-required` | source/cache drift exists, at least one changed path is `guarded-only`, all changed paths are covered, and preflight state allows external-shell `--guarded-refresh` if the later mutation process gate passes |
+| `coverage-gap-blocked` | at least one changed path is `coverage-gap-fail`; no mutation command may be emitted |
+| `blocked-preflight` | generated residue, abandoned run state, missing roots, unparseable config, marketplace metadata failure, or other non-runtime preflight failure blocks planning |
+| `runtime-config-mismatch` | filesystem diff alone would otherwise be actionable or clean, but global config registration, plugin enablement state, or requested read-only runtime inventory is not aligned |
+| `filesystem-no-drift` | source/cache manifests match and config preflight passes, but read-only runtime inventory was not requested, so runtime alignment is unproven |
+| `no-drift` | source/cache manifests match, config preflight passes, and requested read-only runtime inventory aligns |
+
+`no-drift` must not be emitted when runtime inventory was not checked. Use `filesystem-no-drift` instead.
+
 ### `--refresh`
 
-External-shell maintenance refresh for low-risk source/cache diffs. This mode is smaller than `--guarded-refresh`, but it still mutates the installed cache and therefore must not run while hook-capable Codex sessions are present unless a future atomic install certification explicitly changes this rule.
+External-shell maintenance refresh for low-risk source/cache diffs. This mode is narrower than `--guarded-refresh`, but it still mutates the installed cache and therefore must not run while hook-capable Codex sessions are present unless a future atomic install certification explicitly changes this rule.
 
 Responsibilities:
 
@@ -169,6 +187,30 @@ The user-facing path outcome is derived from those fields:
 ## Safety Classification
 
 Unmatched paths are an internal reason code, not an external classifier result. An unmatched non-executable path must be reported externally as `guarded-only` with reason `unmatched-path`. An unmatched executable path, new executable path, or changed command-shape-bearing path without deterministic smoke must be reported externally as `coverage-gap-fail`. False guarded is acceptable; false fast is not. False covered is not acceptable. Classification uses Python `fnmatch`-style glob patterns against canonical refresh paths.
+
+### Executable And Command-Bearing Surfaces
+
+A path is executable or script-bearing for classification if any of these are true:
+
+- canonical path matches `<plugin>/<version>/scripts/*.py`;
+- canonical path matches `<plugin>/<version>/hooks/*.py`;
+- canonical path is `<plugin>/<version>/hooks/hooks.json`;
+- canonical path is `<plugin>/<version>/.codex-plugin/plugin.json`;
+- file mode has any executable bit set;
+- file begins with a shebang;
+- file is referenced as a command target by a hook manifest, plugin manifest, skill doc, README, HANDBOOK, or reference doc.
+
+For the current Handoff and Ticket trees, classifier fixture tests must enumerate every `scripts/*.py`, every `hooks/*.py`, every `hooks/hooks.json`, and every plugin manifest command-bearing path. A current script that is not listed in guarded-only or fast-safe-with-covered-smoke tables must be `coverage-gap-fail`.
+
+Command-shape detection compares source and installed-cache file content for the same canonical path. The detector should use a Markdown-aware projection when possible:
+
+- fenced `bash`, `sh`, `shell`, or untyped command blocks;
+- JSON payload examples;
+- command-like lines beginning with `python`, `python3`, `uv`, `codex`, `ticket_`, or `./`;
+- markdown tables containing command, state, or action columns;
+- sections with headings containing `Command`, `Workflow`, `Execute`, `Prepare`, `Payload`, `Recovery`, or `Policy`.
+
+If the projection parser fails, if the source/cache diff touches a command-bearing file but the projection cannot prove the command shape is unchanged, or if a changed doc already contains command-bearing content outside a recognized projection, the result is `coverage-gap-fail`. The fallback is intentionally conservative: changed command-bearing docs require deterministic smoke or no mutation.
 
 ### Guarded-Only Paths
 
@@ -316,6 +358,10 @@ Both mutation modes use the same no-concurrent-hook-consumer process gate until 
 
 The refresh tool must be launched from an external maintenance shell, not from an active Codex Desktop or Codex CLI conversation. Running from inside a Codex session is expected to self-block and should be treated as correct behavior.
 
+This process gate is sampled evidence, not enforceable machine-wide mutual exclusion. The required operational contract is an operator-enforced exclusive maintenance window: close active Codex Desktop and CLI sessions, do not start new Codex sessions during mutation, and run the mutation command from an external shell. Until hook consumers are updated to honor a machine-local maintenance sentinel, the tool can only prove that no known hook-capable consumers were observed at required census points.
+
+Commit-safe evidence must describe this as `exclusive_window_observed_by_process_samples`, not as `concurrency_prevented`.
+
 Process census command:
 
 ```bash
@@ -366,10 +412,11 @@ Required censuses:
 
 1. **Before any mutation**: after acquiring the refresh lock, before cache/config snapshots or app-server install.
 2. **Immediately before install**: after snapshots are complete, before the first `plugin/install` request.
+3. **Immediately after mutation**: after final inventory and smoke, before clearing the run-state marker.
 
-If either census finds blockers, the tool fails before mutation and writes a local-only process-gate summary plus a local-only raw process listing. If commit-safe evidence is enabled for that run, the commit-safe summary records only count, marker set, census label, raw listing SHA256, and run metadata. The raw process listing stays under local-only evidence.
+If a pre-mutation census finds blockers, the tool fails before mutation and writes a local-only process-gate summary plus a local-only raw process listing. If the post-mutation census finds blockers, the tool must fail the exclusivity evidence gate and report the refresh as `MUTATION_COMPLETE_EXCLUSIVITY_UNPROVEN`; it must not claim the maintenance window was clean. If commit-safe evidence is enabled for that run, the commit-safe summary records only count, marker set, census label, raw listing SHA256, and run metadata. The raw process listing stays under local-only evidence.
 
-For `--guarded-refresh`, if hooks are disabled as part of the guarded flow, a third census must run after hook disable and immediately before cache mutation.
+For `--guarded-refresh`, if hooks are disabled as part of the guarded flow, an additional census must run after hook disable and immediately before cache mutation.
 
 The gate must be tested for:
 
@@ -508,10 +555,12 @@ Local-only evidence requirements are mode-specific:
 | post-refresh cache manifest and SHA256 | not applicable | not applicable | required after install or restore | required after install or rollback |
 | source/cache diff and safety classification | required | required | required | required |
 | terminal plan status | required | required | required | required |
+| runtime/config mismatch summary | required when mismatch is detected | required when mismatch is detected | required when mismatch is detected | required when mismatch is detected |
 | selected mutation command | not applicable | required when mutation is allowed | required | required |
 | process-gate summary and raw local-only process listing | not applicable | optional forecast only | required | required |
 | pre-refresh config SHA256 | not applicable | not applicable | required | required |
 | post-refresh config SHA256 | not applicable | not applicable | required | required |
+| cache parent metadata and unexpected-side-effect scan | not applicable | not applicable | required | required |
 | app-server transcript and SHA256 | not applicable | not applicable | required | required |
 | runtime inventory summary and SHA256 | not applicable | not applicable | required | required |
 | smoke summary and SHA256 | not applicable | not applicable | required | required |
@@ -603,20 +652,23 @@ Stale evidence rejection:
 
 Both mutation modes take a refresh lock before installation. The lock prevents concurrent refresh tools from racing each other.
 
-Both mutation modes require a no-concurrent-hook-consumer process check until app-server install atomicity is separately certified.
+Both mutation modes require sampled no-concurrent-hook-consumer process checks and an operator-enforced exclusive maintenance window until app-server install atomicity or hook-consumer sentinel support is separately certified.
 
 ## Crash And Restart Recovery
 
-Mutation modes must leave a local-only run-state marker before the first app-server install request and clear it only after final status is written. The marker records:
+Mutation modes must write a local-only run-state marker before any config, cache, marketplace, or app-server install mutation and clear it only after final status is written. The marker records:
 
 - `RUN_ID`
 - mode
 - repo `HEAD`
 - tool SHA256
 - pre-refresh config SHA256
+- original config byte-snapshot path when config may be mutated
 - pre-refresh cache manifest SHA256 values
 - snapshot paths
 - current phase
+
+For `--guarded-refresh`, the original config bytes must be snapshotted before changing `features.plugin_hooks` or marketplace registration. Config mutation must be an atomic write using a temp file, fsync, and replace. Rollback must fail closed if the current config SHA256 no longer matches the tool's expected intermediate config state, because that indicates external config mutation during the run. In that case the tool must not blindly overwrite unrelated user edits; it must leave local-only recovery evidence and require manual operator decision.
 
 At startup, mutation modes must check for abandoned run-state markers before taking the refresh lock. If a marker exists, the tool must refuse ordinary mutation and enter a recovery decision path:
 
@@ -669,22 +721,45 @@ For release-like use, warn when source behavior changes but `.codex-plugin/plugi
 - Proving hot-reload behavior for already-running Codex sessions.
 - Replacing the existing source-migration evidence.
 
+## Implementation Plan Requirements
+
+This design is not a single-helper-script task. The implementation plan must split delivery into staged checkpoints with tests at each layer:
+
+1. Classifier and command-shape projection only, with fixtures for the full current Handoff and Ticket trees.
+2. Non-mutating `--dry-run` and `--plan-refresh` evidence, including runtime/config mismatch statuses.
+3. App-server client and read-only inventory parser using the pinned request contract.
+4. Process census classifier and exclusive-window evidence model.
+5. Run-state marker, crash recovery, config snapshot, and rollback primitives.
+6. `--refresh` mutation path with restore proof.
+7. `--guarded-refresh` mutation path with hook-disable, config rollback, and fresh app-server final inventory.
+8. Commit-safe summary validators and redaction gates.
+
+Each checkpoint must have its own commit and verification gate. The full acceptance matrix should not be implemented as one undifferentiated script change.
+
 ## Acceptance Criteria
 
 - `--dry-run` classifies source/cache drift without mutation.
 - `--plan-refresh` emits the external-shell mutation plan without mutation and marks mutation modes as maintenance operations.
+- `--dry-run` and `--plan-refresh` distinguish `filesystem-no-drift`, `no-drift`, and `runtime-config-mismatch`.
+- `no-drift` is emitted only when source/cache manifests match, config preflight passes, and requested read-only runtime inventory aligns; otherwise matching manifests use `filesystem-no-drift` or `runtime-config-mismatch`.
 - `--dry-run` and `--plan-refresh` report `coverage-gap-blocked` without emitting a mutation command when coverage is missing.
 - `--refresh` refuses guarded-only diffs, including unmatched paths reported as `guarded-only` with reason `unmatched-path`.
 - `--refresh` refuses coverage-gap diffs.
 - `--refresh` refuses to mutate unless the process gate passes.
 - `--refresh` can update fast-safe-with-covered-smoke installed content through app-server install and prove runtime inventory plus source/cache equality after the process gate passes.
 - `--refresh` snapshots installed cache roots and restores them if install or post-install verification fails, then proves restored config hash, cache manifests, plugin enablement, runtime inventory, and hook inventory from a fresh app-server process.
+- Mutation runs record cache parent metadata and fail if app-server install changes unexpected paths outside the two versioned Turbo Mode cache roots.
 - `--guarded-refresh` enforces no-concurrent-hook-consumer checks before hook-sensitive mutation.
 - `--guarded-refresh` disables/restores `features.plugin_hooks` when present and true.
 - `--guarded-refresh` successful hook-disable runs collect final inventory and smoke from a fresh app-server process after config restore.
 - `--guarded-refresh` snapshots and rolls back on failed install, inventory, equality, or smoke, then proves restored config hash, cache manifests, plugin enablement, runtime inventory, and hook inventory from a fresh app-server process.
 - Generated residue in source or cache fails the run before equality diffing.
 - Handoff hook inventory assertion matches current truth: expected empty Handoff hook inventory for Handoff 1.6.0.
+- Process-gate evidence says `exclusive_window_observed_by_process_samples`, not `concurrency_prevented`, unless a later sentinel-aware design is implemented.
+- Mutation runs include pre-mutation, pre-install, and post-mutation process censuses.
+- Run-state marker is written before any config, cache, marketplace, or app-server install mutation.
+- Guarded config mutation uses original byte snapshots, atomic writes, and fail-closed rollback if config changed externally.
+- Classifier tests define executable/script-bearing surfaces and cover every current Handoff/Ticket `scripts/*.py`, `hooks/*.py`, `hooks/hooks.json`, and plugin manifest command-bearing path.
 - Classifier tests use canonical `<plugin>/<version>/<relative_path>` keys and assert concrete Handoff and Ticket examples.
 - Classifier tests assert `fast-safe-with-covered-smoke`, `guarded-only`, and `coverage-gap-fail` outcomes.
 - Classifier tests assert that `ticket/1.4.0/scripts/new_helper.py` and any other new executable path are `coverage-gap-fail`, not guarded-only.
