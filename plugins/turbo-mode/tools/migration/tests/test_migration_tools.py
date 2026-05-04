@@ -463,3 +463,32 @@ def test_rollback_verifies_restored_config_and_cache_manifests(
             pre_cache_manifests=pre_manifests,
             prior_marketplace_stanza={"source_type": "local", "source": "/before"},
         )
+
+
+def test_installed_smoke_covers_step12_contract() -> None:
+    expected = {
+        "handoff-search",
+        "handoff-defer",
+        "handoff-triage",
+        "handoff-session-state-write",
+        "handoff-session-state-read",
+        "handoff-session-state-clear",
+        "ticket-create-prepare",
+        "ticket-create-execute",
+        "ticket-scalar-acceptance-rejected",
+        "ticket-update-priority-prepare",
+        "ticket-update-priority-execute",
+        "ticket-update-status-prepare",
+        "ticket-update-status-execute",
+        "ticket-close-prepare",
+        "ticket-close-execute",
+        "ticket-reopen-prepare",
+        "ticket-reopen-execute",
+        "ticket-noncanonical-denied",
+        "ticket-read-list",
+        "ticket-read-query",
+        "ticket-triage-dashboard",
+        "ticket-audit-repair-dry-run",
+    }
+
+    assert set(cache_refresh_wrapper.REQUIRED_INSTALLED_SMOKE_STEPS) >= expected

@@ -67,6 +67,30 @@ REQUIRED_HANDOFF_SKILLS = {
     "handoff:triage",
     "handoff:distill",
 }
+REQUIRED_INSTALLED_SMOKE_STEPS = (
+    "handoff-search",
+    "handoff-defer",
+    "handoff-triage",
+    "handoff-session-state-write",
+    "handoff-session-state-read",
+    "handoff-session-state-clear",
+    "ticket-create-prepare",
+    "ticket-create-execute",
+    "ticket-scalar-acceptance-rejected",
+    "ticket-update-priority-prepare",
+    "ticket-update-priority-execute",
+    "ticket-update-status-prepare",
+    "ticket-update-status-execute",
+    "ticket-close-prepare",
+    "ticket-close-execute",
+    "ticket-reopen-prepare",
+    "ticket-reopen-execute",
+    "ticket-noncanonical-denied",
+    "ticket-read-list",
+    "ticket-read-query",
+    "ticket-triage-dashboard",
+    "ticket-audit-repair-dry-run",
+)
 
 FAULTS = [
     FaultScenario("registration-failure-after-config-backup", ("config.before.toml",)),
@@ -725,6 +749,9 @@ def run_source_cache_gate(run_id: str, metadata: dict[str, Any], label: str) -> 
 def run_installed_smoke(run_id: str, evidence_root: Path, metadata: dict[str, Any]) -> None:
     smoke_root = Path(f"/private/tmp/turbo-mode-source-migration-smoke-{run_id}")
     smoke_root.mkdir(parents=True, exist_ok=True)
+    (smoke_root / ".codex").mkdir(exist_ok=True)
+    (smoke_root / "payloads").mkdir(exist_ok=True)
+    (smoke_root / "docs/tickets").mkdir(parents=True, exist_ok=True)
     handoff_dir = smoke_root / "docs/handoffs"
     handoff_dir.mkdir(parents=True, exist_ok=True)
     phrase = f"turbo-mode-smoke-{run_id}"
@@ -742,64 +769,451 @@ def run_installed_smoke(run_id: str, evidence_root: Path, metadata: dict[str, An
         f"## Goal\n\n{phrase}\n",
         encoding="utf-8",
     )
-    commands = [
-        ["python3", "-B", str(CACHE_ROOTS[0] / "scripts/search.py"), phrase],
-        [
-            "python3",
-            "-B",
-            str(CACHE_ROOTS[0] / "scripts/triage.py"),
-            "--tickets-dir",
-            "docs/tickets",
-            "--handoffs-dir",
-            "docs/handoffs",
-        ],
-        [
-            "python3",
-            "-B",
-            str(CACHE_ROOTS[1] / "scripts/ticket_read.py"),
-            "list",
-            "--tickets-dir",
-            "docs/tickets",
-        ],
-    ]
     results: list[dict[str, Any]] = []
-    for command in commands:
-        completed = subprocess.run(
-            command,
-            cwd=smoke_root,
-            text=True,
-            capture_output=True,
-            check=False,
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-        )
-        results.append(
+    handoff_root = CACHE_ROOTS[0]
+    ticket_root = CACHE_ROOTS[1]
+
+    append_smoke_result(
+        results,
+        run_smoke_command(
+            "handoff-search",
+            ["python3", "-B", str(handoff_root / "scripts/search.py"), phrase],
+            smoke_root=smoke_root,
+            evidence_root=evidence_root,
+        ),
+    )
+    append_smoke_result(
+        results,
+        run_smoke_command(
+            "handoff-defer",
+            [
+                "python3",
+                "-B",
+                str(handoff_root / "scripts/defer.py"),
+                "--tickets-dir",
+                "docs/tickets",
+            ],
+            smoke_root=smoke_root,
+            evidence_root=evidence_root,
+            input_text=json.dumps(
+                [
+                    {
+                        "summary": f"Deferred smoke {run_id}",
+                        "problem": "Exercise installed Handoff defer envelope emission.",
+                        "priority": "medium",
+                    }
+                ]
+            ),
+            expected_states={"ok"},
+        ),
+    )
+    if not list((smoke_root / "docs/tickets/.envelopes").glob("*.json")):
+        fail("installed smoke", "Handoff defer did not emit an envelope", str(smoke_root))
+    append_smoke_result(
+        results,
+        run_smoke_command(
+            "handoff-triage",
+            [
+                "python3",
+                "-B",
+                str(handoff_root / "scripts/triage.py"),
+                "--tickets-dir",
+                "docs/tickets",
+                "--handoffs-dir",
+                "docs/handoffs",
+            ],
+            smoke_root=smoke_root,
+            evidence_root=evidence_root,
+        ),
+    )
+
+    state_dir = smoke_root / "docs/handoffs/.session-state"
+    archived = smoke_root / "docs/handoffs/archive/smoke.md"
+    archived.parent.mkdir(parents=True, exist_ok=True)
+    archived.write_text("smoke", encoding="utf-8")
+    write_state = run_smoke_command(
+        "handoff-session-state-write",
+        [
+            "python3",
+            "-B",
+            str(handoff_root / "scripts/session_state.py"),
+            "write-state",
+            "--state-dir",
+            str(state_dir),
+            "--project",
+            "smoke",
+            "--archive-path",
+            str(archived),
+            "--field",
+            "state_path",
+        ],
+        smoke_root=smoke_root,
+        evidence_root=evidence_root,
+    )
+    append_smoke_result(results, write_state)
+    state_path = write_state["stdout"].strip()
+    append_smoke_result(
+        results,
+        run_smoke_command(
+            "handoff-session-state-read",
+            [
+                "python3",
+                "-B",
+                str(handoff_root / "scripts/session_state.py"),
+                "read-state",
+                "--state-dir",
+                str(state_dir),
+                "--project",
+                "smoke",
+                "--field",
+                "archive_path",
+            ],
+            smoke_root=smoke_root,
+            evidence_root=evidence_root,
+        ),
+    )
+    append_smoke_result(
+        results,
+        run_smoke_command(
+            "handoff-session-state-clear",
+            [
+                "python3",
+                "-B",
+                str(handoff_root / "scripts/session_state.py"),
+                "clear-state",
+                "--state-dir",
+                str(state_dir),
+                "--state-path",
+                state_path,
+            ],
+            smoke_root=smoke_root,
+            evidence_root=evidence_root,
+        ),
+    )
+
+    create_payload = write_smoke_payload(
+        smoke_root,
+        "ticket-create",
+        trusted_ticket_payload(
+            run_id,
+            "create",
             {
-                "command": command[:3],
-                "returncode": completed.returncode,
-                "stdout_sha256": sha256_file(
-                    write_smoke_output(evidence_root, command, completed.stdout, "stdout")
-                ),
-                "stderr_sha256": sha256_file(
-                    write_smoke_output(evidence_root, command, completed.stderr, "stderr")
-                ),
-            }
+                "title": f"Installed smoke {run_id}",
+                "problem": "Exercise installed Ticket create workflow.",
+                "priority": "medium",
+                "acceptance_criteria": ["Smoke passes"],
+            },
+        ),
+    )
+    append_smoke_result(
+        results,
+        run_workflow_smoke_step(
+            "ticket-create-prepare",
+            ticket_root,
+            "prepare",
+            create_payload,
+            smoke_root,
+            evidence_root,
+        ),
+    )
+    create_execute = run_workflow_smoke_step(
+        "ticket-create-execute", ticket_root, "execute", create_payload, smoke_root, evidence_root
+    )
+    append_smoke_result(results, create_execute)
+    ticket_id = create_execute["json"].get("ticket_id")
+    if not isinstance(ticket_id, str) or not ticket_id:
+        fail("installed smoke", "Ticket create did not return a ticket_id", create_execute["json"])
+
+    scalar_payload = write_smoke_payload(
+        smoke_root,
+        "ticket-scalar-acceptance",
+        trusted_ticket_payload(
+            run_id,
+            "create",
+            {
+                "title": f"Scalar acceptance {run_id}",
+                "problem": "Exercise scalar acceptance rejection.",
+                "priority": "medium",
+                "acceptance_criteria": "not-a-list",
+            },
+        ),
+    )
+    append_smoke_result(
+        results,
+        run_workflow_smoke_step(
+            "ticket-scalar-acceptance-rejected",
+            ticket_root,
+            "prepare",
+            scalar_payload,
+            smoke_root,
+            evidence_root,
+            expected_returncodes={2},
+            expected_states={"need_fields"},
+        ),
+    )
+    for label, action, fields in (
+        ("ticket-update-priority", "update", {"priority": "high"}),
+        ("ticket-update-status", "update", {"status": "in_progress"}),
+        ("ticket-close", "close", {"resolution": "done"}),
+        ("ticket-reopen", "reopen", {"reopen_reason": "Need more work"}),
+    ):
+        payload = write_smoke_payload(
+            smoke_root,
+            label,
+            trusted_ticket_payload(run_id, action, fields, ticket_id=ticket_id),
         )
-        if completed.returncode != 0:
-            fail("installed smoke", completed.stderr.strip() or completed.stdout.strip(), command)
+        append_smoke_result(
+            results,
+            run_workflow_smoke_step(
+                f"{label}-prepare", ticket_root, "prepare", payload, smoke_root, evidence_root
+            ),
+        )
+        append_smoke_result(
+            results,
+            run_workflow_smoke_step(
+                f"{label}-execute", ticket_root, "execute", payload, smoke_root, evidence_root
+            ),
+        )
+
+    append_smoke_result(
+        results,
+        run_noncanonical_hook_smoke(ticket_root, create_payload, smoke_root, evidence_root),
+    )
+    append_smoke_result(
+        results,
+        run_smoke_command(
+            "ticket-read-list",
+            ["python3", "-B", str(ticket_root / "scripts/ticket_read.py"), "list", "docs/tickets"],
+            smoke_root=smoke_root,
+            evidence_root=evidence_root,
+            expected_states={"ok"},
+        ),
+    )
+    append_smoke_result(
+        results,
+        run_smoke_command(
+            "ticket-read-query",
+            [
+                "python3",
+                "-B",
+                str(ticket_root / "scripts/ticket_read.py"),
+                "query",
+                "docs/tickets",
+                ticket_id,
+            ],
+            smoke_root=smoke_root,
+            evidence_root=evidence_root,
+            expected_states={"ok"},
+        ),
+    )
+    append_smoke_result(
+        results,
+        run_smoke_command(
+            "ticket-triage-dashboard",
+            [
+                "python3",
+                "-B",
+                str(ticket_root / "scripts/ticket_triage.py"),
+                "dashboard",
+                "docs/tickets",
+            ],
+            smoke_root=smoke_root,
+            evidence_root=evidence_root,
+        ),
+    )
+    append_smoke_result(
+        results,
+        run_smoke_command(
+            "ticket-audit-repair-dry-run",
+            [
+                "python3",
+                "-B",
+                str(ticket_root / "scripts/ticket_audit.py"),
+                "repair",
+                "docs/tickets",
+                "--dry-run",
+            ],
+            smoke_root=smoke_root,
+            evidence_root=evidence_root,
+            expected_states={"ok"},
+        ),
+    )
+    observed = {result["label"] for result in results}
+    missing = sorted(set(REQUIRED_INSTALLED_SMOKE_STEPS) - observed)
+    if missing:
+        fail("installed smoke", "required smoke steps missing", missing)
     write_json(
         EVIDENCE_ROOT / "installed-smoke.summary.json",
         {
             "run_metadata": metadata,
             "smoke_root": str(smoke_root),
-            "commands": results,
+            "steps": redact_smoke_results(results),
             "result": "INSTALLED_SMOKE_PASSED",
         },
     )
 
 
-def write_smoke_output(evidence_root: Path, command: list[str], content: str, stream: str) -> Path:
-    stem = Path(command[2]).stem
-    path = evidence_root / f"smoke-{stem}.{stream}.txt"
+def trusted_ticket_payload(
+    run_id: str,
+    action: str,
+    fields: dict[str, Any],
+    *,
+    ticket_id: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "action": action,
+        "args": {},
+        "request_origin": "user",
+        "hook_injected": True,
+        "hook_request_origin": "user",
+        "session_id": f"installed-smoke-{run_id}-{action}",
+        "fields": fields,
+    }
+    if ticket_id is not None:
+        payload["args"]["ticket_id"] = ticket_id
+    return payload
+
+
+def write_smoke_payload(smoke_root: Path, label: str, payload: dict[str, Any]) -> Path:
+    path = smoke_root / "payloads" / f"{label}.json"
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def append_smoke_result(results: list[dict[str, Any]], result: dict[str, Any]) -> None:
+    results.append(result)
+
+
+def run_workflow_smoke_step(
+    label: str,
+    ticket_root: Path,
+    subcommand: str,
+    payload_path: Path,
+    smoke_root: Path,
+    evidence_root: Path,
+    *,
+    expected_returncodes: set[int] | None = None,
+    expected_states: set[str] | None = None,
+) -> dict[str, Any]:
+    return run_smoke_command(
+        label,
+        [
+            "python3",
+            "-B",
+            str(ticket_root / "scripts/ticket_workflow.py"),
+            subcommand,
+            str(payload_path),
+        ],
+        smoke_root=smoke_root,
+        evidence_root=evidence_root,
+        expected_returncodes=expected_returncodes,
+        expected_states=expected_states
+        or {"ready_to_execute", "ok_create", "ok_update", "ok_close", "ok_reopen"},
+    )
+
+
+def run_smoke_command(
+    label: str,
+    command: list[str],
+    *,
+    smoke_root: Path,
+    evidence_root: Path,
+    input_text: str | None = None,
+    expected_returncodes: set[int] | None = None,
+    expected_states: set[str] | None = None,
+) -> dict[str, Any]:
+    completed = subprocess.run(
+        command,
+        cwd=smoke_root,
+        input=input_text,
+        text=True,
+        capture_output=True,
+        check=False,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    stdout_path = write_smoke_output(evidence_root, label, completed.stdout, "stdout")
+    stderr_path = write_smoke_output(evidence_root, label, completed.stderr, "stderr")
+    allowed = expected_returncodes or {0}
+    if completed.returncode not in allowed:
+        fail("installed smoke", completed.stderr.strip() or completed.stdout.strip(), command)
+    parsed: dict[str, Any] | None = None
+    if completed.stdout.strip().startswith("{"):
+        parsed = read_json_bytes(completed.stdout.encode("utf-8"), source=f"{label} stdout")
+        parsed_state = parsed.get("state", parsed.get("status"))
+        if expected_states is not None and parsed_state not in expected_states:
+            fail("installed smoke", f"{label} returned unexpected state", parsed)
+    return {
+        "label": label,
+        "command": command[:3],
+        "returncode": completed.returncode,
+        "stdout_sha256": sha256_file(stdout_path),
+        "stderr_sha256": sha256_file(stderr_path),
+        "state": parsed.get("state", parsed.get("status")) if parsed else None,
+        "json": parsed or {},
+        "stdout": completed.stdout,
+    }
+
+
+def run_noncanonical_hook_smoke(
+    ticket_root: Path,
+    payload_path: Path,
+    smoke_root: Path,
+    evidence_root: Path,
+) -> dict[str, Any]:
+    before_payload = sha256_file(payload_path)
+    before_tickets = file_manifest(smoke_root / "docs/tickets")
+    before_audit = file_manifest(smoke_root / "docs/tickets/.audit")
+    event = {
+        "session_id": "installed-smoke-noncanonical",
+        "transcript_path": str(evidence_root / "noncanonical-transcript.jsonl"),
+        "cwd": str(smoke_root),
+        "permission_mode": "default",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+            "command": (
+                f"/usr/bin/python3 -B {ticket_root}/scripts/ticket_workflow.py "
+                f"prepare {payload_path}"
+            )
+        },
+        "tool_use_id": "toolu_installed_smoke",
+    }
+    result = run_smoke_command(
+        "ticket-noncanonical-denied",
+        ["python3", "-B", str(ticket_root / "hooks/ticket_engine_guard.py")],
+        smoke_root=smoke_root,
+        evidence_root=evidence_root,
+        input_text=json.dumps(event),
+    )
+    output = result["json"]
+    decision = output.get("hookSpecificOutput", {}).get("permissionDecision")
+    if decision != "deny":
+        fail("installed smoke", "noncanonical Ticket command was not denied", output)
+    if sha256_file(payload_path) != before_payload:
+        fail("installed smoke", "noncanonical denial mutated payload", str(payload_path))
+    if file_manifest(smoke_root / "docs/tickets") != before_tickets:
+        fail("installed smoke", "noncanonical denial mutated tickets", str(smoke_root))
+    if file_manifest(smoke_root / "docs/tickets/.audit") != before_audit:
+        fail("installed smoke", "noncanonical denial mutated audit", str(smoke_root))
+    return result
+
+
+def redact_smoke_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "label": result["label"],
+            "command": result["command"],
+            "returncode": result["returncode"],
+            "stdout_sha256": result["stdout_sha256"],
+            "stderr_sha256": result["stderr_sha256"],
+            "state": result["state"],
+        }
+        for result in results
+    ]
+
+
+def write_smoke_output(evidence_root: Path, label: str, content: str, stream: str) -> Path:
+    path = evidence_root / f"smoke-{label}.{stream}.txt"
     path.write_text(content, encoding="utf-8")
     return path
 
