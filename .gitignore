@@ -3,9 +3,11 @@ node_modules/
 dist/
 build/
 .venv/
+.uv-cache/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 tmp/
 .codex/local/
+.codex/plugin-dev/**/.codex/ticket-tmp/
