@@ -470,6 +470,35 @@ def restore_cache_roots(backup_root: Path, failed_root: Path) -> None:
 
 
 def register_repo_marketplace(evidence_root: Path) -> None:
+    existing = current_marketplace_stanza()
+    if existing.get("source_type") == "local" and existing.get("source") == str(REPO_ROOT):
+        (evidence_root / "marketplace-add.stdout.txt").write_text(
+            "turbo-mode marketplace already registered\n",
+            encoding="utf-8",
+        )
+        (evidence_root / "marketplace-add.stderr.txt").write_text("", encoding="utf-8")
+        return
+    if existing:
+        completed = subprocess.run(
+            ["codex", "plugin", "marketplace", "remove", "turbo-mode"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        (evidence_root / "marketplace-remove.stdout.txt").write_text(
+            completed.stdout,
+            encoding="utf-8",
+        )
+        (evidence_root / "marketplace-remove.stderr.txt").write_text(
+            completed.stderr,
+            encoding="utf-8",
+        )
+        if completed.returncode != 0:
+            fail(
+                "remove existing marketplace",
+                completed.stderr.strip() or completed.stdout.strip(),
+                existing,
+            )
     completed = subprocess.run(
         ["codex", "plugin", "marketplace", "add", str(REPO_ROOT)],
         text=True,

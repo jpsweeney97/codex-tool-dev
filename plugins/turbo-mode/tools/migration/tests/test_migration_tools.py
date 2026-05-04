@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import io
 import json
+import subprocess
 import sys
 import tarfile
 from pathlib import Path
@@ -418,6 +419,57 @@ def test_inventory_contract_rejects_missing_ticket_hook() -> None:
 
     with pytest.raises(migration_common.MigrationError, match="Ticket Bash preToolUse hook"):
         cache_refresh_wrapper.validate_inventory_contract(transcript)
+
+
+def test_register_repo_marketplace_replaces_conflicting_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = {"source": "/Users/jp"}
+    calls: list[list[str]] = []
+
+    def fake_config() -> dict[str, object]:
+        if state["source"] is None:
+            return {"marketplaces": {}}
+        return {
+            "marketplaces": {
+                "turbo-mode": {
+                    "source_type": "local",
+                    "source": state["source"],
+                }
+            }
+        }
+
+    def fake_run(
+        cmd: list[str],
+        *,
+        text: bool,
+        capture_output: bool,
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        assert text
+        assert capture_output
+        assert not check
+        calls.append(cmd)
+        if cmd == ["codex", "plugin", "marketplace", "remove", "turbo-mode"]:
+            state["source"] = None
+            return subprocess.CompletedProcess(cmd, 0, "removed\n", "")
+        if cmd == ["codex", "plugin", "marketplace", "add", str(cache_refresh_wrapper.REPO_ROOT)]:
+            if state["source"] not in (None, str(cache_refresh_wrapper.REPO_ROOT)):
+                return subprocess.CompletedProcess(cmd, 1, "", "already added elsewhere")
+            state["source"] = str(cache_refresh_wrapper.REPO_ROOT)
+            return subprocess.CompletedProcess(cmd, 0, "added\n", "")
+        return subprocess.CompletedProcess(cmd, 2, "", "unexpected command")
+
+    monkeypatch.setattr(cache_refresh_wrapper, "validate_config_parseable", fake_config)
+    monkeypatch.setattr(cache_refresh_wrapper.subprocess, "run", fake_run)
+
+    cache_refresh_wrapper.register_repo_marketplace(tmp_path)
+
+    assert calls == [
+        ["codex", "plugin", "marketplace", "remove", "turbo-mode"],
+        ["codex", "plugin", "marketplace", "add", str(cache_refresh_wrapper.REPO_ROOT)],
+    ]
 
 
 def test_rollback_verifies_restored_config_and_cache_manifests(
