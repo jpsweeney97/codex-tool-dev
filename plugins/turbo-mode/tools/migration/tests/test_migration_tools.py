@@ -17,6 +17,7 @@ import copy_ticket_source
 import migration_common
 import validate_redaction
 import validate_run_metadata
+import validate_staged_content
 
 
 def test_safe_archive_extraction_rejects_traversal(tmp_path: Path) -> None:
@@ -157,6 +158,96 @@ def test_validate_metadata_detects_stale_run_id(
 
     with pytest.raises(migration_common.MigrationError):
         validate_run_metadata.run_validation(args)
+
+
+def test_post_commit_metadata_accepts_evidence_generation_head(tmp_path: Path) -> None:
+    plan = tmp_path / "plan.md"
+    plan.write_text("plan", encoding="utf-8")
+    args = type(
+        "Args",
+        (),
+        {
+            "run_id": "run",
+            "plan": plan,
+            "repo_root": migration_common.REPO_ROOT,
+            "accepted_evidence_head": None,
+        },
+    )()
+    metadata = {
+        "run_id": "run",
+        "generated_at_utc": "2026-05-04T00:00:00+00:00",
+        "plan_path": str(plan),
+        "plan_sha256": migration_common.sha256_file(plan),
+        "repo_root": str(migration_common.REPO_ROOT),
+        "repo_head": "old-evidence-head",
+        "migration_base_head": migration_common.MIGRATION_BASE_HEAD,
+        "migration_base_ref": migration_common.MIGRATION_BASE_REF,
+        "migration_base_kind": migration_common.MIGRATION_BASE_KIND,
+        "tool_path": "manual-shell:test",
+        "tool_sha256": "manual-shell-evidence-step",
+        "mode": "test",
+        "source_roots": [str(path) for path in migration_common.SOURCE_ROOTS],
+        "cache_roots": [str(path) for path in migration_common.CACHE_ROOTS],
+        "config_path": str(migration_common.CONFIG_PATH),
+        "marketplace_path": str(migration_common.MARKETPLACE_PATH),
+    }
+    post_commit_context = {
+        "closeout_rel": "plugins/turbo-mode/evidence/post-commit-closeout.summary.json",
+        "evidence_head": "old-evidence-head",
+        "closeout_head": "closeout-tooling-head",
+    }
+
+    validate_run_metadata.validate_metadata(
+        metadata,
+        args=args,
+        rel="plugins/turbo-mode/evidence/source-test.summary.json",
+        post_commit_context=post_commit_context,
+    )
+
+    closeout_metadata = {**metadata, "repo_head": "closeout-tooling-head"}
+    validate_run_metadata.validate_metadata(
+        closeout_metadata,
+        args=args,
+        rel="plugins/turbo-mode/evidence/post-commit-closeout.summary.json",
+        post_commit_context=post_commit_context,
+    )
+
+
+def test_staged_content_cli_parses_local_only_output_as_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parsed_args: dict[str, object] = {}
+
+    def fake_run_validation(args: object) -> None:
+        parsed_args["local_only_output"] = getattr(args, "local_only_output")
+
+    monkeypatch.setattr(validate_staged_content, "run_validation", fake_run_validation)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "validate_staged_content.py",
+            "--run-id",
+            "run",
+            "--repo-root",
+            str(tmp_path),
+            "--expected-staged-root",
+            "plugins/turbo-mode",
+            "--source-manifest",
+            "manifest",
+            "--marketplace",
+            ".agents/plugins/marketplace.json",
+            "--tool-root",
+            "plugins/turbo-mode/tools/migration",
+            "--local-only-output",
+            str(tmp_path / "out.json"),
+        ],
+    )
+
+    validate_staged_content.main()
+
+    assert parsed_args["local_only_output"] == tmp_path / "out.json"
 
 
 def test_fault_harness_cleans_all_scenarios(tmp_path: Path) -> None:

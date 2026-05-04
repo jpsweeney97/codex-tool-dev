@@ -172,7 +172,7 @@ def main() -> None:
     parser.add_argument("--source-manifest", required=True)
     parser.add_argument("--marketplace", required=True)
     parser.add_argument("--tool-root", required=True)
-    parser.add_argument("--local-only-output")
+    parser.add_argument("--local-only-output", type=Path)
     run_validation(parser.parse_args())
 
 

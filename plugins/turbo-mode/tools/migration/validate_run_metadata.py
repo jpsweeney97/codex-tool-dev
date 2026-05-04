@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,6 @@ from migration_common import (
     MIGRATION_BASE_KIND,
     MIGRATION_BASE_REF,
     SOURCE_ROOTS,
-    committed_tool_sha256,
     fail,
     main_with_errors,
     plan_sha256,
@@ -39,6 +39,7 @@ REQUIRED_FIELDS = {
     "config_path",
     "marketplace_path",
 }
+POST_COMMIT_CLOSEOUT = "post-commit-closeout.summary.json"
 
 
 def git_index_files(repo_root: Path, prefix: str) -> list[str]:
@@ -93,7 +94,85 @@ def metadata_for(repo_root: Path, rel: str, source: str) -> tuple[dict[str, Any]
     return parsed["run_metadata"], sidecar
 
 
-def validate_metadata(metadata: dict[str, Any], *, args: argparse.Namespace, rel: str) -> None:
+def git_tree(repo_root: Path, rev: str) -> str:
+    output = subprocess.run(
+        ["git", "rev-parse", f"{rev}^{{tree}}"],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if output.returncode != 0:
+        fail("read git tree", output.stderr.strip(), rev)
+    return output.stdout.strip()
+
+
+def closeout_rel(args: argparse.Namespace) -> str:
+    return (args.evidence_root / POST_COMMIT_CLOSEOUT).as_posix()
+
+
+def load_post_commit_context(
+    args: argparse.Namespace,
+    files: list[str],
+) -> dict[str, Any] | None:
+    rel = closeout_rel(args)
+    if rel not in files:
+        return None
+    parsed = read_json_bytes(read_source_bytes(args.repo_root, rel, args.source), source=rel)
+    source_migration_commit = parsed.get("source_migration_commit")
+    source_migration_tree = parsed.get("source_migration_tree")
+    if not isinstance(source_migration_commit, str) or not source_migration_commit:
+        fail("validate metadata", "post-commit closeout lacks source_migration_commit", rel)
+    if not isinstance(source_migration_tree, str) or not source_migration_tree:
+        fail("validate metadata", "post-commit closeout lacks source_migration_tree", rel)
+    actual_tree = git_tree(args.repo_root, source_migration_commit)
+    if actual_tree != source_migration_tree:
+        fail(
+            "validate metadata",
+            "source migration tree mismatch",
+            {"expected": actual_tree, "actual": source_migration_tree},
+        )
+
+    evidence_head = getattr(args, "accepted_evidence_head", None) or parsed.get(
+        "evidence_generation_commit"
+    )
+    if not isinstance(evidence_head, str) or not evidence_head:
+        evidence_head = parsed.get("phase0_tooling_commit")
+    if not isinstance(evidence_head, str) or not evidence_head:
+        fail("validate metadata", "post-commit closeout lacks evidence-generation head", rel)
+
+    closeout_head = getattr(args, "closeout_repo_head", None) or parsed.get(
+        "closeout_tooling_commit"
+    )
+    if not isinstance(closeout_head, str) or not closeout_head:
+        closeout_head = repo_head(args.repo_root)
+    return {
+        "closeout_rel": rel,
+        "evidence_head": evidence_head,
+        "closeout_head": closeout_head,
+    }
+
+
+def expected_repo_head(
+    *,
+    args: argparse.Namespace,
+    rel: str,
+    post_commit_context: dict[str, Any] | None,
+) -> str:
+    if post_commit_context is None:
+        return getattr(args, "accepted_evidence_head", None) or repo_head(args.repo_root)
+    if rel == post_commit_context["closeout_rel"]:
+        return post_commit_context["closeout_head"]
+    return post_commit_context["evidence_head"]
+
+
+def validate_metadata(
+    metadata: dict[str, Any],
+    *,
+    args: argparse.Namespace,
+    rel: str,
+    post_commit_context: dict[str, Any] | None,
+) -> None:
     missing = sorted(REQUIRED_FIELDS - set(metadata))
     if missing:
         fail("validate metadata", "missing required fields", {"file": rel, "missing": missing})
@@ -102,7 +181,11 @@ def validate_metadata(metadata: dict[str, Any], *, args: argparse.Namespace, rel
         "plan_path": str(args.plan),
         "plan_sha256": plan_sha256(args.plan),
         "repo_root": str(args.repo_root),
-        "repo_head": repo_head(args.repo_root),
+        "repo_head": expected_repo_head(
+            args=args,
+            rel=rel,
+            post_commit_context=post_commit_context,
+        ),
         "migration_base_head": MIGRATION_BASE_HEAD,
         "migration_base_ref": MIGRATION_BASE_REF,
         "migration_base_kind": MIGRATION_BASE_KIND,
@@ -120,13 +203,33 @@ def validate_metadata(metadata: dict[str, Any], *, args: argparse.Namespace, rel
         fail("validate metadata", "metadata mismatch", {"file": rel, "mismatches": mismatches})
     tool_path = metadata["tool_path"]
     if isinstance(tool_path, str) and not tool_path.startswith("manual-shell:"):
-        expected_tool_sha = committed_tool_sha256(args.repo_root, tool_path)
+        expected_tool_sha = committed_tool_sha256_at(
+            args.repo_root,
+            metadata["repo_head"],
+            tool_path,
+        )
         if metadata["tool_sha256"] != expected_tool_sha:
             fail(
                 "validate metadata",
                 "tool sha256 does not match committed blob",
                 {"file": rel, "tool_path": tool_path},
             )
+
+
+def committed_tool_sha256_at(repo_root: Path, rev: str, tool_path: str) -> str:
+    output = subprocess.run(
+        ["git", "show", f"{rev}:{tool_path}"],
+        cwd=repo_root,
+        capture_output=True,
+        check=False,
+    )
+    if output.returncode != 0:
+        fail(
+            "read committed tool",
+            output.stderr.decode("utf-8", errors="replace").strip(),
+            tool_path,
+        )
+    return hashlib.sha256(output.stdout).hexdigest()
 
 
 def run_validation(args: argparse.Namespace) -> None:
@@ -137,6 +240,7 @@ def run_validation(args: argparse.Namespace) -> None:
             files.append(rel)
     files = sorted(set(files))
     sidecars = {path for path in files if path.endswith(".metadata.json")}
+    post_commit_context = load_post_commit_context(args, files)
     validated: set[str] = set()
     for rel in files:
         if rel.endswith("README.md"):
@@ -147,7 +251,7 @@ def run_validation(args: argparse.Namespace) -> None:
                 fail("validate metadata", "unpaired metadata sidecar", rel)
             continue
         metadata, metadata_rel = metadata_for(args.repo_root, rel, args.source)
-        validate_metadata(metadata, args=args, rel=rel)
+        validate_metadata(metadata, args=args, rel=rel, post_commit_context=post_commit_context)
         validated.add(rel)
         if metadata_rel != rel:
             sidecars.discard(metadata_rel)
@@ -166,6 +270,8 @@ def main() -> None:
     parser.add_argument("--source", choices=["worktree", "index"], default="worktree")
     parser.add_argument("--scan-all", action="store_true")
     parser.add_argument("--require", action="append", default=[])
+    parser.add_argument("--accepted-evidence-head")
+    parser.add_argument("--closeout-repo-head")
     run_validation(parser.parse_args())
 
 
