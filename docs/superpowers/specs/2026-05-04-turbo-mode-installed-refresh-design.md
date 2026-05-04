@@ -6,7 +6,7 @@ Design accepted in discussion on 2026-05-04 and repaired after scrutiny on 2026-
 
 ## Purpose
 
-Add a smaller repeatable tool for refreshing the live installed Turbo Mode plugins from the repo-local source authority without reusing the one-time source-migration wrapper as a daily developer command.
+Add a smaller repeatable tool for assessing and, during a controlled maintenance window, refreshing the live installed Turbo Mode plugins from the repo-local source authority without reusing the one-time source-migration wrapper as the normal interface.
 
 The source-authority migration established:
 
@@ -19,7 +19,7 @@ The source-authority migration established:
   - `/Users/jp/.codex/plugins/cache/turbo-mode/handoff/1.6.0`
   - `/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0`
 
-Editing repo source does not update the installed runtime cache by itself. This tool provides the refresh path and proves what is live after the refresh.
+Editing repo source does not update the installed runtime cache by itself. The routine developer command is non-mutating drift assessment. Installed-cache mutation remains an external-shell maintenance operation until a separate atomic-install certification proves that live concurrent refresh is safe.
 
 ## Proposed Command
 
@@ -27,11 +27,17 @@ Tool path:
 
 ```bash
 python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py --dry-run
+python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py --plan-refresh
 python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py --refresh --smoke light
 python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py --guarded-refresh --smoke standard
 ```
 
-The tool should share small helper functions with the migration tooling where that reduces duplication, but it should be a separate user-facing command. The migration wrapper remains a one-time destructive-operation wrapper, not the normal developer refresh interface.
+The tool should share small helper functions with migration tooling only after those helpers are extracted into a refresh-safe module with no migration plan, migration base-head, or source-migration evidence constants. The migration wrapper remains a one-time destructive-operation wrapper, not the normal developer refresh interface.
+
+The command help and startup banner must make the UX split explicit:
+
+- `--dry-run` and `--plan-refresh` are routine commands and may be run from a Codex session because they do not mutate the installed cache.
+- `--refresh` and `--guarded-refresh` are external-shell maintenance operations. Running either mutation mode from an active Codex Desktop or Codex CLI conversation is expected to self-block.
 
 ## Modes
 
@@ -46,19 +52,32 @@ Responsibilities:
 - Validate installed cache roots are discoverable.
 - Build source and cache manifests.
 - Compute the source/cache filesystem diff.
-- Classify changed paths as fast-safe, guarded-only, or unknown.
+- Classify changed paths as `fast-safe-with-covered-smoke`, `guarded-only`, `coverage-gap-fail`, or unknown.
 - Report whether `--refresh` is allowed or `--guarded-refresh` is required.
 - Write local-only dry-run evidence.
 
+### `--plan-refresh`
+
+No mutation.
+
+Responsibilities:
+
+- Run all `--dry-run` checks.
+- Select the required mutation mode, smoke tier, and coverage requirements.
+- Emit the exact external-shell command that would be allowed if the process gate later passes.
+- Emit stop conditions that would block mutation, including guarded-only paths, coverage gaps, generated residue, marketplace mismatch, and expected process blockers.
+- Write local-only plan evidence that can be compared with the later mutation run. The later mutation run must recompute manifests and must not trust the plan artifact as current proof.
+
 ### `--refresh`
 
-Fast developer refresh for low-risk source/cache diffs. This mode is smaller than `--guarded-refresh`, but it still mutates the installed cache and therefore must not run while hook-capable Codex sessions are present unless a future atomic install certification explicitly changes this rule.
+External-shell maintenance refresh for low-risk source/cache diffs. This mode is smaller than `--guarded-refresh`, but it still mutates the installed cache and therefore must not run while hook-capable Codex sessions are present unless a future atomic install certification explicitly changes this rule.
 
 Responsibilities:
 
 - Take a tool lock so two refresh tools cannot run concurrently.
 - Refuse to proceed unless the process gate passes.
-- Refuse guarded-only or unknown diffs.
+- Refuse guarded-only, unknown, or coverage-gap diffs.
+- Capture pre-refresh config hash and pre-refresh app-server inventory, even though this mode does not edit global config.
 - Snapshot the pre-refresh installed cache roots before app-server install.
 - Validate or require the expected Turbo Mode marketplace registration.
 - Install Handoff and Ticket through `codex app-server` `plugin/install`.
@@ -66,10 +85,11 @@ Responsibilities:
 - Verify post-install source/cache equality.
 - Run the selected smoke tier, default `light`.
 - Restore the pre-refresh cache snapshot if app-server install or post-install verification fails.
+- Prove restore with restored cache manifests, unchanged config hash, and fresh post-restore app-server inventory from a newly started app-server process.
 - Write local-only evidence.
 - Write commit-safe evidence only when `--record-summary` is passed.
 
-This mode does not claim atomic install safety. Its safety boundary is narrower than guarded refresh: process gate, no guarded-only paths, minimal installed-cache snapshot/restore, runtime inventory after install, and source/cache equality after install. It does not edit or roll back global config.
+This mode does not claim atomic install safety. Its safety boundary is narrower than guarded refresh: process gate, no guarded-only or coverage-gap paths, minimal installed-cache snapshot/restore, runtime inventory after install, and source/cache equality after install. It does not edit global config; rollback proof still verifies that config did not change.
 
 ### `--guarded-refresh`
 
@@ -80,13 +100,13 @@ Responsibilities:
 - Take the same tool lock as `--refresh`.
 - Refuse to proceed unless the process gate passes.
 - Snapshot config and cache roots before mutation.
-- Optionally disable `features.plugin_hooks` during cache mutation, then restore it.
+- Disable `features.plugin_hooks` during cache mutation when the setting exists and is true, then restore it before final verification. If the setting is absent or already false, record a no-op hook-disable decision with the parsed config state.
 - Install through app-server.
 - Run runtime inventory checks.
 - Verify post-install source/cache equality.
 - Run the selected smoke tier, default `standard`.
 - Roll back config/cache if install, inventory, equality, or smoke fails.
-- Verify rollback before declaring rollback complete.
+- Verify rollback with restored config hash, restored cache manifests, fresh app-server inventory from a newly started app-server process, expected plugin enablement, and expected hook inventory before declaring rollback complete.
 - Write local-only evidence.
 - Write commit-safe evidence by default, unless `--no-record-summary` is explicitly passed.
 
@@ -131,7 +151,11 @@ Diff categories:
 - `removed`: present in cache, absent from source.
 - `changed`: present in both, different SHA256.
 
-The safety classifier operates on canonical refresh paths.
+The safety classifier operates on canonical refresh paths and returns one of three outcomes:
+
+- `fast-safe-with-covered-smoke`: eligible for `--refresh` after the process gate passes, with named smoke coverage.
+- `guarded-only`: requires `--guarded-refresh`.
+- `coverage-gap-fail`: not eligible for mutation until the implementation adds a deterministic smoke mapping or reclassifies the path as guarded-only.
 
 ## Safety Classification
 
@@ -167,40 +191,64 @@ Rationale:
 - Handoff `defer.py` crosses into Ticket creation behavior and should not be treated as ordinary documentation.
 - Handoff `hooks/hooks.json` is currently empty, but changes to it would change runtime hook registration and are therefore guarded-only.
 
-### Fast-Safe Paths
+### Fast-Safe With Covered Smoke Paths
 
-These paths may be refreshed through `--refresh` after the no-concurrent-hook-consumer check passes:
+These paths may be refreshed through `--refresh` after the no-concurrent-hook-consumer check passes and after the required smoke mapping is selected:
 
 ```text
-handoff/1.6.0/skills/**
-handoff/1.6.0/references/**
-handoff/1.6.0/README.md
-handoff/1.6.0/CHANGELOG.md
 handoff/1.6.0/pyproject.toml
 handoff/1.6.0/uv.lock
 handoff/1.6.0/scripts/search.py
 handoff/1.6.0/scripts/triage.py
-handoff/1.6.0/scripts/distill.py
 handoff/1.6.0/scripts/session_state.py
-handoff/1.6.0/scripts/ticket_parsing.py
-ticket/1.4.0/skills/**
-ticket/1.4.0/references/**
+handoff/1.6.0/skills/**
+handoff/1.6.0/references/**
+handoff/1.6.0/README.md
+handoff/1.6.0/CHANGELOG.md
 ticket/1.4.0/README.md
 ticket/1.4.0/CHANGELOG.md
 ticket/1.4.0/HANDBOOK.md
 ticket/1.4.0/pyproject.toml
 ticket/1.4.0/uv.lock
+ticket/1.4.0/skills/**
+ticket/1.4.0/references/**
 ```
 
-If a path matches both guarded-only and fast-safe classes, guarded-only wins.
+If a path matches both guarded-only and fast-safe-with-covered-smoke classes, guarded-only wins.
+
+Required smoke mapping:
+
+| Path pattern | Minimum smoke |
+| --- | --- |
+| `handoff/1.6.0/scripts/search.py` | Handoff search |
+| `handoff/1.6.0/scripts/triage.py` | Handoff triage |
+| `handoff/1.6.0/scripts/session_state.py` | Handoff session-state write/read/clear |
+| `handoff/1.6.0/skills/**` | Light smoke unless command-shape triggers fire; command-shape triggers require matching command-shape smoke or coverage-gap failure |
+| `handoff/1.6.0/references/**` | Light smoke unless command-shape triggers fire; command-shape triggers require matching command-shape smoke or coverage-gap failure |
+| `ticket/1.4.0/skills/**` | Light smoke unless command-shape triggers fire; command-shape triggers require matching Ticket command-shape smoke or coverage-gap failure |
+| `ticket/1.4.0/references/**` | Light smoke unless command-shape triggers fire; command-shape triggers require matching Ticket command-shape smoke or coverage-gap failure |
+| `ticket/1.4.0/HANDBOOK.md` | Light smoke unless command-shape triggers fire; command-shape triggers require matching Ticket command-shape smoke or coverage-gap failure |
+| README, CHANGELOG, `pyproject.toml`, `uv.lock` | Light smoke |
+
+### Coverage-Gap Fail Paths
+
+These paths look lower risk than hook or Ticket engine paths, but they are executable or command-shape-bearing surfaces without a named deterministic smoke in this design. They must fail mutation until coverage is added or the path is reclassified as guarded-only:
+
+```text
+handoff/1.6.0/scripts/distill.py
+handoff/1.6.0/scripts/ticket_parsing.py
+```
+
+Any new executable path under either plugin root is also `coverage-gap-fail` unless it is explicitly classified as guarded-only or added to the fast-safe-with-covered-smoke table with a smoke mapping.
 
 ### Concrete Classification Examples
 
-- `handoff/1.6.0/skills/search/SKILL.md`: fast-safe.
-- `handoff/1.6.0/scripts/session_state.py`: fast-safe, but requires session-state smoke because the changed executable path has path-specific coverage.
+- `handoff/1.6.0/skills/search/SKILL.md`: fast-safe-with-covered-smoke unless command-shape triggers fire without matching smoke.
+- `handoff/1.6.0/scripts/session_state.py`: fast-safe-with-covered-smoke, but requires session-state smoke because the changed executable path has path-specific coverage.
+- `handoff/1.6.0/scripts/distill.py`: coverage-gap-fail until a deterministic distill smoke exists.
 - `handoff/1.6.0/scripts/defer.py`: guarded-only.
 - `handoff/1.6.0/hooks/hooks.json`: guarded-only, even though the current expected Handoff hook manifest is empty.
-- `ticket/1.4.0/skills/ticket/SKILL.md`: fast-safe, but requires a smoke tier that exercises the documented command shape when the skill content changes.
+- `ticket/1.4.0/skills/ticket/SKILL.md`: fast-safe-with-covered-smoke only when command-shape triggers have matching smoke; otherwise coverage-gap-fail.
 - `ticket/1.4.0/scripts/ticket_engine_core.py`: guarded-only.
 - `ticket/1.4.0/scripts/new_helper.py`: guarded-only until explicitly classified.
 
@@ -221,6 +269,17 @@ Use app-server `plugin/install` as the primary install mechanism.
 
 Do not implement direct file copy as the normal refresh path. File copy can make hashes match while bypassing the runtime install contract. The tool should use source/cache equality as a verification gate after app-server install, not as a substitute for install.
 
+## Shared Helper Boundary
+
+The refresh implementation must not import `plugins/turbo-mode/tools/migration/migration_common.py` directly. That module is bound to source-migration constants such as the migration plan path, migration base head, source-migration evidence root, and source-migration local-only root.
+
+Allowed helper reuse requires one of these shapes:
+
+- Extract constants-free functions into `plugins/turbo-mode/tools/turbo_mode_tooling_common.py`, with every root, plan, evidence path, and mode supplied by the caller.
+- Keep refresh helpers inside `plugins/turbo-mode/tools/refresh_installed_turbo_mode.py` until a clean shared module is justified.
+
+Tests must fail if refresh evidence contains source-migration plan paths, source-migration evidence roots, or `MIGRATION_BASE_HEAD` metadata.
+
 ## Process Gate
 
 Both mutation modes use the same no-concurrent-hook-consumer process gate until a separate atomicity certification changes that rule.
@@ -233,19 +292,43 @@ Process census command:
 ps -axo pid,ppid,command
 ```
 
-Hook-capable blockers are processes whose command line contains one of these markers, excluding the refresh tool process itself and its direct child `codex app-server --listen stdio://` process after the install phase starts:
+The process gate must use a structured classifier, not raw substring matching. Each `ps` row is parsed into:
 
-```text
-Codex
-codex
-codex app-server
-```
+- `pid`
+- `ppid`
+- raw command line
+- best-effort argv tokens using shell-style splitting
+- executable basename from the first argv token when parseable
+- ancestry relation to the refresh tool process
 
-The implementation must avoid a broad self-exemption. It may exempt:
+If a command line contains a known high-risk marker but cannot be parsed confidently, classify it as a blocker rather than ignoring it.
+
+The implementation must avoid a broad self-exemption. It may exempt only:
 
 - the current refresh tool PID;
 - direct child app-server PIDs spawned by this refresh tool after the first successful census;
 - shell wrapper processes whose command line is exactly the refresh command being executed.
+
+Direct child app-server exemption is valid only when:
+
+- `ppid` is the refresh tool PID;
+- executable basename is `codex`;
+- argv includes `app-server`;
+- argv includes `--listen` and `stdio://`;
+- the PID was recorded by the refresh tool when it spawned the child.
+
+Blocker classes:
+
+| Class | Rule |
+| --- | --- |
+| `codex-desktop` | executable basename is `Codex`, or a parsed app bundle command resolves to Codex Desktop |
+| `codex-cli` | executable basename is `codex` and the process is not the refresh tool's recorded direct child app-server |
+| `codex-app-server` | parsed argv contains `codex app-server`, unless it is the recorded direct child app-server |
+| `ticket-hook-runtime` | command line or executable basename references `ticket_engine_guard.py`, `ticket_engine_runner.py`, `ticket_engine_core.py`, `ticket_workflow.py`, or a `ticket_*.py` executable under `/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/` |
+| `ticket-hook-path-consumer` | command line references `/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/hooks/` |
+| `uncertain-high-risk` | parser could not classify a command line that contains `Codex`, basename token `codex`, `codex app-server`, `ticket_engine_`, `ticket_workflow.py`, or the installed Ticket hook path |
+
+The classifier must not block merely because an unrelated file path contains the string `codex`; it must use executable basename, parsed argv tokens, or explicit installed hook/runtime paths.
 
 Required censuses:
 
@@ -262,6 +345,9 @@ The gate must be tested for:
 - no self-block for the refresh tool process itself;
 - no self-block for the direct child app-server spawned by the tool after the first census;
 - blocker detection for unrelated Codex Desktop, Codex CLI, and app-server processes.
+- blocker detection for active Ticket hook and Ticket workflow processes.
+- no blocker for harmless paths that merely contain `codex` as a directory name.
+- uncertain high-risk parse fallback.
 
 ## Marketplace Registration
 
@@ -281,7 +367,7 @@ Default behavior:
 
 - `--dry-run`: report registration state.
 - `--refresh`: fail if `turbo-mode` is registered from a different source. Do not silently replace registration.
-- `--guarded-refresh`: may repair conflicting registration, but must record the before/after state in evidence.
+- `--guarded-refresh`: may repair conflicting registration only after the config snapshot is written and verified. It must record the before/after state in evidence and must include the registration repair in config rollback proof if any later gate fails.
 
 ## Runtime Inventory Checks
 
@@ -305,6 +391,8 @@ Authority rules:
 
 All four surfaces must align after install. A source/cache equality pass alone is not sufficient.
 
+Rollback inventory proof uses the same app-server inventory checks, but compares against the pre-refresh inventory and expected config state rather than the attempted post-install target. Because app-server may hold in-memory plugin state from a failed install attempt, rollback proof must terminate the failed-run app-server child and start a fresh app-server process before collecting restored inventory. A rollback summary may not report `ROLLBACK_COMPLETE` or `RESTORE_COMPLETE` until config hash, cache manifests, plugin enablement, runtime inventory, and hook inventory match the pre-run state.
+
 ## Smoke Tiers
 
 ### `light`
@@ -317,7 +405,7 @@ Required checks:
 - Source/cache equality.
 - Handoff search or triage.
 - Ticket read list and query.
-- Any changed fast-safe executable path with a path-specific smoke available.
+- Any changed fast-safe-with-covered-smoke executable path with a path-specific smoke available.
 
 ### `standard`
 
@@ -350,7 +438,8 @@ Smoke selection is diff-aware:
 - A changed `handoff/1.6.0/scripts/session_state.py` requires Handoff session-state write/read/clear, even if the requested smoke tier is `light`.
 - A changed `handoff/1.6.0/scripts/search.py` requires Handoff search.
 - A changed `handoff/1.6.0/scripts/triage.py` requires Handoff triage.
-- A changed `ticket/1.4.0/skills/ticket/SKILL.md` requires a smoke path that exercises the documented command shape, not only direct script calls.
+- A changed `ticket/1.4.0/skills/ticket/SKILL.md` with command-shape triggers requires a Ticket command-shape smoke: run the documented canonical installed-cache pipeline in a disposable repo through prepare/execute, then prove read/query visibility and audit-log state. Direct script calls that bypass the documented pipeline do not satisfy this requirement.
+- A changed Handoff skill with command-shape triggers requires a Handoff command-shape smoke when the documented command can be executed deterministically. If there is no stable skill-execution API or deterministic command path for the changed instruction, the result is `coverage-gap-fail`, not a weaker light smoke.
 - Any changed skill file that changes command-shape instructions must be paired with a smoke that exercises that documented command shape. If the tool cannot determine whether the skill change is command-shape-affecting, it must require `standard` smoke or fail with a coverage gap.
 - Any changed guarded-only Ticket engine or hook path requires at least `standard`, and the tool should recommend `full`.
 - If a changed executable path has no path-specific smoke, the tool must classify the change as guarded-only or fail the run until coverage is added.
@@ -363,7 +452,7 @@ Command-shape triggers for skill and reference docs:
 - sections with headings containing `Command`, `Workflow`, `Execute`, `Prepare`, `Payload`, `Recovery`, or `Policy` change;
 - markdown tables containing command/state/action fields change.
 
-When any trigger is present in a changed skill or reference doc, the tool must either select a matching command-shape smoke or fail with a coverage gap. A pure prose change outside triggered sections may remain fast-safe with `light` smoke.
+When any trigger is present in a changed skill or reference doc, the tool must either select a matching command-shape smoke or fail with a coverage gap. A pure prose change outside triggered sections may remain fast-safe-with-covered-smoke with `light` smoke.
 
 ## Evidence Policy
 
@@ -406,11 +495,56 @@ plugins/turbo-mode/evidence/refresh/<RUN_ID>.summary.json
 
 Commit-safe summaries must not contain raw app-server transcripts, config contents, process lists, or unredacted local-only raw proof. They may contain hashes, statuses, classifications, repo/source/cache paths already allowed by the migration redaction policy, and pointers to local-only evidence.
 
-Commit-safe summaries must also include top-level run metadata and must be validated by a redaction gate before staging.
+Commit-safe summaries must also include top-level run metadata and must be validated by refresh-specific current-run and redaction gates before staging. The implementation must not import `plugins/turbo-mode/tools/migration/validate_redaction.py` directly while it depends on `migration_common.py`; that module carries source-migration constants. Either extract the shared redaction rules into a constants-free helper or create a refresh validator with explicit refresh paths.
+
+Required refresh validators:
+
+```bash
+python3 plugins/turbo-mode/tools/refresh_validate_run_metadata.py \
+  --run-id <RUN_ID> \
+  --repo-root /Users/jp/Projects/active/codex-tool-dev \
+  --local-only-root /Users/jp/.codex/local-only/turbo-mode-refresh/<RUN_ID> \
+  --summary plugins/turbo-mode/evidence/refresh/<RUN_ID>.summary.json
+
+python3 plugins/turbo-mode/tools/refresh_validate_redaction.py \
+  --run-id <RUN_ID> \
+  --repo-root /Users/jp/Projects/active/codex-tool-dev \
+  --scope turbo-mode-refresh \
+  --source worktree \
+  --include plugins/turbo-mode/evidence/refresh/<RUN_ID>.summary.json \
+  --summary-output /Users/jp/.codex/local-only/turbo-mode-refresh/<RUN_ID>/redaction.summary.json \
+  --validate-own-summary
+```
+
+Required commit-safe summary schema:
+
+- `schema_version`
+- `run_id`
+- `mode`
+- `run_metadata`
+- `repo_head`
+- `tool_path`
+- `tool_sha256`
+- `dirty_state_policy`
+- `source_manifest_sha256`
+- `pre_refresh_cache_manifest_sha256`
+- `post_refresh_cache_manifest_sha256`
+- `pre_refresh_config_sha256`
+- `post_refresh_config_sha256`
+- `pre_refresh_inventory_sha256`
+- `post_refresh_inventory_sha256`
+- `diff_classification`
+- `selected_smoke_tier`
+- `smoke_summary_sha256`
+- `process_gate_summary`
+- `local_only_evidence_root`
+- `final_status`
+- `rollback_or_restore_status`
 
 Stale evidence rejection:
 
 - A summary is current only when its `RUN_ID`, repo `HEAD`, tool SHA256, source manifest SHA256, pre-refresh cache manifest SHA256, post-refresh cache manifest SHA256, and evidence schema version match the run being reported.
+- The metadata validator must recompute the current repo `HEAD`, worktree tool SHA256, manifest digests, config digest, inventory summary digests, and smoke summary digest before accepting the summary.
 - Reusing an older local-only evidence directory for a new commit-safe summary is forbidden unless the summary explicitly records that it is a post-commit binding artifact and validates the original source/cache proof digest.
 - Dirty-state policy must be explicit. The default should fail if relevant source, marketplace, or refresh-tool files are modified outside the committed `HEAD`.
 
@@ -425,18 +559,21 @@ Both mutation modes require a no-concurrent-hook-consumer process check until ap
 `--refresh`:
 
 - Fails before mutation for guarded-only or unknown diffs.
+- Fails before mutation for coverage-gap diffs.
 - Fails before mutation for unexpected marketplace registration.
 - Snapshots installed cache roots before app-server install.
+- Captures pre-refresh config hash and app-server inventory before app-server install.
 - Verifies after install.
 - If Handoff install succeeds and Ticket install fails, or any post-install inventory, equality, or smoke gate fails, restores the pre-refresh installed cache snapshot for both plugins.
-- Verifies restored cache manifests before declaring restore complete.
+- Stops the failed-run app-server child, starts a fresh app-server process, and verifies restored cache manifests, unchanged config hash, plugin enablement, runtime inventory, and hook inventory before declaring restore complete.
 - Does not edit global config and therefore does not provide config rollback.
 
 `--guarded-refresh`:
 
 - Snapshots state before mutation.
+- Disables and restores `features.plugin_hooks` when the setting exists and is true.
 - Rolls back config/cache on failed install, inventory, equality, or smoke.
-- Verifies rollback before declaring rollback complete.
+- Stops the failed-run app-server child, starts a fresh app-server process, and verifies config hash, cache manifests, plugin enablement, runtime inventory, and hook inventory before declaring rollback complete.
 
 ## Version Semantics
 
@@ -462,17 +599,21 @@ For release-like use, warn when source behavior changes but `.codex-plugin/plugi
 ## Acceptance Criteria
 
 - `--dry-run` classifies source/cache drift without mutation.
+- `--plan-refresh` emits the external-shell mutation plan without mutation and marks mutation modes as maintenance operations.
 - `--refresh` refuses guarded-only and unknown diffs.
+- `--refresh` refuses coverage-gap diffs.
 - `--refresh` refuses to mutate unless the process gate passes.
-- `--refresh` can update fast-safe installed content through app-server install and prove runtime inventory plus source/cache equality after the process gate passes.
-- `--refresh` snapshots installed cache roots and restores them if install or post-install verification fails.
+- `--refresh` can update fast-safe-with-covered-smoke installed content through app-server install and prove runtime inventory plus source/cache equality after the process gate passes.
+- `--refresh` snapshots installed cache roots and restores them if install or post-install verification fails, then proves restored config hash, cache manifests, plugin enablement, runtime inventory, and hook inventory from a fresh app-server process.
 - `--guarded-refresh` enforces no-concurrent-hook-consumer checks before hook-sensitive mutation.
-- `--guarded-refresh` snapshots and rolls back on failed install, inventory, equality, or smoke.
+- `--guarded-refresh` disables/restores `features.plugin_hooks` when present and true.
+- `--guarded-refresh` snapshots and rolls back on failed install, inventory, equality, or smoke, then proves restored config hash, cache manifests, plugin enablement, runtime inventory, and hook inventory from a fresh app-server process.
 - Generated residue in source or cache fails the run before equality diffing.
 - Handoff hook inventory assertion matches current truth: expected empty Handoff hook inventory for Handoff 1.6.0.
 - Classifier tests use canonical `<plugin>/<version>/<relative_path>` keys and assert concrete Handoff and Ticket examples.
+- Classifier tests assert `fast-safe-with-covered-smoke`, `guarded-only`, and `coverage-gap-fail` outcomes.
 - Smoke selection is diff-aware for changed executable and skill-command paths.
 - Skill-doc command-shape triggers force matching smoke or a coverage-gap failure.
 - All modes write local-only evidence.
-- `--record-summary` writes a redaction-safe summary suitable for commit.
-- Tests cover empty/no-diff, fast-safe diff, guarded-only diff, unknown diff, generated residue, Handoff expected-empty hook inventory, marketplace mismatch, process-gate self-block/exemption behavior, app-server failure, `--refresh` partial-install restore, skill-doc command-shape smoke escalation, stale evidence rejection, and rollback failure.
+- `--record-summary` writes a redaction-safe summary suitable for commit, and refresh-specific metadata/redaction validators accept it.
+- Tests cover empty/no-diff, fast-safe-with-covered-smoke diff, guarded-only diff, coverage-gap diff, unknown diff, generated residue, Handoff expected-empty hook inventory, marketplace mismatch, structured process-gate self-block/exemption behavior, active Ticket hook process blockers, harmless `codex` path non-blockers, app-server failure, `--refresh` partial-install restore with fresh-inventory proof, skill-doc command-shape smoke escalation, stale evidence rejection, redaction rejection, and rollback failure.
