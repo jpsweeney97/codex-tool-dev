@@ -57,17 +57,19 @@ Fast developer refresh for low-risk source/cache diffs. This mode is smaller tha
 Responsibilities:
 
 - Take a tool lock so two refresh tools cannot run concurrently.
-- Refuse to proceed while hook-capable Codex processes are present.
+- Refuse to proceed unless the process gate passes.
 - Refuse guarded-only or unknown diffs.
+- Snapshot the pre-refresh installed cache roots before app-server install.
 - Validate or require the expected Turbo Mode marketplace registration.
 - Install Handoff and Ticket through `codex app-server` `plugin/install`.
 - Run runtime inventory checks through app-server.
 - Verify post-install source/cache equality.
 - Run the selected smoke tier, default `light`.
+- Restore the pre-refresh cache snapshot if app-server install or post-install verification fails.
 - Write local-only evidence.
 - Write commit-safe evidence only when `--record-summary` is passed.
 
-This mode does not claim atomic install safety and does not provide full rollback semantics. Its safety boundary is narrower than guarded refresh: no concurrent hook-capable consumers, no guarded-only paths, runtime inventory after install, and source/cache equality after install.
+This mode does not claim atomic install safety. Its safety boundary is narrower than guarded refresh: process gate, no guarded-only paths, minimal installed-cache snapshot/restore, runtime inventory after install, and source/cache equality after install. It does not edit or roll back global config.
 
 ### `--guarded-refresh`
 
@@ -76,7 +78,7 @@ Maintenance-window refresh for hook, engine, workflow, validation, path, parsing
 Responsibilities:
 
 - Take the same tool lock as `--refresh`.
-- Refuse to proceed while hook-capable Codex processes are present.
+- Refuse to proceed unless the process gate passes.
 - Snapshot config and cache roots before mutation.
 - Optionally disable `features.plugin_hooks` during cache mutation, then restore it.
 - Install through app-server.
@@ -219,6 +221,48 @@ Use app-server `plugin/install` as the primary install mechanism.
 
 Do not implement direct file copy as the normal refresh path. File copy can make hashes match while bypassing the runtime install contract. The tool should use source/cache equality as a verification gate after app-server install, not as a substitute for install.
 
+## Process Gate
+
+Both mutation modes use the same no-concurrent-hook-consumer process gate until a separate atomicity certification changes that rule.
+
+The refresh tool must be launched from an external maintenance shell, not from an active Codex Desktop or Codex CLI conversation. Running from inside a Codex session is expected to self-block and should be treated as correct behavior.
+
+Process census command:
+
+```bash
+ps -axo pid,ppid,command
+```
+
+Hook-capable blockers are processes whose command line contains one of these markers, excluding the refresh tool process itself and its direct child `codex app-server --listen stdio://` process after the install phase starts:
+
+```text
+Codex
+codex
+codex app-server
+```
+
+The implementation must avoid a broad self-exemption. It may exempt:
+
+- the current refresh tool PID;
+- direct child app-server PIDs spawned by this refresh tool after the first successful census;
+- shell wrapper processes whose command line is exactly the refresh command being executed.
+
+Required censuses:
+
+1. **Before any mutation**: after acquiring the refresh lock, before cache/config snapshots or app-server install.
+2. **Immediately before install**: after snapshots are complete, before the first `plugin/install` request.
+
+If either census finds blockers, the tool fails before mutation and writes a local-only process-gate summary plus a local-only raw process listing. If commit-safe evidence is enabled for that run, the commit-safe summary records only count, marker set, census label, raw listing SHA256, and run metadata. The raw process listing stays under local-only evidence.
+
+For `--guarded-refresh`, if hooks are disabled as part of the guarded flow, a third census must run after hook disable and immediately before cache mutation.
+
+The gate must be tested for:
+
+- self-block when invoked from a simulated Codex command line;
+- no self-block for the refresh tool process itself;
+- no self-block for the direct child app-server spawned by the tool after the first census;
+- blocker detection for unrelated Codex Desktop, Codex CLI, and app-server processes.
+
 ## Marketplace Registration
 
 The expected Turbo Mode marketplace source is:
@@ -311,6 +355,16 @@ Smoke selection is diff-aware:
 - Any changed guarded-only Ticket engine or hook path requires at least `standard`, and the tool should recommend `full`.
 - If a changed executable path has no path-specific smoke, the tool must classify the change as guarded-only or fail the run until coverage is added.
 
+Command-shape triggers for skill and reference docs:
+
+- fenced `bash`, `sh`, `shell`, or untyped command blocks change;
+- lines beginning with `python`, `python3`, `uv`, `codex`, `ticket_`, or `./` change;
+- JSON payload examples change;
+- sections with headings containing `Command`, `Workflow`, `Execute`, `Prepare`, `Payload`, `Recovery`, or `Policy` change;
+- markdown tables containing command/state/action fields change.
+
+When any trigger is present in a changed skill or reference doc, the tool must either select a matching command-shape smoke or fail with a coverage gap. A pure prose change outside triggered sections may remain fast-safe with `light` smoke.
+
 ## Evidence Policy
 
 Every run writes local-only evidence under:
@@ -372,9 +426,11 @@ Both mutation modes require a no-concurrent-hook-consumer process check until ap
 
 - Fails before mutation for guarded-only or unknown diffs.
 - Fails before mutation for unexpected marketplace registration.
+- Snapshots installed cache roots before app-server install.
 - Verifies after install.
-- If post-install verification fails, reports that the installed cache is not proven current and that guarded recovery is required.
-- Does not claim rollback.
+- If Handoff install succeeds and Ticket install fails, or any post-install inventory, equality, or smoke gate fails, restores the pre-refresh installed cache snapshot for both plugins.
+- Verifies restored cache manifests before declaring restore complete.
+- Does not edit global config and therefore does not provide config rollback.
 
 `--guarded-refresh`:
 
@@ -407,14 +463,16 @@ For release-like use, warn when source behavior changes but `.codex-plugin/plugi
 
 - `--dry-run` classifies source/cache drift without mutation.
 - `--refresh` refuses guarded-only and unknown diffs.
-- `--refresh` refuses to mutate while hook-capable Codex processes are present.
+- `--refresh` refuses to mutate unless the process gate passes.
 - `--refresh` can update fast-safe installed content through app-server install and prove runtime inventory plus source/cache equality after the process gate passes.
+- `--refresh` snapshots installed cache roots and restores them if install or post-install verification fails.
 - `--guarded-refresh` enforces no-concurrent-hook-consumer checks before hook-sensitive mutation.
 - `--guarded-refresh` snapshots and rolls back on failed install, inventory, equality, or smoke.
 - Generated residue in source or cache fails the run before equality diffing.
 - Handoff hook inventory assertion matches current truth: expected empty Handoff hook inventory for Handoff 1.6.0.
 - Classifier tests use canonical `<plugin>/<version>/<relative_path>` keys and assert concrete Handoff and Ticket examples.
 - Smoke selection is diff-aware for changed executable and skill-command paths.
+- Skill-doc command-shape triggers force matching smoke or a coverage-gap failure.
 - All modes write local-only evidence.
 - `--record-summary` writes a redaction-safe summary suitable for commit.
-- Tests cover empty/no-diff, fast-safe diff, guarded-only diff, unknown diff, generated residue, Handoff expected-empty hook inventory, marketplace mismatch, app-server failure, stale evidence rejection, and rollback failure.
+- Tests cover empty/no-diff, fast-safe diff, guarded-only diff, unknown diff, generated residue, Handoff expected-empty hook inventory, marketplace mismatch, process-gate self-block/exemption behavior, app-server failure, `--refresh` partial-install restore, skill-doc command-shape smoke escalation, stale evidence rejection, and rollback failure.
