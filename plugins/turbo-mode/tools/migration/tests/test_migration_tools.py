@@ -98,6 +98,17 @@ def test_redaction_allows_dist_artifact_metadata_path() -> None:
     assert issues == []
 
 
+def test_redaction_allows_local_path_fixtures_in_source_tests() -> None:
+    issues = validate_redaction.validate_text(
+        "plugins/turbo-mode/ticket/1.4.0/tests/test_doctor.py",
+        '"/Users/jp/.agents/plugins/marketplace.json" '
+        '"/Users/jp/.codex/plugins/cache/" '
+        '"/Users/jp/Projects/myproject"\n',
+    )
+
+    assert issues == []
+
+
 def test_validate_metadata_detects_stale_run_id(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

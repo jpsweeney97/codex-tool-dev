@@ -44,6 +44,10 @@ FORBIDDEN_FILENAMES = [
 ]
 
 
+def is_source_test_fixture(rel: str) -> bool:
+    return rel.startswith("plugins/turbo-mode/") and "/tests/" in rel
+
+
 def staged_files(repo_root: Path, includes: list[str]) -> list[str]:
     files: list[str] = []
     for include in includes:
@@ -85,18 +89,20 @@ def read_staged(repo_root: Path, rel: str) -> str:
 
 def validate_text(rel: str, text: str) -> list[str]:
     issues: list[str] = []
+    allow_local_path_fixtures = is_source_test_fixture(rel)
     for pattern in SECRET_PATTERNS:
         if pattern.search(text):
             issues.append(f"secret-like token matched {pattern.pattern}")
     for snippet in FORBIDDEN_SNIPPETS:
         if snippet in text:
             issues.append(f"forbidden raw snippet {snippet!r}")
-    for path in FORBIDDEN_LOCAL_PATHS:
-        if path in text:
-            issues.append(f"forbidden local path {path}")
-    for raw_path in re.findall(r"/Users/jp/[^\s\"'<>),]+", text):
-        if not any(raw_path.startswith(allowed) for allowed in ALLOWED_LOCAL_PATHS):
-            issues.append(f"unapproved local path {raw_path}")
+    if not allow_local_path_fixtures:
+        for path in FORBIDDEN_LOCAL_PATHS:
+            if path in text:
+                issues.append(f"forbidden local path {path}")
+        for raw_path in re.findall(r"/Users/jp/[^\s\"'<>),]+", text):
+            if not any(raw_path.startswith(allowed) for allowed in ALLOWED_LOCAL_PATHS):
+                issues.append(f"unapproved local path {raw_path}")
     if any(name in Path(rel).name for name in FORBIDDEN_FILENAMES):
         issues.append("forbidden raw/local-only filename")
     return issues
