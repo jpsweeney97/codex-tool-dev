@@ -1,0 +1,36 @@
+{
+  "handoff": {
+    "result": "passed",
+    "tests": 373,
+    "warnings": 8
+  },
+  "run_metadata": {
+    "cache_roots": [
+      "/Users/jp/.codex/plugins/cache/turbo-mode/handoff/1.6.0",
+      "/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0"
+    ],
+    "config_path": "/Users/jp/.codex/config.toml",
+    "generated_at_utc": "2026-05-04T17:59:54+00:00",
+    "marketplace_path": "/Users/jp/Projects/active/codex-tool-dev/.agents/plugins/marketplace.json",
+    "migration_base_head": "f72236b8402cafdcc056ef1b3b4a891a98363873",
+    "migration_base_kind": "local-clean-main",
+    "migration_base_ref": "main",
+    "mode": "source-tests",
+    "plan_path": "/Users/jp/.codex/docs/plans/2026-05-04-turbo-mode-plugin-source-authority-migration-plan.md",
+    "plan_sha256": "413849fa0acee140b80a48525878cce2d29133e3a14970026d1bb379507f3d47",
+    "repo_head": "a7a539cf5b611fb071755076d2206c077e42042f",
+    "repo_root": "/Users/jp/Projects/active/codex-tool-dev",
+    "run_id": "20260504T152333Z-a7a539c",
+    "source_roots": [
+      "/Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/handoff/1.6.0",
+      "/Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/ticket/1.4.0"
+    ],
+    "tool_path": "plugins/turbo-mode/tools/migration/migration_common.py",
+    "tool_sha256": "661a7ddd525a5556f090d217203f451d168a1997d8691be3f6c966450499bc38"
+  },
+  "ticket": {
+    "result": "passed",
+    "tests": 815,
+    "warnings": 3
+  }
+}

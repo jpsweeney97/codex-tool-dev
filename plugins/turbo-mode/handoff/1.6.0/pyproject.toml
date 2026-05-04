@@ -1,0 +1,11 @@
+[project]
+name = "handoff-plugin"
+version = "1.6.0"
+description = "Session handoff and resume plugin for Codex"
+requires-python = ">=3.11"
+dependencies = ["pyyaml>=6.0"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]

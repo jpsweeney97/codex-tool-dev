@@ -1,0 +1,38 @@
+{
+  "name": "handoff",
+  "version": "1.6.0",
+  "description": "Session handoff, resume, and deferred work tracking for context continuity",
+  "author": {
+    "name": "JP"
+  },
+  "license": "MIT",
+  "keywords": [
+    "handoff",
+    "session",
+    "context",
+    "continuity",
+    "defer",
+    "triage",
+    "tickets"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Handoff",
+    "shortDescription": "Save, resume, search, and triage session handoffs",
+    "longDescription": "Preserve Codex session context as structured handoffs, resume prior work, search history, triage deferred items, and track follow-up tickets across repositories.",
+    "developerName": "JP",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Save a handoff for this session",
+      "Resume the latest handoff",
+      "Search handoffs for a decision"
+    ],
+    "brandColor": "#2563EB",
+    "screenshots": []
+  }
+}

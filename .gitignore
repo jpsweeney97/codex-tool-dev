@@ -11,3 +11,5 @@ __pycache__/
 tmp/
 .codex/local/
 .codex/plugin-dev/**/.codex/ticket-tmp/
+.codex/plugin-dev/
+.codex/plugins/

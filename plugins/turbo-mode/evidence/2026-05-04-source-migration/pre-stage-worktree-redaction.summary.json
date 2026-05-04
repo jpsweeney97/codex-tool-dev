@@ -1,0 +1,40 @@
+{
+  "allowed_local_path_exceptions": [
+    "/Users/jp/Projects/active/codex-tool-dev",
+    "/Users/jp/.codex/local-only/turbo-mode-source-migration",
+    "/Users/jp/.codex/docs/plans",
+    "/Users/jp/.codex/plugins/cache/turbo-mode",
+    "/Users/jp/.codex/config.toml",
+    "/Users/jp/.codex/dist",
+    "/private/tmp/turbo-mode"
+  ],
+  "rejected_file_count": 0,
+  "rejections": {},
+  "run_metadata": {
+    "cache_roots": [
+      "/Users/jp/.codex/plugins/cache/turbo-mode/handoff/1.6.0",
+      "/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0"
+    ],
+    "config_path": "/Users/jp/.codex/config.toml",
+    "generated_at_utc": "2026-05-04T18:05:54+00:00",
+    "marketplace_path": "/Users/jp/Projects/active/codex-tool-dev/.agents/plugins/marketplace.json",
+    "migration_base_head": "f72236b8402cafdcc056ef1b3b4a891a98363873",
+    "migration_base_kind": "local-clean-main",
+    "migration_base_ref": "main",
+    "mode": "redaction-pre-stage-worktree-worktree",
+    "plan_path": "/Users/jp/.codex/docs/plans/2026-05-04-turbo-mode-plugin-source-authority-migration-plan.md",
+    "plan_sha256": "413849fa0acee140b80a48525878cce2d29133e3a14970026d1bb379507f3d47",
+    "repo_head": "a7a539cf5b611fb071755076d2206c077e42042f",
+    "repo_root": "/Users/jp/Projects/active/codex-tool-dev",
+    "run_id": "20260504T152333Z-a7a539c",
+    "source_roots": [
+      "/Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/handoff/1.6.0",
+      "/Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/ticket/1.4.0"
+    ],
+    "tool_path": "plugins/turbo-mode/tools/migration/validate_redaction.py",
+    "tool_sha256": "4ef938b3ed4c2aa1e1623cbc2abb7372cf678daa1dc4ae315b2817f09c5a4b91"
+  },
+  "scanned_file_count": 154,
+  "scope": "pre-stage-worktree",
+  "source": "worktree"
+}

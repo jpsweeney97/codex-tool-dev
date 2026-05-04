@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+import json
+import re
+import tomllib
+from pathlib import Path
+
+
+PLUGIN_ROOT = Path(__file__).parent.parent
+POLICY_DOCS = [
+    PLUGIN_ROOT / "README.md",
+    PLUGIN_ROOT / "references" / "handoff-contract.md",
+    PLUGIN_ROOT / "skills" / "load" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "save" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "quicksave" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "summary" / "SKILL.md",
+]
+POLICY_CODE_COMMENTS = [
+    PLUGIN_ROOT / "scripts" / "cleanup.py",
+    PLUGIN_ROOT / "scripts" / "project_paths.py",
+]
+
+
+def test_versions_are_aligned() -> None:
+    plugin_json = json.loads((PLUGIN_ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    pyproject = tomllib.loads((PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert plugin_json["version"] == "1.6.0"
+    assert pyproject["project"]["version"] == "1.6.0"
+
+
+def test_docs_do_not_claim_universal_gitignore_policy() -> None:
+    for path in POLICY_DOCS:
+        text = path.read_text(encoding="utf-8")
+        assert "gitignored at the repository level" not in text
+        assert "local-only working memory" not in text
+        assert "host-repository policy" in text
+        assert "does not add gitignore rules" in text
+
+
+def test_docs_use_resume_token_state_shape() -> None:
+    for path in POLICY_DOCS:
+        text = path.read_text(encoding="utf-8")
+        assert "handoff-<project>-<resume_token>.json" in text
+
+
+def test_internal_comments_do_not_assert_gitignored_or_local_only_policy() -> None:
+    for path in POLICY_CODE_COMMENTS:
+        text = path.read_text(encoding="utf-8")
+        assert "gitignored to avoid tracking ephemeral session artifacts" not in text
+        assert "local-only working memory" not in text
+        assert "host-repository policy" in text
+
+
+def test_readme_does_not_publish_bundled_hook_launcher_contract() -> None:
+    text = (PLUGIN_ROOT / "README.md").read_text(encoding="utf-8")
+    assert '"command": "./hooks/run_cleanup.py"' not in text
+    assert '"command": "./hooks/run_quality_check.py"' not in text
+    assert "plugin-bundled command hooks are deferred from 1.6.0" in text
+    assert "does not ship plugin-bundled command hooks" in text
+    assert "| **Automatic maintenance** | *(hooks)* |" not in text
+    assert "python3 /absolute/path/to/plugin/scripts/my-script.py" not in text
+
+
+def test_load_skill_does_not_instruct_plugin_managed_gitignore() -> None:
+    text = (PLUGIN_ROOT / "skills" / "load" / "SKILL.md").read_text(encoding="utf-8")
+    assert ".gitignore" not in text
+    assert "does not ship plugin-bundled command hooks" in text
+    assert "SessionStart hook runs silently" not in text
+
+
+def test_changelog_has_1_6_0_release_header() -> None:
+    text = (PLUGIN_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert re.search(r"^## \[1\.6\.0\] - \d{4}-\d{2}-\d{2}$", text, re.MULTILINE), text

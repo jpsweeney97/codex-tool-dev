@@ -1,0 +1,37 @@
+{
+  "name": "ticket",
+  "version": "1.4.0",
+  "description": "Repo-local ticket management with lifecycle operations, smart routing, and autonomous creation",
+  "author": {
+    "name": "JP"
+  },
+  "license": "MIT",
+  "keywords": [
+    "ticket",
+    "tracking",
+    "triage",
+    "dedup",
+    "autonomy"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Ticket",
+    "shortDescription": "Manage repo-local tickets and lifecycle workflows",
+    "longDescription": "Create, read, validate, triage, and execute repo-local tickets with lifecycle checks, trust-aware routing, deduplication, and autonomous follow-up support.",
+    "developerName": "JP",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Create a ticket for this work",
+      "Triage open tickets",
+      "Read the current ticket"
+    ],
+    "brandColor": "#0F766E",
+    "screenshots": []
+  }
+}
