@@ -25,6 +25,7 @@ FORBIDDEN_SNIPPETS = [
 ALLOWED_LOCAL_PATHS = [
     "/Users/jp/Projects/active/codex-tool-dev",
     "/Users/jp/.codex/local-only/turbo-mode-source-migration",
+    "/Users/jp/.codex/docs/plans",
     "/Users/jp/.codex/plugins/cache/turbo-mode",
     "/Users/jp/.codex/config.toml",
     "/Users/jp/.codex/dist/turbo-mode-handoff-1.6.0-non-hook-closeout",

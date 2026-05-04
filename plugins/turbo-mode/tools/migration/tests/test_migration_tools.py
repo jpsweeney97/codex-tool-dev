@@ -78,6 +78,16 @@ def test_redaction_rejects_plugin_dev_and_secret() -> None:
     assert any("secret-like token" in issue for issue in issues)
 
 
+def test_redaction_allows_plan_metadata_path() -> None:
+    issues = validate_redaction.validate_text(
+        "evidence.json",
+        "/Users/jp/.codex/docs/plans/2026-05-04-turbo-mode-plugin-source-authority-"
+        "migration-plan.md\n",
+    )
+
+    assert issues == []
+
+
 def test_validate_metadata_detects_stale_run_id(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
