@@ -1,0 +1,17 @@
+{
+  "description": "Ticket engine guard — validates engine invocations and injects trust fields",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/jp/.codex/plugins/plugin-dev/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

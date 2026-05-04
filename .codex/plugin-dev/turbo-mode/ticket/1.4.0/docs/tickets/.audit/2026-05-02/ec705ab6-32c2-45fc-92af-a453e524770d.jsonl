@@ -1,0 +1,2 @@
+{"ts": "2026-05-02T05:37:08.758321+00:00", "action": "attempt_started", "intent": "create", "ticket_id": null, "session_id": "ec705ab6-32c2-45fc-92af-a453e524770d", "request_origin": "user", "autonomy_mode": "suggest", "result": null, "changes": null}
+{"ts": "2026-05-02T05:37:08.760322+00:00", "action": "create", "ticket_id": "T-20260502-01", "session_id": "ec705ab6-32c2-45fc-92af-a453e524770d", "request_origin": "user", "autonomy_mode": "suggest", "result": "ok_create", "changes": null}
