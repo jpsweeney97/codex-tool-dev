@@ -8,7 +8,10 @@ from typing import Any
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - exercised by live Python 3.9 smoke
-    import tomli as tomllib
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:  # pragma: no cover - exercised by direct Python 3.9 smoke
+        tomllib = None
 
 from .classifier import classify_diff_path
 from .manifests import build_manifest, diff_manifests, scan_generated_residue
@@ -226,8 +229,8 @@ def read_runtime_config_state(
     expected_marketplace_source: Path,
 ) -> RuntimeConfigCheck:
     try:
-        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        data = _loads_config_toml(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
         raise RefreshError(
             f"parse config failed: {exc}. Got: {str(config_path)!r:.100}"
         ) from exc
@@ -286,6 +289,14 @@ def read_runtime_config_state(
             plugin_enablement_state=plugin_state,
             reasons=reasons,
         )
+    if hooks_state == "absent-unproven":
+        return RuntimeConfigCheck(
+            state=RuntimeConfigState.UNCHECKED,
+            marketplace_state=marketplace_state,
+            plugin_hooks_state=hooks_state,
+            plugin_enablement_state=plugin_state,
+            reasons=reasons,
+        )
     if marketplace_state == "missing":
         return RuntimeConfigCheck(
             state=RuntimeConfigState.UNREPAIRABLE_MISMATCH,
@@ -302,14 +313,6 @@ def read_runtime_config_state(
             plugin_enablement_state=plugin_state,
             reasons=reasons,
         )
-    if hooks_state == "absent-unproven":
-        return RuntimeConfigCheck(
-            state=RuntimeConfigState.UNCHECKED,
-            marketplace_state=marketplace_state,
-            plugin_hooks_state=hooks_state,
-            plugin_enablement_state=plugin_state,
-            reasons=reasons,
-        )
     return RuntimeConfigCheck(
         state=RuntimeConfigState.ALIGNED,
         marketplace_state=marketplace_state,
@@ -317,6 +320,114 @@ def read_runtime_config_state(
         plugin_enablement_state=plugin_state,
         reasons=reasons,
     )
+
+
+def _loads_config_toml(text: str) -> dict[str, Any]:
+    if tomllib is not None:
+        return tomllib.loads(text)
+    return _loads_minimal_config_toml(text)
+
+
+def _loads_minimal_config_toml(text: str) -> dict[str, Any]:
+    data: dict[str, Any] = {}
+    current = data
+    in_multiline_array = False
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if in_multiline_array:
+            if line == "]":
+                in_multiline_array = False
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            current = data
+            for key in _split_toml_dotted_key(line[1:-1], line_number=line_number):
+                child = current.setdefault(key, {})
+                if not isinstance(child, dict):
+                    raise ValueError(f"section conflicts with scalar on line {line_number}")
+                current = child
+            continue
+        if "=" not in line:
+            raise ValueError(f"expected key/value on line {line_number}")
+        key_text, value_text = line.split("=", 1)
+        keys = _split_toml_dotted_key(key_text.strip(), line_number=line_number)
+        target = current
+        for key in keys[:-1]:
+            child = target.setdefault(key, {})
+            if not isinstance(child, dict):
+                raise ValueError(f"key conflicts with scalar on line {line_number}")
+            target = child
+        raw_value = value_text.strip()
+        target[keys[-1]] = _parse_minimal_toml_value(
+            raw_value,
+            line_number=line_number,
+        )
+        in_multiline_array = _starts_multiline_array(raw_value)
+    return data
+
+
+def _starts_multiline_array(text: str) -> bool:
+    return text.startswith("[") and not text.endswith("]")
+
+
+def _split_toml_dotted_key(text: str, *, line_number: int) -> list[str]:
+    parts: list[str] = []
+    current: list[str] = []
+    in_quote = False
+    escaped = False
+    for char in text:
+        if escaped:
+            current.append(char)
+            escaped = False
+            continue
+        if char == "\\" and in_quote:
+            current.append(char)
+            escaped = True
+            continue
+        if char == '"':
+            current.append(char)
+            in_quote = not in_quote
+            continue
+        if char == "." and not in_quote:
+            parts.append(_parse_minimal_toml_key("".join(current), line_number=line_number))
+            current = []
+            continue
+        current.append(char)
+    if in_quote:
+        raise ValueError(f"unterminated quoted key on line {line_number}")
+    parts.append(_parse_minimal_toml_key("".join(current), line_number=line_number))
+    return parts
+
+
+def _parse_minimal_toml_key(text: str, *, line_number: int) -> str:
+    key = text.strip()
+    if not key:
+        raise ValueError(f"empty key on line {line_number}")
+    if key.startswith('"') and key.endswith('"'):
+        try:
+            parsed = json.loads(key)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid quoted key on line {line_number}") from exc
+        if not isinstance(parsed, str):
+            raise ValueError(f"quoted key is not a string on line {line_number}")
+        return parsed
+    return key
+
+
+def _parse_minimal_toml_value(text: str, *, line_number: int) -> str | bool:
+    if text == "true":
+        return True
+    if text == "false":
+        return False
+    if text.startswith('"') and text.endswith('"'):
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid string value on line {line_number}") from exc
+        if isinstance(parsed, str):
+            return parsed
+    return text
 
 
 def _marketplace_config_state(
@@ -370,6 +481,10 @@ def _plugin_enablement_state(data: dict[str, Any]) -> tuple[dict[str, str], tupl
     for name in EXPECTED_CONFIG_PLUGINS:
         entry = plugins.get(name)
         if not isinstance(entry, dict):
+            states[name] = "missing"
+            reasons.append(f"plugins.{name}.enabled missing")
+            continue
+        if "enabled" not in entry:
             states[name] = "missing"
             reasons.append(f"plugins.{name}.enabled missing")
             continue
@@ -455,6 +570,8 @@ def _derive_axes(
     )
     if runtime_config_state == RuntimeConfigState.ALIGNED:
         runtime_config_state = RuntimeConfigState.UNCHECKED
+    elif runtime_config_state == RuntimeConfigState.UNCHECKED:
+        runtime_config_state = RuntimeConfigState.UNKNOWN
     if runtime_config_state == RuntimeConfigState.REPAIRABLE_MISMATCH:
         selected_mutation_mode = SelectedMutationMode.GUARDED_REFRESH
     return PlanAxes(

@@ -109,6 +109,20 @@ def run_tool(
     )
 
 
+def run_system_python_tool(
+    args: list[str],
+    *,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["python3", str(TOOL), *args],
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+
+
 def tree_snapshot(root: Path) -> dict[str, dict[str, str]]:
     entries: dict[str, dict[str, str]] = {}
     for path in sorted([root, *root.rglob("*")]):
@@ -250,6 +264,32 @@ def test_cli_bare_invocation_does_not_write_bytecode(tmp_path: Path) -> None:
     assert completed.returncode == 0, completed.stderr
     assert not list(refresh_root.rglob("__pycache__"))
     assert not list(refresh_root.rglob("*.pyc"))
+
+
+def test_cli_system_python_no_user_site_does_not_require_tomli(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    env = {**os.environ, "PYTHONNOUSERSITE": "1"}
+
+    completed = run_system_python_tool(
+        [
+            "--dry-run",
+            "--run-id",
+            "no-user-site",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ],
+        env=env,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "filesystem-no-drift" in completed.stdout
+    assert "Traceback" not in completed.stderr
 
 
 def test_cli_evidence_path_errors_report_without_traceback(tmp_path: Path) -> None:

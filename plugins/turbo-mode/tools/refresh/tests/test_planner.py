@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from refresh import planner
 from refresh.models import (
     CoverageState,
     FilesystemState,
@@ -216,6 +217,24 @@ def test_read_runtime_config_state_missing_plugin_enablement_is_unknown(
     assert state.plugin_enablement_state["ticket@turbo-mode"] == "missing"
 
 
+def test_read_runtime_config_state_missing_enabled_key_is_unknown(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text(
+        '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/repo"\n'
+        "[features]\nplugin_hooks = true\n"
+        '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."ticket@turbo-mode"]\n',
+        encoding="utf-8",
+    )
+
+    state = read_runtime_config_state(config, expected_marketplace_source=Path("/repo"))
+
+    assert state.state == RuntimeConfigState.UNKNOWN
+    assert state.plugin_enablement_state["ticket@turbo-mode"] == "missing"
+
+
 def test_read_runtime_config_state_non_boolean_plugin_enablement_is_unrepairable(
     tmp_path: Path,
 ) -> None:
@@ -252,6 +271,38 @@ def test_read_runtime_config_state_normalizes_config_source_path(
 
     assert state.state == RuntimeConfigState.ALIGNED
     assert state.marketplace_state == "aligned"
+
+
+def test_read_runtime_config_state_fallback_parser_handles_unrelated_config_shapes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    config = tmp_path / "config.toml"
+    config.write_text(
+        "model_context_window = 1000000\n"
+        'notify = ["binary", "turn-ended"]\n'
+        "[sandbox_workspace_write]\n"
+        "writable_roots = [\n"
+        '  "/tmp",\n'
+        '  "/Users/example",\n'
+        "]\n"
+        "[features]\n"
+        "plugin_hooks = true\n"
+        '[marketplaces.turbo-mode]\nsource_type = "local"\n'
+        f'source = "{repo}"\n'
+        '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(planner, "tomllib", None)
+
+    state = read_runtime_config_state(config, expected_marketplace_source=repo)
+
+    assert state.state == RuntimeConfigState.ALIGNED
+    assert state.plugin_hooks_state == "true"
+    assert state.plugin_enablement_state["ticket@turbo-mode"] == "enabled"
 
 
 def write_plugin_pair(
@@ -626,6 +677,33 @@ def test_plan_refresh_missing_plugin_enablement_blocks_filesystem_no_drift(
     assert result.future_external_command is None
     assert result.runtime_config is not None
     assert result.runtime_config.plugin_enablement_state["ticket@turbo-mode"] == "missing"
+
+
+def test_plan_refresh_absent_hooks_blocks_repairable_future_advice(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    config = codex_home / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(
+        '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/other"\n'
+        '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        encoding="utf-8",
+    )
+    ensure_complete_plugin_roots(repo_root, codex_home)
+
+    result = plan_refresh(repo_root=repo_root, codex_home=codex_home, mode="plan-refresh")
+
+    assert result.runtime_config is not None
+    assert result.runtime_config.marketplace_state == "conflicting-source"
+    assert result.runtime_config.plugin_hooks_state == "absent-unproven"
+    assert result.axes.runtime_config_state == RuntimeConfigState.UNKNOWN
+    assert result.terminal_status == TerminalPlanStatus.BLOCKED_PREFLIGHT
+    assert result.future_external_command is None
+    assert result.requires_plan is None
 
 
 def test_plan_refresh_repairable_mismatch_suppresses_future_advice_for_coverage_gap(
