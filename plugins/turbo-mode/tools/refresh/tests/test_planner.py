@@ -305,6 +305,47 @@ def test_read_runtime_config_state_fallback_parser_handles_unrelated_config_shap
     assert state.plugin_enablement_state["ticket@turbo-mode"] == "enabled"
 
 
+def test_read_runtime_config_state_fallback_parser_rejects_duplicate_tables(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    config = tmp_path / "config.toml"
+    config.write_text(
+        f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo}"\n'
+        "[features]\nplugin_hooks = false\n"
+        '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."ticket@turbo-mode"]\nenabled = true\n'
+        "[features]\nplugin_hooks = true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(planner, "tomllib", None)
+
+    with pytest.raises(RefreshError, match="duplicate table"):
+        read_runtime_config_state(config, expected_marketplace_source=repo)
+
+
+def test_read_runtime_config_state_fallback_parser_rejects_duplicate_keys(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    config = tmp_path / "config.toml"
+    config.write_text(
+        f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo}"\n'
+        "[features]\nplugin_hooks = false\nplugin_hooks = true\n"
+        '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(planner, "tomllib", None)
+
+    with pytest.raises(RefreshError, match="duplicate key"):
+        read_runtime_config_state(config, expected_marketplace_source=repo)
+
+
 def write_plugin_pair(
     repo_root: Path,
     codex_home: Path,
@@ -704,6 +745,43 @@ def test_plan_refresh_absent_hooks_blocks_repairable_future_advice(
     assert result.terminal_status == TerminalPlanStatus.BLOCKED_PREFLIGHT
     assert result.future_external_command is None
     assert result.requires_plan is None
+
+
+def test_plan_refresh_fallback_duplicate_config_blocks_future_advice(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    config = codex_home / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(
+        f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
+        "[features]\nplugin_hooks = false\n"
+        '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."ticket@turbo-mode"]\nenabled = true\n'
+        "[features]\nplugin_hooks = true\n",
+        encoding="utf-8",
+    )
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    write_plugin_pair(
+        repo_root,
+        codex_home,
+        plugin="handoff",
+        version="1.6.0",
+        rel="scripts/search.py",
+        source_text="print('new')\n",
+        cache_text="print('old')\n",
+    )
+    monkeypatch.setattr(planner, "tomllib", None)
+
+    result = plan_refresh(repo_root=repo_root, codex_home=codex_home, mode="plan-refresh")
+
+    assert result.axes.preflight_state == PreflightState.BLOCKED
+    assert result.terminal_status == TerminalPlanStatus.BLOCKED_PREFLIGHT
+    assert result.future_external_command is None
+    assert any("duplicate table" in reason for reason in result.axes.reasons)
 
 
 def test_plan_refresh_repairable_mismatch_suppresses_future_advice_for_coverage_gap(

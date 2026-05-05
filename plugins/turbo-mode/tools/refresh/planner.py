@@ -331,6 +331,9 @@ def _loads_config_toml(text: str) -> dict[str, Any]:
 def _loads_minimal_config_toml(text: str) -> dict[str, Any]:
     data: dict[str, Any] = {}
     current = data
+    current_path: tuple[str, ...] = ()
+    explicit_tables: set[tuple[str, ...]] = set()
+    assigned_keys: set[tuple[str, ...]] = set()
     in_multiline_array = False
     for line_number, raw_line in enumerate(text.splitlines(), start=1):
         line = raw_line.strip()
@@ -342,7 +345,13 @@ def _loads_minimal_config_toml(text: str) -> dict[str, Any]:
             continue
         if line.startswith("[") and line.endswith("]"):
             current = data
-            for key in _split_toml_dotted_key(line[1:-1], line_number=line_number):
+            current_path = tuple(_split_toml_dotted_key(line[1:-1], line_number=line_number))
+            if current_path in explicit_tables:
+                raise ValueError(f"duplicate table on line {line_number}")
+            explicit_tables.add(current_path)
+            if current_path in assigned_keys:
+                raise ValueError(f"table conflicts with scalar on line {line_number}")
+            for key in current_path:
                 child = current.setdefault(key, {})
                 if not isinstance(child, dict):
                     raise ValueError(f"section conflicts with scalar on line {line_number}")
@@ -359,6 +368,12 @@ def _loads_minimal_config_toml(text: str) -> dict[str, Any]:
                 raise ValueError(f"key conflicts with scalar on line {line_number}")
             target = child
         raw_value = value_text.strip()
+        full_key = current_path + tuple(keys)
+        if full_key in assigned_keys:
+            raise ValueError(f"duplicate key on line {line_number}")
+        if isinstance(target.get(keys[-1]), dict):
+            raise ValueError(f"key conflicts with table on line {line_number}")
+        assigned_keys.add(full_key)
         target[keys[-1]] = _parse_minimal_toml_value(
             raw_value,
             line_number=line_number,
