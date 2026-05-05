@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from refresh.command_projection import extract_command_projection, has_semantic_policy_trigger
 
 
@@ -37,6 +38,20 @@ PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/test_ticket.py -q
     assert "git status --short" in projection.items
     assert "PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/test_ticket.py -q" in projection.items
     assert "# inspect branch state" not in projection.items
+
+
+@pytest.mark.parametrize("fence", ['```bash title="smoke"', "``` bash"])
+def test_projection_preserves_shell_fence_commands_with_info_strings(fence: str) -> None:
+    text = f"""# Smoke
+
+{fence}
+git status --short
+```
+"""
+
+    projection = extract_command_projection(text)
+
+    assert "git status --short" in projection.items
 
 
 def test_projection_extracts_untyped_command_blocks_and_json_payloads() -> None:

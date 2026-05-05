@@ -12,7 +12,7 @@ class CommandProjection:
     parser_warnings: tuple[str, ...]
 
 
-_FENCE_RE = re.compile(r"^```(?P<lang>[A-Za-z0-9_-]*)\s*$")
+_FENCE_RE = re.compile(r"^```\s*(?P<info>.*?)\s*$")
 _COMMAND_LINE_RE = re.compile(r"^(?:python|python3|uv|codex|ticket_[A-Za-z0-9_-]+|\./)(?:\s|$)")
 _SLASH_COMMAND_RE = re.compile(
     r"(?<![\w/])/(?:ticket-triage|quicksave|summary|distill|ticket|search|triage|defer|save|load)\b"
@@ -47,7 +47,7 @@ def extract_command_projection(text: str) -> CommandProjection:
         line = lines[index]
         fence_match = _FENCE_RE.match(line.strip())
         if fence_match:
-            lang = fence_match.group("lang").lower()
+            lang = _fence_language(fence_match.group("info"))
             block: list[str] = []
             index += 1
             while index < len(lines) and not lines[index].strip().startswith("```"):
@@ -119,6 +119,10 @@ def _extract_fenced_block(block: list[str], *, lang: str, collector: _Projection
 
     for line in block:
         _extract_line(line, collector=collector)
+
+
+def _fence_language(info: str) -> str:
+    return info.strip().split(maxsplit=1)[0].lower() if info.strip() else ""
 
 
 def _extract_line(line: str, *, collector: _ProjectionCollector) -> None:

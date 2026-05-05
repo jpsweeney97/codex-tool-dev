@@ -259,6 +259,27 @@ git status --short
     assert "command-shape-changed" in result.reasons
 
 
+@pytest.mark.parametrize("fence", ['```bash title="smoke"', "``` bash"])
+def test_changed_doc_with_shell_fence_info_string_command_is_coverage_gap(fence: str) -> None:
+    result = classify_diff_path(
+        "handoff/1.6.0/skills/search/SKILL.md",
+        kind=DiffKind.CHANGED,
+        source_text=f"""# Search
+
+{fence}
+git status --short
+```
+""",
+        cache_text="# Search\n",
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "command-shape-changed" in result.reasons
+
+
 def test_changed_doc_with_added_slash_command_is_coverage_gap() -> None:
     result = classify_diff_path(
         "handoff/1.6.0/skills/search/SKILL.md",
