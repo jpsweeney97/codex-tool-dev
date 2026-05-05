@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fnmatch
 
+from .command_projection import extract_command_projection, has_semantic_policy_trigger
 from .models import CoverageStatus, DiffKind, MutationMode, PathClassification, PathOutcome
 
 ROOT_DOC_PATTERNS = (
@@ -130,6 +131,13 @@ def classify_diff_path(
     ):
         coverage_status = CoverageStatus.COVERAGE_GAP
         reasons.append("executable-doc-surface")
+    elif doc_policy_reasons := _doc_policy_reasons(
+        path,
+        source_text=source_text,
+        cache_text=cache_text,
+    ):
+        coverage_status = CoverageStatus.COVERAGE_GAP
+        reasons.extend(doc_policy_reasons)
     elif _matches_any(path, COVERAGE_GAP_PATTERNS):
         coverage_status = CoverageStatus.COVERAGE_GAP
         reasons.append("coverage-gap-path")
@@ -231,6 +239,20 @@ def _is_doc_glob_path(path: str) -> bool:
 
 def _is_doc_surface_path(path: str) -> bool:
     return _is_doc_glob_path(path) or _matches_any(path, ROOT_DOC_PATTERNS)
+
+
+def _doc_policy_reasons(path: str, *, source_text: str, cache_text: str) -> tuple[str, ...]:
+    if not _is_doc_surface_path(path):
+        return ()
+
+    reasons: list[str] = []
+    source_projection = extract_command_projection(source_text)
+    cache_projection = extract_command_projection(cache_text)
+    if source_projection.items != cache_projection.items:
+        reasons.append("command-shape-changed")
+    if has_semantic_policy_trigger(source_text) or has_semantic_policy_trigger(cache_text):
+        reasons.append("semantic-policy-trigger")
+    return tuple(reasons)
 
 
 def _text_has_shebang(text: str) -> bool:

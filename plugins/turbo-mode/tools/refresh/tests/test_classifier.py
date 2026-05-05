@@ -191,6 +191,95 @@ def test_root_reference_markdown_paths_remain_fast_safe(path: str) -> None:
     assert result.smoke == ("light",)
 
 
+def test_changed_doc_with_unchanged_command_projection_remains_fast_safe() -> None:
+    source_text = """# Search
+
+Use this command when needed:
+
+```bash
+python3 scripts/search.py query
+```
+
+Updated surrounding prose.
+"""
+    cache_text = """# Search
+
+Use this command when needed:
+
+```bash
+python3 scripts/search.py query
+```
+"""
+
+    result = classify_diff_path(
+        "handoff/1.6.0/skills/search/SKILL.md",
+        kind=DiffKind.CHANGED,
+        source_text=source_text,
+        cache_text=cache_text,
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.FAST_SAFE_WITH_COVERED_SMOKE
+    assert result.mutation_mode == MutationMode.FAST
+    assert result.coverage_status == CoverageStatus.COVERED
+
+
+def test_changed_doc_with_new_command_projection_is_coverage_gap() -> None:
+    result = classify_diff_path(
+        "handoff/1.6.0/skills/search/SKILL.md",
+        kind=DiffKind.CHANGED,
+        source_text="Run `python3 scripts/search.py query` before summarizing.\n",
+        cache_text="Search before summarizing.\n",
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "command-shape-changed" in result.reasons
+
+
+def test_changed_doc_with_semantic_policy_trigger_is_coverage_gap() -> None:
+    result = classify_diff_path(
+        "ticket/1.4.0/HANDBOOK.md",
+        kind=DiffKind.CHANGED,
+        source_text="Runtime inventory authority now controls maintenance windows.\n",
+        cache_text="Operational handbook.\n",
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "semantic-policy-trigger" in result.reasons
+
+
+@pytest.mark.parametrize(
+    ("kind", "source_text", "cache_text"),
+    [
+        (DiffKind.ADDED, "Run `python3 scripts/search.py query`.\n", ""),
+        (DiffKind.REMOVED, "", "Run `python3 scripts/search.py query`.\n"),
+    ],
+)
+def test_added_or_removed_command_bearing_doc_is_coverage_gap(
+    kind: DiffKind,
+    source_text: str,
+    cache_text: str,
+) -> None:
+    result = classify_diff_path(
+        "handoff/1.6.0/references/handoff-contract.md",
+        kind=kind,
+        source_text=source_text,
+        cache_text=cache_text,
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "command-shape-changed" in result.reasons
+
+
 @pytest.mark.parametrize(
     "path",
     [
