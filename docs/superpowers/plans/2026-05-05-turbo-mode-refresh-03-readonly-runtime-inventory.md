@@ -17,7 +17,7 @@ Plan 03 implements:
 - `python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py --dry-run --inventory-check`
 - `python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py --plan-refresh --inventory-check`
 - read-only app-server requests: `initialize`, `initialized`, `plugin/read`, `plugin/list`, `skills/list`, and `hooks/list`
-- runtime identity capture: `codex --version`, resolved executable path, executable SHA256 or unavailable reason, `initialize.serverInfo`, protocol/capability fields, parser version, and accepted response schema version
+- runtime identity capture: one resolved `codex` executable path used for both app-server launch and `codex --version` / SHA256 capture, the full `initialize.result` object, optional `initialize.result.serverInfo` and `initialize.result.capabilities` fields when present, parser version, and accepted response schema version
 - local-only raw transcript evidence under `<codex_home>/local-only/turbo-mode-refresh/<RUN_ID>/`, including partial transcripts for requested inventory attempts that fail after app-server exchange begins
 - planner integration where aligned local config plus aligned runtime inventory may set `runtime_config_state=aligned`
 - explicit app-server inventory states: `not-requested`, `requested-blocked`, `requested-failed`, and `collected`
@@ -35,7 +35,7 @@ Plan 03 does not implement:
 
 - Create: `plugins/turbo-mode/tools/refresh/app_server_inventory.py`
   - Build pinned read-only JSON-RPC requests.
-  - Run `codex app-server --listen stdio://`.
+  - Resolve `codex` once, then run `<resolved-codex> app-server --listen stdio://`.
   - Capture runtime identity.
   - Validate app-server responses fail-closed.
   - Return summary fields plus raw transcript for local-only evidence writing.
@@ -79,7 +79,7 @@ Plan 03 accepts only responses with the matching integer ids above. It treats a 
 
 The response parser accepts:
 
-- `initialize.result.serverInfo` and `initialize.result.capabilities` as runtime identity fields when present.
+- full `initialize.result` as runtime identity evidence, plus `initialize.result.serverInfo` and `initialize.result.capabilities` as optional convenience fields when present. In the current `codex-cli 0.128.0` live evidence, `serverInfo` and `capabilities` are absent while `codexHome`, platform fields, and `userAgent` are present in `initialize.result`.
 - `plugin/read` responses only when the plugin source path structurally appears at `result.source.path` or `result.plugin.summary.source.path`, exactly matches the expected repo source path for the requested plugin, and no `/plugin-dev/` path appears.
 - `plugin/list` responses only when plugin ids or structural plugin records under `result.plugins` or the matching `result.marketplaces[].plugins[]` entry contain both `handoff@turbo-mode` and `ticket@turbo-mode`, and no `/plugin-dev/` path appears.
 - `skills/list` responses only when structural skill records under `result.skills` or `result.data[].skills` contain every expected Handoff and Ticket skill name with a `path` or `sourcePath` under the expected installed-cache skill root, and no `/plugin-dev/` path appears.
@@ -101,6 +101,7 @@ Additional unrelated hooks are tolerated only when they are not Handoff hooks an
 
 - [x] Write tests for identity hashing and unavailable hash reasons.
 - [x] Prove `collect_codex_runtime_identity()` hash success, missing executable, `codex --version` failure, and hash `OSError` handling directly.
+- [x] Prove one resolved `codex` executable path is used for both app-server launch and identity capture.
 - [x] Implement `collect_codex_runtime_identity()`.
 - [x] Implement `app_server_roundtrip()` without import coupling to migration tooling.
 - [x] Ensure app-server process termination happens on success, error, and timeout.
@@ -151,6 +152,7 @@ Current evidence lanes after parser-contract and closeout-ledger scrutiny:
 - Runtime identity timeout repair boundary: `d3cfbd53c6a93faba9ecd9ffc1dbbab487593f5b`, tree `f15c9dd7af6646912b486d7f06d549ec982edee0`, committed as `d3cfbd5 fix: handle codex version timeouts`.
 - Final executable repair boundary: `bfefeef5fbbcc095f8c0c23c16800a80d7c64a57`, tree `57bc165238b812993e8be600df65458ef35b01c1`, committed as `bfefeef fix: preserve failed inventory transcripts`.
 - Current saved artifact boundary: `bc2aa838cdbcdb78e9d27209f9804df894798bef`, tree `287ea481da3b6c85243dfb221a11e4987791b5f5`, committed as `bc2aa83 docs: record final inventory repair boundary`. This docs-only commit records the final executable repair boundary and does not supersede the executable proof at `bfefeef`.
+- Current pre-identity-binding artifact boundary: `06cc849ac296bf641a52dd3c8070657a1aa3fea6`, tree `d0386abe114b6316b9bff1ff3b5516dd0583cb88`, committed as `06cc849 docs: record current Plan 03 artifact boundary`.
 - Branch: `feature/turbo-mode-refresh-plan-03-runtime-inventory`.
 - Parser-contract repair evidence: `192 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
 - Parser-contract lint: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
@@ -162,6 +164,13 @@ Current evidence lanes after parser-contract and closeout-ledger scrutiny:
 - Runtime identity direct-test evidence: `22 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests/test_app_server_inventory.py -q`.
 - Runtime identity timeout repair evidence: `23 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests/test_app_server_inventory.py -q`.
 - Runtime identity timeout full-slice evidence: `197 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
+- Runtime identity binding repair evidence: `27 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests/test_app_server_inventory.py -q`.
+- Runtime identity binding full-slice evidence: `203 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
+- Runtime identity binding lint: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
+- Runtime identity binding live read-only inventory smoke evidence path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan03-identity-bound-live-smoke-20260505/dry-run.summary.json`.
+- Runtime identity binding live smoke result: `app_server_inventory_status = collected`, runtime inventory aligned, `terminal_plan_status = coverage-gap-blocked`.
+- Runtime identity binding live smoke summary SHA256: `75c0a73d458decd622b91aed0e9cfa93e3bb2f30e41012ada95966128a76e84f`.
+- Runtime identity binding live smoke transcript SHA256: `1926d2a74523cf7a36f6df51ade17061aaf7d5dc9a938581e4de18b282235cb6`.
 - Final contract repair evidence: `202 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
 - Final contract lint: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
 - Final contract live read-only inventory smoke evidence path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan03-final-contract-live-smoke-20260505/dry-run.summary.json`.
@@ -177,4 +186,4 @@ Current evidence lanes after parser-contract and closeout-ledger scrutiny:
 
 The `18b90ff` ignore rule is accepted policy for this branch because the user explicitly requested the remaining `.gitignore` change be committed separately with rationale on 2026-05-05. Its scope is active session handoff summaries as local resume artifacts; it does not change the repository rule that handoff files in current work are durable artifacts when they are in scope. Tracked handoff files still surface in `git status`. A future active `docs/handoffs/*.md` file that is part of the reviewed work must be added intentionally with `git add -f` or the ignore policy must be revisited before merge.
 
-Merge readiness requires the final executable repair at `bfefeef`, the current saved artifact boundary at `bc2aa83`, and a clean worktree at review time. The completed checkboxes mean the branch implementation has local verification evidence, not that the work is merged or that live status is no-drift.
+Merge readiness requires the final executable repair at `bfefeef`, the subsequent identity-binding repair, the current saved artifact boundary, and a clean worktree at review time. The completed checkboxes mean the branch implementation has local verification evidence, not that the work is merged or that live status is no-drift. A docs commit cannot self-name its own hash; use `git rev-parse HEAD` with this ledger to identify the current saved artifact boundary after a ledger-only update.

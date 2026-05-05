@@ -487,7 +487,68 @@ def test_collect_readonly_runtime_inventory_combines_identity_and_transcript(
     )
 
     assert inventory.identity.server_info == {"name": "codex-app-server", "version": "0.test"}
+    assert inventory.identity.initialize_result == raw_transcript[0]["body"]["result"]
     assert raw_transcript == transcript(refresh_paths)
+
+
+def test_collect_readonly_runtime_inventory_binds_roundtrip_and_identity_executable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    executable = tmp_path / "bin/codex"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"codex executable")
+    launched: list[list[str]] = []
+    processes: list[object] = []
+
+    class FakeStdin:
+        def write(self, _value: str) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    class FakeProcess:
+        def __init__(self, cmd: list[str], **_kwargs: object) -> None:
+            launched.append(cmd)
+            processes.append(self)
+            self.stdin = FakeStdin()
+            self.stdout = [
+                json.dumps(item["body"]) + "\n"
+                for item in transcript(refresh_paths)
+                if item["direction"] == "recv"
+            ]
+            self.stderr = None
+            self.returncode = None
+            self.terminated = False
+
+        def terminate(self) -> None:
+            self.terminated = True
+            self.returncode = -15
+
+        def communicate(self, timeout: int) -> tuple[str, str]:
+            assert timeout == 5
+            return "", ""
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert args[0] == [str(executable), "--version"]
+        assert kwargs["timeout"] == 10
+        return subprocess.CompletedProcess(args[0], 0, stdout="codex-cli 0.bound\n", stderr="")
+
+    monkeypatch.setattr(inventory_module.shutil, "which", lambda _name: str(executable))
+    monkeypatch.setattr(inventory_module.subprocess, "Popen", FakeProcess)
+    monkeypatch.setattr(inventory_module.subprocess, "run", fake_run)
+
+    inventory, _raw_transcript = collect_readonly_runtime_inventory(
+        refresh_paths,
+        scratch_cwd=tmp_path / "scratch",
+    )
+
+    assert launched == [[str(executable), "app-server", "--listen", "stdio://"]]
+    assert getattr(processes[0], "terminated")
+    assert inventory.identity.executable_path == str(executable)
+    assert inventory.identity.codex_version == "codex-cli 0.bound"
 
 
 def test_collect_readonly_runtime_inventory_preserves_transcript_on_validation_failure(

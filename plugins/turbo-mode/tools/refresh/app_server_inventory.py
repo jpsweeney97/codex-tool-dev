@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +39,7 @@ class CodexRuntimeIdentity:
     executable_hash_unavailable_reason: str | None
     server_info: dict[str, Any]
     initialize_capabilities: dict[str, Any]
+    initialize_result: dict[str, Any] = field(default_factory=dict)
     parser_version: str = PARSER_VERSION
     accepted_response_schema_version: str = ACCEPTED_RESPONSE_SCHEMA_VERSION
 
@@ -137,16 +138,28 @@ def _collect_readonly_runtime_inventory(
 ) -> tuple[AppServerInventoryCheck, tuple[dict[str, Any], ...]]:
     scratch_cwd.mkdir(parents=True, exist_ok=True)
     requests = build_readonly_inventory_requests(paths, scratch_cwd=scratch_cwd)
-    active_roundtrip = roundtrip or app_server_roundtrip
+    codex_executable = (
+        resolve_codex_executable() if roundtrip is None or identity_collector is None else None
+    )
+    active_roundtrip = roundtrip or (
+        lambda active_requests: app_server_roundtrip(
+            active_requests,
+            executable=codex_executable,
+        )
+    )
     transcript: tuple[dict[str, Any], ...] = ()
     try:
         transcript = tuple(active_roundtrip(requests))
-        active_identity_collector = identity_collector or collect_codex_runtime_identity
-        identity_base = active_identity_collector()
+        identity_base = (
+            identity_collector()
+            if identity_collector is not None
+            else collect_codex_runtime_identity(executable=codex_executable)
+        )
         responses = response_by_id(transcript)
         initialize = responses.get(0)
         if initialize is None:
             fail("inventory contract", "initialize response missing", sorted(responses))
+        initialize_result = response_result(initialize)
         identity = CodexRuntimeIdentity(
             codex_version=identity_base.codex_version,
             executable_path=identity_base.executable_path,
@@ -154,6 +167,7 @@ def _collect_readonly_runtime_inventory(
             executable_hash_unavailable_reason=identity_base.executable_hash_unavailable_reason,
             server_info=_dict_result_field(initialize, "serverInfo"),
             initialize_capabilities=_dict_result_field(initialize, "capabilities"),
+            initialize_result=initialize_result,
         )
         inventory = validate_readonly_inventory_contract(
             transcript,
@@ -173,13 +187,18 @@ def _collect_readonly_runtime_inventory(
     return inventory, transcript
 
 
-def collect_codex_runtime_identity() -> CodexRuntimeIdentity:
+def resolve_codex_executable() -> str:
     executable = shutil.which("codex")
     if executable is None:
-        fail("collect codex runtime identity", "codex executable not found on PATH", "codex")
+        fail("resolve codex executable", "codex executable not found on PATH", "codex")
+    return executable
+
+
+def collect_codex_runtime_identity(*, executable: str | None = None) -> CodexRuntimeIdentity:
+    active_executable = executable or resolve_codex_executable()
     try:
         completed = subprocess.run(
-            [executable, "--version"],
+            [active_executable, "--version"],
             text=True,
             capture_output=True,
             check=False,
@@ -195,14 +214,14 @@ def collect_codex_runtime_identity() -> CodexRuntimeIdentity:
         )
     executable_sha256: str | None = None
     unavailable_reason: str | None = None
-    path = Path(executable)
+    path = Path(active_executable)
     try:
         executable_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
     except OSError as exc:
         unavailable_reason = str(exc)
     return CodexRuntimeIdentity(
         codex_version=completed.stdout.strip(),
-        executable_path=executable,
+        executable_path=active_executable,
         executable_sha256=executable_sha256,
         executable_hash_unavailable_reason=unavailable_reason,
         server_info={},
@@ -210,9 +229,14 @@ def collect_codex_runtime_identity() -> CodexRuntimeIdentity:
     )
 
 
-def app_server_roundtrip(requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def app_server_roundtrip(
+    requests: list[dict[str, Any]],
+    *,
+    executable: str | None = None,
+) -> list[dict[str, Any]]:
+    active_executable = executable or resolve_codex_executable()
     proc = subprocess.Popen(
-        ["codex", "app-server", "--listen", "stdio://"],
+        [active_executable, "app-server", "--listen", "stdio://"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
