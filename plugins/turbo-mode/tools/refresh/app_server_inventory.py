@@ -28,6 +28,7 @@ EXPECTED_HANDOFF_SKILLS = (
     "handoff:triage",
 )
 EXPECTED_TICKET_SKILLS = ("ticket:ticket", "ticket:ticket-triage")
+EXPECTED_RESPONSE_IDS = frozenset({0, 1, 2, 3, 4, 5})
 
 
 @dataclass(frozen=True)
@@ -253,14 +254,28 @@ def app_server_roundtrip(requests: list[dict[str, Any]]) -> list[dict[str, Any]]
 def response_by_id(transcript: tuple[dict[str, Any], ...]) -> dict[int, dict[str, Any]]:
     responses: dict[int, dict[str, Any]] = {}
     for item in transcript:
-        if item.get("direction") != "recv":
+        direction = item.get("direction")
+        if direction == "recv-raw":
+            fail("inventory contract", "malformed app-server response stream", item.get("body"))
+        if direction != "recv":
             continue
         body = item.get("body")
         if not isinstance(body, dict):
-            continue
+            fail("inventory contract", "app-server response is not an object", body)
         response_id = body.get("id")
-        if isinstance(response_id, int):
-            responses[response_id] = body
+        if response_id is None:
+            if isinstance(body.get("method"), str):
+                continue
+            fail("inventory contract", "app-server response missing id", body)
+        if not isinstance(response_id, int):
+            fail("inventory contract", "app-server response id is not an integer", response_id)
+        if response_id not in EXPECTED_RESPONSE_IDS:
+            fail("inventory contract", "unexpected app-server response id", response_id)
+        if response_id in responses:
+            fail("inventory contract", "duplicate app-server response id", response_id)
+        if "error" in body:
+            fail("inventory contract", "app-server response returned error", body)
+        responses[response_id] = body
     return responses
 
 
@@ -279,7 +294,7 @@ def validate_readonly_inventory_contract(
         "handoff": validate_plugin_read_response(responses[1], paths, "handoff", "1.6.0"),
         "ticket": validate_plugin_read_response(responses[2], paths, "ticket", "1.4.0"),
     }
-    plugin_list = validate_plugin_list_response(responses[3])
+    plugin_list = validate_plugin_list_response(responses[3], paths)
     skills = validate_skills_response(responses[4], paths)
     ticket_hook = validate_hooks_response(responses[5], paths)
     handoff_hooks = validate_no_handoff_hooks(responses[5])
@@ -305,54 +320,55 @@ def validate_plugin_read_response(
     expected = str(paths.repo_root / f"plugins/turbo-mode/{plugin}/{version}")
     if json_contains(response, "/plugin-dev/"):
         fail("inventory contract", "plugin/read contains plugin-dev path", plugin)
-    if not json_contains(response, expected):
+    source_path = plugin_read_source_path(response)
+    if source_path != expected:
         fail(
             "inventory contract",
-            f"plugin/read missing repo source metadata for {plugin}",
-            expected,
+            f"plugin/read missing source path for {plugin}",
+            source_path,
         )
-    return expected
+    return source_path
 
 
-def validate_plugin_list_response(response: dict[str, Any]) -> list[str]:
-    serialized = json.dumps(response, sort_keys=True)
-    missing = [
-        plugin_id
-        for plugin_id in ("handoff@turbo-mode", "ticket@turbo-mode")
-        if plugin_id not in serialized
-    ]
+def validate_plugin_list_response(response: dict[str, Any], paths: Any) -> list[str]:
+    if json_contains(response, "/plugin-dev/"):
+        fail("inventory contract", "plugin/list contains plugin-dev path", response)
+    plugin_ids = plugin_list_ids(response, paths)
+    expected = {"handoff@turbo-mode", "ticket@turbo-mode"}
+    missing = sorted(expected - plugin_ids)
     if missing:
         fail("inventory contract", "plugin/list missing Turbo Mode plugins", missing)
-    if "/plugin-dev/" in serialized:
-        fail("inventory contract", "plugin/list contains plugin-dev path", response)
     return ["handoff@turbo-mode", "ticket@turbo-mode"]
 
 
 def validate_skills_response(response: dict[str, Any], paths: Any) -> list[str]:
-    serialized = json.dumps(response, sort_keys=True)
     expected = EXPECTED_HANDOFF_SKILLS + EXPECTED_TICKET_SKILLS
-    missing = sorted(skill for skill in expected if skill not in serialized)
+    if json_contains(response, "/plugin-dev/"):
+        fail("inventory contract", "skills/list contains plugin-dev path", response)
+    skills = skill_records_by_name(response)
+    missing = sorted(skill for skill in expected if skill not in skills)
     if missing:
         fail("inventory contract", "skills/list missing Turbo Mode skills", missing)
-    for plugin, version in (("handoff", "1.6.0"), ("ticket", "1.4.0")):
+    for skill in expected:
+        record = skills[skill]
+        actual_path = skill_record_path(record)
+        plugin = skill.split(":", 1)[0]
+        version = "1.4.0" if skill.startswith("ticket:") else "1.6.0"
         cache_prefix = str(paths.codex_home / f"plugins/cache/turbo-mode/{plugin}/{version}/skills")
-        if cache_prefix not in serialized:
+        if actual_path is None or not actual_path.startswith(cache_prefix + "/"):
             fail(
                 "inventory contract",
-                "skills/list missing installed-cache skill paths",
-                cache_prefix,
+                f"skills/list missing installed-cache skill path for {skill}",
+                actual_path,
             )
-    if "/plugin-dev/" in serialized:
-        fail("inventory contract", "skills/list contains plugin-dev path", response)
     return sorted(expected)
 
 
 def validate_hooks_response(response: dict[str, Any], paths: Any) -> dict[str, str]:
     hooks = [
         item
-        for item in walk_json(response)
-        if isinstance(item, dict)
-        and item.get("pluginId") == "ticket@turbo-mode"
+        for item in hook_records(response)
+        if item.get("pluginId") == "ticket@turbo-mode"
         and item.get("eventName") == "preToolUse"
         and item.get("matcher") == "Bash"
     ]
@@ -376,23 +392,107 @@ def validate_hooks_response(response: dict[str, Any], paths: Any) -> dict[str, s
 def validate_no_handoff_hooks(response: dict[str, Any]) -> list[dict[str, str]]:
     hooks = [
         item
-        for item in walk_json(response)
-        if isinstance(item, dict) and item.get("pluginId") == "handoff@turbo-mode"
+        for item in hook_records(response)
+        if item.get("pluginId") == "handoff@turbo-mode"
     ]
     if hooks:
         fail("inventory contract", "expected no Handoff hooks", hooks)
     return []
 
 
-def walk_json(value: object) -> list[object]:
-    items = [value]
-    if isinstance(value, dict):
-        for child in value.values():
-            items.extend(walk_json(child))
-    elif isinstance(value, list):
-        for child in value:
-            items.extend(walk_json(child))
-    return items
+def plugin_read_source_path(response: dict[str, Any]) -> str | None:
+    result = response_result(response)
+    source = result.get("source")
+    if isinstance(source, dict) and isinstance(source.get("path"), str):
+        return source["path"]
+    plugin = result.get("plugin")
+    if not isinstance(plugin, dict):
+        return None
+    summary = plugin.get("summary")
+    if not isinstance(summary, dict):
+        return None
+    summary_source = summary.get("source")
+    if isinstance(summary_source, dict) and isinstance(summary_source.get("path"), str):
+        return summary_source["path"]
+    return None
+
+
+def plugin_list_ids(response: dict[str, Any], paths: Any) -> set[str]:
+    result = response_result(response)
+    plugins = result.get("plugins")
+    if isinstance(plugins, list):
+        return {plugin_id for plugin_id in plugins if isinstance(plugin_id, str)}
+
+    marketplace_path = str(paths.marketplace_path)
+    ids: set[str] = set()
+    marketplaces = result.get("marketplaces")
+    if not isinstance(marketplaces, list):
+        return ids
+    for marketplace in marketplaces:
+        if not isinstance(marketplace, dict):
+            continue
+        if marketplace.get("name") != "turbo-mode" or marketplace.get("path") != marketplace_path:
+            continue
+        marketplace_plugins = marketplace.get("plugins")
+        if not isinstance(marketplace_plugins, list):
+            continue
+        for plugin in marketplace_plugins:
+            if isinstance(plugin, dict) and isinstance(plugin.get("id"), str):
+                ids.add(plugin["id"])
+    return ids
+
+
+def skill_records_by_name(response: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    result = response_result(response)
+    records = collect_named_records(result.get("skills"))
+    data = result.get("data")
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                records.update(collect_named_records(item.get("skills")))
+    return records
+
+
+def collect_named_records(value: Any) -> dict[str, dict[str, Any]]:
+    records: dict[str, dict[str, Any]] = {}
+    if not isinstance(value, list):
+        return records
+    for item in value:
+        if isinstance(item, dict) and isinstance(item.get("name"), str):
+            records[item["name"]] = item
+    return records
+
+
+def skill_record_path(record: dict[str, Any]) -> str | None:
+    for key in ("path", "sourcePath"):
+        value = record.get(key)
+        if isinstance(value, str):
+            return value
+    return None
+
+
+def hook_records(response: dict[str, Any]) -> list[dict[str, Any]]:
+    result = response_result(response)
+    hooks = collect_hook_records(result.get("hooks"))
+    data = result.get("data")
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                hooks.extend(collect_hook_records(item.get("hooks")))
+    return hooks
+
+
+def collect_hook_records(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def response_result(response: dict[str, Any]) -> dict[str, Any]:
+    result = response.get("result")
+    if not isinstance(result, dict):
+        fail("inventory contract", "response result is not an object", response)
+    return result
 
 
 def json_contains(value: object, needle: str) -> bool:

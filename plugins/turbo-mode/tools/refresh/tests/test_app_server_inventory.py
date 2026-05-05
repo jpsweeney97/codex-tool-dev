@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from pathlib import Path
 
 import pytest
 from refresh.app_server_inventory import (
+    EXPECTED_HANDOFF_SKILLS,
+    EXPECTED_TICKET_SKILLS,
     CodexRuntimeIdentity,
     build_readonly_inventory_requests,
     collect_readonly_runtime_inventory,
@@ -170,6 +173,114 @@ def test_validate_readonly_inventory_contract_accepts_aligned_runtime(tmp_path: 
     assert inventory.transcript_sha256 == hashlib.sha256(
         transcript_bytes(raw_transcript)
     ).hexdigest()
+
+
+def test_validate_readonly_inventory_contract_rejects_raw_response_lines(
+    tmp_path: Path,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    raw = list(transcript(refresh_paths))
+    raw.insert(0, {"direction": "recv-raw", "body": "not json"})
+
+    with pytest.raises(RefreshError, match="malformed app-server response stream"):
+        validate_readonly_inventory_contract(
+            tuple(raw),
+            paths=refresh_paths,
+            identity=identity(),
+            request_methods=("initialize",),
+        )
+
+
+def test_validate_readonly_inventory_contract_rejects_duplicate_response_ids(
+    tmp_path: Path,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    raw = list(transcript(refresh_paths))
+    raw.insert(1, copy.deepcopy(raw[0]))
+
+    with pytest.raises(RefreshError, match="duplicate app-server response id"):
+        validate_readonly_inventory_contract(
+            tuple(raw),
+            paths=refresh_paths,
+            identity=identity(),
+            request_methods=("initialize",),
+        )
+
+
+def test_validate_readonly_inventory_contract_rejects_unexpected_response_ids(
+    tmp_path: Path,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    raw = list(transcript(refresh_paths))
+    raw.insert(1, {"direction": "recv", "body": {"id": 99, "result": {}}})
+
+    with pytest.raises(RefreshError, match="unexpected app-server response id"):
+        validate_readonly_inventory_contract(
+            tuple(raw),
+            paths=refresh_paths,
+            identity=identity(),
+            request_methods=("initialize",),
+        )
+
+
+def test_validate_readonly_inventory_contract_rejects_plugin_read_path_in_wrong_field(
+    tmp_path: Path,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    raw = copy.deepcopy(list(transcript(refresh_paths)))
+    expected = str(refresh_paths.repo_root / "plugins/turbo-mode/handoff/1.6.0")
+    raw[1]["body"]["result"] = {"note": expected}
+
+    with pytest.raises(RefreshError, match="plugin/read missing source path"):
+        validate_readonly_inventory_contract(
+            tuple(raw),
+            paths=refresh_paths,
+            identity=identity(),
+            request_methods=("initialize",),
+        )
+
+
+def test_validate_readonly_inventory_contract_rejects_plugin_list_id_in_wrong_field(
+    tmp_path: Path,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    raw = copy.deepcopy(list(transcript(refresh_paths)))
+    raw[3]["body"]["result"] = {
+        "notes": ["handoff@turbo-mode", "ticket@turbo-mode"],
+        "marketplaces": [],
+    }
+
+    with pytest.raises(RefreshError, match="plugin/list missing Turbo Mode plugins"):
+        validate_readonly_inventory_contract(
+            tuple(raw),
+            paths=refresh_paths,
+            identity=identity(),
+            request_methods=("initialize",),
+        )
+
+
+def test_validate_readonly_inventory_contract_rejects_skill_name_in_wrong_field(
+    tmp_path: Path,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    raw = copy.deepcopy(list(transcript(refresh_paths)))
+    cache_prefix = str(refresh_paths.codex_home / "plugins/cache/turbo-mode/handoff/1.6.0/skills")
+    ticket_cache_prefix = str(
+        refresh_paths.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0/skills"
+    )
+    raw[4]["body"]["result"] = {
+        "notes": list(EXPECTED_HANDOFF_SKILLS + EXPECTED_TICKET_SKILLS),
+        "paths": [cache_prefix, ticket_cache_prefix],
+        "skills": [],
+    }
+
+    with pytest.raises(RefreshError, match="skills/list missing Turbo Mode skills"):
+        validate_readonly_inventory_contract(
+            tuple(raw),
+            paths=refresh_paths,
+            identity=identity(),
+            request_methods=("initialize",),
+        )
 
 
 def test_validate_readonly_inventory_contract_rejects_missing_ticket_hook(

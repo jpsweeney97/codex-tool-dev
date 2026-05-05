@@ -75,15 +75,15 @@ Plan 03 pins this read-only request sequence:
 6. `skills/list`, request id `4`, with `cwds` containing a temporary disposable directory.
 7. `hooks/list`, request id `5`, with `cwds` containing the same temporary disposable directory.
 
-Plan 03 accepts only responses with the matching integer ids above. It treats a response `error`, missing response id, timeout, closed stdout, malformed JSON response stream, or missing required inventory field as fail-closed inventory failure. The app-server process timeout is 30 seconds per request, and the child process is terminated in success, error, and timeout paths.
+Plan 03 accepts only responses with the matching integer ids above. It treats a response `error`, missing response id, duplicate response id, unexpected response id, timeout, closed stdout, malformed JSON response stream, or missing required inventory field as fail-closed inventory failure. Notification messages without ids are tolerated only as app-server notifications and are not counted as inventory proof. The app-server process timeout is 30 seconds per request, and the child process is terminated in success, error, and timeout paths.
 
 The response parser accepts:
 
 - `initialize.result.serverInfo` and `initialize.result.capabilities` as runtime identity fields when present.
-- `plugin/read` responses only when they contain the expected repo source path for each plugin and no `/plugin-dev/` path.
-- `plugin/list` responses only when they contain both `handoff@turbo-mode` and `ticket@turbo-mode` and no `/plugin-dev/` path.
-- `skills/list` responses only when they contain all expected Handoff and Ticket skill names from installed cache paths and no `/plugin-dev/` path.
-- `hooks/list` responses only when they contain exactly one Ticket Bash `preToolUse` hook with command `python3 <codex_home>/plugins/cache/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py`, source path `<codex_home>/plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json`, and no Handoff hook entries.
+- `plugin/read` responses only when the plugin source path structurally appears at `result.source.path` or `result.plugin.summary.source.path`, exactly matches the expected repo source path for the requested plugin, and no `/plugin-dev/` path appears.
+- `plugin/list` responses only when structural plugin records under `result.plugins` or the matching `result.marketplaces[].plugins[]` entry contain both `handoff@turbo-mode` and `ticket@turbo-mode`, and no `/plugin-dev/` path appears.
+- `skills/list` responses only when structural skill records under `result.skills` or `result.data[].skills` contain every expected Handoff and Ticket skill name with a `path` or `sourcePath` under the expected installed-cache skill root, and no `/plugin-dev/` path appears.
+- `hooks/list` responses only when structural hook records under `result.hooks` or `result.data[].hooks` contain exactly one Ticket Bash `preToolUse` hook with command `python3 <codex_home>/plugins/cache/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py`, source path `<codex_home>/plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json`, and no Handoff hook entries.
 
 Additional unrelated hooks are tolerated only when they do not appear as Handoff hooks and do not conflict with the single expected Ticket hook. They are not summarized as proof.
 
@@ -93,6 +93,7 @@ Additional unrelated hooks are tolerated only when they do not appear as Handoff
 - [x] Implement `build_readonly_inventory_requests()`.
 - [x] Implement `validate_readonly_inventory_contract()` with strict required responses.
 - [x] Prove missing Ticket hook, unexpected Handoff hook presence, plugin-dev paths, wrong Ticket hook command/source path, and missing skills fail closed.
+- [x] Prove malformed response streams, duplicate ids, unexpected ids, and expected strings in structurally wrong fields fail closed.
 
 ## Task 2: Add Runtime Identity Capture And Roundtrip Execution
 
@@ -135,15 +136,21 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 ## Completion Evidence
 
-Current completion evidence after the review-fix pass:
+Current evidence lanes after parser-contract scrutiny:
 
+- Intended contract: this document now requires structural response validation, duplicate-id rejection, unexpected-id rejection, malformed-stream rejection, and explicit current-state reconciliation before merge readiness.
+- Implementation boundary: Plan 03 feature work was committed as `e4a4805 feat: add refresh runtime inventory check`.
+- Separate policy boundary: active handoff summary ignore policy was committed separately as `18b90ff chore: ignore active handoff summaries`.
 - Branch: `feature/turbo-mode-refresh-plan-03-runtime-inventory`.
-- Base/current HEAD at verification time: `9e36c72`.
-- Worktree state at verification time: dirty implementation branch with `.gitignore` modified before Plan 03, Plan 03 files modified, and new plan/inventory test files still untracked.
-- Focused tests: `186 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
-- Lint: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
-- Residue scan over Handoff, Ticket, and refresh roots printed nothing.
-- Live read-only inventory smoke evidence path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan03-reviewfix-live-smoke-20260505/dry-run.summary.json`.
-- Live smoke result: `app_server_inventory_status = collected`, runtime inventory aligned, `terminal_plan_status = coverage-gap-blocked`.
+- Parser-contract repair evidence: `192 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
+- Parser-contract lint: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
+- Parser-contract residue scan over Handoff, Ticket, and refresh roots printed nothing.
+- Parser-contract live read-only inventory smoke evidence path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan03-parser-contract-live-smoke-20260505/dry-run.summary.json`.
+- Parser-contract live smoke result: `app_server_inventory_status = collected`, runtime inventory aligned, `terminal_plan_status = coverage-gap-blocked`.
+- Historical focused tests before parser-contract repair: `186 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
+- Historical lint before parser-contract repair: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
+- Historical residue scan before parser-contract repair over Handoff, Ticket, and refresh roots printed nothing.
+- Historical live read-only inventory smoke evidence path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan03-reviewfix-live-smoke-20260505/dry-run.summary.json`.
+- Historical live smoke result: `app_server_inventory_status = collected`, runtime inventory aligned, `terminal_plan_status = coverage-gap-blocked`.
 
-This is not a merge-ready closeout by itself because no commit has been created and the worktree remains dirty. The completed checkboxes mean the branch implementation has local verification evidence, not that the work is merged or that live status is no-drift.
+Merge readiness requires the parser-contract repair to be committed on this branch with a clean worktree. The completed checkboxes mean the branch implementation has local verification evidence, not that the work is merged or that live status is no-drift.
