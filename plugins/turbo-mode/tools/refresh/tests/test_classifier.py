@@ -1,8 +1,74 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from refresh.classifier import classify_diff_path
+from refresh.command_projection import extract_command_projection
 from refresh.models import CoverageStatus, DiffKind, MutationMode, PathOutcome
+
+REPO_ROOT = Path(__file__).resolve().parents[5]
+HANDOFF_ROOT = REPO_ROOT / "plugins/turbo-mode/handoff/1.6.0"
+TICKET_ROOT = REPO_ROOT / "plugins/turbo-mode/ticket/1.4.0"
+
+EXPECTED_COMMAND_SURFACE_PATHS = (
+    "handoff/1.6.0/.codex-plugin/plugin.json",
+    "handoff/1.6.0/hooks/hooks.json",
+    "handoff/1.6.0/scripts/cleanup.py",
+    "handoff/1.6.0/scripts/defer.py",
+    "handoff/1.6.0/scripts/distill.py",
+    "handoff/1.6.0/scripts/handoff_parsing.py",
+    "handoff/1.6.0/scripts/plugin_siblings.py",
+    "handoff/1.6.0/scripts/project_paths.py",
+    "handoff/1.6.0/scripts/provenance.py",
+    "handoff/1.6.0/scripts/quality_check.py",
+    "handoff/1.6.0/scripts/search.py",
+    "handoff/1.6.0/scripts/session_state.py",
+    "handoff/1.6.0/scripts/ticket_parsing.py",
+    "handoff/1.6.0/scripts/triage.py",
+    "ticket/1.4.0/.codex-plugin/plugin.json",
+    "ticket/1.4.0/hooks/hooks.json",
+    "ticket/1.4.0/hooks/ticket_engine_guard.py",
+    "ticket/1.4.0/scripts/__init__.py",
+    "ticket/1.4.0/scripts/ticket_audit.py",
+    "ticket/1.4.0/scripts/ticket_dedup.py",
+    "ticket/1.4.0/scripts/ticket_engine_agent.py",
+    "ticket/1.4.0/scripts/ticket_engine_core.py",
+    "ticket/1.4.0/scripts/ticket_engine_runner.py",
+    "ticket/1.4.0/scripts/ticket_engine_user.py",
+    "ticket/1.4.0/scripts/ticket_envelope.py",
+    "ticket/1.4.0/scripts/ticket_id.py",
+    "ticket/1.4.0/scripts/ticket_parse.py",
+    "ticket/1.4.0/scripts/ticket_paths.py",
+    "ticket/1.4.0/scripts/ticket_read.py",
+    "ticket/1.4.0/scripts/ticket_render.py",
+    "ticket/1.4.0/scripts/ticket_stage_models.py",
+    "ticket/1.4.0/scripts/ticket_triage.py",
+    "ticket/1.4.0/scripts/ticket_trust.py",
+    "ticket/1.4.0/scripts/ticket_ux.py",
+    "ticket/1.4.0/scripts/ticket_validate.py",
+    "ticket/1.4.0/scripts/ticket_workflow.py",
+)
+
+EXPECTED_MARKDOWN_PROJECTION_PATHS = (
+    "handoff/1.6.0/CHANGELOG.md",
+    "handoff/1.6.0/README.md",
+    "handoff/1.6.0/references/handoff-contract.md",
+    "handoff/1.6.0/skills/defer/SKILL.md",
+    "handoff/1.6.0/skills/distill/SKILL.md",
+    "handoff/1.6.0/skills/load/SKILL.md",
+    "handoff/1.6.0/skills/quicksave/SKILL.md",
+    "handoff/1.6.0/skills/save/SKILL.md",
+    "handoff/1.6.0/skills/search/SKILL.md",
+    "handoff/1.6.0/skills/summary/SKILL.md",
+    "handoff/1.6.0/skills/triage/SKILL.md",
+    "ticket/1.4.0/CHANGELOG.md",
+    "ticket/1.4.0/HANDBOOK.md",
+    "ticket/1.4.0/README.md",
+    "ticket/1.4.0/skills/ticket/SKILL.md",
+    "ticket/1.4.0/skills/ticket/references/pipeline-guide.md",
+    "ticket/1.4.0/skills/ticket-triage/SKILL.md",
+)
 
 
 def assert_path(
@@ -17,6 +83,38 @@ def assert_path(
     assert result.outcome == outcome
     assert result.mutation_mode == mutation_mode
     assert result.coverage_status == coverage_status
+
+
+def test_current_source_tree_surfaces_match_pinned_fixture_lists() -> None:
+    assert tuple(_discover_command_surface_paths()) == EXPECTED_COMMAND_SURFACE_PATHS
+    projection_paths: list[str] = []
+
+    for plugin_root, prefix in ((HANDOFF_ROOT, "handoff/1.6.0"), (TICKET_ROOT, "ticket/1.4.0")):
+        for path in sorted(plugin_root.rglob("*.md")):
+            projection = extract_command_projection(path.read_text(encoding="utf-8"))
+            assert projection.parser_warnings == ()
+            if projection.items:
+                projection_paths.append(f"{prefix}/{path.relative_to(plugin_root).as_posix()}")
+
+    assert tuple(projection_paths) == EXPECTED_MARKDOWN_PROJECTION_PATHS
+
+
+def _discover_command_surface_paths() -> list[str]:
+    paths: list[str] = []
+    for plugin_root, prefix in ((HANDOFF_ROOT, "handoff/1.6.0"), (TICKET_ROOT, "ticket/1.4.0")):
+        for relative in (".codex-plugin/plugin.json", "hooks/hooks.json"):
+            path = plugin_root / relative
+            if path.exists():
+                paths.append(f"{prefix}/{relative}")
+        paths.extend(
+            f"{prefix}/{path.relative_to(plugin_root).as_posix()}"
+            for path in sorted((plugin_root / "hooks").glob("*.py"))
+        )
+        paths.extend(
+            f"{prefix}/{path.relative_to(plugin_root).as_posix()}"
+            for path in sorted((plugin_root / "scripts").glob("*.py"))
+        )
+    return sorted(paths)
 
 
 def test_fast_safe_paths_with_named_smoke() -> None:
