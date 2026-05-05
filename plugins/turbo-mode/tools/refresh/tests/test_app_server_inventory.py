@@ -502,6 +502,23 @@ def test_collect_codex_runtime_identity_rejects_version_failure(
         collect_codex_runtime_identity()
 
 
+def test_collect_codex_runtime_identity_rejects_version_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / "codex"
+    executable.write_bytes(b"codex executable")
+
+    def fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired([str(executable), "--version"], timeout=10)
+
+    monkeypatch.setattr(inventory_module.shutil, "which", lambda _name: str(executable))
+    monkeypatch.setattr(inventory_module.subprocess, "run", fake_run)
+
+    with pytest.raises(RefreshError, match="codex --version timed out"):
+        collect_codex_runtime_identity()
+
+
 def test_collect_codex_runtime_identity_records_hash_read_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

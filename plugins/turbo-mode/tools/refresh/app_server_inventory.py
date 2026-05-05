@@ -158,13 +158,16 @@ def collect_codex_runtime_identity() -> CodexRuntimeIdentity:
     executable = shutil.which("codex")
     if executable is None:
         fail("collect codex runtime identity", "codex executable not found on PATH", "codex")
-    completed = subprocess.run(
-        [executable, "--version"],
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=10,
-    )
+    try:
+        completed = subprocess.run(
+            [executable, "--version"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired as exc:
+        fail("collect codex runtime identity", "codex --version timed out", exc.timeout)
     if completed.returncode != 0:
         fail(
             "collect codex runtime identity",
