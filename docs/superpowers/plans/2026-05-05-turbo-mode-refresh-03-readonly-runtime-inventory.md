@@ -98,6 +98,7 @@ Additional unrelated hooks are tolerated only when they do not appear as Handoff
 ## Task 2: Add Runtime Identity Capture And Roundtrip Execution
 
 - [x] Write tests for identity hashing and unavailable hash reasons.
+- [x] Prove `collect_codex_runtime_identity()` hash success, missing executable, `codex --version` failure, and hash `OSError` handling directly.
 - [x] Implement `collect_codex_runtime_identity()`.
 - [x] Implement `app_server_roundtrip()` without import coupling to migration tooling.
 - [x] Ensure app-server process termination happens on success, error, and timeout.
@@ -136,21 +137,26 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 ## Completion Evidence
 
-Current evidence lanes after parser-contract scrutiny:
+Current evidence lanes after parser-contract and closeout-ledger scrutiny:
 
 - Intended contract: this document now requires structural response validation, duplicate-id rejection, unexpected-id rejection, malformed-stream rejection, and explicit current-state reconciliation before merge readiness.
 - Implementation boundary: Plan 03 feature work was committed as `e4a4805 feat: add refresh runtime inventory check`.
 - Separate policy boundary: active handoff summary ignore policy was committed separately as `18b90ff chore: ignore active handoff summaries`.
+- Parser-contract repair boundary: structural parser hardening was committed as `03b04e4 fix: harden refresh runtime inventory parser`.
 - Branch: `feature/turbo-mode-refresh-plan-03-runtime-inventory`.
 - Parser-contract repair evidence: `192 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
 - Parser-contract lint: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
 - Parser-contract residue scan over Handoff, Ticket, and refresh roots printed nothing.
 - Parser-contract live read-only inventory smoke evidence path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan03-parser-contract-live-smoke-20260505/dry-run.summary.json`.
 - Parser-contract live smoke result: `app_server_inventory_status = collected`, runtime inventory aligned, `terminal_plan_status = coverage-gap-blocked`.
+- Runtime identity direct-test evidence: `22 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests/test_app_server_inventory.py -q`.
+- Closeout-ledger repair evidence: `196 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
 - Historical focused tests before parser-contract repair: `186 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
 - Historical lint before parser-contract repair: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
 - Historical residue scan before parser-contract repair over Handoff, Ticket, and refresh roots printed nothing.
 - Historical live read-only inventory smoke evidence path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan03-reviewfix-live-smoke-20260505/dry-run.summary.json`.
 - Historical live smoke result: `app_server_inventory_status = collected`, runtime inventory aligned, `terminal_plan_status = coverage-gap-blocked`.
 
-Merge readiness requires the parser-contract repair to be committed on this branch with a clean worktree. The completed checkboxes mean the branch implementation has local verification evidence, not that the work is merged or that live status is no-drift.
+The `18b90ff` ignore rule is accepted policy for this branch because the user explicitly requested the remaining `.gitignore` change be committed separately with rationale on 2026-05-05. Its scope is active session handoff summaries as local resume artifacts; it does not change the repository rule that handoff files in current work are durable artifacts when they are in scope. Tracked handoff files still surface in `git status`. A future active `docs/handoffs/*.md` file that is part of the reviewed work must be added intentionally with `git add -f` or the ignore policy must be revisited before merge.
+
+Merge readiness requires a clean worktree after the runtime-identity test repair and evidence-ledger update are committed. The completed checkboxes mean the branch implementation has local verification evidence, not that the work is merged or that live status is no-drift.

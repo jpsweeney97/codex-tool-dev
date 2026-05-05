@@ -3,14 +3,17 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
+import refresh.app_server_inventory as inventory_module
 from refresh.app_server_inventory import (
     EXPECTED_HANDOFF_SKILLS,
     EXPECTED_TICKET_SKILLS,
     CodexRuntimeIdentity,
     build_readonly_inventory_requests,
+    collect_codex_runtime_identity,
     collect_readonly_runtime_inventory,
     transcript_bytes,
     validate_readonly_inventory_contract,
@@ -438,3 +441,90 @@ def test_collect_readonly_runtime_inventory_combines_identity_and_transcript(
 
     assert inventory.identity.server_info == {"name": "codex-app-server", "version": "0.test"}
     assert raw_transcript == transcript(refresh_paths)
+
+
+def test_collect_codex_runtime_identity_hashes_executable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / "codex"
+    executable.write_bytes(b"codex executable")
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert args[0] == [str(executable), "--version"]
+        assert kwargs["text"] is True
+        assert kwargs["capture_output"] is True
+        assert kwargs["check"] is False
+        assert kwargs["timeout"] == 10
+        return subprocess.CompletedProcess(args[0], 0, stdout="codex-cli 0.test\n", stderr="")
+
+    monkeypatch.setattr(inventory_module.shutil, "which", lambda _name: str(executable))
+    monkeypatch.setattr(inventory_module.subprocess, "run", fake_run)
+
+    runtime_identity = collect_codex_runtime_identity()
+
+    assert runtime_identity.codex_version == "codex-cli 0.test"
+    assert runtime_identity.executable_path == str(executable)
+    assert runtime_identity.executable_sha256 == hashlib.sha256(b"codex executable").hexdigest()
+    assert runtime_identity.executable_hash_unavailable_reason is None
+    assert runtime_identity.server_info == {}
+    assert runtime_identity.initialize_capabilities == {}
+
+
+def test_collect_codex_runtime_identity_rejects_missing_executable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(inventory_module.shutil, "which", lambda _name: None)
+
+    with pytest.raises(RefreshError, match="codex executable not found on PATH"):
+        collect_codex_runtime_identity()
+
+
+def test_collect_codex_runtime_identity_rejects_version_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / "codex"
+    executable.write_bytes(b"codex executable")
+
+    def fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            [str(executable), "--version"],
+            1,
+            stdout="",
+            stderr="version failed",
+        )
+
+    monkeypatch.setattr(inventory_module.shutil, "which", lambda _name: str(executable))
+    monkeypatch.setattr(inventory_module.subprocess, "run", fake_run)
+
+    with pytest.raises(RefreshError, match="version failed"):
+        collect_codex_runtime_identity()
+
+
+def test_collect_codex_runtime_identity_records_hash_read_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / "codex"
+    executable.write_bytes(b"codex executable")
+
+    def fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            [str(executable), "--version"],
+            0,
+            stdout="codex-cli 0.test\n",
+            stderr="",
+        )
+
+    def fail_read_bytes(_path: Path) -> bytes:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(inventory_module.shutil, "which", lambda _name: str(executable))
+    monkeypatch.setattr(inventory_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(Path, "read_bytes", fail_read_bytes)
+
+    runtime_identity = collect_codex_runtime_identity()
+
+    assert runtime_identity.executable_sha256 is None
+    assert runtime_identity.executable_hash_unavailable_reason == "permission denied"
