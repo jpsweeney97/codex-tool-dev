@@ -3,9 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from refresh.classifier import classify_diff_path
 from refresh.manifests import build_manifest, diff_manifests, scan_generated_residue
-from refresh.models import DiffKind, PluginSpec, RefreshError
+from refresh.models import (
+    CoverageState,
+    CoverageStatus,
+    DiffKind,
+    FilesystemState,
+    MutationMode,
+    PlanAxes,
+    PluginSpec,
+    PreflightState,
+    RefreshError,
+    RuntimeConfigState,
+    SelectedMutationMode,
+    TerminalPlanStatus,
+)
 from refresh.paths import canonical_key
+from refresh.state_machine import derive_terminal_plan_status
 
 
 def plugin_spec(tmp_path: Path) -> PluginSpec:
@@ -155,3 +170,127 @@ def test_diff_manifests_reports_executable_metadata_drift(tmp_path: Path) -> Non
     assert [(diff.canonical_path, diff.kind) for diff in diffs] == [
         ("handoff/1.6.0/scripts/search.py", DiffKind.CHANGED)
     ]
+
+
+def test_fixture_backed_diff_classification_and_aggregate_state(tmp_path: Path) -> None:
+    spec = plugin_spec(tmp_path)
+    _write_pair(spec, "README.md", source_text="same\n", cache_text="same\n")
+    _write_pair(
+        spec,
+        "scripts/search.py",
+        source_text="print('fast new')\n",
+        cache_text="print('fast old')\n",
+    )
+    _write_pair(
+        spec,
+        "scripts/defer.py",
+        source_text="print('guarded new')\n",
+        cache_text="print('guarded old')\n",
+    )
+    _write_pair(
+        spec,
+        "scripts/distill.py",
+        source_text="print('gap new')\n",
+        cache_text="print('gap old')\n",
+    )
+    _write_pair(
+        spec,
+        "notes/operator.md",
+        source_text="note new\n",
+        cache_text="note old\n",
+    )
+    residue = spec.source_root / "scripts" / "__pycache__" / "x.pyc"
+    residue.parent.mkdir(parents=True, exist_ok=True)
+    residue.write_bytes(b"compiled")
+
+    residue_issues = scan_generated_residue([spec])
+
+    assert [(issue.plugin, issue.path, issue.reason) for issue in residue_issues] == [
+        ("handoff", "scripts/__pycache__/x.pyc", "generated-residue")
+    ]
+    residue.unlink()
+    residue.parent.rmdir()
+
+    diffs = diff_manifests(
+        build_manifest(spec, root_kind="source"),
+        build_manifest(spec, root_kind="cache"),
+    )
+
+    assert [(diff.canonical_path, diff.kind) for diff in diffs] == [
+        ("handoff/1.6.0/notes/operator.md", DiffKind.CHANGED),
+        ("handoff/1.6.0/scripts/defer.py", DiffKind.CHANGED),
+        ("handoff/1.6.0/scripts/distill.py", DiffKind.CHANGED),
+        ("handoff/1.6.0/scripts/search.py", DiffKind.CHANGED),
+    ]
+
+    classifications = [
+        classify_diff_path(
+            diff.canonical_path,
+            kind=diff.kind,
+            source_text=(spec.source_root / _relative_path(diff.canonical_path)).read_text(
+                encoding="utf-8"
+            ),
+            cache_text=(spec.cache_root / _relative_path(diff.canonical_path)).read_text(
+                encoding="utf-8"
+            ),
+            executable=bool(diff.source and diff.source.executable),
+        )
+        for diff in diffs
+    ]
+    classification_by_path = {
+        classification.canonical_path: classification for classification in classifications
+    }
+
+    assert (
+        classification_by_path["handoff/1.6.0/scripts/search.py"].mutation_mode
+        == MutationMode.FAST
+    )
+    assert (
+        classification_by_path["handoff/1.6.0/scripts/search.py"].coverage_status.value
+        == CoverageStatus.COVERED.value
+    )
+    assert (
+        classification_by_path["handoff/1.6.0/scripts/defer.py"].mutation_mode
+        == MutationMode.GUARDED
+    )
+    assert (
+        classification_by_path["handoff/1.6.0/scripts/distill.py"].coverage_status.value
+        == CoverageStatus.COVERAGE_GAP.value
+    )
+    assert (
+        classification_by_path["handoff/1.6.0/scripts/distill.py"].mutation_mode
+        == MutationMode.BLOCKED
+    )
+    assert (
+        classification_by_path["handoff/1.6.0/notes/operator.md"].mutation_mode
+        == MutationMode.GUARDED
+    )
+
+    axes = PlanAxes(
+        filesystem_state=FilesystemState.DRIFT,
+        coverage_state=CoverageState.COVERAGE_GAP,
+        runtime_config_state=RuntimeConfigState.ALIGNED,
+        preflight_state=PreflightState.PASSED,
+        selected_mutation_mode=SelectedMutationMode.GUARDED_REFRESH,
+    )
+
+    assert derive_terminal_plan_status(axes) == TerminalPlanStatus.COVERAGE_GAP_BLOCKED
+
+
+def _write_pair(
+    spec: PluginSpec,
+    relative: str,
+    *,
+    source_text: str,
+    cache_text: str,
+) -> None:
+    source = spec.source_root / relative
+    cache = spec.cache_root / relative
+    source.parent.mkdir(parents=True, exist_ok=True)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text(source_text, encoding="utf-8")
+    cache.write_text(cache_text, encoding="utf-8")
+
+
+def _relative_path(canonical_path: str) -> Path:
+    return Path(*Path(canonical_path).parts[2:])
