@@ -9,6 +9,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 tmp/
+*settings*.json
 docs/handoffs/.session-state/
 docs/handoffs/archive/
 .codex/local/
