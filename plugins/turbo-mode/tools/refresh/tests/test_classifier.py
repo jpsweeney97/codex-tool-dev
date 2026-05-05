@@ -239,6 +239,71 @@ def test_changed_doc_with_new_command_projection_is_coverage_gap() -> None:
     assert "command-shape-changed" in result.reasons
 
 
+def test_changed_doc_with_new_shell_fence_command_is_coverage_gap() -> None:
+    result = classify_diff_path(
+        "handoff/1.6.0/skills/search/SKILL.md",
+        kind=DiffKind.CHANGED,
+        source_text="""# Search
+
+```bash
+git status --short
+```
+""",
+        cache_text="# Search\n",
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "command-shape-changed" in result.reasons
+
+
+def test_changed_doc_with_added_slash_command_is_coverage_gap() -> None:
+    result = classify_diff_path(
+        "handoff/1.6.0/skills/search/SKILL.md",
+        kind=DiffKind.CHANGED,
+        source_text="Run /save then /load.\n",
+        cache_text="Run /save.\n",
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "command-shape-changed" in result.reasons
+
+
+def test_changed_doc_with_changed_slash_command_prefix_is_coverage_gap() -> None:
+    result = classify_diff_path(
+        "ticket/1.4.0/skills/ticket-triage/SKILL.md",
+        kind=DiffKind.CHANGED,
+        source_text="Run /ticket-triage.\n",
+        cache_text="Run /ticket.\n",
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "command-shape-changed" in result.reasons
+
+
+def test_changed_doc_with_projection_parser_warning_is_coverage_gap() -> None:
+    result = classify_diff_path(
+        "handoff/1.6.0/references/handoff-contract.md",
+        kind=DiffKind.CHANGED,
+        source_text='```json\n{"request": "tool/execute", "action": }\n```\n',
+        cache_text="# Contract\n",
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "projection-parser-warning" in result.reasons
+
+
 def test_changed_doc_with_semantic_policy_trigger_is_coverage_gap() -> None:
     result = classify_diff_path(
         "ticket/1.4.0/HANDBOOK.md",

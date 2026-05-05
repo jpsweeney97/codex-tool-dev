@@ -250,6 +250,8 @@ def _doc_policy_reasons(path: str, *, source_text: str, cache_text: str) -> tupl
     cache_projection = extract_command_projection(cache_text)
     if source_projection.items != cache_projection.items:
         reasons.append("command-shape-changed")
+    if source_projection.parser_warnings or cache_projection.parser_warnings:
+        reasons.append("projection-parser-warning")
     if has_semantic_policy_trigger(source_text) or has_semantic_policy_trigger(cache_text):
         reasons.append("semantic-policy-trigger")
     return tuple(reasons)

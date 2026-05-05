@@ -15,7 +15,7 @@ class CommandProjection:
 _FENCE_RE = re.compile(r"^```(?P<lang>[A-Za-z0-9_-]*)\s*$")
 _COMMAND_LINE_RE = re.compile(r"^(?:python|python3|uv|codex|ticket_[A-Za-z0-9_-]+|\./)(?:\s|$)")
 _SLASH_COMMAND_RE = re.compile(
-    r"(?<![\w/])/(?:save|load|ticket|ticket-triage|defer|quicksave|summary|search|triage|distill)\b"
+    r"(?<![\w/])/(?:ticket-triage|quicksave|summary|distill|ticket|search|triage|defer|save|load)\b"
 )
 _INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
@@ -105,7 +105,7 @@ def _extract_fenced_block(block: list[str], *, lang: str, collector: _Projection
     block_text = "\n".join(block).strip()
     if lang in _SHELL_FENCE_LANGUAGES:
         for line in block:
-            if normalized := _normalize_command_line(line):
+            if normalized := _normalize_shell_fence_line(line):
                 collector.add(normalized)
         return
 
@@ -135,9 +135,10 @@ def _extract_line(line: str, *, collector: _ProjectionCollector) -> None:
     for inline_code in _INLINE_CODE_RE.findall(stripped):
         if normalized := _normalize_command_line(inline_code):
             collector.add(normalized)
-        elif slash_command := _extract_slash_command(inline_code):
-            collector.add(slash_command)
-    if slash_command := _extract_slash_command(stripped):
+        else:
+            for slash_command in _extract_slash_commands(inline_code):
+                collector.add(slash_command)
+    for slash_command in _extract_slash_commands(stripped):
         collector.add(slash_command)
     if json_item := _extract_json_payload(stripped, collector=collector):
         collector.add(json_item)
@@ -158,7 +159,7 @@ def _extract_table_cells(
         elif _is_projection_item(cell):
             if normalized := _normalize_command_line(cell):
                 collector.add(normalized)
-            elif slash_command := _extract_slash_command(cell):
+            for slash_command in _extract_slash_commands(cell):
                 collector.add(slash_command)
 
 
@@ -179,6 +180,13 @@ def _normalize_command_line(line: str) -> str:
     return ""
 
 
+def _normalize_shell_fence_line(line: str) -> str:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return ""
+    return stripped
+
+
 def _strip_markdown_prefix(line: str) -> str:
     stripped = line.strip()
     stripped = re.sub(r"^(?:[-*+]|\d+\.)\s+", "", stripped)
@@ -193,9 +201,8 @@ def _strip_code(text: str) -> str:
     return stripped
 
 
-def _extract_slash_command(text: str) -> str:
-    match = _SLASH_COMMAND_RE.search(text)
-    return match.group(0) if match else ""
+def _extract_slash_commands(text: str) -> tuple[str, ...]:
+    return tuple(match.group(0) for match in _SLASH_COMMAND_RE.finditer(text))
 
 
 def _extract_json_payload(text: str, *, collector: _ProjectionCollector) -> str:
@@ -237,7 +244,7 @@ def _is_separator_cell(cell: str) -> bool:
 
 
 def _is_projection_item(text: str) -> bool:
-    return bool(_normalize_command_line(text) or _extract_slash_command(text))
+    return bool(_normalize_command_line(text) or _extract_slash_commands(text))
 
 
 def _normalize_item(item: str) -> str:
