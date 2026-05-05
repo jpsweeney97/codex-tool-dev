@@ -25,6 +25,11 @@ def validate_axes(axes: PlanAxes) -> None:
         )
     if (
         axes.filesystem_state == FilesystemState.DRIFT
+        and axes.coverage_state == CoverageState.NOT_APPLICABLE
+    ):
+        fail("validate plan axes", "filesystem drift requires coverage classification", axes)
+    if (
+        axes.filesystem_state == FilesystemState.DRIFT
         and axes.coverage_state == CoverageState.COVERED
         and axes.runtime_config_state == RuntimeConfigState.ALIGNED
         and axes.selected_mutation_mode == SelectedMutationMode.NONE

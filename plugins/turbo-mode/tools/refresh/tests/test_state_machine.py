@@ -188,6 +188,20 @@ def test_preflight_block_takes_precedence_over_unknown_axes() -> None:
             preflight_state=PreflightState.PASSED,
             selected_mutation_mode=SelectedMutationMode.REFRESH,
         ),
+        PlanAxes(
+            filesystem_state=FilesystemState.DRIFT,
+            coverage_state=CoverageState.NOT_APPLICABLE,
+            runtime_config_state=RuntimeConfigState.ALIGNED,
+            preflight_state=PreflightState.PASSED,
+            selected_mutation_mode=SelectedMutationMode.REFRESH,
+        ),
+        PlanAxes(
+            filesystem_state=FilesystemState.DRIFT,
+            coverage_state=CoverageState.NOT_APPLICABLE,
+            runtime_config_state=RuntimeConfigState.ALIGNED,
+            preflight_state=PreflightState.PASSED,
+            selected_mutation_mode=SelectedMutationMode.GUARDED_REFRESH,
+        ),
     ],
 )
 def test_inconsistent_axes_raise_refresh_error(axes: PlanAxes) -> None:
