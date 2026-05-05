@@ -122,7 +122,7 @@ def _json_safe(value: Any) -> Any:
         return str(value)
     if is_dataclass(value):
         return {key: _json_safe(item) for key, item in asdict(value).items()}
-    if isinstance(value, tuple | list):
+    if isinstance(value, (tuple, list)):
         return [_json_safe(item) for item in value]
     if isinstance(value, dict):
         return {str(key): _json_safe(item) for key, item in value.items()}

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised by live Python 3.9 smoke
+    import tomli as tomllib
 
 from .classifier import classify_diff_path
 from .manifests import build_manifest, diff_manifests, scan_generated_residue
