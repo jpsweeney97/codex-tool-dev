@@ -296,3 +296,49 @@ def test_cli_rejects_exact_future_command_shapes_with_plan_02_message() -> None:
     assert "outside Plan 02" in guarded.stderr
     assert "unrecognized arguments" not in refresh.stderr
     assert "unrecognized arguments" not in guarded.stderr
+
+
+def test_cli_dry_run_does_not_modify_cache_tree_or_config(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    write_plugin_pair(
+        repo_root,
+        codex_home,
+        plugin="handoff",
+        version="1.6.0",
+        rel="README.md",
+        source_text="source drift\n",
+        cache_text="cache original\n",
+    )
+    write_plugin_pair(
+        repo_root,
+        codex_home,
+        plugin="ticket",
+        version="1.4.0",
+        rel="scripts/ticket_engine_core.py",
+        source_text="print('source')\n",
+        cache_text="print('cache')\n",
+    )
+    cache_root = codex_home / "plugins/cache/turbo-mode"
+    config = codex_home / "config.toml"
+    before_cache = tree_snapshot(cache_root)
+    before_config = path_snapshot(config)
+
+    completed = run_tool(
+        [
+            "--dry-run",
+            "--run-id",
+            "run-3",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert tree_snapshot(cache_root) == before_cache
+    assert path_snapshot(config) == before_config

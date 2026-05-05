@@ -467,3 +467,209 @@ def test_plan_refresh_added_command_bearing_doc_is_coverage_gap(tmp_path: Path) 
         "ticket/1.4.0/skills/ticket/references/new.md"
     )
     assert result.diff_classification[0].outcome == PathOutcome.COVERAGE_GAP_FAIL
+
+
+def test_plan_refresh_emits_no_future_command_for_coverage_gap(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    write_plugin_pair(
+        repo_root,
+        codex_home,
+        plugin="handoff",
+        version="1.6.0",
+        rel=".codex-plugin/plugin.json",
+        source_text='{"name":"new"}\n',
+        cache_text='{"name":"old"}\n',
+    )
+
+    result = plan_refresh(repo_root=repo_root, codex_home=codex_home, mode="plan-refresh")
+
+    assert result.terminal_status == TerminalPlanStatus.COVERAGE_GAP_BLOCKED
+    assert result.future_external_command is None
+    assert result.mutation_command_available is False
+
+
+def test_plan_refresh_repairable_runtime_mismatch_emits_future_guarded_advice(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    config = codex_home / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(
+        '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/other"\n'
+        "[features]\nplugin_hooks = true\n"
+        '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        encoding="utf-8",
+    )
+    ensure_complete_plugin_roots(repo_root, codex_home)
+
+    result = plan_refresh(repo_root=repo_root, codex_home=codex_home, mode="plan-refresh")
+
+    assert result.terminal_status == TerminalPlanStatus.REPAIRABLE_RUNTIME_CONFIG_MISMATCH
+    assert result.mutation_command_available is False
+    assert result.requires_plan == "future-mutation-plan"
+    assert result.future_external_command is not None
+    assert "--guarded-refresh --smoke standard" in result.future_external_command
+
+
+def test_plan_refresh_unrepairable_config_suppresses_future_advice_for_covered_drift(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    config = codex_home / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(
+        f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
+        "[features]\nplugin_hooks = false\n"
+        '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        encoding="utf-8",
+    )
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    write_plugin_pair(
+        repo_root,
+        codex_home,
+        plugin="handoff",
+        version="1.6.0",
+        rel="scripts/search.py",
+        source_text="print('new')\n",
+        cache_text="print('old')\n",
+    )
+
+    result = plan_refresh(repo_root=repo_root, codex_home=codex_home, mode="plan-refresh")
+
+    assert result.axes.runtime_config_state == RuntimeConfigState.UNREPAIRABLE_MISMATCH
+    assert result.axes.coverage_state == CoverageState.COVERED
+    assert result.future_external_command is None
+    assert result.requires_plan is None
+
+
+def test_plan_refresh_unknown_config_suppresses_future_advice_for_covered_drift(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    write_plugin_pair(
+        repo_root,
+        codex_home,
+        plugin="handoff",
+        version="1.6.0",
+        rel="scripts/search.py",
+        source_text="print('new')\n",
+        cache_text="print('old')\n",
+    )
+
+    result = plan_refresh(repo_root=repo_root, codex_home=codex_home, mode="plan-refresh")
+
+    assert result.axes.runtime_config_state == RuntimeConfigState.UNKNOWN
+    assert result.axes.coverage_state == CoverageState.COVERED
+    assert result.future_external_command is None
+    assert result.requires_plan is None
+
+
+def test_plan_refresh_disabled_plugin_enablement_blocks_filesystem_no_drift(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    config = codex_home / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(
+        f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
+        "[features]\nplugin_hooks = true\n"
+        '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."ticket@turbo-mode"]\nenabled = false\n',
+        encoding="utf-8",
+    )
+    ensure_complete_plugin_roots(repo_root, codex_home)
+
+    result = plan_refresh(repo_root=repo_root, codex_home=codex_home, mode="plan-refresh")
+
+    assert result.axes.runtime_config_state == RuntimeConfigState.UNREPAIRABLE_MISMATCH
+    assert result.terminal_status == TerminalPlanStatus.UNREPAIRABLE_RUNTIME_CONFIG_MISMATCH
+    assert result.future_external_command is None
+    assert result.runtime_config is not None
+    assert result.runtime_config.plugin_enablement_state["ticket@turbo-mode"] == "disabled"
+
+
+def test_plan_refresh_missing_plugin_enablement_blocks_filesystem_no_drift(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    config = codex_home / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(
+        f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
+        "[features]\nplugin_hooks = true\n"
+        '[plugins."handoff@turbo-mode"]\nenabled = true\n',
+        encoding="utf-8",
+    )
+    ensure_complete_plugin_roots(repo_root, codex_home)
+
+    result = plan_refresh(repo_root=repo_root, codex_home=codex_home, mode="plan-refresh")
+
+    assert result.axes.runtime_config_state == RuntimeConfigState.UNKNOWN
+    assert result.terminal_status == TerminalPlanStatus.BLOCKED_PREFLIGHT
+    assert result.future_external_command is None
+    assert result.runtime_config is not None
+    assert result.runtime_config.plugin_enablement_state["ticket@turbo-mode"] == "missing"
+
+
+def test_plan_refresh_repairable_mismatch_suppresses_future_advice_for_coverage_gap(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    config = codex_home / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(
+        '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/other"\n'
+        "[features]\nplugin_hooks = true\n"
+        '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        encoding="utf-8",
+    )
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    source_doc = repo_root / "plugins/turbo-mode/ticket/1.4.0/skills/ticket/references/new.md"
+    source_doc.parent.mkdir(parents=True, exist_ok=True)
+    source_doc.write_text("```bash\npython3 scripts/ticket_read.py list\n```\n", encoding="utf-8")
+
+    result = plan_refresh(repo_root=repo_root, codex_home=codex_home, mode="plan-refresh")
+
+    assert result.axes.runtime_config_state == RuntimeConfigState.REPAIRABLE_MISMATCH
+    assert result.axes.coverage_state == CoverageState.COVERAGE_GAP
+    assert result.future_external_command is None
+    assert result.requires_plan is None
+
+
+def test_plan_refresh_manifest_symlink_failure_becomes_blocked_result(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside\n", encoding="utf-8")
+    link = repo_root / "plugins/turbo-mode/handoff/1.6.0/skills"
+    link.symlink_to(outside)
+
+    result = plan_refresh(repo_root=repo_root, codex_home=codex_home, mode="dry-run")
+
+    assert result.terminal_status == TerminalPlanStatus.BLOCKED_PREFLIGHT
+    assert any("symlinks are not allowed" in reason for reason in result.axes.reasons)
