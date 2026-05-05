@@ -150,6 +150,7 @@ Current evidence lanes after parser-contract and closeout-ledger scrutiny:
 - Closeout-ledger repair boundary: runtime identity tests and evidence ledger repair were committed as `4d26c46 fix: close refresh inventory evidence gaps`.
 - Runtime identity timeout repair boundary: `d3cfbd53c6a93faba9ecd9ffc1dbbab487593f5b`, tree `f15c9dd7af6646912b486d7f06d549ec982edee0`, committed as `d3cfbd5 fix: handle codex version timeouts`.
 - Final executable repair boundary: `bfefeef5fbbcc095f8c0c23c16800a80d7c64a57`, tree `57bc165238b812993e8be600df65458ef35b01c1`, committed as `bfefeef fix: preserve failed inventory transcripts`.
+- Current saved artifact boundary: `bc2aa838cdbcdb78e9d27209f9804df894798bef`, tree `287ea481da3b6c85243dfb221a11e4987791b5f5`, committed as `bc2aa83 docs: record final inventory repair boundary`. This docs-only commit records the final executable repair boundary and does not supersede the executable proof at `bfefeef`.
 - Branch: `feature/turbo-mode-refresh-plan-03-runtime-inventory`.
 - Parser-contract repair evidence: `192 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
 - Parser-contract lint: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
@@ -176,4 +177,4 @@ Current evidence lanes after parser-contract and closeout-ledger scrutiny:
 
 The `18b90ff` ignore rule is accepted policy for this branch because the user explicitly requested the remaining `.gitignore` change be committed separately with rationale on 2026-05-05. Its scope is active session handoff summaries as local resume artifacts; it does not change the repository rule that handoff files in current work are durable artifacts when they are in scope. Tracked handoff files still surface in `git status`. A future active `docs/handoffs/*.md` file that is part of the reviewed work must be added intentionally with `git add -f` or the ignore policy must be revisited before merge.
 
-Merge readiness requires a clean worktree after the runtime-identity timeout repair and evidence-ledger update are committed. The completed checkboxes mean the branch implementation has local verification evidence, not that the work is merged or that live status is no-drift.
+Merge readiness requires the final executable repair at `bfefeef`, the current saved artifact boundary at `bc2aa83`, and a clean worktree at review time. The completed checkboxes mean the branch implementation has local verification evidence, not that the work is merged or that live status is no-drift.
