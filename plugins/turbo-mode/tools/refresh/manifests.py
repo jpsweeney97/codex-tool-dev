@@ -51,7 +51,17 @@ def scan_generated_residue(specs: list[PluginSpec]) -> list[ResidueIssue]:
             if not root.exists():
                 continue
             for path in sorted(root.rglob("*")):
-                if path.is_dir() and any(path.rglob("*")):
+                try:
+                    path_stat = path.lstat()
+                except OSError as exc:
+                    fail(
+                        "scan generated residue",
+                        str(exc),
+                        {"root_kind": root_kind, "path": str(path)},
+                    )
+                if path.is_symlink():
+                    continue
+                if stat.S_ISDIR(path_stat.st_mode) and any(path.iterdir()):
                     continue
                 rel = path.relative_to(root)
                 if _is_generated_residue(rel):

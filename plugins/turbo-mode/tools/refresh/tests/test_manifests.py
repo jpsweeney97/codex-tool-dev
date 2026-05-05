@@ -73,6 +73,42 @@ def test_manifest_rejects_directory_symlink_before_hashing(tmp_path: Path) -> No
         build_manifest(spec, root_kind="source")
 
 
+def test_directory_symlink_rejection_wins_before_external_residue_scan(tmp_path: Path) -> None:
+    spec = plugin_spec(tmp_path)
+    outside_residue = tmp_path / "outside" / ".pytest_cache" / "README.md"
+    outside_residue.parent.mkdir(parents=True)
+    outside_residue.write_text("external cache", encoding="utf-8")
+    link = spec.source_root / "skills"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(tmp_path / "outside", target_is_directory=True)
+
+    with pytest.raises(RefreshError, match="symlinks are not allowed"):
+        build_manifest(spec, root_kind="source")
+
+
+def test_residue_scan_does_not_descend_from_directory_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = plugin_spec(tmp_path)
+    outside_file = tmp_path / "outside" / "README.md"
+    outside_file.parent.mkdir(parents=True)
+    outside_file.write_text("external", encoding="utf-8")
+    link = spec.source_root / "skills"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(tmp_path / "outside", target_is_directory=True)
+    original_rglob = Path.rglob
+
+    def fail_on_symlink_rglob(self: Path, pattern: str) -> object:
+        if self.is_symlink():
+            raise AssertionError(f"descended from symlink path: {self}")
+        return original_rglob(self, pattern)
+
+    monkeypatch.setattr(Path, "rglob", fail_on_symlink_rglob)
+
+    assert scan_generated_residue([spec]) == []
+
+
 def test_diff_manifests_reports_added_removed_and_changed(tmp_path: Path) -> None:
     spec = plugin_spec(tmp_path)
     source_only = spec.source_root / "README.md"
