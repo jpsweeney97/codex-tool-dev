@@ -149,6 +149,7 @@ Current evidence lanes after parser-contract and closeout-ledger scrutiny:
 - Parser-contract repair boundary: structural parser hardening was committed as `03b04e4 fix: harden refresh runtime inventory parser`.
 - Closeout-ledger repair boundary: runtime identity tests and evidence ledger repair were committed as `4d26c46 fix: close refresh inventory evidence gaps`.
 - Runtime identity timeout repair boundary: `d3cfbd53c6a93faba9ecd9ffc1dbbab487593f5b`, tree `f15c9dd7af6646912b486d7f06d549ec982edee0`, committed as `d3cfbd5 fix: handle codex version timeouts`.
+- Final executable repair boundary: `bfefeef5fbbcc095f8c0c23c16800a80d7c64a57`, tree `57bc165238b812993e8be600df65458ef35b01c1`, committed as `bfefeef fix: preserve failed inventory transcripts`.
 - Branch: `feature/turbo-mode-refresh-plan-03-runtime-inventory`.
 - Parser-contract repair evidence: `192 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
 - Parser-contract lint: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
