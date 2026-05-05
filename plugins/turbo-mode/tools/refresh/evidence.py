@@ -8,9 +8,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from .app_server_inventory import transcript_bytes
 from .planner import RefreshPlanResult
 
-SCHEMA_VERSION = "turbo-mode-refresh-plan-02"
+SCHEMA_VERSION = "turbo-mode-refresh-plan-03"
 
 
 def evidence_payload(result: RefreshPlanResult, *, run_id: str) -> dict[str, Any]:
@@ -27,6 +28,9 @@ def evidence_payload(result: RefreshPlanResult, *, run_id: str) -> dict[str, Any
         "diffs": _json_safe(result.diffs),
         "diff_classification": _json_safe(result.diff_classification),
         "runtime_config": _json_safe(result.runtime_config),
+        "app_server_inventory": _json_safe(result.app_server_inventory),
+        "app_server_inventory_status": result.app_server_inventory_status,
+        "app_server_inventory_failure_reason": result.app_server_inventory_failure_reason,
         "axes": _json_safe(result.axes),
         "terminal_plan_status": result.terminal_status.value,
         "future_external_command": result.future_external_command,
@@ -48,8 +52,14 @@ def write_local_evidence(result: RefreshPlanResult, *, run_id: str) -> Path:
             f"Got: {str(run_dir)!r:.100}"
         ) from exc
     path = run_dir / f"{result.mode}.summary.json"
-    payload = evidence_payload(result, run_id=safe_run_id)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if result.app_server_transcript:
+        transcript_path = run_dir / "app-server-readonly-inventory.transcript.json"
+        transcript_fd = os.open(transcript_path, flags, 0o600)
+        with os.fdopen(transcript_fd, "wb") as handle:
+            handle.write(transcript_bytes(result.app_server_transcript))
+        os.chmod(transcript_path, 0o600)
+    payload = evidence_payload(result, run_id=safe_run_id)
     fd = os.open(path, flags, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, sort_keys=True)
@@ -131,9 +141,9 @@ def _json_safe(value: Any) -> Any:
 
 def _omission_reasons(result: RefreshPlanResult) -> dict[str, str]:
     return {
-        "app_server_inventory": "outside-plan-02",
-        "process_gate": "outside-plan-02",
-        "post_refresh_cache_manifest": "outside-plan-02",
-        "smoke_summary": "outside-plan-02",
-        "commit_safe_summary": "outside-plan-02",
+        "app_server_inventory": result.app_server_inventory_status,
+        "process_gate": "outside-plan-03",
+        "post_refresh_cache_manifest": "outside-plan-03",
+        "smoke_summary": "outside-plan-03",
+        "commit_safe_summary": "outside-plan-03",
     }

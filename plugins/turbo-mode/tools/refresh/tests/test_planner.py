@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from refresh import planner
+from refresh.app_server_inventory import AppServerInventoryCheck, CodexRuntimeIdentity
 from refresh.models import (
     CoverageState,
     FilesystemState,
@@ -401,6 +402,31 @@ def write_valid_marketplace(repo_root: Path) -> None:
     write_marketplace(repo_root / ".agents/plugins/marketplace.json")
 
 
+def aligned_inventory() -> AppServerInventoryCheck:
+    identity = CodexRuntimeIdentity(
+        codex_version="codex-cli 0.test",
+        executable_path="/usr/local/bin/codex",
+        executable_sha256="abc",
+        executable_hash_unavailable_reason=None,
+        server_info={"name": "codex-app-server", "version": "0.test"},
+        initialize_capabilities={"experimentalApi": True},
+    )
+    return AppServerInventoryCheck(
+        state="aligned",
+        identity=identity,
+        plugin_read_sources={
+            "handoff": "/repo/plugins/turbo-mode/handoff/1.6.0",
+            "ticket": "/repo/plugins/turbo-mode/ticket/1.4.0",
+        },
+        plugin_list=("handoff@turbo-mode", "ticket@turbo-mode"),
+        skills=("handoff:save", "ticket:ticket"),
+        ticket_hook={"command": "python3 ticket_engine_guard.py", "sourcePath": "hooks.json"},
+        handoff_hooks=(),
+        request_methods=("initialize", "plugin/read"),
+        transcript_sha256="abc",
+    )
+
+
 def test_plan_refresh_no_drift_with_aligned_config(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     codex_home = tmp_path / ".codex"
@@ -416,6 +442,89 @@ def test_plan_refresh_no_drift_with_aligned_config(tmp_path: Path) -> None:
     assert result.axes.runtime_config_state == RuntimeConfigState.UNCHECKED
     assert result.terminal_status == TerminalPlanStatus.FILESYSTEM_NO_DRIFT
     assert result.diff_classification == ()
+
+
+def test_plan_refresh_inventory_check_can_prove_no_drift(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+
+    result = plan_refresh(
+        repo_root=repo_root,
+        codex_home=codex_home,
+        mode="dry-run",
+        inventory_check=True,
+        inventory_collector=lambda _paths: (aligned_inventory(), ({"direction": "recv"},)),
+    )
+
+    assert result.axes.runtime_config_state == RuntimeConfigState.ALIGNED
+    assert result.terminal_status == TerminalPlanStatus.NO_DRIFT
+    assert result.app_server_inventory is not None
+    assert result.app_server_transcript == ({"direction": "recv"},)
+
+
+def test_plan_refresh_inventory_failure_blocks_without_erasing_manifest_facts(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    write_plugin_pair(
+        repo_root,
+        codex_home,
+        plugin="handoff",
+        version="1.6.0",
+        rel="scripts/search.py",
+        source_text="print('new')\n",
+        cache_text="print('old')\n",
+    )
+
+    def fail_inventory(_paths):
+        raise RefreshError("inventory contract failed: missing app-server responses. Got: [4]")
+
+    result = plan_refresh(
+        repo_root=repo_root,
+        codex_home=codex_home,
+        mode="dry-run",
+        inventory_check=True,
+        inventory_collector=fail_inventory,
+    )
+
+    assert result.axes.preflight_state == PreflightState.BLOCKED
+    assert result.terminal_status == TerminalPlanStatus.BLOCKED_PREFLIGHT
+    assert result.diffs
+    assert result.diff_classification
+    assert result.app_server_inventory_status == "requested-failed"
+    assert result.app_server_inventory_failure_reason is not None
+    assert "inventory contract failed" in result.axes.reasons[0]
+
+
+def test_plan_refresh_inventory_requested_blocked_when_config_preflight_fails(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    config = codex_home / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("[features\n", encoding="utf-8")
+
+    result = plan_refresh(
+        repo_root=repo_root,
+        codex_home=codex_home,
+        mode="dry-run",
+        inventory_check=True,
+    )
+
+    assert result.app_server_inventory_status == "requested-blocked"
+    assert result.app_server_inventory_failure_reason == "runtime config preflight unavailable"
+    assert result.app_server_inventory is None
+    assert result.terminal_status == TerminalPlanStatus.BLOCKED_PREFLIGHT
 
 
 def test_plan_refresh_normalizes_relative_repo_root_for_config_comparison(

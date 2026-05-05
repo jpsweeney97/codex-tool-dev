@@ -32,6 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--codex-home", type=Path, default=Path.home() / ".codex")
     parser.add_argument("--run-id")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--inventory-check", action="store_true")
     return parser
 
 
@@ -39,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.refresh or args.guarded_refresh:
-        parser.error("--refresh and --guarded-refresh are outside Plan 02")
+        parser.error("--refresh and --guarded-refresh are outside Plan 03")
     if args.smoke is not None:
         parser.error("--smoke is only accepted with rejected future command shapes")
     mode = "plan-refresh" if args.plan_refresh else "dry-run"
@@ -49,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
             repo_root=args.repo_root,
             codex_home=args.codex_home,
             mode=mode,
+            inventory_check=args.inventory_check,
         )
         evidence_path = write_local_evidence(result, run_id=run_id)
     except (RefreshError, ValueError, OSError) as exc:
@@ -62,6 +64,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"mode: {mode}")
         print(f"terminal_plan_status: {result.terminal_status.value}")
         print(f"evidence_path: {evidence_path}")
+        print(f"app_server_inventory_status: {result.app_server_inventory_status}")
+        if result.app_server_inventory_failure_reason is not None:
+            print(
+                "app_server_inventory_failure_reason: "
+                f"{result.app_server_inventory_failure_reason}"
+            )
+        if result.app_server_inventory is not None:
+            print(f"app_server_inventory: {result.app_server_inventory.state}")
         print(f"mutation_command_available: {str(result.mutation_command_available).lower()}")
         if result.future_external_command is not None:
             print(f"future_external_command: {result.future_external_command}")
