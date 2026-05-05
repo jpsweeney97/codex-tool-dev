@@ -10,7 +10,6 @@ GUARDED_ONLY_PATTERNS = (
     "handoff/1.6.0/scripts/defer.py",
     "ticket/1.4.0/hooks/hooks.json",
     "ticket/1.4.0/hooks/*.py",
-    "ticket/1.4.0/scripts/ticket_engine_guard.py",
     "ticket/1.4.0/scripts/ticket_engine_runner.py",
     "ticket/1.4.0/scripts/ticket_engine_core.py",
     "ticket/1.4.0/scripts/ticket_engine_user.py",
@@ -89,7 +88,15 @@ def classify_diff_path(
     mutation_mode = MutationMode.GUARDED
     smoke: tuple[str, ...] = ()
 
-    if _matches_any(path, COVERAGE_GAP_PATTERNS):
+    if _is_added_executable_path(
+        path,
+        kind=kind,
+        source_text=source_text,
+        executable=executable,
+    ):
+        coverage_status = CoverageStatus.COVERAGE_GAP
+        reasons.append("added-executable-path")
+    elif _matches_any(path, COVERAGE_GAP_PATTERNS):
         coverage_status = CoverageStatus.COVERAGE_GAP
         reasons.append("coverage-gap-path")
     elif _matches_any(path, GUARDED_ONLY_PATTERNS):
@@ -149,6 +156,21 @@ def _smoke_for_path(path: str) -> tuple[str, ...]:
         if fnmatch.fnmatchcase(path, pattern):
             return smoke
     return ()
+
+
+def _is_added_executable_path(
+    path: str,
+    *,
+    kind: DiffKind,
+    source_text: str,
+    executable: bool,
+) -> bool:
+    if kind != DiffKind.ADDED:
+        return False
+    return executable or _text_has_shebang(source_text) or is_executable_or_command_bearing_path(
+        path,
+        executable=executable,
+    )
 
 
 def _text_has_shebang(text: str) -> bool:

@@ -62,6 +62,45 @@ def test_new_executable_path_is_coverage_gap_not_guarded_only() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "handoff/1.6.0/skills/new_tool.py",
+        "handoff/1.6.0/references/new_tool.py",
+        "ticket/1.4.0/skills/new_tool.py",
+        "ticket/1.4.0/references/new_tool.py",
+    ],
+)
+def test_added_executable_under_fast_safe_doc_glob_is_coverage_gap(path: str) -> None:
+    result = classify_diff_path(
+        path,
+        kind=DiffKind.ADDED,
+        source_text="print('new')\n",
+        cache_text="",
+        executable=True,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "added-executable-path" in result.reasons
+
+
+def test_added_shebang_file_under_fast_safe_doc_glob_is_coverage_gap() -> None:
+    result = classify_diff_path(
+        "handoff/1.6.0/skills/new_tool",
+        kind=DiffKind.ADDED,
+        source_text="#!/usr/bin/env python3\nprint('new')\n",
+        cache_text="",
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "added-executable-path" in result.reasons
+
+
 def test_unmatched_non_executable_path_is_guarded_only_with_reason() -> None:
     result = classify_diff_path(
         "ticket/1.4.0/notes/operator.md",
@@ -91,6 +130,20 @@ def test_added_unmatched_non_executable_path_is_guarded_only() -> None:
     assert "unmatched-path" in result.reasons
 
 
+def test_nonexistent_ticket_engine_guard_script_is_coverage_gap() -> None:
+    result = classify_diff_path(
+        "ticket/1.4.0/scripts/ticket_engine_guard.py",
+        kind=DiffKind.ADDED,
+        source_text="print('new')\n",
+        cache_text="",
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+
+
 @pytest.mark.parametrize(
     ("path", "outcome"),
     [
@@ -116,7 +169,6 @@ def test_added_unmatched_non_executable_path_is_guarded_only() -> None:
         ("ticket/1.4.0/scripts/ticket_dedup.py", PathOutcome.COVERAGE_GAP_FAIL),
         ("ticket/1.4.0/scripts/ticket_engine_agent.py", PathOutcome.GUARDED_ONLY),
         ("ticket/1.4.0/scripts/ticket_engine_core.py", PathOutcome.GUARDED_ONLY),
-        ("ticket/1.4.0/scripts/ticket_engine_guard.py", PathOutcome.GUARDED_ONLY),
         ("ticket/1.4.0/scripts/ticket_engine_runner.py", PathOutcome.GUARDED_ONLY),
         ("ticket/1.4.0/scripts/ticket_engine_user.py", PathOutcome.GUARDED_ONLY),
         ("ticket/1.4.0/scripts/ticket_envelope.py", PathOutcome.GUARDED_ONLY),
