@@ -101,6 +101,69 @@ def test_added_shebang_file_under_fast_safe_doc_glob_is_coverage_gap() -> None:
     assert "added-executable-path" in result.reasons
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "handoff/1.6.0/skills/search/SKILL.md",
+        "handoff/1.6.0/references/handoff-contract.md",
+        "ticket/1.4.0/skills/ticket/SKILL.md",
+        "ticket/1.4.0/references/pipeline-guide.md",
+    ],
+)
+def test_changed_fast_safe_doc_glob_with_executable_mode_is_coverage_gap(path: str) -> None:
+    result = classify_diff_path(
+        path,
+        kind=DiffKind.CHANGED,
+        source_text="# Heading\n",
+        cache_text="# Heading\n",
+        executable=True,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "executable-doc-surface" in result.reasons
+
+
+def test_changed_fast_safe_doc_glob_with_new_shebang_is_coverage_gap() -> None:
+    result = classify_diff_path(
+        "handoff/1.6.0/skills/search/SKILL.md",
+        kind=DiffKind.CHANGED,
+        source_text="#!/usr/bin/env python3\nprint('new')\n",
+        cache_text="# Search skill\n",
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "executable-doc-surface" in result.reasons
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "handoff/1.6.0/skills/new_tool.py",
+        "handoff/1.6.0/references/new_tool.sh",
+        "ticket/1.4.0/skills/new_tool.py",
+        "ticket/1.4.0/references/new_tool.sh",
+    ],
+)
+def test_added_non_doc_file_under_fast_safe_doc_glob_is_coverage_gap(path: str) -> None:
+    result = classify_diff_path(
+        path,
+        kind=DiffKind.ADDED,
+        source_text="content\n",
+        cache_text="",
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "added-non-doc-path" in result.reasons
+
+
 def test_unmatched_non_executable_path_is_guarded_only_with_reason() -> None:
     result = classify_diff_path(
         "ticket/1.4.0/notes/operator.md",
