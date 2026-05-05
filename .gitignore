@@ -12,6 +12,7 @@ tmp/
 *settings*.json
 docs/handoffs/.session-state/
 docs/handoffs/archive/
+docs/handoffs/*.md
 .codex/local/
 .codex/plugin-dev/**/.codex/ticket-tmp/
 .codex/plugin-dev/
