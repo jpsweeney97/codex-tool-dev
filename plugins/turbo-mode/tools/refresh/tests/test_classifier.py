@@ -141,6 +141,57 @@ def test_changed_fast_safe_doc_glob_with_new_shebang_is_coverage_gap() -> None:
 
 
 @pytest.mark.parametrize(
+    ("path", "source_text", "executable"),
+    [
+        ("handoff/1.6.0/README.md", "#!/usr/bin/env python3\nprint('new')\n", False),
+        ("handoff/1.6.0/CHANGELOG.md", "# Changelog\n", True),
+        ("ticket/1.4.0/README.md", "#!/usr/bin/env bash\n", False),
+        ("ticket/1.4.0/CHANGELOG.md", "# Changelog\n", True),
+        ("ticket/1.4.0/HANDBOOK.md", "# Handbook\n", True),
+    ],
+)
+def test_changed_root_fast_safe_doc_with_executable_surface_is_coverage_gap(
+    path: str,
+    source_text: str,
+    executable: bool,
+) -> None:
+    result = classify_diff_path(
+        path,
+        kind=DiffKind.CHANGED,
+        source_text=source_text,
+        cache_text="# Previous\n",
+        executable=executable,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "executable-doc-surface" in result.reasons
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "handoff/1.6.0/references/handoff-contract.md",
+        "ticket/1.4.0/references/ticket-contract.md",
+    ],
+)
+def test_root_reference_markdown_paths_remain_fast_safe(path: str) -> None:
+    result = classify_diff_path(
+        path,
+        kind=DiffKind.CHANGED,
+        source_text="# Contract\n",
+        cache_text="# Contract\n",
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.FAST_SAFE_WITH_COVERED_SMOKE
+    assert result.mutation_mode == MutationMode.FAST
+    assert result.coverage_status == CoverageStatus.COVERED
+    assert result.smoke == ("light",)
+
+
+@pytest.mark.parametrize(
     "path",
     [
         "handoff/1.6.0/skills/new_tool.py",

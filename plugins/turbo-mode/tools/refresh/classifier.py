@@ -4,6 +4,21 @@ import fnmatch
 
 from .models import CoverageStatus, DiffKind, MutationMode, PathClassification, PathOutcome
 
+ROOT_DOC_PATTERNS = (
+    "handoff/1.6.0/README.md",
+    "handoff/1.6.0/CHANGELOG.md",
+    "ticket/1.4.0/README.md",
+    "ticket/1.4.0/CHANGELOG.md",
+    "ticket/1.4.0/HANDBOOK.md",
+)
+
+DOC_ROOT_PATTERNS = (
+    "handoff/1.6.0/skills/**",
+    "handoff/1.6.0/references/**",
+    "ticket/1.4.0/skills/**",
+    "ticket/1.4.0/references/**",
+)
+
 GUARDED_ONLY_PATTERNS = (
     "handoff/1.6.0/hooks/hooks.json",
     "handoff/1.6.0/hooks/*.py",
@@ -27,7 +42,9 @@ FAST_SAFE_PATTERNS = (
     "handoff/1.6.0/scripts/search.py",
     "handoff/1.6.0/scripts/triage.py",
     "handoff/1.6.0/scripts/session_state.py",
+    "handoff/1.6.0/skills/*.md",
     "handoff/1.6.0/skills/**/*.md",
+    "handoff/1.6.0/references/*.md",
     "handoff/1.6.0/references/**/*.md",
     "handoff/1.6.0/README.md",
     "handoff/1.6.0/CHANGELOG.md",
@@ -36,7 +53,9 @@ FAST_SAFE_PATTERNS = (
     "ticket/1.4.0/HANDBOOK.md",
     "ticket/1.4.0/pyproject.toml",
     "ticket/1.4.0/uv.lock",
+    "ticket/1.4.0/skills/*.md",
     "ticket/1.4.0/skills/**/*.md",
+    "ticket/1.4.0/references/*.md",
     "ticket/1.4.0/references/**/*.md",
 )
 
@@ -51,7 +70,9 @@ SMOKE_BY_PATTERN = {
     "handoff/1.6.0/scripts/search.py": ("handoff-search",),
     "handoff/1.6.0/scripts/triage.py": ("handoff-triage",),
     "handoff/1.6.0/scripts/session_state.py": ("handoff-session-state-write-read-clear",),
+    "handoff/1.6.0/skills/*.md": ("light",),
     "handoff/1.6.0/skills/**/*.md": ("light",),
+    "handoff/1.6.0/references/*.md": ("light",),
     "handoff/1.6.0/references/**/*.md": ("light",),
     "handoff/1.6.0/README.md": ("light",),
     "handoff/1.6.0/CHANGELOG.md": ("light",),
@@ -60,7 +81,9 @@ SMOKE_BY_PATTERN = {
     "ticket/1.4.0/README.md": ("light",),
     "ticket/1.4.0/CHANGELOG.md": ("light",),
     "ticket/1.4.0/HANDBOOK.md": ("light",),
+    "ticket/1.4.0/skills/*.md": ("light",),
     "ticket/1.4.0/skills/**/*.md": ("light",),
+    "ticket/1.4.0/references/*.md": ("light",),
     "ticket/1.4.0/references/**/*.md": ("light",),
     "ticket/1.4.0/pyproject.toml": ("ticket-installed-command",),
     "ticket/1.4.0/uv.lock": ("ticket-installed-command",),
@@ -191,7 +214,7 @@ def _is_executable_doc_surface(
     cache_text: str,
     executable: bool,
 ) -> bool:
-    if not _is_doc_glob_path(path):
+    if not _is_doc_surface_path(path):
         return False
     return executable or _text_has_shebang(source_text) or _text_has_shebang(cache_text)
 
@@ -203,15 +226,11 @@ def _is_added_non_doc_path(path: str, *, kind: DiffKind) -> bool:
 
 
 def _is_doc_glob_path(path: str) -> bool:
-    return _matches_any(
-        path,
-        (
-            "handoff/1.6.0/skills/**",
-            "handoff/1.6.0/references/**",
-            "ticket/1.4.0/skills/**",
-            "ticket/1.4.0/references/**",
-        ),
-    )
+    return _matches_any(path, DOC_ROOT_PATTERNS)
+
+
+def _is_doc_surface_path(path: str) -> bool:
+    return _is_doc_glob_path(path) or _matches_any(path, ROOT_DOC_PATTERNS)
 
 
 def _text_has_shebang(text: str) -> bool:
