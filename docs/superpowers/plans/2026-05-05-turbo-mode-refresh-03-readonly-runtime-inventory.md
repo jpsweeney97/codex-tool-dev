@@ -153,6 +153,7 @@ Current evidence lanes after parser-contract and closeout-ledger scrutiny:
 - Final executable repair boundary: `bfefeef5fbbcc095f8c0c23c16800a80d7c64a57`, tree `57bc165238b812993e8be600df65458ef35b01c1`, committed as `bfefeef fix: preserve failed inventory transcripts`.
 - Current saved artifact boundary: `bc2aa838cdbcdb78e9d27209f9804df894798bef`, tree `287ea481da3b6c85243dfb221a11e4987791b5f5`, committed as `bc2aa83 docs: record final inventory repair boundary`. This docs-only commit records the final executable repair boundary and does not supersede the executable proof at `bfefeef`.
 - Current pre-identity-binding artifact boundary: `06cc849ac296bf641a52dd3c8070657a1aa3fea6`, tree `d0386abe114b6316b9bff1ff3b5516dd0583cb88`, committed as `06cc849 docs: record current Plan 03 artifact boundary`.
+- Runtime identity binding repair boundary: `33a588b192f0deefb07f925e7a0809b1ea0ac4c5`, tree `f0be53663e75c436cf7815e7ca0217658ae34ae7`, committed as `33a588b fix: bind inventory identity executable`.
 - Branch: `feature/turbo-mode-refresh-plan-03-runtime-inventory`.
 - Parser-contract repair evidence: `192 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
 - Parser-contract lint: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
