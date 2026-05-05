@@ -142,49 +142,39 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 ## Completion Evidence
 
-Current evidence lanes after parser-contract and closeout-ledger scrutiny:
+Current Plan 03 proof lane:
 
-- Intended contract: this document now requires structural response validation, duplicate-id rejection, unexpected-id rejection, malformed-stream rejection, and explicit current-state reconciliation before merge readiness.
+- Intended contract: this document requires structural response validation, duplicate-id rejection, unexpected-id rejection, malformed-stream rejection, runtime executable identity binding to one resolved path, explicit current-state reconciliation before merge readiness, and ignored-handoff visibility before closeout.
+- Branch: `feature/turbo-mode-refresh-plan-03-runtime-inventory`.
+- Current committed Plan 03 artifact boundary at the 2026-05-05 scrutiny checkpoint: `64cfecba45d12a7988f6c8a0ad2bc9ae3a4c98bc`, tree `5a618dc04e7982b64146d179e110b43c24c558ee`, committed as `64cfecb docs: record identity binding boundary`.
+- Executable proof boundary: `33a588b192f0deefb07f925e7a0809b1ea0ac4c5`, tree `f0be53663e75c436cf7815e7ca0217658ae34ae7`, committed as `33a588b fix: bind inventory identity executable`.
+- Runtime identity proof: one resolved `codex` path is used for app-server launch and identity capture, and tests prove that shared-path binding. This is path-bound provenance, not immutable-binary provenance; Plan 03 accepts the local race where the bytes at that path could change between launch and post-roundtrip version/hash capture.
+- Focused refresh test evidence at the current checkpoint: `203 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
+- Lint evidence at the current checkpoint: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
+- Residue evidence at the current checkpoint: the generated-residue scan over Handoff, Ticket, and refresh roots printed nothing.
+- Current live read-only inventory smoke evidence path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan03-scrutinize-live-20260505/dry-run.summary.json`.
+- Current live smoke result: `app_server_inventory_status = collected`, runtime inventory aligned, `terminal_plan_status = coverage-gap-blocked`.
+- Current live smoke summary SHA256: `a9c09eb5cbf2b3a2ee074d0b6ab09c46527b1a8aa322805199dda92133fc0146`.
+- Current live smoke transcript SHA256: `932c49c6905912a53622c3178173446568dc3f5def73a59a3b20035b781a6e3f`.
+
+Superseded historical proof lane:
+
 - Implementation boundary: Plan 03 feature work was committed as `e4a4805 feat: add refresh runtime inventory check`.
 - Separate policy boundary: active handoff summary ignore policy was committed separately as `18b90ff chore: ignore active handoff summaries`.
 - Parser-contract repair boundary: structural parser hardening was committed as `03b04e4 fix: harden refresh runtime inventory parser`.
 - Closeout-ledger repair boundary: runtime identity tests and evidence ledger repair were committed as `4d26c46 fix: close refresh inventory evidence gaps`.
 - Runtime identity timeout repair boundary: `d3cfbd53c6a93faba9ecd9ffc1dbbab487593f5b`, tree `f15c9dd7af6646912b486d7f06d549ec982edee0`, committed as `d3cfbd5 fix: handle codex version timeouts`.
-- Final executable repair boundary: `bfefeef5fbbcc095f8c0c23c16800a80d7c64a57`, tree `57bc165238b812993e8be600df65458ef35b01c1`, committed as `bfefeef fix: preserve failed inventory transcripts`.
-- Current saved artifact boundary: `bc2aa838cdbcdb78e9d27209f9804df894798bef`, tree `287ea481da3b6c85243dfb221a11e4987791b5f5`, committed as `bc2aa83 docs: record final inventory repair boundary`. This docs-only commit records the final executable repair boundary and does not supersede the executable proof at `bfefeef`.
-- Current pre-identity-binding artifact boundary: `06cc849ac296bf641a52dd3c8070657a1aa3fea6`, tree `d0386abe114b6316b9bff1ff3b5516dd0583cb88`, committed as `06cc849 docs: record current Plan 03 artifact boundary`.
-- Runtime identity binding repair boundary: `33a588b192f0deefb07f925e7a0809b1ea0ac4c5`, tree `f0be53663e75c436cf7815e7ca0217658ae34ae7`, committed as `33a588b fix: bind inventory identity executable`.
-- Branch: `feature/turbo-mode-refresh-plan-03-runtime-inventory`.
-- Parser-contract repair evidence: `192 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
-- Parser-contract lint: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
-- Parser-contract residue scan over Handoff, Ticket, and refresh roots printed nothing.
-- Parser-contract live read-only inventory smoke evidence path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan03-parser-contract-live-smoke-20260505/dry-run.summary.json`.
-- Parser-contract live smoke result: `app_server_inventory_status = collected`, runtime inventory aligned, `terminal_plan_status = coverage-gap-blocked`.
-- Parser-contract live smoke summary SHA256: `a00593ea010508325cbba6118fa076a65cc6ad00b0f2136cd446701dc32573d0`.
-- Parser-contract live smoke transcript SHA256: `35575891cc74a50d99163088f6d4c2661a0e871b2de65b40435a57abdc5b065d`.
-- Runtime identity direct-test evidence: `22 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests/test_app_server_inventory.py -q`.
-- Runtime identity timeout repair evidence: `23 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests/test_app_server_inventory.py -q`.
-- Runtime identity timeout full-slice evidence: `197 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
-- Runtime identity binding repair evidence: `27 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests/test_app_server_inventory.py -q`.
-- Runtime identity binding full-slice evidence: `203 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
-- Runtime identity binding lint: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
-- Runtime identity binding live read-only inventory smoke evidence path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan03-identity-bound-live-smoke-20260505/dry-run.summary.json`.
-- Runtime identity binding live smoke result: `app_server_inventory_status = collected`, runtime inventory aligned, `terminal_plan_status = coverage-gap-blocked`.
-- Runtime identity binding live smoke summary SHA256: `75c0a73d458decd622b91aed0e9cfa93e3bb2f30e41012ada95966128a76e84f`.
-- Runtime identity binding live smoke transcript SHA256: `1926d2a74523cf7a36f6df51ade17061aaf7d5dc9a938581e4de18b282235cb6`.
-- Final contract repair evidence: `202 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
-- Final contract lint: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
-- Final contract live read-only inventory smoke evidence path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan03-final-contract-live-smoke-20260505/dry-run.summary.json`.
-- Final contract live smoke result: `app_server_inventory_status = collected`, runtime inventory aligned, `terminal_plan_status = coverage-gap-blocked`.
-- Final contract live smoke summary SHA256: `ba67d167364f126b905967db0a167a0503c30fef2a981b5fb444b62c197efa0d`.
-- Final contract live smoke transcript SHA256: `5cb244f6026c41ed57e6c2ec53ab94d7c894ea24b75de9b600ef917580d962d2`.
-- Closeout-ledger repair evidence: `196 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
-- Historical focused tests before parser-contract repair: `186 passed` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`.
-- Historical lint before parser-contract repair: `All checks passed!` from `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`.
-- Historical residue scan before parser-contract repair over Handoff, Ticket, and refresh roots printed nothing.
-- Historical live read-only inventory smoke evidence path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan03-reviewfix-live-smoke-20260505/dry-run.summary.json`.
-- Historical live smoke result: `app_server_inventory_status = collected`, runtime inventory aligned, `terminal_plan_status = coverage-gap-blocked`.
+- Failed-transcript preservation boundary: `bfefeef5fbbcc095f8c0c23c16800a80d7c64a57`, tree `57bc165238b812993e8be600df65458ef35b01c1`, committed as `bfefeef fix: preserve failed inventory transcripts`.
+- Prior docs-only artifact boundaries: `bc2aa838cdbcdb78e9d27209f9804df894798bef` / tree `287ea481da3b6c85243dfb221a11e4987791b5f5` and `06cc849ac296bf641a52dd3c8070657a1aa3fea6` / tree `d0386abe114b6316b9bff1ff3b5516dd0583cb88`.
+- Earlier proof entries with `186`, `192`, `196`, `197`, or `202` focused test passes, earlier lint passes, earlier clean residue scans, and earlier local-only smoke hashes are historical repair evidence only. They do not supersede the current proof lane above.
 
-The `18b90ff` ignore rule is accepted policy for this branch because the user explicitly requested the remaining `.gitignore` change be committed separately with rationale on 2026-05-05. Its scope is active session handoff summaries as local resume artifacts; it does not change the repository rule that handoff files in current work are durable artifacts when they are in scope. Tracked handoff files still surface in `git status`. A future active `docs/handoffs/*.md` file that is part of the reviewed work must be added intentionally with `git add -f` or the ignore policy must be revisited before merge.
+The `18b90ff` ignore rule is accepted policy for this branch because the user explicitly requested the remaining `.gitignore` change be committed separately with rationale on 2026-05-05. Its scope is active session handoff summaries as local resume artifacts; it does not change the repository rule that handoff files in current work are durable artifacts when they are in scope. Tracked handoff files still surface in `git status`.
 
-Merge readiness requires the final executable repair at `bfefeef`, the subsequent identity-binding repair, the current saved artifact boundary, and a clean worktree at review time. The completed checkboxes mean the branch implementation has local verification evidence, not that the work is merged or that live status is no-drift. A docs commit cannot self-name its own hash; use `git rev-parse HEAD` with this ledger to identify the current saved artifact boundary after a ledger-only update.
+Merge readiness requires all of the following:
+
+- The executable proof boundary at `33a588b` or a later reviewed implementation boundary.
+- The current committed Plan 03 artifact boundary recorded above, or a later docs boundary that explicitly supersedes it.
+- A clean tracked worktree at review time.
+- `git status --short --ignored docs/handoffs` checked at review time, plus `git status --short --ignored --untracked-files=all docs/handoffs` if the short form collapses ignored directories. Ignored `docs/handoffs/.session-state/` and `docs/handoffs/archive/` entries are expected local handoff mechanics. Any ignored active `docs/handoffs/*.md` file outside those directories must be archived, force-added and reviewed, or otherwise explicitly resolved before claiming closeout cleanliness.
+
+The completed checkboxes mean the branch implementation has local verification evidence, not that the work is merged or that live status is no-drift. The live status warning is load-bearing: Plan 03 runtime inventory can be collected and aligned while the installed-cache/source assessment still ends in `coverage-gap-blocked`. A docs commit cannot self-name its own hash; after any ledger-only update, use `git rev-parse HEAD` and `git rev-parse HEAD^{tree}` to record the next committed artifact boundary.
