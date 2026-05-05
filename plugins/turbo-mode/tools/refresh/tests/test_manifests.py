@@ -11,6 +11,7 @@ from refresh.models import (
     DiffKind,
     FilesystemState,
     MutationMode,
+    PathClassification,
     PlanAxes,
     PluginSpec,
     PreflightState,
@@ -266,9 +267,10 @@ def test_fixture_backed_diff_classification_and_aggregate_state(tmp_path: Path) 
         == MutationMode.GUARDED
     )
 
+    coverage_state = _aggregate_coverage_state(classifications)
     axes = PlanAxes(
         filesystem_state=FilesystemState.DRIFT,
-        coverage_state=CoverageState.COVERAGE_GAP,
+        coverage_state=coverage_state,
         runtime_config_state=RuntimeConfigState.ALIGNED,
         preflight_state=PreflightState.PASSED,
         selected_mutation_mode=SelectedMutationMode.GUARDED_REFRESH,
@@ -294,3 +296,12 @@ def _write_pair(
 
 def _relative_path(canonical_path: str) -> Path:
     return Path(*Path(canonical_path).parts[2:])
+
+
+def _aggregate_coverage_state(classifications: list[PathClassification]) -> CoverageState:
+    if any(
+        classification.coverage_status == CoverageStatus.COVERAGE_GAP
+        for classification in classifications
+    ):
+        return CoverageState.COVERAGE_GAP
+    return CoverageState.COVERED
