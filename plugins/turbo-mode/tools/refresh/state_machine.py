@@ -51,13 +51,14 @@ def derive_terminal_plan_status(axes: PlanAxes) -> TerminalPlanStatus:
     if axes.preflight_state == PreflightState.BLOCKED:
         return TerminalPlanStatus.BLOCKED_PREFLIGHT
 
+    if axes.coverage_state == CoverageState.COVERAGE_GAP:
+        return TerminalPlanStatus.COVERAGE_GAP_BLOCKED
+
     if _has_unknown_axis(axes) or _drift_runtime_config_unchecked(axes):
         return TerminalPlanStatus.BLOCKED_PREFLIGHT
 
     validate_axes(axes)
 
-    if axes.coverage_state == CoverageState.COVERAGE_GAP:
-        return TerminalPlanStatus.COVERAGE_GAP_BLOCKED
     if axes.runtime_config_state == RuntimeConfigState.UNREPAIRABLE_MISMATCH:
         return TerminalPlanStatus.UNREPAIRABLE_RUNTIME_CONFIG_MISMATCH
     if axes.runtime_config_state == RuntimeConfigState.REPAIRABLE_MISMATCH:

@@ -6,7 +6,27 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .models import PluginSpec, RefreshError, RuntimeConfigState, fail
+from .classifier import classify_diff_path
+from .manifests import build_manifest, diff_manifests, scan_generated_residue
+from .models import (
+    CoverageState,
+    CoverageStatus,
+    DiffEntry,
+    FilesystemState,
+    ManifestEntry,
+    MutationMode,
+    PathClassification,
+    PlanAxes,
+    PluginSpec,
+    PreflightState,
+    RefreshError,
+    ResidueIssue,
+    RuntimeConfigState,
+    SelectedMutationMode,
+    TerminalPlanStatus,
+    fail,
+)
+from .state_machine import derive_terminal_plan_status
 
 TOOL_RELATIVE_PATH = "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py"
 MARKETPLACE_RELATIVE_PATH = ".agents/plugins/marketplace.json"
@@ -33,6 +53,21 @@ class RuntimeConfigCheck:
     plugin_hooks_state: str
     plugin_enablement_state: dict[str, str]
     reasons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RefreshPlanResult:
+    mode: str
+    paths: RefreshPaths
+    residue_issues: tuple[ResidueIssue, ...]
+    diffs: tuple[DiffEntry, ...]
+    diff_classification: tuple[PathClassification, ...]
+    runtime_config: RuntimeConfigCheck | None
+    axes: PlanAxes
+    terminal_status: TerminalPlanStatus
+    future_external_command: str | None = None
+    mutation_command_available: bool = False
+    requires_plan: str | None = None
 
 
 def build_paths(
@@ -66,6 +101,88 @@ def build_plugin_specs(*, repo_root: Path, codex_home: Path) -> list[PluginSpec]
             cache_root=codex_home / "plugins/cache/turbo-mode/ticket/1.4.0",
         ),
     ]
+
+
+def plan_refresh(
+    *,
+    repo_root: Path,
+    codex_home: Path,
+    mode: str,
+) -> RefreshPlanResult:
+    paths = build_paths(
+        repo_root=repo_root,
+        codex_home=codex_home,
+    )
+    if mode not in {"dry-run", "plan-refresh"}:
+        fail("plan refresh", "mode must be dry-run or plan-refresh", mode)
+    specs = build_plugin_specs(repo_root=paths.repo_root, codex_home=paths.codex_home)
+    preflight_reasons: list[str] = []
+    try:
+        residue_issues = tuple(scan_generated_residue(specs))
+    except RefreshError as exc:
+        residue_issues = ()
+        preflight_reasons.append(str(exc))
+
+    for spec in specs:
+        if not spec.source_root.exists():
+            preflight_reasons.append(f"missing source root: {spec.source_root}")
+        if not spec.cache_root.exists():
+            preflight_reasons.append(f"missing cache root: {spec.cache_root}")
+    if residue_issues:
+        preflight_reasons.append("generated residue present")
+
+    runtime_config: RuntimeConfigCheck | None = None
+    diffs: list[DiffEntry] = []
+    classifications: list[PathClassification] = []
+    manifest_collected = False
+
+    if not _has_manifest_blocking_reasons(preflight_reasons):
+        try:
+            for spec in specs:
+                source_manifest = build_manifest(spec, root_kind="source")
+                cache_manifest = build_manifest(spec, root_kind="cache")
+                spec_diffs = diff_manifests(source_manifest, cache_manifest)
+                diffs.extend(spec_diffs)
+                classifications.extend(
+                    _classify_diff_for_spec(spec, diff) for diff in spec_diffs
+                )
+            manifest_collected = True
+        except RefreshError as exc:
+            preflight_reasons.append(str(exc))
+
+    try:
+        validate_repo_marketplace(paths.marketplace_path)
+        runtime_config = read_runtime_config_state(
+            paths.config_path,
+            expected_marketplace_source=paths.repo_root,
+        )
+    except RefreshError as exc:
+        preflight_reasons.append(str(exc))
+
+    axes = _derive_axes(
+        diffs=diffs,
+        classifications=classifications,
+        runtime_config=runtime_config,
+        preflight_reasons=tuple(preflight_reasons),
+        manifest_collected=manifest_collected,
+    )
+    terminal_status = derive_terminal_plan_status(axes)
+    future_external_command = (
+        select_future_external_command(axes) if mode == "plan-refresh" else None
+    )
+    return RefreshPlanResult(
+        mode=mode,
+        paths=paths,
+        residue_issues=residue_issues,
+        diffs=tuple(diffs),
+        diff_classification=tuple(classifications),
+        runtime_config=runtime_config,
+        axes=axes,
+        terminal_status=terminal_status,
+        future_external_command=future_external_command,
+        mutation_command_available=False,
+        requires_plan="future-mutation-plan" if future_external_command is not None else None,
+    )
 
 
 def validate_repo_marketplace(path: Path) -> dict[str, str]:
@@ -262,3 +379,157 @@ def _plugin_enablement_state(data: dict[str, Any]) -> tuple[dict[str, str], tupl
             states[name] = "malformed"
             reasons.append(f"plugins.{name}.enabled is not boolean")
     return states, tuple(reasons)
+
+
+def _classify_diff_for_spec(spec: PluginSpec, diff: DiffEntry) -> PathClassification:
+    source_text = _read_text_for_entry(spec.source_root, diff.source)
+    cache_text = _read_text_for_entry(spec.cache_root, diff.cache)
+    executable = bool(
+        (diff.source and diff.source.executable)
+        or (diff.cache and diff.cache.executable)
+    )
+    return classify_diff_path(
+        diff.canonical_path,
+        kind=diff.kind,
+        source_text=source_text,
+        cache_text=cache_text,
+        executable=executable,
+    )
+
+
+def _read_text_for_entry(root: Path, entry: ManifestEntry | None) -> str:
+    if entry is None:
+        return ""
+    prefix = "/".join(entry.canonical_path.split("/")[:2])
+    rel = entry.canonical_path.removeprefix(prefix + "/")
+    path = root / rel
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return ""
+    except FileNotFoundError:
+        return ""
+
+
+def _has_manifest_blocking_reasons(preflight_reasons: list[str]) -> bool:
+    return any(
+        reason.startswith("missing source root:")
+        or reason.startswith("missing cache root:")
+        or "generated residue present" in reason
+        or "scan generated residue failed" in reason
+        for reason in preflight_reasons
+    )
+
+
+def _derive_axes(
+    *,
+    diffs: list[DiffEntry],
+    classifications: list[PathClassification],
+    runtime_config: RuntimeConfigCheck | None,
+    preflight_reasons: tuple[str, ...],
+    manifest_collected: bool,
+) -> PlanAxes:
+    filesystem_state = (
+        FilesystemState.DRIFT
+        if diffs
+        else FilesystemState.NO_DRIFT
+        if manifest_collected
+        else FilesystemState.UNKNOWN
+    )
+    coverage_state = (
+        _aggregate_coverage_state(filesystem_state, classifications)
+        if manifest_collected
+        else CoverageState.UNKNOWN
+    )
+    selected_mutation_mode = (
+        _select_mutation_mode(filesystem_state, classifications)
+        if manifest_collected
+        else SelectedMutationMode.UNKNOWN
+    )
+    runtime_config_state = (
+        runtime_config.state if runtime_config is not None else RuntimeConfigState.UNKNOWN
+    )
+    if runtime_config_state == RuntimeConfigState.ALIGNED:
+        runtime_config_state = RuntimeConfigState.UNCHECKED
+    if runtime_config_state == RuntimeConfigState.REPAIRABLE_MISMATCH:
+        selected_mutation_mode = SelectedMutationMode.GUARDED_REFRESH
+    return PlanAxes(
+        filesystem_state=filesystem_state,
+        coverage_state=coverage_state,
+        runtime_config_state=runtime_config_state,
+        preflight_state=PreflightState.BLOCKED if preflight_reasons else PreflightState.PASSED,
+        selected_mutation_mode=selected_mutation_mode,
+        reasons=preflight_reasons + (runtime_config.reasons if runtime_config is not None else ()),
+    )
+
+
+def _aggregate_coverage_state(
+    filesystem_state: FilesystemState,
+    classifications: list[PathClassification],
+) -> CoverageState:
+    if filesystem_state == FilesystemState.NO_DRIFT:
+        return CoverageState.NOT_APPLICABLE
+    if any(item.coverage_status == CoverageStatus.COVERAGE_GAP for item in classifications):
+        return CoverageState.COVERAGE_GAP
+    return CoverageState.COVERED
+
+
+def _select_mutation_mode(
+    filesystem_state: FilesystemState,
+    classifications: list[PathClassification],
+) -> SelectedMutationMode:
+    if filesystem_state == FilesystemState.NO_DRIFT:
+        return SelectedMutationMode.NONE
+    if any(item.mutation_mode == MutationMode.BLOCKED for item in classifications):
+        return SelectedMutationMode.NONE
+    if any(item.mutation_mode == MutationMode.GUARDED for item in classifications):
+        return SelectedMutationMode.GUARDED_REFRESH
+    return SelectedMutationMode.REFRESH
+
+
+def select_future_external_command(axes: PlanAxes) -> str | None:
+    if not future_external_command_allowed(axes):
+        return None
+    if axes.runtime_config_state == RuntimeConfigState.REPAIRABLE_MISMATCH:
+        return (
+            "python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py "
+            "--guarded-refresh --smoke standard"
+        )
+    if (
+        axes.filesystem_state == FilesystemState.DRIFT
+        and axes.selected_mutation_mode == SelectedMutationMode.REFRESH
+    ):
+        return (
+            "python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py "
+            "--refresh --smoke light"
+        )
+    if (
+        axes.filesystem_state == FilesystemState.DRIFT
+        and axes.selected_mutation_mode == SelectedMutationMode.GUARDED_REFRESH
+    ):
+        return (
+            "python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py "
+            "--guarded-refresh --smoke standard"
+        )
+    return None
+
+
+def future_external_command_allowed(axes: PlanAxes) -> bool:
+    if axes.preflight_state != PreflightState.PASSED:
+        return False
+    if axes.runtime_config_state == RuntimeConfigState.UNCHECKED:
+        return (
+            axes.filesystem_state == FilesystemState.DRIFT
+            and axes.coverage_state == CoverageState.COVERED
+            and axes.selected_mutation_mode
+            in {
+                SelectedMutationMode.REFRESH,
+                SelectedMutationMode.GUARDED_REFRESH,
+            }
+        )
+    if axes.runtime_config_state == RuntimeConfigState.REPAIRABLE_MISMATCH:
+        return axes.coverage_state in {
+            CoverageState.COVERED,
+            CoverageState.NOT_APPLICABLE,
+        }
+    return False

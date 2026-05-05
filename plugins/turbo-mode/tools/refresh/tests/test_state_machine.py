@@ -115,6 +115,18 @@ def test_drift_with_unchecked_runtime_config_fails_closed() -> None:
     assert derive_terminal_plan_status(axes) == TerminalPlanStatus.BLOCKED_PREFLIGHT
 
 
+def test_coverage_gap_takes_precedence_over_unchecked_runtime_config() -> None:
+    axes = PlanAxes(
+        filesystem_state=FilesystemState.DRIFT,
+        coverage_state=CoverageState.COVERAGE_GAP,
+        runtime_config_state=RuntimeConfigState.UNCHECKED,
+        preflight_state=PreflightState.PASSED,
+        selected_mutation_mode=SelectedMutationMode.NONE,
+    )
+
+    assert derive_terminal_plan_status(axes) == TerminalPlanStatus.COVERAGE_GAP_BLOCKED
+
+
 @pytest.mark.parametrize(
     "axes",
     [
