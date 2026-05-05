@@ -45,12 +45,12 @@ Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a 
 4. **Check state file** per chain protocol in [handoff-contract.md](../../references/handoff-contract.md):
    - Read `<project_root>/docs/handoffs/.session-state/handoff-<project>-<resume_token>.json` with `session_state.py`.
    - If state exists, set `resumed_from` to its archive path.
+   - Resolve plugin root before running state helpers. Set `PLUGIN_ROOT` to the plugin version root, three levels above this `SKILL.md`, not the `skills/` directory. Use a literal absolute value such as `PLUGIN_ROOT="/absolute/path/to/handoff/1.6.0"`. The literal `python` command must resolve to Python >=3.11.
    ```bash
    PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
    PROJECT_NAME="$(basename "$PROJECT_ROOT")"
    READ_STATE_OUTPUT="$(
-     PYTHONDONTWRITEBYTECODE=1 UV_PROJECT_ENVIRONMENT="$PROJECT_ROOT/.codex/plugin-runtimes/handoff-1.6.0" \
-     uv run --project "$PLUGIN_ROOT/pyproject.toml" python "$PLUGIN_ROOT/scripts/session_state.py" \
+     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
        read-state \
        --state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \
        --project "$PROJECT_NAME" \
@@ -65,8 +65,7 @@ Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a 
      *) printf '%s\n' "$READ_STATE_OUTPUT" >&2; exit "$READ_STATE_STATUS" ;;
    esac
    READ_ARCHIVE_OUTPUT="$(
-     PYTHONDONTWRITEBYTECODE=1 UV_PROJECT_ENVIRONMENT="$PROJECT_ROOT/.codex/plugin-runtimes/handoff-1.6.0" \
-     uv run --project "$PLUGIN_ROOT/pyproject.toml" python "$PLUGIN_ROOT/scripts/session_state.py" \
+     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
        read-state \
        --state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \
        --project "$PROJECT_NAME" \
@@ -107,9 +106,7 @@ Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a 
    ```bash
    if [ -n "$STATE_PATH" ]; then
      PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-     PYTHONDONTWRITEBYTECODE=1 \
-     UV_PROJECT_ENVIRONMENT="$PROJECT_ROOT/.codex/plugin-runtimes/handoff-1.6.0" \
-     uv run --project "$PLUGIN_ROOT/pyproject.toml" python "$PLUGIN_ROOT/scripts/session_state.py" \
+     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
        clear-state \
        --state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \
        --state-path "$STATE_PATH"

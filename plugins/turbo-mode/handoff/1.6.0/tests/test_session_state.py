@@ -260,30 +260,48 @@ def test_read_state_returns_1_when_absent(tmp_path: Path) -> None:
     assert read_state.returncode == 1
 
 
-def _residue_snapshot(root: Path) -> set[str]:
-    snapshot: set[str] = set()
-    for pattern in [".venv", ".pytest_cache", ".DS_Store", "scripts/__pycache__", "hooks/__pycache__"]:
-        for match in root.glob(pattern):
-            snapshot.add(str(match.relative_to(root)))
-    return snapshot
+def _residue_snapshot(root: Path, patterns: list[str]) -> set[str]:
+    return {
+        str(match.relative_to(root))
+        for pattern in patterns
+        for match in root.glob(pattern)
+    }
+
+
+def _plugin_residue_snapshot(plugin_root: Path) -> set[str]:
+    return _residue_snapshot(
+        plugin_root,
+        ["**/__pycache__", "**/*.pyc", ".venv", ".pytest_cache", ".DS_Store"],
+    )
+
+
+def _project_residue_snapshot(project_root: Path) -> set[str]:
+    return _residue_snapshot(
+        project_root,
+        [
+            ".codex/plugin-runtimes/handoff-1.6.0",
+            ".codex/plugin-runtimes/handoff-1.6.0/.lock",
+            "**/__pycache__",
+            "**/*.pyc",
+        ],
+    )
 
 
 def test_state_shell_snippet_preserves_exit_2(tmp_path: Path) -> None:
-    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
     plugin_root = Path(__file__).parent.parent
-    before = _residue_snapshot(plugin_root)
+    plugin_before = _plugin_residue_snapshot(plugin_root)
     subprocess.run(["git", "init"], cwd=str(tmp_path), check=True, capture_output=True, text=True)
     state_dir = tmp_path / "docs" / "handoffs" / ".session-state"
     state_dir.mkdir(parents=True)
     runtime_env = tmp_path / ".codex" / "plugin-runtimes" / "handoff-1.6.0"
+    project_before = _project_residue_snapshot(tmp_path)
     write_resume_state(state_dir, "demo", "/tmp/archive-a.md", "token-a")
     write_resume_state(state_dir, "demo", "/tmp/archive-b.md", "token-b")
     shell = f'''
 PLUGIN_ROOT="{plugin_root}"
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 READ_STATE_OUTPUT="$(
-  PYTHONDONTWRITEBYTECODE=1 UV_PROJECT_ENVIRONMENT="$PROJECT_ROOT/.codex/plugin-runtimes/handoff-1.6.0" \
-  uv run --project "{plugin_root}/pyproject.toml" python "{script}" read-state --state-dir "{state_dir}" --project demo --field state_path 2>&1
+  PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" read-state --state-dir "{state_dir}" --project demo --field state_path 2>&1
 )"
 READ_STATE_STATUS=$?
 case "$READ_STATE_STATUS" in
@@ -295,25 +313,43 @@ esac
 '''
     result = subprocess.run(["/bin/zsh", "-lc", shell], cwd=str(tmp_path))
     assert result.returncode == 2
-    assert runtime_env.exists()
-    assert _residue_snapshot(plugin_root) == before
+    assert not runtime_env.exists()
+    assert _plugin_residue_snapshot(plugin_root) == plugin_before
+    assert _project_residue_snapshot(tmp_path) == project_before
 
 
 def test_state_shell_snippet_skips_clear_when_absent(tmp_path: Path) -> None:
-    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
     plugin_root = Path(__file__).parent.parent
-    before = _residue_snapshot(plugin_root)
+    plugin_before = _plugin_residue_snapshot(plugin_root)
     subprocess.run(["git", "init"], cwd=str(tmp_path), check=True, capture_output=True, text=True)
     state_dir = tmp_path / "docs" / "handoffs" / ".session-state"
     state_dir.mkdir(parents=True)
+    runtime_env = tmp_path / ".codex" / "plugin-runtimes" / "handoff-1.6.0"
+    project_before = _project_residue_snapshot(tmp_path)
     shell = f'''
+PLUGIN_ROOT="{plugin_root}"
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-STATE_PATH=""
+READ_STATE_OUTPUT="$(
+  PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" read-state --state-dir "{state_dir}" --project demo --field state_path 2>&1
+)"
+READ_STATE_STATUS=$?
+printf 'READ_STATE_STATUS=%s\\n' "$READ_STATE_STATUS"
+case "$READ_STATE_STATUS" in
+  0) STATE_PATH="$READ_STATE_OUTPUT" ;;
+  1) STATE_PATH="" ;;
+  2) printf '%s\\n' "$READ_STATE_OUTPUT" >&2; exit 2 ;;
+  *) printf '%s\\n' "$READ_STATE_OUTPUT" >&2; exit "$READ_STATE_STATUS" ;;
+esac
 if [ -n "$STATE_PATH" ]; then
-  PYTHONDONTWRITEBYTECODE=1 UV_PROJECT_ENVIRONMENT="$PROJECT_ROOT/.codex/plugin-runtimes/handoff-1.6.0" \
-  uv run --project "{plugin_root}/pyproject.toml" python "{script}" clear-state --state-dir "{state_dir}" --state-path "$STATE_PATH"
+  PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" clear-state --state-dir "{state_dir}" --state-path "$STATE_PATH"
+else
+  printf 'CLEAR_SKIPPED\\n'
 fi
 '''
-    result = subprocess.run(["/bin/zsh", "-lc", shell], cwd=str(tmp_path))
+    result = subprocess.run(["/bin/zsh", "-lc", shell], capture_output=True, text=True, cwd=str(tmp_path))
     assert result.returncode == 0
-    assert _residue_snapshot(plugin_root) == before
+    assert "READ_STATE_STATUS=1" in result.stdout
+    assert "CLEAR_SKIPPED" in result.stdout
+    assert not runtime_env.exists()
+    assert _plugin_residue_snapshot(plugin_root) == plugin_before
+    assert _project_residue_snapshot(tmp_path) == project_before

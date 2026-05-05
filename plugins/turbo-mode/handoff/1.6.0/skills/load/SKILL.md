@@ -131,11 +131,11 @@ When user runs `/load [path]`:
    PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
    PROJECT_NAME="$(basename "$PROJECT_ROOT")"
    ```
+   - Resolve plugin root before running state helpers. Set `PLUGIN_ROOT` to the plugin version root, three levels above this `SKILL.md`, not the `skills/` directory. Use a literal absolute value such as `PLUGIN_ROOT="/absolute/path/to/handoff/1.6.0"`. The literal `python` command must resolve to Python >=3.11.
    - Archive the source with `session_state.py`:
    ```bash
    ARCHIVED_PATH="$(
-     PYTHONDONTWRITEBYTECODE=1 UV_PROJECT_ENVIRONMENT="$PROJECT_ROOT/.codex/plugin-runtimes/handoff-1.6.0" \
-     uv run --project "$PLUGIN_ROOT/pyproject.toml" python "$PLUGIN_ROOT/scripts/session_state.py" \
+     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
        archive \
        --source "$SOURCE_PATH" \
        --archive-dir "$PROJECT_ROOT/docs/handoffs/archive" \
@@ -147,8 +147,7 @@ When user runs `/load [path]`:
    - Write archive path to `<project_root>/docs/handoffs/.session-state/handoff-<project>-<resume_token>.json` using the project name from the contract.
    ```bash
    STATE_PATH="$(
-     PYTHONDONTWRITEBYTECODE=1 UV_PROJECT_ENVIRONMENT="$PROJECT_ROOT/.codex/plugin-runtimes/handoff-1.6.0" \
-     uv run --project "$PLUGIN_ROOT/pyproject.toml" python "$PLUGIN_ROOT/scripts/session_state.py" \
+     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
        write-state \
        --state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \
        --project "$PROJECT_NAME" \

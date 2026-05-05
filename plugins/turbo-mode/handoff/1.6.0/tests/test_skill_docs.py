@@ -39,11 +39,18 @@ def test_command_skills_define_plugin_root_setup() -> None:
 def test_state_skills_use_session_state_module() -> None:
     for path in STATE_SKILLS:
         text = path.read_text(encoding="utf-8")
+        assert "Resolve plugin root" in text
+        assert "three levels above this `SKILL.md`" in text
+        assert "not the `skills/` directory" in text
+        assert 'PLUGIN_ROOT="/absolute/path/to/handoff/1.6.0"' in text
         assert "session_state.py" in text
         assert "handoff-<project>-<resume_token>.json" in text
         assert "legacy plain-text state file" in text
-        assert 'UV_PROJECT_ENVIRONMENT="$PROJECT_ROOT/.codex/plugin-runtimes/handoff-1.6.0"' in text
+        assert 'python "$PLUGIN_ROOT/scripts/session_state.py"' in text
+        assert "The literal `python` command must resolve to Python >=3.11." in text
         assert "PYTHONDONTWRITEBYTECODE=1" in text
+        assert "UV_PROJECT_ENVIRONMENT" not in text
+        assert "uv run --project" not in text
 
 
 def test_defer_skill_uses_plugin_siblings_plain_field() -> None:
