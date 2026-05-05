@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .models import fail
+from .models import RefreshError, fail
 
 PARSER_VERSION = "refresh-app-server-inventory-1"
 ACCEPTED_RESPONSE_SCHEMA_VERSION = "app-server-readonly-inventory-v1"
@@ -55,6 +55,14 @@ class AppServerInventoryCheck:
     request_methods: tuple[str, ...]
     transcript_sha256: str
     reasons: tuple[str, ...] = ()
+
+
+class InventoryCollectionError(RefreshError):
+    """Raised when inventory collection fails after collecting partial transcript."""
+
+    def __init__(self, operation: str, reason: str, got: object, transcript: list[dict[str, Any]]):
+        super().__init__(f"{operation} failed: {reason}. Got: {got!r:.100}")
+        self.transcript = tuple(transcript)
 
 
 def build_readonly_inventory_requests(paths: Any, *, scratch_cwd: Path) -> list[dict[str, Any]]:
@@ -130,27 +138,38 @@ def _collect_readonly_runtime_inventory(
     scratch_cwd.mkdir(parents=True, exist_ok=True)
     requests = build_readonly_inventory_requests(paths, scratch_cwd=scratch_cwd)
     active_roundtrip = roundtrip or app_server_roundtrip
-    transcript = tuple(active_roundtrip(requests))
-    active_identity_collector = identity_collector or collect_codex_runtime_identity
-    identity_base = active_identity_collector()
-    responses = response_by_id(transcript)
-    initialize = responses.get(0)
-    if initialize is None:
-        fail("inventory contract", "initialize response missing", sorted(responses))
-    identity = CodexRuntimeIdentity(
-        codex_version=identity_base.codex_version,
-        executable_path=identity_base.executable_path,
-        executable_sha256=identity_base.executable_sha256,
-        executable_hash_unavailable_reason=identity_base.executable_hash_unavailable_reason,
-        server_info=_dict_result_field(initialize, "serverInfo"),
-        initialize_capabilities=_dict_result_field(initialize, "capabilities"),
-    )
-    inventory = validate_readonly_inventory_contract(
-        transcript,
-        paths=paths,
-        identity=identity,
-        request_methods=tuple(request.get("method", "") for request in requests),
-    )
+    transcript: tuple[dict[str, Any], ...] = ()
+    try:
+        transcript = tuple(active_roundtrip(requests))
+        active_identity_collector = identity_collector or collect_codex_runtime_identity
+        identity_base = active_identity_collector()
+        responses = response_by_id(transcript)
+        initialize = responses.get(0)
+        if initialize is None:
+            fail("inventory contract", "initialize response missing", sorted(responses))
+        identity = CodexRuntimeIdentity(
+            codex_version=identity_base.codex_version,
+            executable_path=identity_base.executable_path,
+            executable_sha256=identity_base.executable_sha256,
+            executable_hash_unavailable_reason=identity_base.executable_hash_unavailable_reason,
+            server_info=_dict_result_field(initialize, "serverInfo"),
+            initialize_capabilities=_dict_result_field(initialize, "capabilities"),
+        )
+        inventory = validate_readonly_inventory_contract(
+            transcript,
+            paths=paths,
+            identity=identity,
+            request_methods=tuple(request.get("method", "") for request in requests),
+        )
+    except InventoryCollectionError:
+        raise
+    except RefreshError as exc:
+        raise InventoryCollectionError(
+            "inventory contract",
+            str(exc),
+            "partial transcript",
+            list(transcript),
+        ) from exc
     return inventory, transcript
 
 
@@ -229,7 +248,12 @@ def app_server_roundtrip(requests: list[dict[str, Any]]) -> list[dict[str, Any]]
                 except queue.Empty:
                     continue
                 if response_line is None:
-                    fail("app-server request", "stdout closed before response", request)
+                    raise InventoryCollectionError(
+                        "app-server request",
+                        "stdout closed before response",
+                        request,
+                        transcript,
+                    )
                 try:
                     response = json.loads(response_line)
                 except json.JSONDecodeError:
@@ -238,10 +262,20 @@ def app_server_roundtrip(requests: list[dict[str, Any]]) -> list[dict[str, Any]]
                 transcript.append({"direction": "recv", "body": response})
                 if response.get("id") == request["id"]:
                     if "error" in response:
-                        fail("app-server request", "response returned error", response)
+                        raise InventoryCollectionError(
+                            "app-server request",
+                            "response returned error",
+                            response,
+                            transcript,
+                        )
                     break
             else:
-                fail("app-server request", "timed out waiting for response", request)
+                raise InventoryCollectionError(
+                    "app-server request",
+                    "timed out waiting for response",
+                    request,
+                    transcript,
+                )
     finally:
         proc.terminate()
         try:
@@ -368,16 +402,14 @@ def validate_skills_response(response: dict[str, Any], paths: Any) -> list[str]:
 
 
 def validate_hooks_response(response: dict[str, Any], paths: Any) -> dict[str, str]:
-    hooks = [
-        item
-        for item in hook_records(response)
-        if item.get("pluginId") == "ticket@turbo-mode"
-        and item.get("eventName") == "preToolUse"
-        and item.get("matcher") == "Bash"
+    ticket_hooks = [
+        item for item in hook_records(response) if item.get("pluginId") == "ticket@turbo-mode"
     ]
-    if len(hooks) != 1:
-        fail("inventory contract", "expected exactly one Ticket Bash preToolUse hook", len(hooks))
-    hook = hooks[0]
+    if len(ticket_hooks) != 1:
+        fail("inventory contract", "expected exactly one Ticket hook", len(ticket_hooks))
+    hook = ticket_hooks[0]
+    if hook.get("eventName") != "preToolUse" or hook.get("matcher") != "Bash":
+        fail("inventory contract", "Ticket hook event or matcher mismatch", hook)
     command = str(hook.get("command", ""))
     source_path = str(hook.get("sourcePath", ""))
     expected_cache = paths.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
@@ -424,7 +456,7 @@ def plugin_list_ids(response: dict[str, Any], paths: Any) -> set[str]:
     result = response_result(response)
     plugins = result.get("plugins")
     if isinstance(plugins, list):
-        return {plugin_id for plugin_id in plugins if isinstance(plugin_id, str)}
+        return plugin_ids_from_records(plugins)
 
     marketplace_path = str(paths.marketplace_path)
     ids: set[str] = set()
@@ -439,9 +471,17 @@ def plugin_list_ids(response: dict[str, Any], paths: Any) -> set[str]:
         marketplace_plugins = marketplace.get("plugins")
         if not isinstance(marketplace_plugins, list):
             continue
-        for plugin in marketplace_plugins:
-            if isinstance(plugin, dict) and isinstance(plugin.get("id"), str):
-                ids.add(plugin["id"])
+        ids.update(plugin_ids_from_records(marketplace_plugins))
+    return ids
+
+
+def plugin_ids_from_records(records: list[Any]) -> set[str]:
+    ids: set[str] = set()
+    for plugin in records:
+        if isinstance(plugin, str):
+            ids.add(plugin)
+        elif isinstance(plugin, dict) and isinstance(plugin.get("id"), str):
+            ids.add(plugin["id"])
     return ids
 
 

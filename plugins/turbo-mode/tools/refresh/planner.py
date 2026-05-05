@@ -14,7 +14,11 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by live Python 3.9 s
     except ModuleNotFoundError:  # pragma: no cover - exercised by direct Python 3.9 smoke
         tomllib = None
 
-from .app_server_inventory import AppServerInventoryCheck, collect_readonly_runtime_inventory
+from .app_server_inventory import (
+    AppServerInventoryCheck,
+    InventoryCollectionError,
+    collect_readonly_runtime_inventory,
+)
 from .classifier import classify_diff_path
 from .manifests import build_manifest, diff_manifests, scan_generated_residue
 from .models import (
@@ -193,6 +197,11 @@ def plan_refresh(
                 collector = inventory_collector or collect_readonly_runtime_inventory
                 app_server_inventory, app_server_transcript = collector(paths)
                 inventory_status = "collected"
+            except InventoryCollectionError as exc:
+                app_server_transcript = exc.transcript
+                inventory_status = "requested-failed"
+                inventory_failure_reason = str(exc)
+                preflight_reasons.append(str(exc))
             except RefreshError as exc:
                 inventory_status = "requested-failed"
                 inventory_failure_reason = str(exc)

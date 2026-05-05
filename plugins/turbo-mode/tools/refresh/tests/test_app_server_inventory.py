@@ -12,6 +12,7 @@ from refresh.app_server_inventory import (
     EXPECTED_HANDOFF_SKILLS,
     EXPECTED_TICKET_SKILLS,
     CodexRuntimeIdentity,
+    InventoryCollectionError,
     build_readonly_inventory_requests,
     collect_codex_runtime_identity,
     collect_readonly_runtime_inventory,
@@ -178,6 +179,28 @@ def test_validate_readonly_inventory_contract_accepts_aligned_runtime(tmp_path: 
     ).hexdigest()
 
 
+def test_validate_readonly_inventory_contract_accepts_structural_top_level_plugin_list(
+    tmp_path: Path,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    raw = copy.deepcopy(list(transcript(refresh_paths)))
+    raw[3]["body"]["result"] = {
+        "plugins": [
+            {"id": "handoff@turbo-mode", "source": {"path": "/source/handoff"}},
+            {"id": "ticket@turbo-mode", "source": {"path": "/source/ticket"}},
+        ]
+    }
+
+    inventory = validate_readonly_inventory_contract(
+        tuple(raw),
+        paths=refresh_paths,
+        identity=identity(),
+        request_methods=("initialize",),
+    )
+
+    assert inventory.plugin_list == ("handoff@turbo-mode", "ticket@turbo-mode")
+
+
 def test_validate_readonly_inventory_contract_rejects_raw_response_lines(
     tmp_path: Path,
 ) -> None:
@@ -293,7 +316,7 @@ def test_validate_readonly_inventory_contract_rejects_missing_ticket_hook(
     raw = list(transcript(refresh_paths))
     raw[-1] = {"direction": "recv", "body": {"id": 5, "result": {"hooks": []}}}
 
-    with pytest.raises(RefreshError, match="Ticket Bash preToolUse hook"):
+    with pytest.raises(RefreshError, match="expected exactly one Ticket hook"):
         validate_readonly_inventory_contract(
             tuple(raw),
             paths=refresh_paths,
@@ -428,6 +451,30 @@ def test_validate_readonly_inventory_contract_rejects_wrong_ticket_hook_source_p
         )
 
 
+def test_validate_readonly_inventory_contract_rejects_additional_ticket_hook(
+    tmp_path: Path,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    raw = copy.deepcopy(list(transcript(refresh_paths)))
+    raw[-1]["body"]["result"]["hooks"].append(
+        {
+            "pluginId": "ticket@turbo-mode",
+            "eventName": "postToolUse",
+            "matcher": "Bash",
+            "command": "python3 other.py",
+            "sourcePath": "/other/hooks.json",
+        }
+    )
+
+    with pytest.raises(RefreshError, match="expected exactly one Ticket hook"):
+        validate_readonly_inventory_contract(
+            tuple(raw),
+            paths=refresh_paths,
+            identity=identity(),
+            request_methods=("initialize",),
+        )
+
+
 def test_collect_readonly_runtime_inventory_combines_identity_and_transcript(
     tmp_path: Path,
 ) -> None:
@@ -441,6 +488,24 @@ def test_collect_readonly_runtime_inventory_combines_identity_and_transcript(
 
     assert inventory.identity.server_info == {"name": "codex-app-server", "version": "0.test"}
     assert raw_transcript == transcript(refresh_paths)
+
+
+def test_collect_readonly_runtime_inventory_preserves_transcript_on_validation_failure(
+    tmp_path: Path,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    raw = list(transcript(refresh_paths))
+    raw.pop()
+
+    with pytest.raises(InventoryCollectionError) as exc_info:
+        collect_readonly_runtime_inventory(
+            refresh_paths,
+            roundtrip=lambda _requests: raw,
+            identity_collector=identity,
+        )
+
+    assert "missing app-server responses" in str(exc_info.value)
+    assert exc_info.value.transcript == tuple(raw)
 
 
 def test_collect_codex_runtime_identity_hashes_executable(

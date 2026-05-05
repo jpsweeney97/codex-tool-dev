@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 from refresh import planner
-from refresh.app_server_inventory import AppServerInventoryCheck, CodexRuntimeIdentity
+from refresh.app_server_inventory import (
+    AppServerInventoryCheck,
+    CodexRuntimeIdentity,
+    InventoryCollectionError,
+)
 from refresh.models import (
     CoverageState,
     FilesystemState,
@@ -501,6 +505,38 @@ def test_plan_refresh_inventory_failure_blocks_without_erasing_manifest_facts(
     assert result.app_server_inventory_status == "requested-failed"
     assert result.app_server_inventory_failure_reason is not None
     assert "inventory contract failed" in result.axes.reasons[0]
+    assert result.app_server_transcript == ()
+
+
+def test_plan_refresh_inventory_failure_preserves_partial_transcript(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    partial = ({"direction": "send", "body": {"id": 0, "method": "initialize"}},)
+
+    def fail_inventory(_paths):
+        raise InventoryCollectionError(
+            "app-server request",
+            "timed out waiting for response",
+            {"id": 0},
+            list(partial),
+        )
+
+    result = plan_refresh(
+        repo_root=repo_root,
+        codex_home=codex_home,
+        mode="dry-run",
+        inventory_check=True,
+        inventory_collector=fail_inventory,
+    )
+
+    assert result.app_server_inventory_status == "requested-failed"
+    assert "timed out waiting for response" in str(result.app_server_inventory_failure_reason)
+    assert result.app_server_transcript == partial
 
 
 def test_plan_refresh_inventory_requested_blocked_when_config_preflight_fails(

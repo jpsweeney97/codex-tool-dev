@@ -182,3 +182,33 @@ def test_evidence_payload_distinguishes_requested_failed_inventory(
     assert payload["app_server_inventory_status"] == "requested-failed"
     assert payload["app_server_inventory_failure_reason"] == "app-server request failed"
     assert payload["omission_reasons"]["app_server_inventory"] == "requested-failed"
+
+
+def test_write_local_evidence_writes_failed_inventory_transcript(
+    tmp_path: Path,
+) -> None:
+    result = empty_result(tmp_path)
+    result = RefreshPlanResult(
+        mode=result.mode,
+        paths=result.paths,
+        residue_issues=result.residue_issues,
+        diffs=result.diffs,
+        diff_classification=result.diff_classification,
+        runtime_config=result.runtime_config,
+        axes=result.axes,
+        terminal_status=result.terminal_status,
+        app_server_transcript=({"direction": "send", "body": {"id": 0}},),
+        app_server_inventory_status="requested-failed",
+        app_server_inventory_failure_reason="app-server request failed",
+    )
+
+    evidence_path = write_local_evidence(result, run_id="run-1")
+
+    summary = json.loads(evidence_path.read_text(encoding="utf-8"))
+    transcript = evidence_path.parent / "app-server-readonly-inventory.transcript.json"
+    assert "app_server_transcript" not in summary
+    assert summary["app_server_inventory_status"] == "requested-failed"
+    assert transcript.is_file()
+    assert json.loads(transcript.read_text(encoding="utf-8")) == [
+        {"direction": "send", "body": {"id": 0}}
+    ]
