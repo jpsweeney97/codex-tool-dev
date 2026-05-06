@@ -3172,6 +3172,141 @@ Expected:
 - `docs/handoffs/.session-state/` and `docs/handoffs/archive/` may appear as ignored local mechanics.
 - No ignored active `docs/handoffs/*.md` outside `.session-state/` or `archive/` should remain unresolved.
 
+## Completion Evidence
+
+Implementation branch:
+
+- `feature/turbo-mode-refresh-plan-04-commit-safe-evidence`
+
+Source implementation boundary:
+
+- Source implementation commit: `47bbe50017742f1decd8142463e9d5020f90f45b`
+- Source implementation tree: `ca7b11b02014f0e5b1afb351c2bf92da6a5fa1b1`
+- The evidence/docs commit hash and tree cannot be embedded in this same committed
+  file without changing them. Record that identity in the implementation closeout
+  or PR text after the evidence/docs commit exists.
+
+Verification before the source implementation commit:
+
+- Focused refresh tests:
+  `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`
+- Result before commit: `243 passed in 20.58s`
+- Ruff:
+  `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py plugins/turbo-mode/tools/refresh_validate_run_metadata.py plugins/turbo-mode/tools/refresh_validate_redaction.py`
+- Result after formatting fixes: `All checks passed!`
+- Focused refresh tests after formatting: `243 passed in 16.05s`
+- Source-tree residue gate:
+  `find plugins/turbo-mode/handoff/1.6.0 plugins/turbo-mode/ticket/1.4.0 plugins/turbo-mode/tools/refresh -name __pycache__ -o -name '*.pyc' -o -name .pytest_cache -o -name .ruff_cache -o -name .mypy_cache -o -name .venv -o -name .DS_Store`
+- Source-tree residue result: printed nothing.
+
+Installed-cache residue cleanup before final live smoke:
+
+- An earlier live smoke with run id `plan04-live-commit-safe-20260506-003319`
+  exited `0` but honestly reported `blocked-preflight` because installed-cache
+  residue existed at
+  `/Users/jp/.codex/plugins/cache/turbo-mode/handoff/1.6.0/scripts/__pycache__/project_paths.cpython-314.pyc`.
+- The operator approved moving the installed-cache `__pycache__` residue to Trash.
+- Cleanup command:
+  `trash /Users/jp/.codex/plugins/cache/turbo-mode/handoff/1.6.0/scripts/__pycache__`
+- Installed-cache residue check after cleanup printed nothing.
+- The earlier blocked smoke summary remains untracked and is not the intended
+  evidence/docs artifact.
+
+Live non-mutating summary smoke:
+
+- Run id: `plan04-live-commit-safe-20260506-003701`
+- Command:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache python3 \
+  plugins/turbo-mode/tools/refresh_installed_turbo_mode.py \
+  --dry-run \
+  --inventory-check \
+  --record-summary \
+  --run-id plan04-live-commit-safe-20260506-003701 \
+  --repo-root /Users/jp/Projects/active/codex-tool-dev \
+  --codex-home /Users/jp/.codex \
+  --json
+```
+
+- Command exit: `0`
+- Local-only summary path:
+  `/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/dry-run.summary.json`
+- Local-only candidate commit-safe summary:
+  `/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/commit-safe.candidate.summary.json`
+- Local-only final commit-safe summary:
+  `/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/commit-safe.final.summary.json`
+- Repo-local commit-safe summary:
+  `plugins/turbo-mode/evidence/refresh/plan04-live-commit-safe-20260506-003701.summary.json`
+- Commit-safe summary SHA256:
+  `e8d55549560767ece41caf3133667b3a95fa36add17b6ce3ce4187ee941cac92`
+- Metadata validator summary SHA256:
+  `09c13a0804cb36c97b0b840b039429bc98d3d1d5638e27357f6169a80ff3550c`
+- Redaction validator summary SHA256:
+  `00949e85a6ac08fe51c3adcc51befa9be41a133d8bbf8934786aaa98b7bc6fb7`
+- Commit-safe summary `repo_head`:
+  `47bbe50017742f1decd8142463e9d5020f90f45b`
+- Commit-safe summary `repo_tree`:
+  `ca7b11b02014f0e5b1afb351c2bf92da6a5fa1b1`
+- Final terminal status: `coverage-gap-blocked`
+- App-server inventory status: `collected`
+- The local-only final summary and repo-local published summary were verified
+  byte-for-byte identical before the evidence/docs commit.
+
+Replay commands from the source implementation commit:
+
+```bash
+git switch feature/turbo-mode-refresh-plan-04-commit-safe-evidence
+git rev-parse HEAD
+git switch --detach 47bbe50017742f1decd8142463e9d5020f90f45b
+python3 plugins/turbo-mode/tools/refresh_validate_run_metadata.py \
+  --mode final \
+  --run-id plan04-live-commit-safe-20260506-003701 \
+  --repo-root /Users/jp/Projects/active/codex-tool-dev \
+  --local-only-root /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701 \
+  --summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/commit-safe.final.summary.json \
+  --published-summary-path /Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/evidence/refresh/plan04-live-commit-safe-20260506-003701.summary.json \
+  --candidate-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/commit-safe.candidate.summary.json \
+  --existing-validation-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/metadata-validation.summary.json
+python3 plugins/turbo-mode/tools/refresh_validate_redaction.py \
+  --mode final \
+  --run-id plan04-live-commit-safe-20260506-003701 \
+  --repo-root /Users/jp/Projects/active/codex-tool-dev \
+  --scope commit-safe-summary \
+  --source plan-04-cli \
+  --summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/commit-safe.final.summary.json \
+  --local-only-root /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701 \
+  --published-summary-path /Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/evidence/refresh/plan04-live-commit-safe-20260506-003701.summary.json \
+  --candidate-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/commit-safe.candidate.summary.json \
+  --existing-validation-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/redaction.summary.json \
+  --final-scan-output /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/redaction-final-scan.summary.json
+git switch feature/turbo-mode-refresh-plan-04-commit-safe-evidence
+```
+
+Replay boundary:
+
+- Replay is source-commit-bound and live-environment-bound.
+- Replay depends on checking out
+  `47bbe50017742f1decd8142463e9d5020f90f45b`.
+- Replay depends on retaining
+  `/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/`.
+- Replay also depends on preserving or reproducibly restoring installed cache
+  manifests, local config metadata, repo marketplace metadata, Codex executable
+  identity, accepted app-server response schema, and app-server read-only
+  inventory behavior.
+- If any of those external inputs drift, replay may fail even when the committed
+  summary blob remains byte-for-byte identical to the validated local-only final
+  summary.
+
+Scope boundary:
+
+- Mutation remains outside Plan 04.
+- Plan 04 does not implement `--refresh`, `--guarded-refresh`,
+  app-server `plugin/install`, hook execution proof, process quiescence, locks,
+  rollback, recovery, or post-refresh certification.
+- `coverage-gap-blocked` is an honest non-green live state, not refresh-ready
+  status.
+
 ## Stop Conditions
 
 Stop before implementation or commit if any of these occur:

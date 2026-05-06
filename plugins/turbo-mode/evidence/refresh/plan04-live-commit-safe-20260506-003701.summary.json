@@ -1,0 +1,182 @@
+{
+  "app_server_inventory_failure_reason_code": null,
+  "app_server_inventory_status": "collected",
+  "app_server_inventory_summary_sha256": "5b863387f904a94ae3dcfd45a5eb7463d3402346f3fc01a646e78edaab789b50",
+  "app_server_parser_version": "refresh-app-server-inventory-1",
+  "app_server_protocol_capabilities": {
+    "experimentalApi": null
+  },
+  "app_server_request_methods": [
+    "initialize",
+    "initialized",
+    "plugin/read",
+    "plugin/read",
+    "plugin/list",
+    "skills/list",
+    "hooks/list"
+  ],
+  "app_server_response_schema_version": "app-server-readonly-inventory-v1",
+  "app_server_server_info": {
+    "name": null,
+    "version": null
+  },
+  "axes": {
+    "coverage_state": "coverage-gap",
+    "filesystem_state": "drift",
+    "preflight_state": "passed",
+    "reason_codes": [],
+    "reason_count": 0,
+    "runtime_config_state": "aligned",
+    "selected_mutation_mode": "none"
+  },
+  "codex_executable_hash_unavailable_reason": null,
+  "codex_executable_path": "/opt/homebrew/bin/codex",
+  "codex_executable_sha256": "ff803d4b5c595af19b99c18db6def26539fdf4da23a035ab30809835631e8e4b",
+  "codex_version": "codex-cli 0.128.0",
+  "current_run_identity": {
+    "app_server_inventory_freshness": "recomputed-readonly-inventory",
+    "app_server_inventory_summary_sha256": "5b863387f904a94ae3dcfd45a5eb7463d3402346f3fc01a646e78edaab789b50",
+    "installed_cache_manifest_sha256": "a71a5b4af1685508de7ff75f832f08e66728c465002486d7df8cabf856b2dc00",
+    "installed_cache_manifest_unavailable_reason": null,
+    "local_config_metadata_sha256": "763cd39254fa28a89f50ec82077364fa9da9eefb34c0e9bc49721c9b5a0f2e9f",
+    "local_config_metadata_unavailable_reason": null,
+    "local_summary_mode": "dry-run",
+    "local_summary_run_id": "plan04-live-commit-safe-20260506-003701",
+    "local_summary_schema_version": "turbo-mode-refresh-plan-03",
+    "repo_marketplace_sha256": "56131cfd05b96e67fd917da93ff69950a33b463eac9bfa8ace18b96eea734e06",
+    "repo_marketplace_unavailable_reason": null,
+    "runtime_config_projection_sha256": "bcafbd8ebab75f4c9cdab15fa8a1510d0f9e764ce86666aabcae5e4f7a4c10bd",
+    "runtime_config_projection_unavailable_reason": null,
+    "runtime_identity": {
+      "app_server_parser_version": "refresh-app-server-inventory-1",
+      "app_server_protocol_capabilities": {
+        "experimentalApi": null
+      },
+      "app_server_response_schema_version": "app-server-readonly-inventory-v1",
+      "app_server_server_info": {
+        "name": null,
+        "version": null
+      },
+      "codex_executable_hash_unavailable_reason": null,
+      "codex_executable_path": "/opt/homebrew/bin/codex",
+      "codex_executable_sha256": "ff803d4b5c595af19b99c18db6def26539fdf4da23a035ab30809835631e8e4b",
+      "codex_version": "codex-cli 0.128.0"
+    },
+    "runtime_identity_freshness": "recomputed-readonly-inventory",
+    "source_manifest_sha256": "8e5b46f9bfd5a5ea039447e24e18de187f4eaed6646ef7575ad065d35ea62fb8",
+    "source_manifest_unavailable_reason": null
+  },
+  "diff_classification": [
+    {
+      "canonical_path": "handoff/1.6.0/skills/load/SKILL.md",
+      "coverage_status": "coverage_gap",
+      "mutation_mode": "blocked",
+      "outcome": "coverage-gap-fail",
+      "reason_codes": [
+        "command-shape-changed",
+        "semantic-policy-trigger"
+      ],
+      "smoke": []
+    },
+    {
+      "canonical_path": "handoff/1.6.0/skills/quicksave/SKILL.md",
+      "coverage_status": "coverage_gap",
+      "mutation_mode": "blocked",
+      "outcome": "coverage-gap-fail",
+      "reason_codes": [
+        "command-shape-changed",
+        "semantic-policy-trigger"
+      ],
+      "smoke": []
+    },
+    {
+      "canonical_path": "handoff/1.6.0/skills/save/SKILL.md",
+      "coverage_status": "coverage_gap",
+      "mutation_mode": "blocked",
+      "outcome": "coverage-gap-fail",
+      "reason_codes": [
+        "command-shape-changed",
+        "semantic-policy-trigger"
+      ],
+      "smoke": []
+    },
+    {
+      "canonical_path": "handoff/1.6.0/skills/summary/SKILL.md",
+      "coverage_status": "coverage_gap",
+      "mutation_mode": "blocked",
+      "outcome": "coverage-gap-fail",
+      "reason_codes": [
+        "command-shape-changed",
+        "semantic-policy-trigger"
+      ],
+      "smoke": []
+    },
+    {
+      "canonical_path": "handoff/1.6.0/tests/test_session_state.py",
+      "coverage_status": "covered",
+      "mutation_mode": "guarded",
+      "outcome": "guarded-only",
+      "reason_codes": [
+        "unmatched-path"
+      ],
+      "smoke": []
+    },
+    {
+      "canonical_path": "handoff/1.6.0/tests/test_skill_docs.py",
+      "coverage_status": "covered",
+      "mutation_mode": "guarded",
+      "outcome": "guarded-only",
+      "reason_codes": [
+        "unmatched-path"
+      ],
+      "smoke": []
+    }
+  ],
+  "dirty_state": {
+    "post_commit_binding": false,
+    "relevant_paths_checked": [
+      ".agents/plugins/marketplace.json",
+      "plugins/turbo-mode/tools/refresh",
+      "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
+      "plugins/turbo-mode/tools/refresh_validate_redaction.py",
+      "plugins/turbo-mode/tools/refresh_validate_run_metadata.py"
+    ],
+    "status": "clean-relevant-paths"
+  },
+  "dirty_state_policy": "fail-relevant-dirty-state",
+  "final_status": "coverage-gap-blocked",
+  "local_only_evidence_root": "/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701",
+  "local_only_summary_sha256": "2095df3271c199543a735e65626f886c4521f177c7729194b5713135fdbad6a1",
+  "metadata_validation_summary_sha256": "09c13a0804cb36c97b0b840b039429bc98d3d1d5638e27357f6169a80ff3550c",
+  "mode": "dry-run",
+  "omission_reasons": {
+    "exclusivity_status": "outside-plan-04",
+    "post_refresh_cache_manifest": "outside-plan-04",
+    "post_refresh_config_sha256": "outside-plan-04",
+    "pre_refresh_config_sha256": "outside-plan-04",
+    "process_gate": "outside-plan-04",
+    "raw_app_server_transcript": "local-only",
+    "rollback_or_restore_status": "outside-plan-04",
+    "smoke_summary": "outside-plan-04"
+  },
+  "redaction_validation_summary_sha256": "00949e85a6ac08fe51c3adcc51befa9be41a133d8bbf8934786aaa98b7bc6fb7",
+  "repo_head": "47bbe50017742f1decd8142463e9d5020f90f45b",
+  "repo_tree": "ca7b11b02014f0e5b1afb351c2bf92da6a5fa1b1",
+  "run_id": "plan04-live-commit-safe-20260506-003701",
+  "runtime_config": {
+    "marketplace_state": "aligned",
+    "plugin_enablement_state": {
+      "handoff@turbo-mode": "enabled",
+      "ticket@turbo-mode": "enabled"
+    },
+    "plugin_hooks_state": "true",
+    "reason_codes": [],
+    "reason_count": 0,
+    "state": "aligned"
+  },
+  "schema_version": "turbo-mode-refresh-commit-safe-plan-04",
+  "source_local_summary_schema_version": "turbo-mode-refresh-plan-03",
+  "terminal_plan_status": "coverage-gap-blocked",
+  "tool_path": "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
+  "tool_sha256": "d13ee971fcdaea477ce197f68f1b356d140be22d48911dd68ee51620bbcecf4e"
+}
