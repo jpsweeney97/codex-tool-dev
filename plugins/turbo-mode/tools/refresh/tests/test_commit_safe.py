@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from refresh import commit_safe
+from refresh import commit_safe, validation
 from refresh.app_server_inventory import AppServerInventoryCheck, CodexRuntimeIdentity
 from refresh.commit_safe import (
     SAFE_REASON_CODES,
@@ -94,6 +94,30 @@ def test_commit_safe_plan05_constants_and_reason_allowlist() -> None:
         "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",
         "plugins/turbo-mode/tools/refresh_validate_redaction.py",
     )
+
+
+def test_commit_safe_and_validation_reason_allowlists_match() -> None:
+    assert commit_safe.SAFE_REASON_CODES == validation.SAFE_REASON_CODES
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "added-executable-path",
+        "added-non-doc-path",
+        "executable-doc-surface",
+        "command-shape-changed",
+        "handoff-state-helper-direct-python-doc-migration",
+        "projection-parser-warning",
+        "semantic-policy-trigger",
+        "coverage-gap-path",
+        "guarded-only-path",
+        "fast-safe-path",
+        "unmatched-path",
+    ],
+)
+def test_commit_safe_classifier_reasons_have_explicit_codes(reason: str) -> None:
+    assert commit_safe._reason_code(reason) == reason
 
 
 def test_commit_safe_summary_omits_raw_transcript_and_records_omissions(

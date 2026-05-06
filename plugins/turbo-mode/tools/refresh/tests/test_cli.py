@@ -757,6 +757,34 @@ def test_cli_record_summary_rejects_wrong_terminal_status_before_writes(
     ).exists()
 
 
+def test_cli_record_summary_writes_when_terminal_status_matches(tmp_path: Path) -> None:
+    repo_root, codex_home = setup_record_summary_repo(tmp_path)
+
+    completed = run_tool(
+        [
+            "--dry-run",
+            "--record-summary",
+            "--require-terminal-status",
+            "filesystem-no-drift",
+            "--run-id",
+            "matching-terminal-status",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert (
+        codex_home
+        / "local-only/turbo-mode-refresh/matching-terminal-status/commit-safe.final.summary.json"
+    ).is_file()
+    assert (
+        repo_root / "plugins/turbo-mode/evidence/refresh/matching-terminal-status.summary.json"
+    ).is_file()
+
+
 def test_cli_record_summary_fails_before_candidate_when_relevant_dirty(
     tmp_path: Path,
 ) -> None:

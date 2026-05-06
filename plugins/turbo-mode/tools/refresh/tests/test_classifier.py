@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
-from refresh.classifier import classify_diff_path
+from refresh.classifier import HANDOFF_STATE_HELPER_DOC_CONTRACTS, classify_diff_path
 from refresh.command_projection import (
     CommandProjection,
     extract_command_projection,
@@ -498,6 +499,42 @@ def test_handoff_state_helper_direct_python_doc_migration_is_guarded(path: str) 
         "handoff-state-helper-docs",
         "handoff-session-state-write-read-clear",
     )
+
+
+def test_handoff_state_helper_doc_migration_rejects_hash_only_content_change() -> None:
+    contract = HANDOFF_STATE_HELPER_DOC_FIXTURES["handoff/1.6.0/skills/load/SKILL.md"]
+    source_text = contract["source_text"].replace(
+        "Continue work from a previous handoff.",
+        "Continue work from an earlier handoff.",
+    )
+    cache_text = contract["cache_text"]
+
+    assert _sha256(source_text) != contract["source_sha256"]
+    assert extract_command_projection(source_text).items == tuple(contract["source_items"])
+    assert extract_command_projection(source_text).parser_warnings == tuple(
+        contract["source_parser_warnings"]
+    )
+    assert has_semantic_policy_trigger(source_text) is contract["source_semantic_policy_trigger"]
+
+    result = classify_diff_path(
+        "handoff/1.6.0/skills/load/SKILL.md",
+        kind=DiffKind.CHANGED,
+        source_text=source_text,
+        cache_text=cache_text,
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "handoff-state-helper-direct-python-doc-migration" not in result.reasons
+
+
+def test_handoff_state_helper_doc_contracts_have_valid_hashes_and_fallback_trigger() -> None:
+    for contract in HANDOFF_STATE_HELPER_DOC_CONTRACTS.values():
+        assert re.fullmatch(r"[0-9a-f]{64}", contract.source_sha256)
+        assert re.fullmatch(r"[0-9a-f]{64}", contract.cache_sha256)
+        assert contract.source_semantic_policy_trigger is True
+        assert contract.cache_semantic_policy_trigger is True
 
 
 def test_handoff_state_helper_doc_migration_rejects_extra_command_item() -> None:
