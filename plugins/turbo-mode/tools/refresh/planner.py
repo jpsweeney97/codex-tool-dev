@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,11 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by live Python 3.9 s
     except ModuleNotFoundError:  # pragma: no cover - exercised by direct Python 3.9 smoke
         tomllib = None
 
+from .app_server_inventory import (
+    AppServerInventoryCheck,
+    InventoryCollectionError,
+    collect_readonly_runtime_inventory,
+)
 from .classifier import classify_diff_path
 from .manifests import build_manifest, diff_manifests, scan_generated_residue
 from .models import (
@@ -53,6 +59,12 @@ class RefreshPaths:
     local_only_root: Path
 
 
+InventoryCollector = Callable[
+    [RefreshPaths],
+    tuple[AppServerInventoryCheck, tuple[dict[str, Any], ...]],
+]
+
+
 @dataclass(frozen=True)
 class RuntimeConfigCheck:
     state: RuntimeConfigState
@@ -75,6 +87,10 @@ class RefreshPlanResult:
     future_external_command: str | None = None
     mutation_command_available: bool = False
     requires_plan: str | None = None
+    app_server_inventory: AppServerInventoryCheck | None = None
+    app_server_transcript: tuple[dict[str, Any], ...] = ()
+    app_server_inventory_status: str = "not-requested"
+    app_server_inventory_failure_reason: str | None = None
 
 
 def build_paths(
@@ -115,6 +131,8 @@ def plan_refresh(
     repo_root: Path,
     codex_home: Path,
     mode: str,
+    inventory_check: bool = False,
+    inventory_collector: InventoryCollector | None = None,
 ) -> RefreshPlanResult:
     paths = build_paths(
         repo_root=repo_root,
@@ -166,10 +184,34 @@ def plan_refresh(
     except RefreshError as exc:
         preflight_reasons.append(str(exc))
 
+    app_server_inventory: AppServerInventoryCheck | None = None
+    app_server_transcript: tuple[dict[str, Any], ...] = ()
+    inventory_status = "not-requested"
+    inventory_failure_reason: str | None = None
+    if inventory_check:
+        if runtime_config is None:
+            inventory_status = "requested-blocked"
+            inventory_failure_reason = "runtime config preflight unavailable"
+        else:
+            try:
+                collector = inventory_collector or collect_readonly_runtime_inventory
+                app_server_inventory, app_server_transcript = collector(paths)
+                inventory_status = "collected"
+            except InventoryCollectionError as exc:
+                app_server_transcript = exc.transcript
+                inventory_status = "requested-failed"
+                inventory_failure_reason = str(exc)
+                preflight_reasons.append(str(exc))
+            except RefreshError as exc:
+                inventory_status = "requested-failed"
+                inventory_failure_reason = str(exc)
+                preflight_reasons.append(str(exc))
+
     axes = _derive_axes(
         diffs=diffs,
         classifications=classifications,
         runtime_config=runtime_config,
+        app_server_inventory=app_server_inventory,
         preflight_reasons=tuple(preflight_reasons),
         manifest_collected=manifest_collected,
     )
@@ -189,6 +231,10 @@ def plan_refresh(
         future_external_command=future_external_command,
         mutation_command_available=False,
         requires_plan="future-mutation-plan" if future_external_command is not None else None,
+        app_server_inventory=app_server_inventory,
+        app_server_transcript=app_server_transcript,
+        app_server_inventory_status=inventory_status,
+        app_server_inventory_failure_reason=inventory_failure_reason,
     )
 
 
@@ -560,6 +606,7 @@ def _derive_axes(
     diffs: list[DiffEntry],
     classifications: list[PathClassification],
     runtime_config: RuntimeConfigCheck | None,
+    app_server_inventory: AppServerInventoryCheck | None,
     preflight_reasons: tuple[str, ...],
     manifest_collected: bool,
 ) -> PlanAxes:
@@ -584,7 +631,12 @@ def _derive_axes(
         runtime_config.state if runtime_config is not None else RuntimeConfigState.UNKNOWN
     )
     if runtime_config_state == RuntimeConfigState.ALIGNED:
-        runtime_config_state = RuntimeConfigState.UNCHECKED
+        runtime_config_state = (
+            RuntimeConfigState.ALIGNED
+            if app_server_inventory is not None
+            and app_server_inventory.state == "aligned"
+            else RuntimeConfigState.UNCHECKED
+        )
     elif runtime_config_state == RuntimeConfigState.UNCHECKED:
         runtime_config_state = RuntimeConfigState.UNKNOWN
     if runtime_config_state == RuntimeConfigState.REPAIRABLE_MISMATCH:

@@ -123,6 +123,91 @@ def run_system_python_tool(
     )
 
 
+def write_fake_codex(bin_dir: Path) -> Path:
+    codex = bin_dir / "codex"
+    codex.write_text(
+        """#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+import sys
+
+repo = os.environ["FAKE_REPO_ROOT"]
+codex_home = os.environ["FAKE_CODEX_HOME"]
+
+def skill(name, plugin, version, rel):
+    return {
+        "name": name,
+        "sourcePath": (
+            f"{codex_home}/plugins/cache/turbo-mode/{plugin}/{version}"
+            f"/skills/{rel}/SKILL.md"
+        ),
+    }
+
+if sys.argv[1:] == ["--version"]:
+    print("codex-cli 0.test")
+    raise SystemExit(0)
+
+if sys.argv[1:] != ["app-server", "--listen", "stdio://"]:
+    print("unexpected argv", sys.argv[1:], file=sys.stderr)
+    raise SystemExit(2)
+
+for line in sys.stdin:
+    request = json.loads(line)
+    request_id = request.get("id")
+    if request_id is None:
+        continue
+    method = request.get("method")
+    if method == "initialize":
+        result = {
+            "serverInfo": {"name": "codex-app-server", "version": "0.test"},
+            "capabilities": {"experimentalApi": True},
+        }
+    elif method == "plugin/read":
+        plugin = request["params"]["pluginName"]
+        version = "1.6.0" if plugin == "handoff" else "1.4.0"
+        result = {"source": {"path": f"{repo}/plugins/turbo-mode/{plugin}/{version}"}}
+    elif method == "plugin/list":
+        result = {"plugins": ["handoff@turbo-mode", "ticket@turbo-mode"]}
+    elif method == "skills/list":
+        result = {
+            "skills": [
+                skill("handoff:defer", "handoff", "1.6.0", "defer"),
+                skill("handoff:distill", "handoff", "1.6.0", "distill"),
+                skill("handoff:load", "handoff", "1.6.0", "load"),
+                skill("handoff:quicksave", "handoff", "1.6.0", "quicksave"),
+                skill("handoff:save", "handoff", "1.6.0", "save"),
+                skill("handoff:search", "handoff", "1.6.0", "search"),
+                skill("handoff:summary", "handoff", "1.6.0", "summary"),
+                skill("handoff:triage", "handoff", "1.6.0", "triage"),
+                skill("ticket:ticket", "ticket", "1.4.0", "ticket"),
+                skill("ticket:ticket-triage", "ticket", "1.4.0", "ticket-triage"),
+            ]
+        }
+    elif method == "hooks/list":
+        ticket_cache = f"{codex_home}/plugins/cache/turbo-mode/ticket/1.4.0"
+        result = {
+            "hooks": [
+                {
+                    "pluginId": "ticket@turbo-mode",
+                    "eventName": "preToolUse",
+                    "matcher": "Bash",
+                    "command": f"python3 {ticket_cache}/hooks/ticket_engine_guard.py",
+                    "sourcePath": f"{ticket_cache}/hooks/hooks.json",
+                }
+            ]
+        }
+    else:
+        result = {}
+    print(json.dumps({"id": request_id, "result": result}), flush=True)
+""",
+        encoding="utf-8",
+    )
+    codex.chmod(0o755)
+    return codex
+
+
 def tree_snapshot(root: Path) -> dict[str, dict[str, str]]:
     entries: dict[str, dict[str, str]] = {}
     for path in sorted([root, *root.rglob("*")]):
@@ -190,6 +275,48 @@ def test_cli_dry_run_outputs_json_and_writes_evidence(tmp_path: Path) -> None:
         "ticket@turbo-mode": "enabled",
     }
     assert (codex_home / "local-only/turbo-mode-refresh/run-1/dry-run.summary.json").is_file()
+
+
+def test_cli_inventory_check_collects_runtime_inventory(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_fake_codex(bin_dir)
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "FAKE_REPO_ROOT": str(repo_root),
+        "FAKE_CODEX_HOME": str(codex_home),
+    }
+
+    completed = run_tool(
+        [
+            "--dry-run",
+            "--inventory-check",
+            "--json",
+            "--run-id",
+            "run-inventory",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ],
+        env=env,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["terminal_plan_status"] == "no-drift"
+    assert payload["app_server_inventory"]["state"] == "aligned"
+    transcript = codex_home / (
+        "local-only/turbo-mode-refresh/run-inventory/"
+        "app-server-readonly-inventory.transcript.json"
+    )
+    assert transcript.is_file()
 
 
 def test_cli_plan_refresh_emits_future_command_advice_for_fast_safe_drift(
@@ -323,7 +450,7 @@ def test_cli_rejects_mutation_modes_in_plan_02() -> None:
     completed = run_tool(["--refresh"])
 
     assert completed.returncode == 2
-    assert "outside Plan 02" in completed.stderr
+    assert "outside Plan 03" in completed.stderr
 
 
 def test_cli_rejects_exact_future_command_shapes_with_plan_02_message() -> None:
@@ -332,8 +459,8 @@ def test_cli_rejects_exact_future_command_shapes_with_plan_02_message() -> None:
 
     assert refresh.returncode == 2
     assert guarded.returncode == 2
-    assert "outside Plan 02" in refresh.stderr
-    assert "outside Plan 02" in guarded.stderr
+    assert "outside Plan 03" in refresh.stderr
+    assert "outside Plan 03" in guarded.stderr
     assert "unrecognized arguments" not in refresh.stderr
     assert "unrecognized arguments" not in guarded.stderr
 
