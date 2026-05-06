@@ -1452,3 +1452,50 @@ Stop before implementation or commit if any of these occur:
 - [ ] The Handoff tests remain guarded-only drift and do not become fast-safe.
 - [ ] Commit-safe reason allowlists include the new reason code.
 - [ ] Verification includes refresh tests, Handoff source tests, ruff, residue scan, live dry-run, and commit-safe evidence.
+
+## Completion Evidence
+
+- Implementation branch: `chore/turbo-refresh-plan05-handoff-coverage`
+- Source implementation commit: `6ac913e7059be99e14cf0cfdb8925f8736e4dcc0`
+- Source implementation tree: `8b89866a7486859bb1632b1794102ea6996798d2`
+- Focused refresh test result:
+  `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`
+  Result: `271 passed in 21.77s`
+- Handoff source test result:
+  `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/handoff/1.6.0/tests/test_session_state.py plugins/turbo-mode/handoff/1.6.0/tests/test_skill_docs.py -q`
+  Result: `20 passed in 1.85s`
+- Ruff result:
+  `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py plugins/turbo-mode/tools/refresh_validate_run_metadata.py plugins/turbo-mode/tools/refresh_validate_redaction.py`
+  Result: `All checks passed!`
+- Residue result:
+  `find plugins/turbo-mode/handoff/1.6.0 plugins/turbo-mode/ticket/1.4.0 plugins/turbo-mode/tools/refresh -name __pycache__ -o -name '*.pyc' -o -name .pytest_cache -o -name .ruff_cache -o -name .mypy_cache -o -name .venv -o -name .DS_Store`
+  Result: no output after trashing generated residue under `plugins/turbo-mode/handoff/1.6.0/.pytest_cache`
+- Live dry-run status:
+  Run id `plan05-live-handoff-coverage-dry-run-20260506-160004`
+  Result: `terminal_plan_status = "guarded-refresh-required"`, `coverage_state = "covered"`, `selected_mutation_mode = "guarded-refresh"`, `runtime_config_state = "aligned"`, `app_server_inventory_status = "collected"`
+- Live commit-safe summary path:
+  [plan05-live-handoff-coverage-20260506-160049.summary.json](/Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/evidence/refresh/plan05-live-handoff-coverage-20260506-160049.summary.json)
+- Live commit-safe summary SHA256:
+  `64e996c2c788961a11012b35bcb60b35d6e5c107751c5ae25196021832656052`
+- Live commit-safe summary schema version:
+  `turbo-mode-refresh-commit-safe-plan-05`
+- Proof that the live commit-safe summary contains no `outside-plan-04` or `plan-04-cli`:
+  Task 6 Step 5 scanned the summary payload text and found neither stale Plan 04 value.
+- Proof that local-only redaction evidence and the whole run root contain no `plan-04-cli`:
+  Task 6 Step 5 scanned `redaction.summary.json`, `redaction-final-scan.summary.json`, and every `*.json` file under `/Users/jp/.codex/local-only/turbo-mode-refresh/plan05-live-handoff-coverage-20260506-160049` and found no `plan-04-cli`.
+- Final terminal status:
+  `guarded-refresh-required`
+- Clean-source gate output from Task 6 Step 3:
+  `## chore/turbo-refresh-plan05-handoff-coverage`
+- Source-commit-bound metadata replay command:
+  `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache python3 "$SOURCE_REPLAY_ROOT/plugins/turbo-mode/tools/refresh_validate_run_metadata.py" --run-id "$RUN_ID" --repo-root "$SOURCE_REPLAY_ROOT" --mode final --local-only-root "/Users/jp/.codex/local-only/turbo-mode-refresh/$RUN_ID" --summary "/Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/evidence/refresh/$RUN_ID.summary.json" --published-summary-path "/Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/evidence/refresh/$RUN_ID.summary.json" --candidate-summary "/Users/jp/.codex/local-only/turbo-mode-refresh/$RUN_ID/commit-safe.candidate.summary.json" --existing-validation-summary "/Users/jp/.codex/local-only/turbo-mode-refresh/$RUN_ID/metadata-validation.summary.json"`
+- Source-commit-bound metadata replay result:
+  This replay is intentionally run after the evidence/docs commit because it must prove validation from the recorded source implementation commit rather than the later evidence/docs `HEAD`. The result is recorded after Task 7 Step 3 completes.
+- Source-bound validation note:
+  Commit-safe validation and replay after the evidence/docs commit must be run from, or otherwise bound to, `source_implementation_commit = 6ac913e7059be99e14cf0cfdb8925f8736e4dcc0` and `source_implementation_tree = 8b89866a7486859bb1632b1794102ea6996798d2`, not the later evidence/docs commit.
+- Smoke-label note:
+  Plan 05 smoke labels are advisory metadata only. No guarded-refresh smoke executor is implemented or invoked by this plan.
+- Completion-boundary note:
+  `guarded-refresh-required` is not refresh completion. It proves that the current six-path drift is covered and guarded, not that installed cache mutation has been executed.
+- Mutation-boundary note:
+  Installed-cache mutation remains outside Plan 05.
