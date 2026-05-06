@@ -336,11 +336,13 @@ def publish_json_0600_exclusive(source_payload_path: Path, final_path: Path) -> 
 
 
 def run_validator(command: list[str]) -> None:
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     completed = subprocess.run(
         command,
         text=True,
         capture_output=True,
         check=False,
+        env=env,
     )
     if completed.returncode != 0:
         raise RefreshError(

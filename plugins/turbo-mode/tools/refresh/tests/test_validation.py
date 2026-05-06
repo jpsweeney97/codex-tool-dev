@@ -7,8 +7,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from refresh.app_server_inventory import AppServerInventoryCheck, CodexRuntimeIdentity
 from refresh.commit_safe import (
     build_commit_safe_summary,
+    build_current_run_identity_from_paths,
     ensure_relevant_worktree_clean,
     sha256_file,
     sha256_payload,
@@ -393,6 +395,107 @@ def build_candidate_summary(tmp_path: Path) -> dict[str, object]:
         "payload": payload,
         "published": repo_root / "plugins/turbo-mode/evidence/refresh/run-1.summary.json",
     }
+
+
+def inventory_fixture(*, version: str, hook_command: str) -> AppServerInventoryCheck:
+    identity = CodexRuntimeIdentity(
+        codex_version=version,
+        executable_path="/opt/homebrew/bin/codex",
+        executable_sha256="0" * 64,
+        executable_hash_unavailable_reason=None,
+        server_info={"name": "codex-app-server", "version": version},
+        initialize_capabilities={"experimentalApi": True},
+    )
+    return AppServerInventoryCheck(
+        state="aligned",
+        identity=identity,
+        plugin_read_sources={
+            "handoff": "/repo/plugins/turbo-mode/handoff/1.6.0",
+            "ticket": "/repo/plugins/turbo-mode/ticket/1.4.0",
+        },
+        plugin_list=("handoff@turbo-mode", "ticket@turbo-mode"),
+        skills=("handoff:save", "ticket:ticket"),
+        ticket_hook={
+            "plugin_id": "ticket@turbo-mode",
+            "event_name": "preToolUse",
+            "matcher": "Bash",
+            "command": hook_command,
+            "source_path": "/cache/hooks/hooks.json",
+        },
+        handoff_hooks=(),
+        request_methods=(
+            "initialize",
+            "initialized",
+            "plugin/read",
+            "plugin/read",
+            "plugin/list",
+            "skills/list",
+            "hooks/list",
+        ),
+        transcript_sha256="1" * 64,
+    )
+
+
+def test_current_run_identity_recollects_collected_inventory(tmp_path: Path) -> None:
+    repo_root, codex_home, _result = init_refresh_repo(tmp_path)
+    stale_inventory = inventory_fixture(version="codex-cli stale", hook_command="old")
+    current_inventory = inventory_fixture(version="codex-cli current", hook_command="new")
+    local_summary = {
+        "schema_version": "turbo-mode-refresh-plan-03",
+        "run_id": "run-1",
+        "mode": "dry-run",
+        "app_server_inventory_status": "collected",
+        "app_server_inventory": {
+            "state": stale_inventory.state,
+            "identity": {
+                "codex_version": stale_inventory.identity.codex_version,
+                "executable_path": stale_inventory.identity.executable_path,
+                "executable_sha256": stale_inventory.identity.executable_sha256,
+                "executable_hash_unavailable_reason": (
+                    stale_inventory.identity.executable_hash_unavailable_reason
+                ),
+                "server_info": stale_inventory.identity.server_info,
+                "initialize_capabilities": stale_inventory.identity.initialize_capabilities,
+                "parser_version": stale_inventory.identity.parser_version,
+                "accepted_response_schema_version": (
+                    stale_inventory.identity.accepted_response_schema_version
+                ),
+            },
+            "plugin_read_sources": stale_inventory.plugin_read_sources,
+            "plugin_list": list(stale_inventory.plugin_list),
+            "skills": list(stale_inventory.skills),
+            "ticket_hook": stale_inventory.ticket_hook,
+            "handoff_hooks": list(stale_inventory.handoff_hooks),
+            "request_methods": list(stale_inventory.request_methods),
+            "reasons": list(stale_inventory.reasons),
+        },
+    }
+
+    current_identity = build_current_run_identity_from_paths(
+        repo_root=repo_root,
+        codex_home=codex_home,
+        run_id="run-1",
+        local_summary=local_summary,
+        inventory_collector=lambda _paths: current_inventory,
+    )
+
+    assert current_identity["runtime_identity"]["codex_version"] == "codex-cli current"
+    assert current_identity["runtime_identity_freshness"] == "recomputed-readonly-inventory"
+    assert current_identity["app_server_inventory_freshness"] == (
+        "recomputed-readonly-inventory"
+    )
+    assert current_identity["app_server_inventory_summary_sha256"] != sha256_payload(
+        {
+            "state": stale_inventory.state,
+            "plugin_read_sources": dict(stale_inventory.plugin_read_sources),
+            "plugin_list": list(stale_inventory.plugin_list),
+            "skills": list(stale_inventory.skills),
+            "ticket_hook": dict(stale_inventory.ticket_hook),
+            "handoff_hooks": [dict(item) for item in stale_inventory.handoff_hooks],
+            "request_methods": list(stale_inventory.request_methods),
+            "reasons": [],
+        }
+    )
 
 
 def run_metadata(args: list[str]) -> subprocess.CompletedProcess[str]:

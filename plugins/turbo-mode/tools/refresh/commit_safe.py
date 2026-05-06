@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .app_server_inventory import collect_readonly_runtime_inventory
 from .evidence import SCHEMA_VERSION as LOCAL_ONLY_SCHEMA_VERSION
 from .manifests import build_manifest
 from .models import RefreshError
@@ -227,21 +228,18 @@ def build_current_run_identity(
     run_id: str,
     local_summary: dict[str, Any],
 ) -> dict[str, Any]:
-    identity = build_current_run_identity_from_paths(
+    inventory_collector = None
+    if result.app_server_inventory is not None:
+        def inventory_collector(_paths: RefreshPaths) -> Any:
+            return result.app_server_inventory
+
+    return build_current_run_identity_from_paths(
         repo_root=result.paths.repo_root,
         codex_home=result.paths.codex_home,
         run_id=run_id,
         local_summary=local_summary,
+        inventory_collector=inventory_collector,
     )
-    if result.app_server_inventory is not None:
-        inventory_summary = _inventory_replay_identity(result.app_server_inventory)
-        identity["app_server_inventory_summary_sha256"] = sha256_payload(inventory_summary)
-        identity["app_server_inventory_freshness"] = "recomputed-readonly-inventory"
-        identity["runtime_identity"] = _runtime_identity_projection(
-            result.app_server_inventory.identity
-        )
-        identity["runtime_identity_freshness"] = "recomputed-readonly-inventory"
-    return identity
 
 
 def build_current_run_identity_from_paths(
@@ -250,6 +248,7 @@ def build_current_run_identity_from_paths(
     codex_home: Path,
     run_id: str,
     local_summary: dict[str, Any],
+    inventory_collector: Callable[[RefreshPaths], Any] | None = None,
 ) -> dict[str, Any]:
     try:
         paths = build_paths(repo_root=repo_root, codex_home=codex_home)
@@ -283,13 +282,14 @@ def build_current_run_identity_from_paths(
             expected_marketplace_source=paths.repo_root,
         )
     )
-    local_inventory = local_summary.get("app_server_inventory") or {}
-    inventory_summary = _inventory_replay_identity_from_local_summary(local_inventory)
     status = str(local_summary.get("app_server_inventory_status"))
     runtime_identity = None
-    if status == "collected" and isinstance(local_inventory, dict):
-        local_identity = local_inventory.get("identity")
-        runtime_identity = _runtime_identity_projection_from_local_summary(local_identity)
+    inventory_summary = None
+    if status == "collected":
+        collector = inventory_collector or _collect_current_runtime_inventory
+        current_inventory = collector(paths)
+        inventory_summary = _inventory_replay_identity(current_inventory)
+        runtime_identity = _runtime_identity_projection(current_inventory.identity)
     return {
         "local_summary_schema_version": local_summary.get("schema_version"),
         "local_summary_run_id": local_summary.get("run_id"),
@@ -317,6 +317,11 @@ def build_current_run_identity_from_paths(
             runtime_identity=runtime_identity,
         ),
     }
+
+
+def _collect_current_runtime_inventory(paths: RefreshPaths) -> Any:
+    inventory, _raw_transcript = collect_readonly_runtime_inventory(paths)
+    return inventory
 
 
 def _manifest_or_missing_source(spec: Any, *, root_kind: str) -> dict[str, Any]:

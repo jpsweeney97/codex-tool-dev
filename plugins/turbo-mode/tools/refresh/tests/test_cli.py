@@ -430,6 +430,36 @@ def test_cli_bare_invocation_does_not_write_bytecode(tmp_path: Path) -> None:
     assert not list(refresh_root.rglob("*.pyc"))
 
 
+def test_cli_record_summary_validators_do_not_write_bytecode(tmp_path: Path) -> None:
+    repo_root, codex_home = setup_record_summary_repo(tmp_path)
+    refresh_root = REPO_ROOT / "plugins/turbo-mode/tools/refresh"
+    assert not list(refresh_root.rglob("__pycache__"))
+    assert not list(refresh_root.rglob("*.pyc"))
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX"}
+    }
+
+    completed = run_system_python_tool(
+        [
+            "--dry-run",
+            "--record-summary",
+            "--run-id",
+            "record-no-bytecode",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ],
+        env=env,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert not list(refresh_root.rglob("__pycache__"))
+    assert not list(refresh_root.rglob("*.pyc"))
+
+
 def test_cli_system_python_no_user_site_does_not_require_tomli(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     codex_home = tmp_path / ".codex"

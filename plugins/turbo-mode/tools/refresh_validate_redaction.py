@@ -8,6 +8,8 @@ import stat
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+
 CURRENT_FILE = Path(__file__).resolve()
 REFRESH_PARENT = CURRENT_FILE.parent
 sys.path.insert(0, str(REFRESH_PARENT))
