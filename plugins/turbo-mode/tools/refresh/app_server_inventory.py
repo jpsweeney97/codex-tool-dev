@@ -245,7 +245,9 @@ def app_server_roundtrip(
     )
     assert proc.stdin is not None
     assert proc.stdout is not None
+    assert proc.stderr is not None
     output: queue.Queue[str | None] = queue.Queue()
+    stderr_lines: list[str] = []
     transcript: list[dict[str, Any]] = []
 
     def read_stdout() -> None:
@@ -255,8 +257,14 @@ def app_server_roundtrip(
         finally:
             output.put(None)
 
-    reader = threading.Thread(target=read_stdout, daemon=True)
-    reader.start()
+    def read_stderr() -> None:
+        for line in proc.stderr:
+            stderr_lines.append(line)
+
+    stdout_reader = threading.Thread(target=read_stdout, daemon=True)
+    stderr_reader = threading.Thread(target=read_stderr, daemon=True)
+    stdout_reader.start()
+    stderr_reader.start()
     try:
         for request in requests:
             proc.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
@@ -303,12 +311,15 @@ def app_server_roundtrip(
     finally:
         proc.terminate()
         try:
-            _stdout, stderr = proc.communicate(timeout=5)
+            proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
-            _stdout, stderr = proc.communicate(timeout=5)
+            proc.wait(timeout=5)
+        stdout_reader.join(timeout=1)
+        stderr_reader.join(timeout=1)
+        stderr = "".join(stderr_lines).strip()
         if proc.returncode not in (0, -15, None) and stderr:
-            transcript.append({"direction": "stderr", "body": stderr.strip()})
+            transcript.append({"direction": "stderr", "body": stderr})
     return transcript
 
 

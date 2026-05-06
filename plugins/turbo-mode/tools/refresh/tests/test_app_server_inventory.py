@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from refresh.app_server_inventory import (
     EXPECTED_TICKET_SKILLS,
     CodexRuntimeIdentity,
     InventoryCollectionError,
+    app_server_roundtrip,
     build_readonly_inventory_requests,
     collect_codex_runtime_identity,
     collect_readonly_runtime_inventory,
@@ -519,7 +521,7 @@ def test_collect_readonly_runtime_inventory_binds_roundtrip_and_identity_executa
                 for item in transcript(refresh_paths)
                 if item["direction"] == "recv"
             ]
-            self.stderr = None
+            self.stderr = []
             self.returncode = None
             self.terminated = False
 
@@ -527,9 +529,9 @@ def test_collect_readonly_runtime_inventory_binds_roundtrip_and_identity_executa
             self.terminated = True
             self.returncode = -15
 
-        def communicate(self, timeout: int) -> tuple[str, str]:
+        def wait(self, timeout: int) -> int:
             assert timeout == 5
-            return "", ""
+            return self.returncode
 
     def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert args[0] == [str(executable), "--version"]
@@ -549,6 +551,58 @@ def test_collect_readonly_runtime_inventory_binds_roundtrip_and_identity_executa
     assert getattr(processes[0], "terminated")
     assert inventory.identity.executable_path == str(executable)
     assert inventory.identity.codex_version == "codex-cli 0.bound"
+
+
+def test_app_server_roundtrip_drains_stderr_while_waiting_for_response(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / "bin/codex"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"codex executable")
+    stderr_drained = threading.Event()
+
+    class FakeStdin:
+        def write(self, _value: str) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    class BlockingStdout:
+        def __iter__(self):
+            assert stderr_drained.wait(timeout=1)
+            yield json.dumps({"id": 0, "result": {}}) + "\n"
+
+    class VerboseStderr:
+        def __iter__(self):
+            for _index in range(1000):
+                stderr_drained.set()
+                yield "verbose app-server log\n"
+
+    class FakeProcess:
+        def __init__(self, _cmd: list[str], **_kwargs: object) -> None:
+            self.stdin = FakeStdin()
+            self.stdout = BlockingStdout()
+            self.stderr = VerboseStderr()
+            self.returncode = None
+
+        def terminate(self) -> None:
+            self.returncode = -15
+
+        def wait(self, timeout: int) -> int:
+            assert timeout == 5
+            return self.returncode
+
+    monkeypatch.setattr(inventory_module.subprocess, "Popen", FakeProcess)
+
+    raw_transcript = app_server_roundtrip(
+        [{"id": 0, "method": "initialize"}],
+        executable=str(executable),
+    )
+
+    assert stderr_drained.is_set()
+    assert raw_transcript[-1] == {"direction": "recv", "body": {"id": 0, "result": {}}}
 
 
 def test_collect_readonly_runtime_inventory_preserves_transcript_on_validation_failure(
