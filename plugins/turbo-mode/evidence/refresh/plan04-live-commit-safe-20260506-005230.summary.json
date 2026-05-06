@@ -38,10 +38,10 @@
     "app_server_inventory_summary_sha256": "5b863387f904a94ae3dcfd45a5eb7463d3402346f3fc01a646e78edaab789b50",
     "installed_cache_manifest_sha256": "a71a5b4af1685508de7ff75f832f08e66728c465002486d7df8cabf856b2dc00",
     "installed_cache_manifest_unavailable_reason": null,
-    "local_config_metadata_sha256": "763cd39254fa28a89f50ec82077364fa9da9eefb34c0e9bc49721c9b5a0f2e9f",
+    "local_config_metadata_sha256": "264adb10daa4d78933d5af95b636a90f03c38ea34c964f696e15e41839484e51",
     "local_config_metadata_unavailable_reason": null,
     "local_summary_mode": "dry-run",
-    "local_summary_run_id": "plan04-live-commit-safe-20260506-003701",
+    "local_summary_run_id": "plan04-live-commit-safe-20260506-005230",
     "local_summary_schema_version": "turbo-mode-refresh-plan-03",
     "repo_marketplace_sha256": "56131cfd05b96e67fd917da93ff69950a33b463eac9bfa8ace18b96eea734e06",
     "repo_marketplace_unavailable_reason": null,
@@ -145,9 +145,9 @@
   },
   "dirty_state_policy": "fail-relevant-dirty-state",
   "final_status": "coverage-gap-blocked",
-  "local_only_evidence_root": "/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701",
-  "local_only_summary_sha256": "2095df3271c199543a735e65626f886c4521f177c7729194b5713135fdbad6a1",
-  "metadata_validation_summary_sha256": "09c13a0804cb36c97b0b840b039429bc98d3d1d5638e27357f6169a80ff3550c",
+  "local_only_evidence_root": "/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230",
+  "local_only_summary_sha256": "87418f21d3cd397f5ed7222cab3a8f0daba1c34f2367d28b6327b88cb097932d",
+  "metadata_validation_summary_sha256": "fd994edabc2c3ab0dd330233513a78bc6b86d1dc84652c42a6076e3a825a593e",
   "mode": "dry-run",
   "omission_reasons": {
     "exclusivity_status": "outside-plan-04",
@@ -159,10 +159,10 @@
     "rollback_or_restore_status": "outside-plan-04",
     "smoke_summary": "outside-plan-04"
   },
-  "redaction_validation_summary_sha256": "00949e85a6ac08fe51c3adcc51befa9be41a133d8bbf8934786aaa98b7bc6fb7",
-  "repo_head": "47bbe50017742f1decd8142463e9d5020f90f45b",
-  "repo_tree": "ca7b11b02014f0e5b1afb351c2bf92da6a5fa1b1",
-  "run_id": "plan04-live-commit-safe-20260506-003701",
+  "redaction_validation_summary_sha256": "20e73afb5f296b3d33d38945187f010894ba9e5456cfa5dd20f45495bdb005fb",
+  "repo_head": "ef8dcd945661115508a94bce337a6b99422a053a",
+  "repo_tree": "620d6538e5ec82cc999b7ffd873589e688be0a90",
+  "run_id": "plan04-live-commit-safe-20260506-005230",
   "runtime_config": {
     "marketplace_state": "aligned",
     "plugin_enablement_state": {
@@ -178,5 +178,5 @@
   "source_local_summary_schema_version": "turbo-mode-refresh-plan-03",
   "terminal_plan_status": "coverage-gap-blocked",
   "tool_path": "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
-  "tool_sha256": "d13ee971fcdaea477ce197f68f1b356d140be22d48911dd68ee51620bbcecf4e"
+  "tool_sha256": "8cc0d06d34098155e4b0a418f7aecc57a3685beb99f7804e89a62814d01f669b"
 }

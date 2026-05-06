@@ -2852,7 +2852,8 @@ In the CLI write path:
 4. Run the metadata validator and redaction validator in candidate mode with explicit arguments:
 
 ```bash
-python3 plugins/turbo-mode/tools/refresh_validate_run_metadata.py \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache python3 \
+  plugins/turbo-mode/tools/refresh_validate_run_metadata.py \
   --mode candidate \
   --run-id "$RUN_ID" \
   --repo-root "$REPO_ROOT" \
@@ -2861,7 +2862,8 @@ python3 plugins/turbo-mode/tools/refresh_validate_run_metadata.py \
   --published-summary-path "$PUBLISHED_SUMMARY_PATH" \
   --summary-output "$LOCAL_ONLY_RUN_DIR/metadata-validation.summary.json"
 
-python3 plugins/turbo-mode/tools/refresh_validate_redaction.py \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache python3 \
+  plugins/turbo-mode/tools/refresh_validate_redaction.py \
   --mode candidate \
   --run-id "$RUN_ID" \
   --repo-root "$REPO_ROOT" \
@@ -2880,7 +2882,8 @@ python3 plugins/turbo-mode/tools/refresh_validate_redaction.py \
 8. Re-run validators in final mode with explicit arguments and the existing candidate-mode summaries:
 
 ```bash
-python3 plugins/turbo-mode/tools/refresh_validate_run_metadata.py \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache python3 \
+  plugins/turbo-mode/tools/refresh_validate_run_metadata.py \
   --mode final \
   --run-id "$RUN_ID" \
   --repo-root "$REPO_ROOT" \
@@ -2890,7 +2893,8 @@ python3 plugins/turbo-mode/tools/refresh_validate_run_metadata.py \
   --candidate-summary "$LOCAL_ONLY_RUN_DIR/commit-safe.candidate.summary.json" \
   --existing-validation-summary "$LOCAL_ONLY_RUN_DIR/metadata-validation.summary.json"
 
-python3 plugins/turbo-mode/tools/refresh_validate_redaction.py \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache python3 \
+  plugins/turbo-mode/tools/refresh_validate_redaction.py \
   --mode final \
   --run-id "$RUN_ID" \
   --repo-root "$REPO_ROOT" \
@@ -3132,7 +3136,8 @@ The completion evidence must include a replay recipe like:
 git switch feature/turbo-mode-refresh-plan-04-commit-safe-evidence
 git rev-parse HEAD
 git switch --detach <source_implementation_commit>
-python3 plugins/turbo-mode/tools/refresh_validate_run_metadata.py \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache python3 \
+  plugins/turbo-mode/tools/refresh_validate_run_metadata.py \
   --mode final \
   --run-id <fresh-run-id> \
   --repo-root /Users/jp/Projects/active/codex-tool-dev \
@@ -3141,7 +3146,8 @@ python3 plugins/turbo-mode/tools/refresh_validate_run_metadata.py \
   --published-summary-path /Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/evidence/refresh/<fresh-run-id>.summary.json \
   --candidate-summary /Users/jp/.codex/local-only/turbo-mode-refresh/<fresh-run-id>/commit-safe.candidate.summary.json \
   --existing-validation-summary /Users/jp/.codex/local-only/turbo-mode-refresh/<fresh-run-id>/metadata-validation.summary.json
-python3 plugins/turbo-mode/tools/refresh_validate_redaction.py \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache python3 \
+  plugins/turbo-mode/tools/refresh_validate_redaction.py \
   --mode final \
   --run-id <fresh-run-id> \
   --repo-root /Users/jp/Projects/active/codex-tool-dev \
@@ -3152,7 +3158,7 @@ python3 plugins/turbo-mode/tools/refresh_validate_redaction.py \
   --published-summary-path /Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/evidence/refresh/<fresh-run-id>.summary.json \
   --candidate-summary /Users/jp/.codex/local-only/turbo-mode-refresh/<fresh-run-id>/commit-safe.candidate.summary.json \
   --existing-validation-summary /Users/jp/.codex/local-only/turbo-mode-refresh/<fresh-run-id>/redaction.summary.json \
-  --final-scan-output /Users/jp/.codex/local-only/turbo-mode-refresh/<fresh-run-id>/redaction-final-scan.summary.json
+  --final-scan-output /private/tmp/<fresh-run-id>-redaction-final-scan.replay.summary.json
 git switch feature/turbo-mode-refresh-plan-04-commit-safe-evidence
 ```
 
@@ -3180,21 +3186,20 @@ Implementation branch:
 
 Source implementation boundary:
 
-- Source implementation commit: `47bbe50017742f1decd8142463e9d5020f90f45b`
-- Source implementation tree: `ca7b11b02014f0e5b1afb351c2bf92da6a5fa1b1`
+- Source implementation commit: `ef8dcd945661115508a94bce337a6b99422a053a`
+- Source implementation tree: `620d6538e5ec82cc999b7ffd873589e688be0a90`
 - The evidence/docs commit hash and tree cannot be embedded in this same committed
   file without changing them. Record that identity in the implementation closeout
   or PR text after the evidence/docs commit exists.
 
-Verification before the source implementation commit:
+Verification before the patched source implementation commit:
 
 - Focused refresh tests:
   `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`
-- Result before commit: `243 passed in 20.58s`
+- Result before commit: `245 passed in 16.11s`
 - Ruff:
   `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py plugins/turbo-mode/tools/refresh_validate_run_metadata.py plugins/turbo-mode/tools/refresh_validate_redaction.py`
-- Result after formatting fixes: `All checks passed!`
-- Focused refresh tests after formatting: `243 passed in 16.05s`
+- Result: `All checks passed!`
 - Source-tree residue gate:
   `find plugins/turbo-mode/handoff/1.6.0 plugins/turbo-mode/ticket/1.4.0 plugins/turbo-mode/tools/refresh -name __pycache__ -o -name '*.pyc' -o -name .pytest_cache -o -name .ruff_cache -o -name .mypy_cache -o -name .venv -o -name .DS_Store`
 - Source-tree residue result: printed nothing.
@@ -3211,10 +3216,13 @@ Installed-cache residue cleanup before final live smoke:
 - Installed-cache residue check after cleanup printed nothing.
 - The earlier blocked smoke summary remains untracked and is not the intended
   evidence/docs artifact.
+- A later run with id `plan04-live-commit-safe-20260506-003701` was superseded
+  by the review patch that fixed live inventory re-collection and replay
+  bytecode behavior. It is not the intended final evidence/docs artifact.
 
 Live non-mutating summary smoke:
 
-- Run id: `plan04-live-commit-safe-20260506-003701`
+- Run id: `plan04-live-commit-safe-20260506-005230`
 - Command:
 
 ```bash
@@ -3223,7 +3231,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   --dry-run \
   --inventory-check \
   --record-summary \
-  --run-id plan04-live-commit-safe-20260506-003701 \
+  --run-id plan04-live-commit-safe-20260506-005230 \
   --repo-root /Users/jp/Projects/active/codex-tool-dev \
   --codex-home /Users/jp/.codex \
   --json
@@ -3231,23 +3239,23 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 - Command exit: `0`
 - Local-only summary path:
-  `/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/dry-run.summary.json`
+  `/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230/dry-run.summary.json`
 - Local-only candidate commit-safe summary:
-  `/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/commit-safe.candidate.summary.json`
+  `/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230/commit-safe.candidate.summary.json`
 - Local-only final commit-safe summary:
-  `/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/commit-safe.final.summary.json`
+  `/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230/commit-safe.final.summary.json`
 - Repo-local commit-safe summary:
-  `plugins/turbo-mode/evidence/refresh/plan04-live-commit-safe-20260506-003701.summary.json`
+  `plugins/turbo-mode/evidence/refresh/plan04-live-commit-safe-20260506-005230.summary.json`
 - Commit-safe summary SHA256:
-  `e8d55549560767ece41caf3133667b3a95fa36add17b6ce3ce4187ee941cac92`
+  `7d9e4541a01a64d60749dde8fd145becc9c7ea26bda6be77e8dedc8bf5f30071`
 - Metadata validator summary SHA256:
-  `09c13a0804cb36c97b0b840b039429bc98d3d1d5638e27357f6169a80ff3550c`
+  `fd994edabc2c3ab0dd330233513a78bc6b86d1dc84652c42a6076e3a825a593e`
 - Redaction validator summary SHA256:
-  `00949e85a6ac08fe51c3adcc51befa9be41a133d8bbf8934786aaa98b7bc6fb7`
+  `20e73afb5f296b3d33d38945187f010894ba9e5456cfa5dd20f45495bdb005fb`
 - Commit-safe summary `repo_head`:
-  `47bbe50017742f1decd8142463e9d5020f90f45b`
+  `ef8dcd945661115508a94bce337a6b99422a053a`
 - Commit-safe summary `repo_tree`:
-  `ca7b11b02014f0e5b1afb351c2bf92da6a5fa1b1`
+  `620d6538e5ec82cc999b7ffd873589e688be0a90`
 - Final terminal status: `coverage-gap-blocked`
 - App-server inventory status: `collected`
 - The local-only final summary and repo-local published summary were verified
@@ -3258,28 +3266,30 @@ Replay commands from the source implementation commit:
 ```bash
 git switch feature/turbo-mode-refresh-plan-04-commit-safe-evidence
 git rev-parse HEAD
-git switch --detach 47bbe50017742f1decd8142463e9d5020f90f45b
-python3 plugins/turbo-mode/tools/refresh_validate_run_metadata.py \
+git switch --detach ef8dcd945661115508a94bce337a6b99422a053a
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache python3 \
+  plugins/turbo-mode/tools/refresh_validate_run_metadata.py \
   --mode final \
-  --run-id plan04-live-commit-safe-20260506-003701 \
+  --run-id plan04-live-commit-safe-20260506-005230 \
   --repo-root /Users/jp/Projects/active/codex-tool-dev \
-  --local-only-root /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701 \
-  --summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/commit-safe.final.summary.json \
-  --published-summary-path /Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/evidence/refresh/plan04-live-commit-safe-20260506-003701.summary.json \
-  --candidate-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/commit-safe.candidate.summary.json \
-  --existing-validation-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/metadata-validation.summary.json
-python3 plugins/turbo-mode/tools/refresh_validate_redaction.py \
+  --local-only-root /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230 \
+  --summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230/commit-safe.final.summary.json \
+  --published-summary-path /Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/evidence/refresh/plan04-live-commit-safe-20260506-005230.summary.json \
+  --candidate-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230/commit-safe.candidate.summary.json \
+  --existing-validation-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230/metadata-validation.summary.json
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache python3 \
+  plugins/turbo-mode/tools/refresh_validate_redaction.py \
   --mode final \
-  --run-id plan04-live-commit-safe-20260506-003701 \
+  --run-id plan04-live-commit-safe-20260506-005230 \
   --repo-root /Users/jp/Projects/active/codex-tool-dev \
   --scope commit-safe-summary \
   --source plan-04-cli \
-  --summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/commit-safe.final.summary.json \
-  --local-only-root /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701 \
-  --published-summary-path /Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/evidence/refresh/plan04-live-commit-safe-20260506-003701.summary.json \
-  --candidate-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/commit-safe.candidate.summary.json \
-  --existing-validation-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/redaction.summary.json \
-  --final-scan-output /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/redaction-final-scan.summary.json
+  --summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230/commit-safe.final.summary.json \
+  --local-only-root /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230 \
+  --published-summary-path /Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/evidence/refresh/plan04-live-commit-safe-20260506-005230.summary.json \
+  --candidate-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230/commit-safe.candidate.summary.json \
+  --existing-validation-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230/redaction.summary.json \
+  --final-scan-output /private/tmp/plan04-live-commit-safe-20260506-005230-redaction-final-scan.replay.summary.json
 git switch feature/turbo-mode-refresh-plan-04-commit-safe-evidence
 ```
 
@@ -3287,9 +3297,11 @@ Replay boundary:
 
 - Replay is source-commit-bound and live-environment-bound.
 - Replay depends on checking out
-  `47bbe50017742f1decd8142463e9d5020f90f45b`.
+  `ef8dcd945661115508a94bce337a6b99422a053a`.
 - Replay depends on retaining
-  `/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-003701/`.
+  `/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230/`.
+- The final redaction replay writes a new local-only scan summary with exclusive
+  creation. The `--final-scan-output` path must not already exist.
 - Replay also depends on preserving or reproducibly restoring installed cache
   manifests, local config metadata, repo marketplace metadata, Codex executable
   identity, accepted app-server response schema, and app-server read-only
