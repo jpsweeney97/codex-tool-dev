@@ -3,13 +3,12 @@ from __future__ import annotations
 import json
 import os
 import stat
-from dataclasses import asdict, is_dataclass
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from .app_server_inventory import transcript_bytes
 from .planner import RefreshPlanResult
+from .validation import _json_safe
 
 SCHEMA_VERSION = "turbo-mode-refresh-plan-03"
 
@@ -121,22 +120,6 @@ def validate_run_id(run_id: str) -> str:
             f"Got: {run_id!r:.100}"
         )
     return run_id
-
-
-def _json_safe(value: Any) -> Any:
-    if value is None:
-        return None
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, Path):
-        return str(value)
-    if is_dataclass(value):
-        return {key: _json_safe(item) for key, item in asdict(value).items()}
-    if isinstance(value, (tuple, list)):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    return value
 
 
 def _omission_reasons(result: RefreshPlanResult) -> dict[str, str]:

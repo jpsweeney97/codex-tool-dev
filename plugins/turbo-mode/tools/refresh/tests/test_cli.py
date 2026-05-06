@@ -95,6 +95,43 @@ def ensure_complete_plugin_roots(repo_root: Path, codex_home: Path) -> None:
     )
 
 
+def init_git_repo(repo_root: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_root, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo_root, check=True)
+
+
+def write_refresh_tooling_sources(repo_root: Path) -> None:
+    for rel in (
+        "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
+        "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",
+        "plugins/turbo-mode/tools/refresh_validate_redaction.py",
+        "plugins/turbo-mode/tools/refresh/__init__.py",
+    ):
+        target = repo_root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source = REPO_ROOT / rel
+        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+
+
+def commit_all(repo_root: Path) -> None:
+    subprocess.run(["git", "add", "."], cwd=repo_root, check=True)
+    subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repo_root, check=True)
+
+
+def setup_record_summary_repo(tmp_path: Path) -> tuple[Path, Path]:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+    init_git_repo(repo_root)
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    write_refresh_tooling_sources(repo_root)
+    commit_all(repo_root)
+    return repo_root, codex_home
+
+
 def run_tool(
     args: list[str],
     *,
@@ -450,7 +487,7 @@ def test_cli_rejects_mutation_modes_in_plan_02() -> None:
     completed = run_tool(["--refresh"])
 
     assert completed.returncode == 2
-    assert "outside Plan 03" in completed.stderr
+    assert "outside Plan 04" in completed.stderr
 
 
 def test_cli_rejects_exact_future_command_shapes_with_plan_02_message() -> None:
@@ -459,8 +496,8 @@ def test_cli_rejects_exact_future_command_shapes_with_plan_02_message() -> None:
 
     assert refresh.returncode == 2
     assert guarded.returncode == 2
-    assert "outside Plan 03" in refresh.stderr
-    assert "outside Plan 03" in guarded.stderr
+    assert "outside Plan 04" in refresh.stderr
+    assert "outside Plan 04" in guarded.stderr
     assert "unrecognized arguments" not in refresh.stderr
     assert "unrecognized arguments" not in guarded.stderr
 
@@ -509,3 +546,282 @@ def test_cli_dry_run_does_not_modify_cache_tree_or_config(tmp_path: Path) -> Non
     assert completed.returncode == 0, completed.stderr
     assert tree_snapshot(cache_root) == before_cache
     assert path_snapshot(config) == before_config
+
+
+def test_cli_record_summary_publishes_after_candidate_and_final_validation(
+    tmp_path: Path,
+) -> None:
+    repo_root, codex_home = setup_record_summary_repo(tmp_path)
+    published = repo_root / "plugins/turbo-mode/evidence/refresh/run-1.summary.json"
+
+    completed = run_tool(
+        [
+            "--dry-run",
+            "--record-summary",
+            "--json",
+            "--run-id",
+            "run-1",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--summary-output",
+            str(published),
+        ]
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    run_root = codex_home / "local-only/turbo-mode-refresh/run-1"
+    candidate = run_root / "commit-safe.candidate.summary.json"
+    final = run_root / "commit-safe.final.summary.json"
+    metadata = run_root / "metadata-validation.summary.json"
+    redaction = run_root / "redaction.summary.json"
+    final_scan = run_root / "redaction-final-scan.summary.json"
+    assert candidate.is_file()
+    assert final.is_file()
+    assert metadata.is_file()
+    assert redaction.is_file()
+    assert final_scan.is_file()
+    assert published.is_file()
+    candidate_payload = json.loads(candidate.read_text(encoding="utf-8"))
+    final_payload = json.loads(final.read_text(encoding="utf-8"))
+    published_payload = json.loads(published.read_text(encoding="utf-8"))
+    assert candidate_payload["schema_version"] == "turbo-mode-refresh-commit-safe-plan-04"
+    assert candidate_payload["mode"] == "dry-run"
+    assert candidate_payload["metadata_validation_summary_sha256"] is None
+    assert candidate_payload["redaction_validation_summary_sha256"] is None
+    assert final_payload["metadata_validation_summary_sha256"] == hashlib.sha256(
+        metadata.read_bytes()
+    ).hexdigest()
+    assert final_payload["redaction_validation_summary_sha256"] == hashlib.sha256(
+        redaction.read_bytes()
+    ).hexdigest()
+    assert published_payload == final_payload
+    assert "app_server_transcript" not in candidate_payload
+    assert "app_server_inventory_failure_reason" not in candidate_payload
+    assert candidate_payload["omission_reasons"]["raw_app_server_transcript"] == "local-only"
+    assert payload["published_summary_path"] == str(published)
+
+
+def test_cli_record_summary_plan_refresh_writes_plan_refresh_candidate(
+    tmp_path: Path,
+) -> None:
+    repo_root, codex_home = setup_record_summary_repo(tmp_path)
+
+    completed = run_tool(
+        [
+            "--plan-refresh",
+            "--record-summary",
+            "--run-id",
+            "run-plan",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    candidate = (
+        codex_home
+        / "local-only/turbo-mode-refresh/run-plan/commit-safe.candidate.summary.json"
+    )
+    summary = json.loads(candidate.read_text(encoding="utf-8"))
+    assert summary["mode"] == "plan-refresh"
+    assert (
+        repo_root / "plugins/turbo-mode/evidence/refresh/run-plan.summary.json"
+    ).is_file()
+
+
+def test_cli_record_summary_inventory_check_projects_methods_without_transcript(
+    tmp_path: Path,
+) -> None:
+    repo_root, codex_home = setup_record_summary_repo(tmp_path)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_fake_codex(bin_dir)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "FAKE_REPO_ROOT": str(repo_root),
+        "FAKE_CODEX_HOME": str(codex_home),
+    }
+
+    completed = run_tool(
+        [
+            "--dry-run",
+            "--inventory-check",
+            "--record-summary",
+            "--run-id",
+            "run-inventory",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ],
+        env=env,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    candidate = (
+        codex_home
+        / "local-only/turbo-mode-refresh/run-inventory/commit-safe.candidate.summary.json"
+    )
+    summary = json.loads(candidate.read_text(encoding="utf-8"))
+    dumped = json.dumps(summary)
+    assert summary["app_server_inventory_status"] == "collected"
+    assert summary["app_server_request_methods"] == [
+        "initialize",
+        "initialized",
+        "plugin/read",
+        "plugin/read",
+        "plugin/list",
+        "skills/list",
+        "hooks/list",
+    ]
+    assert "app_server_transcript" not in summary
+    assert "secret" not in dumped
+
+
+def test_cli_record_summary_fails_before_candidate_when_relevant_dirty(
+    tmp_path: Path,
+) -> None:
+    repo_root, codex_home = setup_record_summary_repo(tmp_path)
+    (repo_root / "plugins/turbo-mode/tools/refresh/__init__.py").write_text(
+        "# dirty\n",
+        encoding="utf-8",
+    )
+
+    completed = run_tool(
+        [
+            "--dry-run",
+            "--record-summary",
+            "--run-id",
+            "dirty",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 1
+    assert "relevant dirty state" in completed.stderr
+    assert not (codex_home / "local-only/turbo-mode-refresh/dirty").exists()
+    assert not (repo_root / "plugins/turbo-mode/evidence/refresh/dirty.summary.json").exists()
+
+
+def test_cli_record_summary_allows_unrelated_dirty_path(tmp_path: Path) -> None:
+    repo_root, codex_home = setup_record_summary_repo(tmp_path)
+    docs = repo_root / "docs/note.md"
+    docs.parent.mkdir()
+    docs.write_text("dirty\n", encoding="utf-8")
+
+    completed = run_tool(
+        [
+            "--dry-run",
+            "--record-summary",
+            "--run-id",
+            "unrelated",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_cli_record_summary_rejects_existing_run_and_bad_summary_output(
+    tmp_path: Path,
+) -> None:
+    repo_root, codex_home = setup_record_summary_repo(tmp_path)
+    evidence_root = codex_home / "local-only/turbo-mode-refresh"
+    evidence_root.mkdir(parents=True, mode=0o700)
+    os.chmod(evidence_root, 0o700)
+    existing = evidence_root / "existing"
+    existing.mkdir(mode=0o700)
+
+    reused = run_tool(
+        [
+            "--dry-run",
+            "--record-summary",
+            "--run-id",
+            "existing",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+    assert reused.returncode == 1
+    assert "run directory already exists" in reused.stderr
+
+    escaped = run_tool(
+        [
+            "--dry-run",
+            "--record-summary",
+            "--run-id",
+            "escape",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--summary-output",
+            str(tmp_path / "outside.summary.json"),
+        ]
+    )
+    assert escaped.returncode == 1
+    assert "path must stay under evidence root" in escaped.stderr
+
+
+def test_cli_record_summary_rejects_existing_summary_output_and_symlink_parent(
+    tmp_path: Path,
+) -> None:
+    repo_root, codex_home = setup_record_summary_repo(tmp_path)
+    evidence_root = repo_root / "plugins/turbo-mode/evidence/refresh"
+    evidence_root.mkdir(parents=True)
+    existing = evidence_root / "exists.summary.json"
+    existing.write_text("{}\n", encoding="utf-8")
+
+    rejected_existing = run_tool(
+        [
+            "--dry-run",
+            "--record-summary",
+            "--run-id",
+            "exists",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--summary-output",
+            str(existing),
+        ]
+    )
+    assert rejected_existing.returncode == 1
+    assert "output path already exists" in rejected_existing.stderr
+
+    trash = tmp_path / "symlink-target"
+    trash.mkdir()
+    symlink_parent = evidence_root / "link"
+    symlink_parent.symlink_to(trash, target_is_directory=True)
+    rejected_symlink = run_tool(
+        [
+            "--dry-run",
+            "--record-summary",
+            "--run-id",
+            "symlink",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--summary-output",
+            str(symlink_parent / "run.summary.json"),
+        ]
+    )
+    assert rejected_symlink.returncode == 1
+    assert "path must stay under evidence root" in rejected_symlink.stderr or (
+        "symlink parent" in rejected_symlink.stderr
+    )
