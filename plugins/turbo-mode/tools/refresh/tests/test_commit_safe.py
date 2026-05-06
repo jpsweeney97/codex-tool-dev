@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from refresh import commit_safe
 from refresh.app_server_inventory import AppServerInventoryCheck, CodexRuntimeIdentity
 from refresh.commit_safe import (
     SAFE_REASON_CODES,
@@ -81,6 +82,20 @@ def build_payload(result: RefreshPlanResult, tmp_path: Path) -> dict[str, object
     )
 
 
+def test_commit_safe_plan05_constants_and_reason_allowlist() -> None:
+    assert commit_safe.COMMIT_SAFE_SCHEMA_VERSION == "turbo-mode-refresh-commit-safe-plan-05"
+    assert "handoff-state-helper-direct-python-doc-migration" in commit_safe.SAFE_REASON_CODES
+    assert commit_safe.RELEVANT_DIRTY_PATHS == (
+        ".agents/plugins/marketplace.json",
+        "plugins/turbo-mode/handoff/1.6.0",
+        "plugins/turbo-mode/ticket/1.4.0",
+        "plugins/turbo-mode/tools/refresh",
+        "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
+        "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",
+        "plugins/turbo-mode/tools/refresh_validate_redaction.py",
+    )
+
+
 def test_commit_safe_summary_omits_raw_transcript_and_records_omissions(
     tmp_path: Path,
 ) -> None:
@@ -88,14 +103,52 @@ def test_commit_safe_summary_omits_raw_transcript_and_records_omissions(
 
     payload = build_payload(result, tmp_path)
 
-    assert payload["schema_version"] == "turbo-mode-refresh-commit-safe-plan-04"
+    assert payload["schema_version"] == "turbo-mode-refresh-commit-safe-plan-05"
     assert payload["source_local_summary_schema_version"] == "turbo-mode-refresh-plan-03"
     assert payload["local_only_summary_sha256"]
     assert payload["terminal_plan_status"] == "filesystem-no-drift"
     assert payload["final_status"] == "filesystem-no-drift"
     assert payload["omission_reasons"]["raw_app_server_transcript"] == "local-only"
-    assert payload["omission_reasons"]["process_gate"] == "outside-plan-04"
+    assert payload["omission_reasons"]["process_gate"] == "outside-non-mutating-refresh-plan"
     assert "app_server_transcript" not in payload
+
+
+def test_commit_safe_summary_projects_plan05_reason_code(tmp_path: Path) -> None:
+    result = empty_result(tmp_path)
+    classification = PathClassification(
+        canonical_path="handoff/1.6.0/skills/save/SKILL.md",
+        mutation_mode=MutationMode.GUARDED,
+        coverage_status=CoverageStatus.COVERED,
+        outcome=PathOutcome.GUARDED_ONLY,
+        reasons=("handoff-state-helper-direct-python-doc-migration",),
+        smoke=(
+            "handoff-state-helper-docs",
+            "handoff-session-state-write-read-clear",
+        ),
+    )
+    result = RefreshPlanResult(
+        mode=result.mode,
+        paths=result.paths,
+        residue_issues=result.residue_issues,
+        diffs=result.diffs,
+        diff_classification=(classification,),
+        runtime_config=result.runtime_config,
+        axes=PlanAxes(
+            filesystem_state=FilesystemState.DRIFT,
+            coverage_state=CoverageState.COVERED,
+            runtime_config_state=RuntimeConfigState.ALIGNED,
+            preflight_state=PreflightState.PASSED,
+            selected_mutation_mode=SelectedMutationMode.GUARDED_REFRESH,
+        ),
+        terminal_status=TerminalPlanStatus.GUARDED_REFRESH_REQUIRED,
+    )
+
+    payload = build_payload(result, tmp_path)
+
+    assert payload["schema_version"] == "turbo-mode-refresh-commit-safe-plan-05"
+    assert payload["diff_classification"][0]["reason_codes"] == [
+        "handoff-state-helper-direct-python-doc-migration"
+    ]
 
 
 def test_commit_safe_inventory_projection_uses_replay_identity_not_transcript_sha(
@@ -307,6 +360,8 @@ def init_repo(repo_root: Path) -> None:
         "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
         "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",
         "plugins/turbo-mode/tools/refresh_validate_redaction.py",
+        "plugins/turbo-mode/handoff/1.6.0/README.md",
+        "plugins/turbo-mode/ticket/1.4.0/README.md",
         "docs/readme.md",
     ):
         path = repo_root / rel
@@ -320,6 +375,8 @@ def init_repo(repo_root: Path) -> None:
     "dirty_path",
     [
         ".agents/plugins/marketplace.json",
+        "plugins/turbo-mode/handoff/1.6.0/README.md",
+        "plugins/turbo-mode/ticket/1.4.0/README.md",
         "plugins/turbo-mode/tools/refresh/existing.py",
         "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
         "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",

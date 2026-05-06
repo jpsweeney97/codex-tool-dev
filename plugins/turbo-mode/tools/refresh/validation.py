@@ -119,7 +119,7 @@ NESTED_ALLOWED_KEYS = {
 }
 
 ALLOWED_PLUGIN_ENABLEMENT_VALUES = {"enabled", "disabled", "missing", "malformed"}
-ALLOWED_OMISSION_REASON_VALUES = {"local-only", "outside-plan-04"}
+ALLOWED_OMISSION_REASON_VALUES = {"local-only", "outside-non-mutating-refresh-plan"}
 SAFE_REASON_CODES = {
     "source-root-missing",
     "cache-root-missing",
@@ -143,6 +143,7 @@ SAFE_REASON_CODES = {
     "added-non-doc-path",
     "executable-doc-surface",
     "command-shape-changed",
+    "handoff-state-helper-direct-python-doc-migration",
     "projection-parser-warning",
     "semantic-policy-trigger",
     "coverage-gap-path",
@@ -222,9 +223,11 @@ BROAD_ABSOLUTE_PATH_PATTERN = re.compile(r"(^|\s)/(Users|private|tmp|var|etc|opt
 EXPECTED_TOOL_PATH = "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py"
 EXPECTED_DIRTY_STATE_POLICY = "fail-relevant-dirty-state"
 EXPECTED_SOURCE_LOCAL_SUMMARY_SCHEMA_VERSION = "turbo-mode-refresh-plan-03"
-EXPECTED_COMMIT_SAFE_SCHEMA_VERSION = "turbo-mode-refresh-commit-safe-plan-04"
+EXPECTED_COMMIT_SAFE_SCHEMA_VERSION = "turbo-mode-refresh-commit-safe-plan-05"
 ALLOWED_DIRTY_RELEVANT_PATHS = {
     ".agents/plugins/marketplace.json",
+    "plugins/turbo-mode/handoff/1.6.0",
+    "plugins/turbo-mode/ticket/1.4.0",
     "plugins/turbo-mode/tools/refresh",
     "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
     "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",

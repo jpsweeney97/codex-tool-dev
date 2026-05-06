@@ -21,10 +21,12 @@ from .planner import (
 )
 from .validation import _json_safe, load_json_object
 
-COMMIT_SAFE_SCHEMA_VERSION = "turbo-mode-refresh-commit-safe-plan-04"
+COMMIT_SAFE_SCHEMA_VERSION = "turbo-mode-refresh-commit-safe-plan-05"
 DIRTY_STATE_POLICY = "fail-relevant-dirty-state"
 RELEVANT_DIRTY_PATHS = (
     ".agents/plugins/marketplace.json",
+    "plugins/turbo-mode/handoff/1.6.0",
+    "plugins/turbo-mode/ticket/1.4.0",
     "plugins/turbo-mode/tools/refresh",
     "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
     "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",
@@ -54,6 +56,7 @@ SAFE_REASON_CODES = {
     "added-non-doc-path",
     "executable-doc-surface",
     "command-shape-changed",
+    "handoff-state-helper-direct-python-doc-migration",
     "projection-parser-warning",
     "semantic-policy-trigger",
     "coverage-gap-path",
@@ -470,6 +473,9 @@ def _reason_code(reason: object) -> str:
         "added-non-doc-path": "added-non-doc-path",
         "executable-doc-surface": "executable-doc-surface",
         "command-shape-changed": "command-shape-changed",
+        "handoff-state-helper-direct-python-doc-migration": (
+            "handoff-state-helper-direct-python-doc-migration"
+        ),
         "projection-parser-warning": "projection-parser-warning",
         "semantic-policy-trigger": "semantic-policy-trigger",
         "coverage-gap-path": "coverage-gap-path",
@@ -669,11 +675,11 @@ def _runtime_identity_freshness(
 def _commit_safe_omission_reasons() -> dict[str, str]:
     return {
         "raw_app_server_transcript": "local-only",
-        "process_gate": "outside-plan-04",
-        "post_refresh_cache_manifest": "outside-plan-04",
-        "pre_refresh_config_sha256": "outside-plan-04",
-        "post_refresh_config_sha256": "outside-plan-04",
-        "smoke_summary": "outside-plan-04",
-        "rollback_or_restore_status": "outside-plan-04",
-        "exclusivity_status": "outside-plan-04",
+        "process_gate": "outside-non-mutating-refresh-plan",
+        "post_refresh_cache_manifest": "outside-non-mutating-refresh-plan",
+        "pre_refresh_config_sha256": "outside-non-mutating-refresh-plan",
+        "post_refresh_config_sha256": "outside-non-mutating-refresh-plan",
+        "smoke_summary": "outside-non-mutating-refresh-plan",
+        "rollback_or_restore_status": "outside-non-mutating-refresh-plan",
+        "exclusivity_status": "outside-non-mutating-refresh-plan",
     }

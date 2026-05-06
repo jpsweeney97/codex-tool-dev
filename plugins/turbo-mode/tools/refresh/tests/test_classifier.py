@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
 from refresh.classifier import classify_diff_path
-from refresh.command_projection import extract_command_projection
+from refresh.command_projection import (
+    CommandProjection,
+    extract_command_projection,
+    has_semantic_policy_trigger,
+)
 from refresh.models import CoverageStatus, DiffKind, MutationMode, PathOutcome
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 HANDOFF_ROOT = REPO_ROOT / "plugins/turbo-mode/handoff/1.6.0"
 TICKET_ROOT = REPO_ROOT / "plugins/turbo-mode/ticket/1.4.0"
+HANDOFF_STATE_HELPER_DOC_FIXTURES = json.loads(
+    (
+        Path(__file__).parent / "fixtures" / "handoff_state_helper_doc_migration.json"
+    ).read_text(encoding="utf-8")
+)
 
 EXPECTED_COMMAND_SURFACE_PATHS = (
     "handoff/1.6.0/.codex-plugin/plugin.json",
@@ -69,6 +80,10 @@ EXPECTED_MARKDOWN_PROJECTION_PATHS = (
     "ticket/1.4.0/skills/ticket/references/pipeline-guide.md",
     "ticket/1.4.0/skills/ticket-triage/SKILL.md",
 )
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def assert_path(
@@ -436,6 +451,169 @@ def test_changed_doc_with_semantic_policy_trigger_is_coverage_gap() -> None:
     assert result.mutation_mode == MutationMode.BLOCKED
     assert result.coverage_status == CoverageStatus.COVERAGE_GAP
     assert "semantic-policy-trigger" in result.reasons
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "handoff/1.6.0/skills/load/SKILL.md",
+        "handoff/1.6.0/skills/quicksave/SKILL.md",
+        "handoff/1.6.0/skills/save/SKILL.md",
+        "handoff/1.6.0/skills/summary/SKILL.md",
+    ],
+)
+def test_handoff_state_helper_direct_python_doc_migration_is_guarded(path: str) -> None:
+    contract = HANDOFF_STATE_HELPER_DOC_FIXTURES[path]
+    source_text = contract["source_text"]
+    cache_text = contract["cache_text"]
+
+    assert _sha256(source_text) == contract["source_sha256"]
+    assert _sha256(cache_text) == contract["cache_sha256"]
+    assert extract_command_projection(source_text).items == tuple(contract["source_items"])
+    assert extract_command_projection(cache_text).items == tuple(contract["cache_items"])
+    assert extract_command_projection(source_text).parser_warnings == tuple(
+        contract["source_parser_warnings"]
+    )
+    assert extract_command_projection(cache_text).parser_warnings == tuple(
+        contract["cache_parser_warnings"]
+    )
+    assert contract["source_parser_warnings"] == []
+    assert contract["cache_parser_warnings"] == []
+    assert has_semantic_policy_trigger(source_text) is contract["source_semantic_policy_trigger"]
+    assert has_semantic_policy_trigger(cache_text) is contract["cache_semantic_policy_trigger"]
+
+    result = classify_diff_path(
+        path,
+        kind=DiffKind.CHANGED,
+        source_text=source_text,
+        cache_text=cache_text,
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.GUARDED_ONLY
+    assert result.mutation_mode == MutationMode.GUARDED
+    assert result.coverage_status == CoverageStatus.COVERED
+    assert result.reasons == ("handoff-state-helper-direct-python-doc-migration",)
+    assert result.smoke == (
+        "handoff-state-helper-docs",
+        "handoff-session-state-write-read-clear",
+    )
+
+
+def test_handoff_state_helper_doc_migration_rejects_extra_command_item() -> None:
+    contract = HANDOFF_STATE_HELPER_DOC_FIXTURES["handoff/1.6.0/skills/save/SKILL.md"]
+    result = classify_diff_path(
+        "handoff/1.6.0/skills/save/SKILL.md",
+        kind=DiffKind.CHANGED,
+        source_text=contract["source_text"]
+        + (
+            '\nRun `python "$PLUGIN_ROOT/scripts/session_state.py" prune-state '
+            '--state-dir "$PROJECT_ROOT/docs/handoffs/.session-state"`.\n'
+        ),
+        cache_text=contract["cache_text"],
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert "command-shape-changed" in result.reasons
+
+
+def test_handoff_state_helper_doc_migration_rejects_added_slash_command() -> None:
+    contract = HANDOFF_STATE_HELPER_DOC_FIXTURES["handoff/1.6.0/skills/load/SKILL.md"]
+    result = classify_diff_path(
+        "handoff/1.6.0/skills/load/SKILL.md",
+        kind=DiffKind.CHANGED,
+        source_text=contract["source_text"] + "\nUse `/summary` if loading is ambiguous.\n",
+        cache_text=contract["cache_text"],
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert "command-shape-changed" in result.reasons
+
+
+def test_handoff_state_helper_doc_migration_rejects_added_policy_text() -> None:
+    contract = HANDOFF_STATE_HELPER_DOC_FIXTURES["handoff/1.6.0/skills/quicksave/SKILL.md"]
+    result = classify_diff_path(
+        "handoff/1.6.0/skills/quicksave/SKILL.md",
+        kind=DiffKind.CHANGED,
+        source_text=contract["source_text"]
+        + "\nRollback and recovery hooks must be approved by the operator.\n",
+        cache_text=contract["cache_text"],
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert "semantic-policy-trigger" in result.reasons
+
+
+def test_handoff_state_helper_doc_migration_requires_exact_state_helper_command() -> None:
+    contract = HANDOFF_STATE_HELPER_DOC_FIXTURES["handoff/1.6.0/skills/summary/SKILL.md"]
+    result = classify_diff_path(
+        "handoff/1.6.0/skills/summary/SKILL.md",
+        kind=DiffKind.CHANGED,
+        source_text=contract["source_text"].replace("read-state \\", "repair-state \\"),
+        cache_text=contract["cache_text"],
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert "command-shape-changed" in result.reasons
+
+
+def test_unrelated_uv_run_state_helper_doc_change_stays_coverage_gap() -> None:
+    result = classify_diff_path(
+        "handoff/1.6.0/skills/search/SKILL.md",
+        kind=DiffKind.CHANGED,
+        source_text=(
+            'Run `uv run --project "$PLUGIN_ROOT/pyproject.toml" python '
+            '"$PLUGIN_ROOT/scripts/session_state.py" read-state`.\n'
+        ),
+        cache_text="Run `python3 scripts/search.py`.\n",
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert "command-shape-changed" in result.reasons
+
+
+def test_unrelated_handoff_command_doc_change_stays_coverage_gap() -> None:
+    result = classify_diff_path(
+        "handoff/1.6.0/skills/search/SKILL.md",
+        kind=DiffKind.CHANGED,
+        source_text="Run `python3 scripts/search.py --new-mode`.\n",
+        cache_text="Run `python3 scripts/search.py`.\n",
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert "command-shape-changed" in result.reasons
+
+
+def test_handoff_state_helper_doc_migration_rejects_projection_parser_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract = HANDOFF_STATE_HELPER_DOC_FIXTURES["handoff/1.6.0/skills/save/SKILL.md"]
+    original_extract = extract_command_projection
+
+    def warn_for_same_bytes(text: str) -> CommandProjection:
+        projection = original_extract(text)
+        return CommandProjection(
+            items=projection.items,
+            parser_warnings=("json-payload-parse-failed",),
+        )
+
+    monkeypatch.setattr("refresh.classifier.extract_command_projection", warn_for_same_bytes)
+    result = classify_diff_path(
+        "handoff/1.6.0/skills/save/SKILL.md",
+        kind=DiffKind.CHANGED,
+        source_text=contract["source_text"],
+        cache_text=contract["cache_text"],
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert "projection-parser-warning" in result.reasons
 
 
 @pytest.mark.parametrize(
