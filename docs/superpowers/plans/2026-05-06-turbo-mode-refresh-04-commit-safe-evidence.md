@@ -3136,6 +3136,8 @@ The completion evidence must include a replay recipe like:
 git switch feature/turbo-mode-refresh-plan-04-commit-safe-evidence
 git rev-parse HEAD
 git switch --detach <source_implementation_commit>
+mkdir /private/tmp/<fresh-run-id>-redaction-replay
+chmod 700 /private/tmp/<fresh-run-id>-redaction-replay
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache python3 \
   plugins/turbo-mode/tools/refresh_validate_run_metadata.py \
   --mode final \
@@ -3158,7 +3160,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   --published-summary-path /Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/evidence/refresh/<fresh-run-id>.summary.json \
   --candidate-summary /Users/jp/.codex/local-only/turbo-mode-refresh/<fresh-run-id>/commit-safe.candidate.summary.json \
   --existing-validation-summary /Users/jp/.codex/local-only/turbo-mode-refresh/<fresh-run-id>/redaction.summary.json \
-  --final-scan-output /private/tmp/<fresh-run-id>-redaction-final-scan.replay.summary.json
+  --final-scan-output /private/tmp/<fresh-run-id>-redaction-replay/redaction-final-scan.summary.json
 git switch feature/turbo-mode-refresh-plan-04-commit-safe-evidence
 ```
 
@@ -3267,6 +3269,8 @@ Replay commands from the source implementation commit:
 git switch feature/turbo-mode-refresh-plan-04-commit-safe-evidence
 git rev-parse HEAD
 git switch --detach ef8dcd945661115508a94bce337a6b99422a053a
+mkdir /private/tmp/plan04-live-commit-safe-20260506-005230-redaction-replay
+chmod 700 /private/tmp/plan04-live-commit-safe-20260506-005230-redaction-replay
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache python3 \
   plugins/turbo-mode/tools/refresh_validate_run_metadata.py \
   --mode final \
@@ -3289,7 +3293,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   --published-summary-path /Users/jp/Projects/active/codex-tool-dev/plugins/turbo-mode/evidence/refresh/plan04-live-commit-safe-20260506-005230.summary.json \
   --candidate-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230/commit-safe.candidate.summary.json \
   --existing-validation-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230/redaction.summary.json \
-  --final-scan-output /private/tmp/plan04-live-commit-safe-20260506-005230-redaction-final-scan.replay.summary.json
+  --final-scan-output /private/tmp/plan04-live-commit-safe-20260506-005230-redaction-replay/redaction-final-scan.summary.json
 git switch feature/turbo-mode-refresh-plan-04-commit-safe-evidence
 ```
 
@@ -3301,7 +3305,8 @@ Replay boundary:
 - Replay depends on retaining
   `/Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230/`.
 - The final redaction replay writes a new local-only scan summary with exclusive
-  creation. The `--final-scan-output` path must not already exist.
+  creation. Its parent directory must already exist with mode `0700`, and the
+  `--final-scan-output` path itself must not already exist.
 - Replay also depends on preserving or reproducibly restoring installed cache
   manifests, local config metadata, repo marketplace metadata, Codex executable
   identity, accepted app-server response schema, and app-server read-only
