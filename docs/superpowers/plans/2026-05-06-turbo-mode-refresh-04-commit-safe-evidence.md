@@ -3133,7 +3133,7 @@ Do not rerun the metadata validator from the evidence/docs commit against the ge
 The completion evidence must include a replay recipe like:
 
 ```bash
-git switch feature/turbo-mode-refresh-plan-04-commit-safe-evidence
+git switch main
 git rev-parse HEAD
 git switch --detach <source_implementation_commit>
 mkdir /private/tmp/<fresh-run-id>-redaction-replay
@@ -3161,7 +3161,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   --candidate-summary /Users/jp/.codex/local-only/turbo-mode-refresh/<fresh-run-id>/commit-safe.candidate.summary.json \
   --existing-validation-summary /Users/jp/.codex/local-only/turbo-mode-refresh/<fresh-run-id>/redaction.summary.json \
   --final-scan-output /private/tmp/<fresh-run-id>-redaction-replay/redaction-final-scan.summary.json
-git switch feature/turbo-mode-refresh-plan-04-commit-safe-evidence
+git switch main
 ```
 
 This replay recipe depends on more than local-only evidence retention. It also depends on checking out `source_implementation_commit` and preserving or reproducibly restoring the installed cache, local config metadata, repo marketplace metadata, Codex executable identity, accepted app-server response schema, and app-server read-only inventory behavior observed by the source-commit smoke. If the local-only run directory is missing, record that replay is unavailable because Plan 04 does not implement evidence retention or portable raw evidence. If any live external input has drifted, record that replay is unavailable or stale because Plan 04 does not implement a historical-validation mode against recorded external digests.
@@ -3265,8 +3265,12 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 Replay commands from the source implementation commit:
 
+The original feature branch was deleted after merge. Replay from the published
+state starts and restores to `main`, then detaches only for the source-bound
+validator commands.
+
 ```bash
-git switch feature/turbo-mode-refresh-plan-04-commit-safe-evidence
+git switch main
 git rev-parse HEAD
 git switch --detach ef8dcd945661115508a94bce337a6b99422a053a
 mkdir /private/tmp/plan04-live-commit-safe-20260506-005230-redaction-replay
@@ -3294,7 +3298,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   --candidate-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230/commit-safe.candidate.summary.json \
   --existing-validation-summary /Users/jp/.codex/local-only/turbo-mode-refresh/plan04-live-commit-safe-20260506-005230/redaction.summary.json \
   --final-scan-output /private/tmp/plan04-live-commit-safe-20260506-005230-redaction-replay/redaction-final-scan.summary.json
-git switch feature/turbo-mode-refresh-plan-04-commit-safe-evidence
+git switch main
 ```
 
 Replay boundary:
