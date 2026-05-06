@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
+from dataclasses import dataclass
 
 from .command_projection import extract_command_projection, has_semantic_policy_trigger
 from .models import CoverageStatus, DiffKind, MutationMode, PathClassification, PathOutcome
@@ -91,12 +93,370 @@ SMOKE_BY_PATTERN = {
 }
 
 
+@dataclass(frozen=True)
+class HandoffStateHelperDocContract:
+    source_sha256: str
+    cache_sha256: str
+    source_items: tuple[str, ...]
+    cache_items: tuple[str, ...]
+    source_parser_warnings: tuple[str, ...]
+    cache_parser_warnings: tuple[str, ...]
+    source_semantic_policy_trigger: bool
+    cache_semantic_policy_trigger: bool
+
+
+HANDOFF_STATE_HELPER_DOC_SMOKE = (
+    "handoff-state-helper-docs",
+    "handoff-session-state-write-read-clear",
+)
+HANDOFF_STATE_HELPER_UV_ENV = (
+    'PYTHONDONTWRITEBYTECODE=1 '
+    'UV_PROJECT_ENVIRONMENT="$PROJECT_ROOT/.codex/plugin-runtimes/handoff-1.6.0" \\'
+)
+HANDOFF_STATE_HELPER_UV_RUN = (
+    'uv run --project "$PLUGIN_ROOT/pyproject.toml" '
+    'python "$PLUGIN_ROOT/scripts/session_state.py" \\'
+)
+
+HANDOFF_STATE_HELPER_DOC_CONTRACTS = {
+    "handoff/1.6.0/skills/load/SKILL.md": HandoffStateHelperDocContract(
+        source_sha256="ccbc7a20aa346d6d65e3861b62fd551d37ec44a43538685bfd09ef14b16b5698",
+        cache_sha256="6cc5f0c631fb03fa310171ca49fec6d40ec59ab9641a342e194180470749f509",
+        source_items=(
+            "/load",
+            "/load <path>",
+            "/list-handoffs",
+            "/save",
+            'PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"',
+            'PROJECT_NAME="$(basename "$PROJECT_ROOT")"',
+            "python",
+            'ARCHIVED_PATH="$(',
+            'PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \\',
+            "archive \\",
+            '--source "$SOURCE_PATH" \\',
+            '--archive-dir "$PROJECT_ROOT/docs/handoffs/archive" \\',
+            "--field archived_path",
+            ')"',
+            'STATE_PATH="$(',
+            "write-state \\",
+            '--state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \\',
+            '--project "$PROJECT_NAME" \\',
+            '--archive-path "$ARCHIVED_PATH" \\',
+            "--field state_path",
+        ),
+        cache_items=(
+            "/load",
+            "/load <path>",
+            "/list-handoffs",
+            "/save",
+            'PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"',
+            'PROJECT_NAME="$(basename "$PROJECT_ROOT")"',
+            'ARCHIVED_PATH="$(',
+            HANDOFF_STATE_HELPER_UV_ENV,
+            HANDOFF_STATE_HELPER_UV_RUN,
+            "archive \\",
+            '--source "$SOURCE_PATH" \\',
+            '--archive-dir "$PROJECT_ROOT/docs/handoffs/archive" \\',
+            "--field archived_path",
+            ')"',
+            'STATE_PATH="$(',
+            "write-state \\",
+            '--state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \\',
+            '--project "$PROJECT_NAME" \\',
+            '--archive-path "$ARCHIVED_PATH" \\',
+            "--field state_path",
+        ),
+        source_parser_warnings=(),
+        cache_parser_warnings=(),
+        source_semantic_policy_trigger=True,
+        cache_semantic_policy_trigger=True,
+    ),
+    "handoff/1.6.0/skills/quicksave/SKILL.md": HandoffStateHelperDocContract(
+        source_sha256="ac1430c96316f8fa60971bf20a7d55b98b60e03baac73e91cabbf2995cba56aa",
+        cache_sha256="644b183f4c68a50511b45854f7a3fd7115bcdc5cea8355f9cfb6ff41265d0c8d",
+        source_items=(
+            "/quicksave",
+            "/save",
+            "python",
+            'PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"',
+            'PROJECT_NAME="$(basename "$PROJECT_ROOT")"',
+            'READ_STATE_OUTPUT="$(',
+            'PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \\',
+            "read-state \\",
+            '--state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \\',
+            '--project "$PROJECT_NAME" \\',
+            '--field state_path \\',
+            "2>&1",
+            ')"',
+            "READ_STATE_STATUS=$?",
+            'case "$READ_STATE_STATUS" in',
+            '0) STATE_PATH="$READ_STATE_OUTPUT" ;;',
+            '1) STATE_PATH="" ;;',
+            '2) printf \'%s\\n\' "$READ_STATE_OUTPUT" >&2; exit 2 ;;',
+            '*) printf \'%s\\n\' "$READ_STATE_OUTPUT" >&2; exit "$READ_STATE_STATUS" ;;',
+            "esac",
+            'READ_ARCHIVE_OUTPUT="$(',
+            "--field archive_path \\",
+            "READ_ARCHIVE_STATUS=$?",
+            'case "$READ_ARCHIVE_STATUS" in',
+            '0) RESUMED_FROM="$READ_ARCHIVE_OUTPUT" ;;',
+            '1) RESUMED_FROM="" ;;',
+            '2) printf \'%s\\n\' "$READ_ARCHIVE_OUTPUT" >&2; exit 2 ;;',
+            '*) printf \'%s\\n\' "$READ_ARCHIVE_OUTPUT" >&2; exit "$READ_ARCHIVE_STATUS" ;;',
+            "/load",
+            'if [ -n "$STATE_PATH" ]; then',
+            "clear-state \\",
+            '--state-path "$STATE_PATH"',
+            "fi",
+        ),
+        cache_items=(
+            "/quicksave",
+            "/save",
+            'PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"',
+            'PROJECT_NAME="$(basename "$PROJECT_ROOT")"',
+            'READ_STATE_OUTPUT="$(',
+            HANDOFF_STATE_HELPER_UV_ENV,
+            HANDOFF_STATE_HELPER_UV_RUN,
+            "read-state \\",
+            '--state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \\',
+            '--project "$PROJECT_NAME" \\',
+            '--field state_path \\',
+            "2>&1",
+            ')"',
+            "READ_STATE_STATUS=$?",
+            'case "$READ_STATE_STATUS" in',
+            '0) STATE_PATH="$READ_STATE_OUTPUT" ;;',
+            '1) STATE_PATH="" ;;',
+            '2) printf \'%s\\n\' "$READ_STATE_OUTPUT" >&2; exit 2 ;;',
+            '*) printf \'%s\\n\' "$READ_STATE_OUTPUT" >&2; exit "$READ_STATE_STATUS" ;;',
+            "esac",
+            'READ_ARCHIVE_OUTPUT="$(',
+            "--field archive_path \\",
+            "READ_ARCHIVE_STATUS=$?",
+            'case "$READ_ARCHIVE_STATUS" in',
+            '0) RESUMED_FROM="$READ_ARCHIVE_OUTPUT" ;;',
+            '1) RESUMED_FROM="" ;;',
+            '2) printf \'%s\\n\' "$READ_ARCHIVE_OUTPUT" >&2; exit 2 ;;',
+            '*) printf \'%s\\n\' "$READ_ARCHIVE_OUTPUT" >&2; exit "$READ_ARCHIVE_STATUS" ;;',
+            "/load",
+            'if [ -n "$STATE_PATH" ]; then',
+            "PYTHONDONTWRITEBYTECODE=1 \\",
+            'UV_PROJECT_ENVIRONMENT="$PROJECT_ROOT/.codex/plugin-runtimes/handoff-1.6.0" \\',
+            "clear-state \\",
+            '--state-path "$STATE_PATH"',
+            "fi",
+        ),
+        source_parser_warnings=(),
+        cache_parser_warnings=(),
+        source_semantic_policy_trigger=True,
+        cache_semantic_policy_trigger=True,
+    ),
+    "handoff/1.6.0/skills/save/SKILL.md": HandoffStateHelperDocContract(
+        source_sha256="377609aefd7bd567c68ee71cbd620b0f03a16bcd4e04dd70a9310cc8132f37ae",
+        cache_sha256="55b8d897a91ac70e119c7299ca294e6028aeffcd71994d7daa096e2c5cd43d85",
+        source_items=(
+            "/save",
+            "/save <title>",
+            "python",
+            'PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"',
+            'PROJECT_NAME="$(basename "$PROJECT_ROOT")"',
+            'READ_STATE_OUTPUT="$(',
+            'PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \\',
+            "read-state \\",
+            '--state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \\',
+            '--project "$PROJECT_NAME" \\',
+            '--field state_path \\',
+            "2>&1",
+            ')"',
+            "READ_STATE_STATUS=$?",
+            'case "$READ_STATE_STATUS" in',
+            '0) STATE_PATH="$READ_STATE_OUTPUT" ;;',
+            '1) STATE_PATH="" ;;',
+            '2) printf \'%s\\n\' "$READ_STATE_OUTPUT" >&2; exit 2 ;;',
+            '*) printf \'%s\\n\' "$READ_STATE_OUTPUT" >&2; exit "$READ_STATE_STATUS" ;;',
+            "esac",
+            'READ_ARCHIVE_OUTPUT="$(',
+            "--field archive_path \\",
+            "READ_ARCHIVE_STATUS=$?",
+            'case "$READ_ARCHIVE_STATUS" in',
+            '0) RESUMED_FROM="$READ_ARCHIVE_OUTPUT" ;;',
+            '1) RESUMED_FROM="" ;;',
+            '2) printf \'%s\\n\' "$READ_ARCHIVE_OUTPUT" >&2; exit 2 ;;',
+            '*) printf \'%s\\n\' "$READ_ARCHIVE_OUTPUT" >&2; exit "$READ_ARCHIVE_STATUS" ;;',
+            'if [ -n "$STATE_PATH" ]; then',
+            "clear-state \\",
+            '--state-path "$STATE_PATH"',
+            "fi",
+        ),
+        cache_items=(
+            "/save",
+            "/save <title>",
+            'PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"',
+            'PROJECT_NAME="$(basename "$PROJECT_ROOT")"',
+            'READ_STATE_OUTPUT="$(',
+            HANDOFF_STATE_HELPER_UV_ENV,
+            HANDOFF_STATE_HELPER_UV_RUN,
+            "read-state \\",
+            '--state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \\',
+            '--project "$PROJECT_NAME" \\',
+            '--field state_path \\',
+            "2>&1",
+            ')"',
+            "READ_STATE_STATUS=$?",
+            'case "$READ_STATE_STATUS" in',
+            '0) STATE_PATH="$READ_STATE_OUTPUT" ;;',
+            '1) STATE_PATH="" ;;',
+            '2) printf \'%s\\n\' "$READ_STATE_OUTPUT" >&2; exit 2 ;;',
+            '*) printf \'%s\\n\' "$READ_STATE_OUTPUT" >&2; exit "$READ_STATE_STATUS" ;;',
+            "esac",
+            'READ_ARCHIVE_OUTPUT="$(',
+            "--field archive_path \\",
+            "READ_ARCHIVE_STATUS=$?",
+            'case "$READ_ARCHIVE_STATUS" in',
+            '0) RESUMED_FROM="$READ_ARCHIVE_OUTPUT" ;;',
+            '1) RESUMED_FROM="" ;;',
+            '2) printf \'%s\\n\' "$READ_ARCHIVE_OUTPUT" >&2; exit 2 ;;',
+            '*) printf \'%s\\n\' "$READ_ARCHIVE_OUTPUT" >&2; exit "$READ_ARCHIVE_STATUS" ;;',
+            'if [ -n "$STATE_PATH" ]; then',
+            "PYTHONDONTWRITEBYTECODE=1 \\",
+            'UV_PROJECT_ENVIRONMENT="$PROJECT_ROOT/.codex/plugin-runtimes/handoff-1.6.0" \\',
+            "clear-state \\",
+            '--state-path "$STATE_PATH"',
+            "fi",
+        ),
+        source_parser_warnings=(),
+        cache_parser_warnings=(),
+        source_semantic_policy_trigger=True,
+        cache_semantic_policy_trigger=True,
+    ),
+    "handoff/1.6.0/skills/summary/SKILL.md": HandoffStateHelperDocContract(
+        source_sha256="108c18afd8cf8716b058dbfc1aee8e6db6007f8828025faa74fac16993c576b0",
+        cache_sha256="ad8c4b0eca09103c4d396238191d0f424abf9b9ee1d47d3b6126d24628f8d5c0",
+        source_items=(
+            "/save",
+            "/quicksave",
+            "/summary",
+            "/summary <title>",
+            "python",
+            'PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"',
+            'PROJECT_NAME="$(basename "$PROJECT_ROOT")"',
+            'READ_STATE_OUTPUT="$(',
+            'PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \\',
+            "read-state \\",
+            '--state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \\',
+            '--project "$PROJECT_NAME" \\',
+            '--field state_path \\',
+            "2>&1",
+            ')"',
+            "READ_STATE_STATUS=$?",
+            'case "$READ_STATE_STATUS" in',
+            '0) STATE_PATH="$READ_STATE_OUTPUT" ;;',
+            '1) STATE_PATH="" ;;',
+            '2) printf \'%s\\n\' "$READ_STATE_OUTPUT" >&2; exit 2 ;;',
+            '*) printf \'%s\\n\' "$READ_STATE_OUTPUT" >&2; exit "$READ_STATE_STATUS" ;;',
+            "esac",
+            'READ_ARCHIVE_OUTPUT="$(',
+            "--field archive_path \\",
+            "READ_ARCHIVE_STATUS=$?",
+            'case "$READ_ARCHIVE_STATUS" in',
+            '0) RESUMED_FROM="$READ_ARCHIVE_OUTPUT" ;;',
+            '1) RESUMED_FROM="" ;;',
+            '2) printf \'%s\\n\' "$READ_ARCHIVE_OUTPUT" >&2; exit 2 ;;',
+            '*) printf \'%s\\n\' "$READ_ARCHIVE_OUTPUT" >&2; exit "$READ_ARCHIVE_STATUS" ;;',
+            'if [ -n "$STATE_PATH" ]; then',
+            "clear-state \\",
+            '--state-path "$STATE_PATH"',
+            "fi",
+        ),
+        cache_items=(
+            "/save",
+            "/quicksave",
+            "/summary",
+            "/summary <title>",
+            'PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"',
+            'PROJECT_NAME="$(basename "$PROJECT_ROOT")"',
+            'READ_STATE_OUTPUT="$(',
+            HANDOFF_STATE_HELPER_UV_ENV,
+            HANDOFF_STATE_HELPER_UV_RUN,
+            "read-state \\",
+            '--state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \\',
+            '--project "$PROJECT_NAME" \\',
+            '--field state_path \\',
+            "2>&1",
+            ')"',
+            "READ_STATE_STATUS=$?",
+            'case "$READ_STATE_STATUS" in',
+            '0) STATE_PATH="$READ_STATE_OUTPUT" ;;',
+            '1) STATE_PATH="" ;;',
+            '2) printf \'%s\\n\' "$READ_STATE_OUTPUT" >&2; exit 2 ;;',
+            '*) printf \'%s\\n\' "$READ_STATE_OUTPUT" >&2; exit "$READ_STATE_STATUS" ;;',
+            "esac",
+            'READ_ARCHIVE_OUTPUT="$(',
+            "--field archive_path \\",
+            "READ_ARCHIVE_STATUS=$?",
+            'case "$READ_ARCHIVE_STATUS" in',
+            '0) RESUMED_FROM="$READ_ARCHIVE_OUTPUT" ;;',
+            '1) RESUMED_FROM="" ;;',
+            '2) printf \'%s\\n\' "$READ_ARCHIVE_OUTPUT" >&2; exit 2 ;;',
+            '*) printf \'%s\\n\' "$READ_ARCHIVE_OUTPUT" >&2; exit "$READ_ARCHIVE_STATUS" ;;',
+            'if [ -n "$STATE_PATH" ]; then',
+            "PYTHONDONTWRITEBYTECODE=1 \\",
+            'UV_PROJECT_ENVIRONMENT="$PROJECT_ROOT/.codex/plugin-runtimes/handoff-1.6.0" \\',
+            "clear-state \\",
+            '--state-path "$STATE_PATH"',
+            "fi",
+        ),
+        source_parser_warnings=(),
+        cache_parser_warnings=(),
+        source_semantic_policy_trigger=True,
+        cache_semantic_policy_trigger=True,
+    ),
+}
+
+
 def is_executable_or_command_bearing_path(path: str, *, executable: bool) -> bool:
     return (
         executable
         or _matches_any(path, ("*/scripts/*.py", "*/hooks/*.py"))
         or _matches_any(path, ("*/hooks/hooks.json", "*/.codex-plugin/plugin.json"))
     )
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _is_handoff_state_helper_direct_python_doc_migration(
+    path: str,
+    *,
+    source_text: str,
+    cache_text: str,
+) -> bool:
+    contract = HANDOFF_STATE_HELPER_DOC_CONTRACTS.get(path)
+    if contract is None:
+        return False
+    if _sha256_text(source_text) != contract.source_sha256:
+        return False
+    if _sha256_text(cache_text) != contract.cache_sha256:
+        return False
+
+    source_projection = extract_command_projection(source_text)
+    cache_projection = extract_command_projection(cache_text)
+    if source_projection.parser_warnings != contract.source_parser_warnings:
+        return False
+    if cache_projection.parser_warnings != contract.cache_parser_warnings:
+        return False
+    if source_projection.parser_warnings or cache_projection.parser_warnings:
+        return False
+    if source_projection.items != contract.source_items:
+        return False
+    if cache_projection.items != contract.cache_items:
+        return False
+    if has_semantic_policy_trigger(source_text) is not contract.source_semantic_policy_trigger:
+        return False
+    if has_semantic_policy_trigger(cache_text) is not contract.cache_semantic_policy_trigger:
+        return False
+    return True
 
 
 def classify_diff_path(
@@ -131,6 +491,14 @@ def classify_diff_path(
     ):
         coverage_status = CoverageStatus.COVERAGE_GAP
         reasons.append("executable-doc-surface")
+    elif _is_handoff_state_helper_direct_python_doc_migration(
+        path,
+        source_text=source_text,
+        cache_text=cache_text,
+    ):
+        mutation_mode = MutationMode.GUARDED
+        reasons.append("handoff-state-helper-direct-python-doc-migration")
+        smoke = HANDOFF_STATE_HELPER_DOC_SMOKE
     elif doc_policy_reasons := _doc_policy_reasons(
         path,
         source_text=source_text,

@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[5]
 TOOL = REPO_ROOT / "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py"
 
@@ -284,6 +286,11 @@ def path_snapshot(path: Path) -> dict[str, str]:
     return {"kind": "other", "mode": mode}
 
 
+def assert_text_not_present(paths: list[Path], needle: str) -> None:
+    for path in paths:
+        assert needle not in path.read_text(encoding="utf-8")
+
+
 def test_cli_dry_run_outputs_json_and_writes_evidence(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     codex_home = tmp_path / ".codex"
@@ -517,7 +524,7 @@ def test_cli_rejects_mutation_modes_in_plan_02() -> None:
     completed = run_tool(["--refresh"])
 
     assert completed.returncode == 2
-    assert "outside Plan 04" in completed.stderr
+    assert "outside non-mutating refresh planning" in completed.stderr
 
 
 def test_cli_rejects_exact_future_command_shapes_with_plan_02_message() -> None:
@@ -526,8 +533,8 @@ def test_cli_rejects_exact_future_command_shapes_with_plan_02_message() -> None:
 
     assert refresh.returncode == 2
     assert guarded.returncode == 2
-    assert "outside Plan 04" in refresh.stderr
-    assert "outside Plan 04" in guarded.stderr
+    assert "outside non-mutating refresh planning" in refresh.stderr
+    assert "outside non-mutating refresh planning" in guarded.stderr
     assert "unrecognized arguments" not in refresh.stderr
     assert "unrecognized arguments" not in guarded.stderr
 
@@ -617,7 +624,7 @@ def test_cli_record_summary_publishes_after_candidate_and_final_validation(
     candidate_payload = json.loads(candidate.read_text(encoding="utf-8"))
     final_payload = json.loads(final.read_text(encoding="utf-8"))
     published_payload = json.loads(published.read_text(encoding="utf-8"))
-    assert candidate_payload["schema_version"] == "turbo-mode-refresh-commit-safe-plan-04"
+    assert candidate_payload["schema_version"] == "turbo-mode-refresh-commit-safe-plan-05"
     assert candidate_payload["mode"] == "dry-run"
     assert candidate_payload["metadata_validation_summary_sha256"] is None
     assert candidate_payload["redaction_validation_summary_sha256"] is None
@@ -631,6 +638,14 @@ def test_cli_record_summary_publishes_after_candidate_and_final_validation(
     assert "app_server_transcript" not in candidate_payload
     assert "app_server_inventory_failure_reason" not in candidate_payload
     assert candidate_payload["omission_reasons"]["raw_app_server_transcript"] == "local-only"
+    assert_text_not_present(
+        [candidate, final, published, metadata, redaction, final_scan],
+        "outside-plan-04",
+    )
+    assert_text_not_present(
+        [candidate, final, published, metadata, redaction, final_scan],
+        "plan-04-cli",
+    )
     assert payload["published_summary_path"] == str(published)
 
 
@@ -714,6 +729,62 @@ def test_cli_record_summary_inventory_check_projects_methods_without_transcript(
     assert "secret" not in dumped
 
 
+def test_cli_record_summary_rejects_wrong_terminal_status_before_writes(
+    tmp_path: Path,
+) -> None:
+    repo_root, codex_home = setup_record_summary_repo(tmp_path)
+
+    completed = run_tool(
+        [
+            "--dry-run",
+            "--record-summary",
+            "--require-terminal-status",
+            "guarded-refresh-required",
+            "--run-id",
+            "wrong-terminal-status",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 1
+    assert "required terminal status mismatch" in completed.stderr
+    assert not (codex_home / "local-only/turbo-mode-refresh/wrong-terminal-status").exists()
+    assert not (
+        repo_root / "plugins/turbo-mode/evidence/refresh/wrong-terminal-status.summary.json"
+    ).exists()
+
+
+def test_cli_record_summary_writes_when_terminal_status_matches(tmp_path: Path) -> None:
+    repo_root, codex_home = setup_record_summary_repo(tmp_path)
+
+    completed = run_tool(
+        [
+            "--dry-run",
+            "--record-summary",
+            "--require-terminal-status",
+            "filesystem-no-drift",
+            "--run-id",
+            "matching-terminal-status",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert (
+        codex_home
+        / "local-only/turbo-mode-refresh/matching-terminal-status/commit-safe.final.summary.json"
+    ).is_file()
+    assert (
+        repo_root / "plugins/turbo-mode/evidence/refresh/matching-terminal-status.summary.json"
+    ).is_file()
+
+
 def test_cli_record_summary_fails_before_candidate_when_relevant_dirty(
     tmp_path: Path,
 ) -> None:
@@ -740,6 +811,60 @@ def test_cli_record_summary_fails_before_candidate_when_relevant_dirty(
     assert "relevant dirty state" in completed.stderr
     assert not (codex_home / "local-only/turbo-mode-refresh/dirty").exists()
     assert not (repo_root / "plugins/turbo-mode/evidence/refresh/dirty.summary.json").exists()
+
+
+@pytest.mark.parametrize(
+    "dirty_path",
+    [
+        "plugins/turbo-mode/handoff/1.6.0/README.md",
+        "plugins/turbo-mode/ticket/1.4.0/README.md",
+    ],
+)
+def test_cli_record_summary_fails_when_plugin_source_surfaces_are_dirty(
+    tmp_path: Path,
+    dirty_path: str,
+) -> None:
+    repo_root, codex_home = setup_record_summary_repo(tmp_path)
+    (repo_root / dirty_path).write_text("dirty\n", encoding="utf-8")
+
+    completed = run_tool(
+        [
+            "--dry-run",
+            "--record-summary",
+            "--run-id",
+            "dirty-plugin-source",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 1
+    assert "relevant dirty state" in completed.stderr
+    assert not (codex_home / "local-only/turbo-mode-refresh/dirty-plugin-source").exists()
+
+
+def test_cli_refresh_modes_use_plan_neutral_error_wording(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+
+    completed = run_tool(
+        [
+            "--refresh",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "outside non-mutating refresh planning" in completed.stderr
+    assert "outside Plan 04" not in completed.stderr
 
 
 def test_cli_record_summary_allows_unrelated_dirty_path(tmp_path: Path) -> None:

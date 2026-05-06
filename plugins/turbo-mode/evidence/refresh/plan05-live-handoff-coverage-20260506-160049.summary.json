@@ -1,0 +1,192 @@
+{
+  "app_server_inventory_failure_reason_code": null,
+  "app_server_inventory_status": "collected",
+  "app_server_inventory_summary_sha256": "5b863387f904a94ae3dcfd45a5eb7463d3402346f3fc01a646e78edaab789b50",
+  "app_server_parser_version": "refresh-app-server-inventory-1",
+  "app_server_protocol_capabilities": {
+    "experimentalApi": null
+  },
+  "app_server_request_methods": [
+    "initialize",
+    "initialized",
+    "plugin/read",
+    "plugin/read",
+    "plugin/list",
+    "skills/list",
+    "hooks/list"
+  ],
+  "app_server_response_schema_version": "app-server-readonly-inventory-v1",
+  "app_server_server_info": {
+    "name": null,
+    "version": null
+  },
+  "axes": {
+    "coverage_state": "covered",
+    "filesystem_state": "drift",
+    "preflight_state": "passed",
+    "reason_codes": [],
+    "reason_count": 0,
+    "runtime_config_state": "aligned",
+    "selected_mutation_mode": "guarded-refresh"
+  },
+  "codex_executable_hash_unavailable_reason": null,
+  "codex_executable_path": "/opt/homebrew/bin/codex",
+  "codex_executable_sha256": "ff803d4b5c595af19b99c18db6def26539fdf4da23a035ab30809835631e8e4b",
+  "codex_version": "codex-cli 0.128.0",
+  "current_run_identity": {
+    "app_server_inventory_freshness": "recomputed-readonly-inventory",
+    "app_server_inventory_summary_sha256": "5b863387f904a94ae3dcfd45a5eb7463d3402346f3fc01a646e78edaab789b50",
+    "installed_cache_manifest_sha256": "a71a5b4af1685508de7ff75f832f08e66728c465002486d7df8cabf856b2dc00",
+    "installed_cache_manifest_unavailable_reason": null,
+    "local_config_metadata_sha256": "1f887c3f4152bc4d3469b045ffbecb2a5d52b3aec38020c80fb40f135f3510c9",
+    "local_config_metadata_unavailable_reason": null,
+    "local_summary_mode": "dry-run",
+    "local_summary_run_id": "plan05-live-handoff-coverage-20260506-160049",
+    "local_summary_schema_version": "turbo-mode-refresh-plan-03",
+    "repo_marketplace_sha256": "56131cfd05b96e67fd917da93ff69950a33b463eac9bfa8ace18b96eea734e06",
+    "repo_marketplace_unavailable_reason": null,
+    "runtime_config_projection_sha256": "bcafbd8ebab75f4c9cdab15fa8a1510d0f9e764ce86666aabcae5e4f7a4c10bd",
+    "runtime_config_projection_unavailable_reason": null,
+    "runtime_identity": {
+      "app_server_parser_version": "refresh-app-server-inventory-1",
+      "app_server_protocol_capabilities": {
+        "experimentalApi": null
+      },
+      "app_server_response_schema_version": "app-server-readonly-inventory-v1",
+      "app_server_server_info": {
+        "name": null,
+        "version": null
+      },
+      "codex_executable_hash_unavailable_reason": null,
+      "codex_executable_path": "/opt/homebrew/bin/codex",
+      "codex_executable_sha256": "ff803d4b5c595af19b99c18db6def26539fdf4da23a035ab30809835631e8e4b",
+      "codex_version": "codex-cli 0.128.0"
+    },
+    "runtime_identity_freshness": "recomputed-readonly-inventory",
+    "source_manifest_sha256": "8e5b46f9bfd5a5ea039447e24e18de187f4eaed6646ef7575ad065d35ea62fb8",
+    "source_manifest_unavailable_reason": null
+  },
+  "diff_classification": [
+    {
+      "canonical_path": "handoff/1.6.0/skills/load/SKILL.md",
+      "coverage_status": "covered",
+      "mutation_mode": "guarded",
+      "outcome": "guarded-only",
+      "reason_codes": [
+        "handoff-state-helper-direct-python-doc-migration"
+      ],
+      "smoke": [
+        "handoff-state-helper-docs",
+        "handoff-session-state-write-read-clear"
+      ]
+    },
+    {
+      "canonical_path": "handoff/1.6.0/skills/quicksave/SKILL.md",
+      "coverage_status": "covered",
+      "mutation_mode": "guarded",
+      "outcome": "guarded-only",
+      "reason_codes": [
+        "handoff-state-helper-direct-python-doc-migration"
+      ],
+      "smoke": [
+        "handoff-state-helper-docs",
+        "handoff-session-state-write-read-clear"
+      ]
+    },
+    {
+      "canonical_path": "handoff/1.6.0/skills/save/SKILL.md",
+      "coverage_status": "covered",
+      "mutation_mode": "guarded",
+      "outcome": "guarded-only",
+      "reason_codes": [
+        "handoff-state-helper-direct-python-doc-migration"
+      ],
+      "smoke": [
+        "handoff-state-helper-docs",
+        "handoff-session-state-write-read-clear"
+      ]
+    },
+    {
+      "canonical_path": "handoff/1.6.0/skills/summary/SKILL.md",
+      "coverage_status": "covered",
+      "mutation_mode": "guarded",
+      "outcome": "guarded-only",
+      "reason_codes": [
+        "handoff-state-helper-direct-python-doc-migration"
+      ],
+      "smoke": [
+        "handoff-state-helper-docs",
+        "handoff-session-state-write-read-clear"
+      ]
+    },
+    {
+      "canonical_path": "handoff/1.6.0/tests/test_session_state.py",
+      "coverage_status": "covered",
+      "mutation_mode": "guarded",
+      "outcome": "guarded-only",
+      "reason_codes": [
+        "unmatched-path"
+      ],
+      "smoke": []
+    },
+    {
+      "canonical_path": "handoff/1.6.0/tests/test_skill_docs.py",
+      "coverage_status": "covered",
+      "mutation_mode": "guarded",
+      "outcome": "guarded-only",
+      "reason_codes": [
+        "unmatched-path"
+      ],
+      "smoke": []
+    }
+  ],
+  "dirty_state": {
+    "post_commit_binding": false,
+    "relevant_paths_checked": [
+      ".agents/plugins/marketplace.json",
+      "plugins/turbo-mode/handoff/1.6.0",
+      "plugins/turbo-mode/ticket/1.4.0",
+      "plugins/turbo-mode/tools/refresh",
+      "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
+      "plugins/turbo-mode/tools/refresh_validate_redaction.py",
+      "plugins/turbo-mode/tools/refresh_validate_run_metadata.py"
+    ],
+    "status": "clean-relevant-paths"
+  },
+  "dirty_state_policy": "fail-relevant-dirty-state",
+  "final_status": "guarded-refresh-required",
+  "local_only_evidence_root": "/Users/jp/.codex/local-only/turbo-mode-refresh/plan05-live-handoff-coverage-20260506-160049",
+  "local_only_summary_sha256": "f875c4c404fd8fdfafc953c9ef6e5866809a811d25c6498bde30766b2c1d2eec",
+  "metadata_validation_summary_sha256": "9ac551847219364732bd189337107013240a9fbe7c8c78d89d19035a71eb838a",
+  "mode": "dry-run",
+  "omission_reasons": {
+    "exclusivity_status": "outside-non-mutating-refresh-plan",
+    "post_refresh_cache_manifest": "outside-non-mutating-refresh-plan",
+    "post_refresh_config_sha256": "outside-non-mutating-refresh-plan",
+    "pre_refresh_config_sha256": "outside-non-mutating-refresh-plan",
+    "process_gate": "outside-non-mutating-refresh-plan",
+    "raw_app_server_transcript": "local-only",
+    "rollback_or_restore_status": "outside-non-mutating-refresh-plan",
+    "smoke_summary": "outside-non-mutating-refresh-plan"
+  },
+  "redaction_validation_summary_sha256": "c79a3e7e8288b4e8320e8c70f343704dde8973329fe1bef73dc84f1fa9240cd0",
+  "repo_head": "6ac913e7059be99e14cf0cfdb8925f8736e4dcc0",
+  "repo_tree": "8b89866a7486859bb1632b1794102ea6996798d2",
+  "run_id": "plan05-live-handoff-coverage-20260506-160049",
+  "runtime_config": {
+    "marketplace_state": "aligned",
+    "plugin_enablement_state": {
+      "handoff@turbo-mode": "enabled",
+      "ticket@turbo-mode": "enabled"
+    },
+    "plugin_hooks_state": "true",
+    "reason_codes": [],
+    "reason_count": 0,
+    "state": "aligned"
+  },
+  "schema_version": "turbo-mode-refresh-commit-safe-plan-05",
+  "source_local_summary_schema_version": "turbo-mode-refresh-plan-03",
+  "terminal_plan_status": "guarded-refresh-required",
+  "tool_path": "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
+  "tool_sha256": "be976120c19438c662ef7b60a10da5da37874faddaf14a48e91a076060c5f5e1"
+}

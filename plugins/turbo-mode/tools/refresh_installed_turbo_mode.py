@@ -43,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--inventory-check", action="store_true")
     parser.add_argument("--record-summary", action="store_true")
+    parser.add_argument("--require-terminal-status")
     parser.add_argument("--summary-output", type=Path)
     return parser
 
@@ -51,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.refresh or args.guarded_refresh:
-        parser.error("--refresh and --guarded-refresh are outside Plan 04")
+        parser.error("--refresh and --guarded-refresh are outside non-mutating refresh planning")
     if args.smoke is not None:
         parser.error("--smoke is only accepted with rejected future command shapes")
     mode = "plan-refresh" if args.plan_refresh else "dry-run"
@@ -66,6 +67,13 @@ def main(argv: list[str] | None = None) -> int:
             mode=mode,
             inventory_check=args.inventory_check,
         )
+        if args.require_terminal_status is not None:
+            terminal_status = result.terminal_status.value
+            if terminal_status != args.require_terminal_status:
+                raise RefreshError(
+                    "required terminal status mismatch: "
+                    f"expected {args.require_terminal_status!r}, got {terminal_status!r}"
+                )
         evidence_path = write_local_evidence(result, run_id=run_id)
         published_summary_path = None
         candidate_summary_path = None
@@ -130,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
                     "--scope",
                     "commit-safe-summary",
                     "--source",
-                    "plan-04-cli",
+                    "plan-05-cli",
                     "--summary",
                     str(candidate_summary_path),
                     "--local-only-root",
@@ -191,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
                     "--scope",
                     "commit-safe-summary",
                     "--source",
-                    "plan-04-cli",
+                    "plan-05-cli",
                     "--summary",
                     str(final_summary_path),
                     "--local-only-root",

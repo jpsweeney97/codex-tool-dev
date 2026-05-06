@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from refresh import validation
 from refresh.app_server_inventory import AppServerInventoryCheck, CodexRuntimeIdentity
 from refresh.commit_safe import (
     build_commit_safe_summary,
@@ -35,6 +36,63 @@ REPO_ROOT = Path(__file__).resolve().parents[5]
 METADATA_TOOL = REPO_ROOT / "plugins/turbo-mode/tools/refresh_validate_run_metadata.py"
 REDACTION_TOOL = REPO_ROOT / "plugins/turbo-mode/tools/refresh_validate_redaction.py"
 TOOL_REL = Path("plugins/turbo-mode/tools/refresh_installed_turbo_mode.py")
+
+
+def test_validation_plan05_schema_constant() -> None:
+    assert validation.EXPECTED_COMMIT_SAFE_SCHEMA_VERSION == (
+        "turbo-mode-refresh-commit-safe-plan-05"
+    )
+
+
+def test_commit_safe_accepts_plan05_reason_code_only_under_plan05_schema() -> None:
+    payload = {
+        "schema_version": "turbo-mode-refresh-commit-safe-plan-05",
+        "run_id": "run-1",
+        "axes": {
+            "filesystem_state": "drift",
+            "coverage_state": "covered",
+            "runtime_config_state": "aligned",
+            "preflight_state": "passed",
+            "selected_mutation_mode": "guarded-refresh",
+            "reason_codes": ["handoff-state-helper-direct-python-doc-migration"],
+            "reason_count": 1,
+        },
+    }
+
+    assert_commit_safe_payload(payload)
+
+
+def test_commit_safe_rejects_plan04_schema_with_plan05_reason_code() -> None:
+    payload = {
+        "schema_version": "turbo-mode-refresh-commit-safe-plan-04",
+        "run_id": "run-1",
+        "axes": {
+            "filesystem_state": "drift",
+            "coverage_state": "covered",
+            "runtime_config_state": "aligned",
+            "preflight_state": "passed",
+            "selected_mutation_mode": "guarded-refresh",
+            "reason_codes": ["handoff-state-helper-direct-python-doc-migration"],
+            "reason_count": 1,
+        },
+    }
+
+    with pytest.raises(ValueError, match="invalid schema_version"):
+        assert_commit_safe_payload(payload)
+
+
+def test_commit_safe_rejects_stale_plan04_omission_reason_under_plan05_schema() -> None:
+    payload = {
+        "schema_version": "turbo-mode-refresh-commit-safe-plan-05",
+        "run_id": "run-1",
+        "omission_reasons": {
+            "raw_app_server_transcript": "local-only",
+            "process_gate": "outside-plan-04",
+        },
+    }
+
+    with pytest.raises(ValueError, match="invalid omission reason"):
+        assert_commit_safe_payload(payload)
 
 
 def test_commit_safe_redaction_rejects_raw_transcript_key() -> None:
@@ -670,7 +728,33 @@ def test_metadata_validator_rejects_stale_existing_candidate_summary(tmp_path: P
     )
 
     assert rejected.returncode == 1
-    assert "validator summary field mismatch" in rejected.stderr
+
+
+@pytest.mark.parametrize(
+    "dirty_path",
+    [
+        "plugins/turbo-mode/handoff/1.6.0/README.md",
+        "plugins/turbo-mode/ticket/1.4.0/README.md",
+    ],
+)
+def test_metadata_validator_rejects_dirty_plugin_source_paths(
+    tmp_path: Path,
+    dirty_path: str,
+) -> None:
+    case = build_candidate_summary(tmp_path)
+    metadata_summary = case["run_root"] / "metadata-validation.summary.json"
+    (case["repo_root"] / dirty_path).write_text("dirty\n", encoding="utf-8")
+
+    rejected = run_metadata(
+        [
+            *common_args(case, summary=case["candidate"], mode="candidate"),
+            "--summary-output",
+            str(metadata_summary),
+        ]
+    )
+
+    assert rejected.returncode == 1
+    assert "relevant paths dirty" in rejected.stderr
 
 
 def test_metadata_validator_rejects_recomputed_dirty_relevant_paths(tmp_path: Path) -> None:

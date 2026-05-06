@@ -28,6 +28,12 @@ from refresh.planner import (
     validate_repo_marketplace,
 )
 
+HANDOFF_STATE_HELPER_DOC_FIXTURES = json.loads(
+    (
+        Path(__file__).parent / "fixtures" / "handoff_state_helper_doc_migration.json"
+    ).read_text(encoding="utf-8")
+)
+
 
 def test_build_plugin_specs_uses_repo_source_and_codex_cache_roots(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
@@ -431,6 +437,23 @@ def aligned_inventory() -> AppServerInventoryCheck:
     )
 
 
+def write_handoff_state_helper_doc_migration_fixture(
+    repo_root: Path,
+    codex_home: Path,
+) -> None:
+    for path, contract in HANDOFF_STATE_HELPER_DOC_FIXTURES.items():
+        relative_path = Path(*Path(path).parts[2:]).as_posix()
+        write_plugin_pair(
+            repo_root,
+            codex_home,
+            plugin="handoff",
+            version="1.6.0",
+            rel=relative_path,
+            source_text=contract["source_text"],
+            cache_text=contract["cache_text"],
+        )
+
+
 def test_plan_refresh_no_drift_with_aligned_config(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     codex_home = tmp_path / ".codex"
@@ -467,6 +490,58 @@ def test_plan_refresh_inventory_check_can_prove_no_drift(tmp_path: Path) -> None
     assert result.terminal_status == TerminalPlanStatus.NO_DRIFT
     assert result.app_server_inventory is not None
     assert result.app_server_transcript == ({"direction": "recv"},)
+
+
+def test_plan_refresh_handoff_state_helper_doc_migration_requires_guarded_refresh(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    write_handoff_state_helper_doc_migration_fixture(repo_root, codex_home)
+
+    result = plan_refresh(
+        repo_root=repo_root,
+        codex_home=codex_home,
+        mode="dry-run",
+        inventory_check=True,
+        inventory_collector=lambda _paths: (aligned_inventory(), ({"direction": "recv"},)),
+    )
+
+    expected_paths = [
+        "handoff/1.6.0/skills/load/SKILL.md",
+        "handoff/1.6.0/skills/quicksave/SKILL.md",
+        "handoff/1.6.0/skills/save/SKILL.md",
+        "handoff/1.6.0/skills/summary/SKILL.md",
+        "handoff/1.6.0/tests/test_session_state.py",
+        "handoff/1.6.0/tests/test_skill_docs.py",
+    ]
+
+    assert result.terminal_status == TerminalPlanStatus.GUARDED_REFRESH_REQUIRED
+    assert result.axes.coverage_state == CoverageState.COVERED
+    assert result.axes.selected_mutation_mode == SelectedMutationMode.GUARDED_REFRESH
+    assert [item.canonical_path for item in result.diff_classification] == expected_paths
+    assert [item.outcome for item in result.diff_classification] == [
+        PathOutcome.GUARDED_ONLY,
+        PathOutcome.GUARDED_ONLY,
+        PathOutcome.GUARDED_ONLY,
+        PathOutcome.GUARDED_ONLY,
+        PathOutcome.GUARDED_ONLY,
+        PathOutcome.GUARDED_ONLY,
+    ]
+
+    for item in result.diff_classification[:4]:
+        assert item.reasons == ("handoff-state-helper-direct-python-doc-migration",)
+        assert item.smoke == (
+            "handoff-state-helper-docs",
+            "handoff-session-state-write-read-clear",
+        )
+
+    for item in result.diff_classification[4:]:
+        assert item.reasons == ("unmatched-path",)
+        assert item.smoke == ()
 
 
 def test_plan_refresh_inventory_failure_blocks_without_erasing_manifest_facts(
