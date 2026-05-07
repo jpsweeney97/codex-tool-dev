@@ -10,9 +10,7 @@ __pycache__/
 .mypy_cache/
 tmp/
 *settings*.json
-docs/handoffs/.session-state/
-docs/handoffs/archive/
-docs/handoffs/*.md
+docs/handoffs/
 .codex/local/
 .codex/plugin-dev/**/.codex/ticket-tmp/
 .codex/plugin-dev/
