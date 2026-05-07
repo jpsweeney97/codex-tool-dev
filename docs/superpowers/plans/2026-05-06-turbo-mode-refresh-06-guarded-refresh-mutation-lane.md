@@ -477,7 +477,8 @@ Implementation must also define an `AppServerInstallAuthority` record for instal
 - expected plugin ids and versions;
 - requested marketplace path and remote marketplace value;
 - installed destination paths under the requested plugin cache root;
-- accepted install schema/status;
+- accepted sparse install success/auth schema and request-id correlation;
+- same-child and fresh-child post-install app-server corroboration digests;
 - pre-install and post-install cache manifest digests;
 - per-plugin post-install cache delta digests.
 
@@ -505,18 +506,21 @@ Task 1A must then prove pre-install target authority before any unmocked `plugin
 Only after read-only home-binding discovery and pre-install target authority pass may Task 1A run the separately approved isolated install spike:
 
 1. Run `plugin/install` for Handoff and Ticket against the requested repo marketplace into the isolated home.
-2. Prove each install response identifies the requested plugin, requested marketplace, installed path under the isolated home cache, accepted schema/status, and post-install cache manifest delta.
-3. A generic success response without install identity is schema drift and blocks Plan 06 before lock/recovery scaffolding.
-4. Fail before process gate, lock, marker, snapshots, hook disable, config writes, real cache writes, real app-server install, smoke, recovery, or evidence scaffolding if any response or post-install path resolves to `/Users/jp/.codex` during an isolated run. This failure is still a blocker because the pre-install proof was wrong; it is not acceptable proof to continue.
+2. Treat each sparse `plugin/install` response only as an install write-completion signal. It must still be tied to the exact request id and must have the accepted generic success/auth schema returned by the current app-server runtime.
+3. After install, collect post-install app-server corroboration from the requested isolated home with `plugin/read`, `plugin/list`, `skills/list`, and `hooks/list` on both the same install child and a fresh app-server child.
+4. Prove Handoff and Ticket identity from the combination of pre-install request identity, app-server post-install read/list/hooks corroboration, installed skill/hook paths under the requested isolated cache root, and local installed-cache manifest digests. Do not infer identity from the sparse install response alone.
+5. Compute and record post-install cache manifest delta from local installed-cache evidence rather than requiring `plugin/install` to echo that delta.
+6. A generic success response without post-install app-server corroboration remains a blocker and must not be treated as install authority.
+7. Fail before process gate, lock, marker, snapshots, hook disable, config writes, real cache writes, real app-server install, smoke, recovery, or evidence scaffolding if any response or post-install path resolves to `/Users/jp/.codex` during an isolated run. This failure is still a blocker because the pre-install or post-install proof was wrong; it is not acceptable proof to continue.
 
 Task 1A has only two valid outcomes:
 
-- `authority-validated`: local-only artifacts exist with path/SHA256 for read-only home-binding discovery, pre-install target authority, executable identity, requested home, marketplace, install request/response digests, installed path proof, cache delta proof, and no-real-home path proof.
+- `authority-validated`: local-only artifacts exist with path/SHA256 for read-only home-binding discovery, pre-install target authority, executable identity, requested home, marketplace, install request/response digests, same-child and fresh-child post-install app-server corroboration, installed path proof, cache delta proof, and no-real-home path proof.
 - `blocked-plan-update`: this plan is patched before implementation continues, naming the failed authority field and choosing one reviewed path: update the Codex app-server/protocol, replace `plugin/install` authority with another approved mechanism, or stop Plan 06.
 
-Do not convert a sparse or generic `plugin/install` success payload into a warning, best-effort proof, or implementation TODO. Sparse install identity is a blocker until the app-server/protocol is updated, the plan chooses a different authority mechanism, or the lane stops.
+Do not convert a sparse or generic `plugin/install` success payload into a warning, best-effort proof, or implementation TODO. Plan 06 now chooses a different authority mechanism: sparse install success is accepted only as a write-completion signal, and install authority is established by pre-install authority plus post-install app-server read/list/hooks corroboration and local manifest proof.
 
-Live `/Users/jp/.codex` runs must perform only the launch/read authority proof before snapshots: executable identity, version, accepted schema, requested-home config/cache/local-only path binding, and read-only `plugin/read`, `plugin/list`, `skills/list`, and `hooks/list` authority. Live real-home `plugin/install` is forbidden before `snapshot-written` is durable and before the marker records `pre_snapshot_app_server_launch_authority_sha256`, snapshot paths, snapshot manifest digest, original config SHA256, pre-refresh cache manifest SHA256 map, and recovery eligibility. Real install identity proof is collected in the `install-complete` phase after snapshots and before config restore/final inventory.
+Live `/Users/jp/.codex` runs must perform only the launch/read authority proof before snapshots: executable identity, version, accepted schema, requested-home config/cache/local-only path binding, and read-only `plugin/read`, `plugin/list`, `skills/list`, and `hooks/list` authority. Live real-home `plugin/install` is forbidden before `snapshot-written` is durable and before the marker records `pre_snapshot_app_server_launch_authority_sha256`, snapshot paths, snapshot manifest digest, original config SHA256, pre-refresh cache manifest SHA256 map, and recovery eligibility. Real install authority proof is collected in the `install-complete` phase after snapshots and before config restore/final inventory.
 
 ## Isolated Rehearsal Proof Contract
 
@@ -962,9 +966,10 @@ Add default-suite tests that prove the app-server authority contract without req
 - `plugin/read`, `plugin/list`, `skills/list`, and `hooks/list` responses resolve config, cache, plugin, hook, and local-only authority under the requested temporary home or the requested repo marketplace;
 - `AppServerPreInstallTargetAuthority` is required before fixture-backed install request builders can be invoked;
 - fixture-backed install request builders refuse to run when pre-install target authority is missing, stale, or points outside the requested isolated home;
-- fixture-backed `plugin/install` responses for Handoff and Ticket prove requested plugin, requested marketplace, installed path under the temporary home cache, accepted schema/status, and post-install cache manifest delta;
-- each install response records enough identity to prove requested plugin, requested marketplace, installed path under the temporary home cache, accepted schema/status, and post-install cache manifest delta;
-- a generic install success response without plugin/cache/path/schema identity fails closed as app-server install-authority schema drift;
+- fixture-backed sparse `plugin/install` responses are accepted only as write-completion signals tied to exact request ids and accepted generic success/auth schema;
+- post-install app-server `plugin/read`, `plugin/list`, `skills/list`, and `hooks/list` fixtures from the same install child and a fresh child prove requested plugin, requested marketplace, installed paths under the temporary home cache, accepted runtime schema, and no-real-home path authority;
+- local installed-cache fixtures for Handoff and Ticket prove post-install cache manifest delta independently from the sparse `plugin/install` responses;
+- a generic install success response without post-install app-server read/list/hooks corroboration fails closed as insufficient app-server install authority;
 - `app_server_inventory.py` owns `AppServerLaunchAuthority`, `AppServerInstallAuthority`, their serializers, and digest helpers; mutation code imports and consumes those records instead of defining parallel proof shapes;
 - the authority probe fails closed before snapshots or hook disable if any response resolves to `/Users/jp/.codex` during an isolated run;
 - fixture-backed missing-home-binding responses fail closed before snapshots or hook disable;
@@ -992,8 +997,9 @@ The read-only discovery portion is complete only when:
 The isolated install spike is allowed only after read-only discovery and pre-install target authority pass. It is complete only when:
 
 - the pre-install target authority artifact exists and proves the install cache root before any unmocked `plugin/install` write;
-- the isolated `plugin/install` spike mutates only the temporary home cache and returns certifiable install identity for Handoff and Ticket;
-- an unmocked local-only spike artifact exists under the isolated home's local-only refresh root, records the exact app-server executable path/SHA256, requested home, repo marketplace, pre-install target authority digest, install request/response digests, installed cache paths, no-real-home path checks, post-install cache manifest delta, and artifact SHA256, and is referenced in the Task 1A commit message or implementation notes;
+- the isolated `plugin/install` spike mutates only the temporary home cache and returns accepted generic success/auth responses for Handoff and Ticket;
+- the same install child and a fresh app-server child both corroborate post-install state with `plugin/read`, `plugin/list`, `skills/list`, and `hooks/list` rooted under the requested isolated home or requested repo marketplace, as appropriate;
+- an unmocked local-only spike artifact exists under the isolated home's local-only refresh root, records the exact app-server executable path/SHA256, requested home, repo marketplace, pre-install target authority digest, install request/response digests, same-child and fresh-child post-install corroboration transcript digests, installed cache paths, no-real-home path checks, post-install cache manifest delta, and artifact SHA256, and is referenced in the Task 1A commit message or implementation notes;
 - serialized authority proof digests are produced by `app_server_inventory.py` and consumed by mutation code without reserializing a different shape;
 - the authority proof can be serialized for later rehearsal proof digests;
 - failures return a hard blocker status, not a warning.
@@ -1014,56 +1020,113 @@ Expected: the command first writes a local-only read-only discovery artifact and
 
 Observed blocker from the operator-run Task 1A authority spike:
 
-- run id: `plan06-task1a-authority-spike-20260507-033041`
-- post-review corrected durable blocker report derived from the original spike transcript: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-task1a-authority-spike-20260507-033041/authority-blocker.json`
-- corrected blocker report SHA256: `89d443384cfa92bb9e940256c74053be1617d82bc19ae69d2139225d91d88118`
-- original raw-write blocker report SHA256 before nested `result.data` count correction: `64c20014ca1b9bb3bb1fde1cc3ee222ddf6f4c697b70810560fa542233b818f9`
-- durable read-only transcript: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-task1a-authority-spike-20260507-033041/readonly-discovery.transcript.json`
-- durable read-only transcript SHA256: `9ad3f61d70af200e519e7f69b1593f27c5988089027276ce14f0c108a5e58ab5`
-- isolated home used for the spike: `/private/tmp/plan06-task1a-authority-spike-20260507-033041-6e4tz9go/.codex`
+- run id: `plan06-task1a-authority-spike-20260507-041723`
+- durable blocker report: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-task1a-authority-spike-20260507-041723/authority-blocker.json`
+- blocker report SHA256: `0c50e30e46fe0f5ab7eb190c63fae7950f1e2160c9b5d97cf6f067dd4b42ece6`
+- durable read-only transcript: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-task1a-authority-spike-20260507-041723/readonly-discovery.transcript.json`
+- durable read-only transcript SHA256: `83c261d3038571cc47c02693dbf43cc2c02690f51f4cba6afe8b79263dd7c29d`
+- durable launch-authority artifact: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-task1a-authority-spike-20260507-041723/launch-authority.json`
+- launch-authority SHA256: `b320051f8daf54679acea616a69363caf3aa96a02ae3d4ccfc59b84bf9af1e1d`
+- durable pre-install target authority artifact: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-task1a-authority-spike-20260507-041723/preinstall-target-authority.json`
+- pre-install target authority SHA256: `f02d8d897dfd11af0a6e79b401515a001c2a255c5b91d2e92482c068d0aea1e9`
+- durable install transcript: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-task1a-authority-spike-20260507-041723/install.transcript.json`
+- durable install transcript SHA256: `438bc777ef5d8f3f9c7fe351b12af9e15b12f13a898b42dae862496a6582d9c7`
+- isolated home used for the spike: `/private/tmp/plan06-task1a-authority-spike-20260507-041723-bj35slzn/.codex`
 
-Observed read-only authority result:
+Observed read-only and pre-install authority result:
 
 - `initialize.result.codexHome` bound to the isolated home.
 - `skills/list` returned Handoff and Ticket skill paths under the isolated home cache.
-- `hooks/list` returned the Ticket hook `sourcePath` under the isolated home cache.
-- copied or installed Ticket hook metadata still exposed the Ticket hook `command` as `python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py` during isolated read-only discovery, so the command authority still points at the real Codex home.
+- `hooks/list.sourcePath` and `hooks/list.command` both resolved under the isolated Ticket cache root for the requested isolated home.
+- `launch-authority.json` and `preinstall-target-authority.json` were written before any unmocked `plugin/install` request.
+- this run supersedes the earlier read-only blocker recorded in the docs-only blocked update: install-root-bound Ticket hook metadata cleared the no-real-home hook-command blocker in isolated read-only discovery, but it did not unblock install authority.
+
+Observed isolated install-authority blocker:
+
+- the isolated `plugin/install` transcript still returned only generic success/auth payloads and did not expose install identity fields for Handoff or Ticket;
+- the validator now computes post-install cache manifest delta from local installed-cache evidence, so the remaining blocker is not missing `cacheDelta`;
+- the blocker report records the current missing install identity fields as `pluginName`, `marketplacePath`, `remoteMarketplaceName`, `installedPath`, and `status`.
+
+Follow-up implementation spike after the alternate authority validator patch:
+
+- run id: `plan06-task1a-authority-spike-20260507-043440`
+- durable blocker report: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-task1a-authority-spike-20260507-043440/authority-blocker.json`
+- blocker report SHA256: `47631be38ce4482e6ade6bfa14142b42010e853ab05605c14e5cfbdfd703411e`
+- durable read-only transcript SHA256: `8d3eeb4ab117c705616d0d15e66db5e411dd6f8d41769d48122443c41629e7e0`
+- durable launch-authority SHA256: `fc905c1accc3dc005c9b850e5a596b38e9df920e7c0a178095e74b8b66bc65a7`
+- durable pre-install target authority SHA256: `b15334e53f114e967f31999c57c6612e53e90a185dd40ffc131c1476a83376a3`
+- durable install transcript SHA256: `f35f7671f224667ccbb19efde4664cbbd107fe9ef7da5b776961beb3cf672efc`
+- durable same-child post-install corroboration transcript SHA256: `9cb92f025f9932b713e07b1558c9f13ae304221bf86c472552cd527da8035545`
+- durable fresh-child post-install corroboration transcript SHA256: `4cd76b220bcb2c67a6bbe49a984f9b8233393b4261fc636a378c1eadaa16f096`
+- isolated home used for the spike: `/private/tmp/plan06-task1a-authority-spike-20260507-043440-a4zhd3k2/.codex`
+
+Observed follow-up blocker:
+
+- sparse `plugin/install` response validation moved past the previous missing response-identity blocker;
+- same-child post-install app-server corroboration failed because `hooks/list.command` returned `python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py`;
+- the repo source manifest `plugins/turbo-mode/ticket/1.4.0/hooks/hooks.json` still contains that absolute real-home command, and the current Ticket release provenance test intentionally pins it;
+- no documented app-server hook-command placeholder, installed-root expansion, or portable plugin-root launcher was found in this repo;
+- therefore the alternate authority mechanism is implemented in the validator but still blocked at runtime by post-install Ticket hook command authority.
+
+Follow-up implementation spike after post-install installed-cache Ticket hook rewrite:
+
+- run id: `plan06-task1a-authority-spike-20260507-044924`
+- durable artifact root: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-task1a-authority-spike-20260507-044924`
+- durable read-only transcript SHA256: `cbd5093c0b0fec1b22c14b6d0565cddefbd74df75a141ab3b468b806fd3a549b`
+- durable launch-authority SHA256: `6a84eb2262fed4bb2c916d94bb37cff34b4817e1ae440871f7edac21e5e33d28`
+- durable pre-install target authority SHA256: `add463e2604b8f879ba34af8d183e7b62add23f6af83dc241c1142cc9bc5f349`
+- durable install transcript SHA256: `7b0842440ff5edda53338d2d6c04e26f0523e1d3f0a6ce4fed40d9e2cbe64277`
+- durable same-child post-install corroboration transcript SHA256: `edbd11cb6a93baf1adee6fc9752847b38da246d6a0b7bb6b1155d1d77d2ff615`
+- durable fresh-child post-install corroboration transcript SHA256: `cbd5093c0b0fec1b22c14b6d0565cddefbd74df75a141ab3b468b806fd3a549b`
+- durable install-authority artifact SHA256: `f1f7cef1dec15e5caff7de5d4ce5a7ac4bd2f5c84fa23f9ba661de20dc520f28`
+- isolated home used for the spike: `/private/tmp/plan06-task1a-authority-spike-20260507-044924-ejckxgbw/.codex`
+
+Observed validated authority result:
+
+- sparse Handoff and Ticket `plugin/install` responses were accepted only as `sparse-success-auth-v1` write-completion signals with request-id correlation;
+- after the Ticket install response, the spike rewrote the installed Ticket `hooks/hooks.json` command to the actual isolated installed Ticket root before same-child post-install inventory;
+- same-child `hooks/list.command` returned `python3 /private/tmp/plan06-task1a-authority-spike-20260507-044924-ejckxgbw/.codex/plugins/cache/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py`;
+- same-child `hooks/list.sourcePath` returned `/private/tmp/plan06-task1a-authority-spike-20260507-044924-ejckxgbw/.codex/plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json`;
+- fresh-child `hooks/list.command` and `sourcePath` returned the same isolated installed Ticket root;
+- `install-authority.json` records installed destination paths for Handoff and Ticket under the isolated home, same-child and fresh-child corroboration digests, accepted sparse install schemas, pre/post cache manifest SHA256 maps, and cache manifest delta SHA256s.
 
 Plan 06 consequence:
 
-- Task 1A does not pass the read-only launch/read authority gate.
-- Plan 06 cannot prove no-real-home hook command authority before writes.
-- This evidence does not yet prove that the Codex app-server/runtime cannot bind to the requested isolated `CODEX_HOME`; it proves that the isolated read-only authority surface still exposes a real-home absolute hook command.
-- Stop Plan 06 here. Do not begin Task 1B, Task 2, or any process gate, lock, marker, snapshot, smoke, recovery, retained-run, or mutation-orchestration work from this branch state.
+- Task 1A now reaches `authority-validated` in the local isolated spike.
+- The selected authority mechanism is sparse install success plus explicit post-install installed-cache Ticket hook command rewrite, same-child app-server corroboration, fresh-child app-server corroboration, and local cache manifest proof.
+- Post-install cache delta proof alone is not sufficient; do not infer install authority from a generic success payload plus post-write observation.
+- Task 1B may start only after Task 1A is committed with this authority evidence boundary. Do not skip the commit boundary into process gate, lock, marker, snapshot, smoke, recovery, retained-run, or mutation-orchestration work.
 
-Reviewed next paths opened by this blocked decision:
+Reviewed paths resolved by this authority decision:
 
-1. update the Ticket hook packaging/install metadata so hook commands are generated or rewritten to the actual installed plugin root, then rerun Task 0 and Task 1A;
-2. update Codex app-server/plugin-install or hook registry behavior so hook command authority is bound to the requested `CODEX_HOME` or install root and exposed before writes, then rerun Task 0 and Task 1A;
-3. revise Plan 06 with a different approved pre-install authority mechanism that does not rely on copied installed hook metadata, then rerun from Task 0 and Task 1A.
+1. Codex app-server/plugin-install response identity remains OpenAI-owned and sparse in this repo; do not fabricate richer response identity locally.
+2. The approved local mechanism is post-install installed-cache hook-command rewrite plus app-server and manifest corroboration, not source manifest portability.
+3. The source Ticket hook manifest and release provenance test may continue pinning the real-home installed runtime command while isolated install proof rewrites only the installed cache copy for the requested home.
 
 Selected unblock path:
 
-- use path 1 as the project-facing repair: install-root-bound Ticket hook metadata;
-- do not satisfy this by replacing one hardcoded absolute source path with another hardcoded absolute source path;
-- do not use a relative hook command unless Codex documents and proves that hook commands execute with the installed plugin root as `cwd`;
-- do not rely on `$CODEX_HOME`, `$CODEX_PLUGIN_ROOT`, or another environment variable in the hook command unless a live `hooks/list` proof and hook execution proof show the runtime supplies that variable for the installed hook;
-- if the repair requires Codex app-server/plugin-install support for manifest placeholder expansion or install-time rewrite, record that as the implementation mechanism for path 1 rather than treating it as a separate Plan 06 escape hatch.
+- use the alternate authority mechanism as the current project-facing repair because the Codex app-server runtime is OpenAI-owned and cannot be changed in this repository;
+- preserve the current app-server `plugin/install` response as a write-completion signal only, with accepted generic success/auth schema and exact request-id correlation;
+- prove install authority from a separate post-install authority chain: same-child app-server `plugin/read`, `plugin/list`, `skills/list`, and `hooks/list`; fresh-child app-server `plugin/read`, `plugin/list`, `skills/list`, and `hooks/list`; local installed-cache manifest digests; and no-real-home path checks;
+- require Handoff skills and Ticket skills/hooks to resolve under the requested isolated cache root after install, and require `plugin/read` / `plugin/list` to preserve requested marketplace identity and runtime schema;
+- post-install cache manifest delta may be computed from local installed-cache evidence and does not need to be echoed by `plugin/install`;
+- do not weaken the gate by inferring install identity from a generic success payload, cache side effects, or post-write observation alone. Post-write observation is acceptable only when it is bound to the same pre-install authority, same requested home, same marketplace request identity, app-server post-install corroboration from both same-child and fresh-child sessions, and local cache manifest proof.
 
 Task 1A unblock acceptance:
 
-- the Ticket hook source or packaging contract has an explicit template, placeholder, or install-time rewrite mechanism for `hooks/hooks.json`;
-- a real-home install still yields `python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py`;
-- an isolated install into a temporary `CODEX_HOME` yields `python3 <isolated-codex-home>/plugins/cache/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py`;
-- `hooks/list.command` and `hooks/list.sourcePath` both resolve under the same installed Ticket plugin root for the requested home;
+- the install-root-bound Ticket hook metadata fix remains in place so `hooks/list.command` and `hooks/list.sourcePath` both resolve under the same installed Ticket plugin root for the requested home;
 - read-only Task 1A discovery proves `initialize.result.codexHome`, Handoff and Ticket skill paths, Ticket hook `sourcePath`, Ticket hook `command`, and local-only roots bind to the requested isolated home or requested repo marketplace as appropriate;
 - pre-install target authority is recorded before any unmocked `plugin/install` request;
+- the isolated `plugin/install` responses have accepted generic success/auth schema and are correlated to the exact Handoff and Ticket install requests;
+- same-child and fresh-child post-install app-server corroboration proves Handoff and Ticket plugin state through `plugin/read`, `plugin/list`, `skills/list`, and `hooks/list` without resolving config, cache, plugin, hook, local-only, or installed paths under `/Users/jp/.codex`;
+- local installed-cache manifests prove the expected Handoff and Ticket installed roots under the requested isolated home;
+- post-install cache manifest delta is computed from local installed-cache evidence and recorded in `AppServerInstallAuthority`;
 - the isolated `plugin/install` spike produces validated local-only authority artifacts and SHA256s without any config, cache, plugin, hook, local-only, or installed path resolving under `/Users/jp/.codex`;
-- after the unblock implementation lands, rerun Plan 06 from Task 0 with a fresh run id and do not begin Task 1B until Task 1A reaches `authority-validated`.
+- after the unblock implementation lands, rerun Plan 06 from Task 0 with a fresh run id before marking Task 1A `authority-validated`.
 
-Until one of those reviewed paths lands and the isolated authority spike passes, Plan 06 remains blocked and must not proceed to mutation scaffolding.
+The isolated authority spike now passes for Task 1A. This is not a live real-home guarded refresh and does not certify Task 1B or any later mutation scaffolding.
 
-Task 1B and Task 2 must not start until this unmocked isolated install-authority spike artifact exists and validates, or until this plan is patched in that separate docs step with the blocked decision. Mock-only authority tests are insufficient for the process gate, lock, marker, snapshot, recovery, smoke, or evidence scaffolding boundary.
+Task 1B and Task 2 must not start until the Task 1A code and plan evidence are committed. Mock-only authority tests remain insufficient for the process gate, lock, marker, snapshot, recovery, smoke, or evidence scaffolding boundary.
 
 - [ ] **Step 3: Commit Task 1A**
 
@@ -1282,7 +1345,8 @@ Add tests for:
 - install-phase code records the install child `AppServerLaunchAuthority` before the first `plugin/install` request;
 - install-phase code records `AppServerPreInstallTargetAuthority` before the first `plugin/install` request;
 - install-phase code rejects an `AppServerInstallAuthority` whose launch authority digest or pre-install target authority digest is missing, stale, from a different child process, or recorded after any install request;
-- app-server install responses assert expected success schema, installed plugin identity, source marketplace path, and installed plugin path for both Handoff and Ticket;
+- app-server install responses assert only accepted generic success/auth schema and request-id correlation for both Handoff and Ticket;
+- same-child and fresh-child post-install app-server corroboration asserts expected installed plugin identity through `plugin/read`, `plugin/list`, `skills/list`, and `hooks/list`, including source marketplace path and installed skill/hook paths for both Handoff and Ticket;
 - app-server failure taxonomy for child start failure, Handoff install failure, Ticket install failure after Handoff success, response schema drift, timeout, stdout close, child termination failure, and rollback inventory failure;
 - post-install equality compares repo source manifests to installed cache manifests;
 - rollback restores both cache roots from snapshots and restores original config bytes;
@@ -1315,7 +1379,9 @@ Required public API in `mutation.py`:
 
 `prove_app_server_home_authority()` must pass before snapshots, hook disable, config writes, cache writes, app-server install, or smoke. It must prove only launch/read authority for real `/Users/jp/.codex` runs before snapshots, and must fail closed if the current app-server runtime cannot be explicitly bound to the requested Codex home.
 
-`install_plugins_via_app_server()` must use app-server `plugin/install`; it must not copy source files into the cache. It must assert both request and response shape from the pinned spec contract: Handoff install succeeds before Ticket install, Ticket install succeeds, each response identifies the expected plugin, requested marketplace, installed path under the requested Codex home cache, and accepted schema/status. A response that only returns generic success without enough identity fields is schema drift and fails closed. For real `/Users/jp/.codex` runs, this function must refuse to start app-server install until the snapshot marker is durable and includes snapshot paths, snapshot manifest digest, original config SHA256, pre-refresh cache manifest SHA256 map, and recovery eligibility. It must record the install child `AppServerLaunchAuthority` and `AppServerPreInstallTargetAuthority` before sending the first `plugin/install` request, then include those digests in the returned `AppServerInstallAuthority` from `app_server_inventory.py`. If launch authority or pre-install target authority is missing, stale, from a different child/mechanism, recorded after an install request, or points at `/Users/jp/.codex` during an isolated run, fail closed before sending or asserting install success.
+`install_plugins_via_app_server()` must use app-server `plugin/install`; it must not copy source files into the cache. It must assert request shape, request-id correlation, and the current pinned sparse success/auth response schema: Handoff install succeeds before Ticket install, Ticket install succeeds, and both responses are retained as write-completion evidence rather than identity evidence. For real `/Users/jp/.codex` runs, this function must refuse to start app-server install until the snapshot marker is durable and includes snapshot paths, snapshot manifest digest, original config SHA256, pre-refresh cache manifest SHA256 map, and recovery eligibility. It must record the install child `AppServerLaunchAuthority` and `AppServerPreInstallTargetAuthority` before sending the first `plugin/install` request, then collect same-child and fresh-child post-install app-server corroboration with `plugin/read`, `plugin/list`, `skills/list`, and `hooks/list`. The returned `AppServerInstallAuthority` from `app_server_inventory.py` must include the launch authority digest, pre-install target authority digest, install request/response digests, same-child post-install corroboration digest, fresh-child post-install corroboration digest, installed cache paths, post-install cache manifest SHA256 map, and cache delta digests. If launch authority or pre-install target authority is missing, stale, from a different child/mechanism, recorded after any install request, or points at `/Users/jp/.codex` during an isolated run, fail closed before sending or asserting install success.
+
+Do not satisfy `install_plugins_via_app_server()` by enriching sparse `plugin/install` responses inside the refresh tool from the request payload alone. Post-install filesystem observation is also insufficient by itself. The accepted authority chain is sparse install success plus same-child app-server corroboration, fresh-child app-server corroboration, and local cache manifest proof tied to the same pre-install authority and requested home.
 
 `rollback_guarded_refresh()` is the only primitive allowed to restore cache contents by file copy, and only from the per-run snapshot.
 
@@ -1514,21 +1580,23 @@ Required behavior:
 25. Run `before-install` process gate.
 26. If `before-install` blocks, restore original config, write abort evidence, and clear or retain the marker according to restore result.
 27. Start app-server, prove `AppServerPreInstallTargetAuthority` for the install child, and atomically replace marker with `pre_install_app_server_target_authority_sha256` before the first `plugin/install` request. This step is allowed only after snapshot marker durability has been verified.
-28. Run `plugin/install` for Handoff and Ticket only after the marker contains that pre-install target authority digest, assert install response identity/schema for both plugins, write `AppServerInstallAuthority`, then terminate that child.
-29. Atomically replace marker with install transcript digest, `AppServerInstallAuthority` digest, retained `pre_install_app_server_target_authority_sha256`, app-server child PID record, and post-install cache manifest SHA256 map.
-30. Restore config before final inventory and smoke.
-31. Start fresh app-server inventory and verify runtime alignment.
-32. Verify source/cache equality.
-33. Run standard smoke.
-34. Run `post-mutation` process gate.
-35. If `post-mutation` blocks, write `MUTATION_COMPLETE_EXCLUSIVITY_UNPROVEN`, suppress certified commit-safe summary, and clear marker only after local-only evidence is durable. The operator must then choose retained-run certification or manual rollback/adjudication before claiming closeout.
-36. Branch by run type before repo-local summary publication:
+28. Run `plugin/install` for Handoff and Ticket only after the marker contains that pre-install target authority digest. Assert sparse success/auth schema and request-id correlation for both install responses, then collect same-child post-install app-server corroboration with `plugin/read`, `plugin/list`, `skills/list`, and `hooks/list`.
+29. Terminate the install child, start a fresh app-server child, and collect fresh-child post-install app-server corroboration with `plugin/read`, `plugin/list`, `skills/list`, and `hooks/list`.
+30. Write `AppServerInstallAuthority` from the install transcript, same-child corroboration transcript, fresh-child corroboration transcript, retained pre-install target authority digest, installed cache paths, and post-install cache manifest SHA256 map.
+31. Atomically replace marker with install transcript digest, same-child and fresh-child corroboration transcript digests, `AppServerInstallAuthority` digest, retained `pre_install_app_server_target_authority_sha256`, app-server child PID records, and post-install cache manifest SHA256 map.
+32. Restore config before final inventory and smoke.
+33. Start fresh app-server inventory and verify runtime alignment.
+34. Verify source/cache equality.
+35. Run standard smoke.
+36. Run `post-mutation` process gate.
+37. If `post-mutation` blocks, write `MUTATION_COMPLETE_EXCLUSIVITY_UNPROVEN`, suppress certified commit-safe summary, and clear marker only after local-only evidence is durable. The operator must then choose retained-run certification or manual rollback/adjudication before claiming closeout.
+38. Branch by run type before repo-local summary publication:
    - isolated rehearsal: write only local-only non-certified rehearsal evidence, write final status `MUTATION_REHEARSAL_COMPLETE_NON_CERTIFIED`, write `rehearsal-proof.json` plus SHA256, and skip candidate summary creation, commit-safe validation, repo-local summary publication, and certified status naming;
    - real `/Users/jp/.codex` guarded refresh: continue to commit-safe publication only after the supplied rehearsal proof remains valid and the captured rehearsal-proof bundle under the live local-only evidence root validates. Real guarded-refresh runs may not skip summary publication.
-37. For real `/Users/jp/.codex` guarded refresh, publish commit-safe summary only after metadata and redaction validators pass.
-38. If commit-safe publication or validation fails after successful real mutation, write `MUTATION_COMPLETE_EVIDENCE_FAILED`, suppress green completion, demote any repo-local summary to `<RUN_ID>.summary.failed.json` with crash-safe non-overwriting rename semantics, and clear marker only after evidence-failed status is durable. The operator must then choose retained-run certification or manual rollback/adjudication before claiming closeout.
-39. Write `MUTATION_COMPLETE_CERTIFIED` local-only final status only for real `/Users/jp/.codex` guarded refresh after all gates pass.
-40. Clear run-state marker only after final local-only evidence is durable.
+39. For real `/Users/jp/.codex` guarded refresh, publish commit-safe summary only after metadata and redaction validators pass.
+40. If commit-safe publication or validation fails after successful real mutation, write `MUTATION_COMPLETE_EVIDENCE_FAILED`, suppress green completion, demote any repo-local summary to `<RUN_ID>.summary.failed.json` with crash-safe non-overwriting rename semantics, and clear marker only after evidence-failed status is durable. The operator must then choose retained-run certification or manual rollback/adjudication before claiming closeout.
+41. Write `MUTATION_COMPLETE_CERTIFIED` local-only final status only for real `/Users/jp/.codex` guarded refresh after all gates pass.
+42. Clear run-state marker only after final local-only evidence is durable.
 
 Any failure from `plugin/install` through smoke must call `rollback_guarded_refresh()`. Any failure after config mutation but before install must call `abort_after_config_mutation()`. No failure path after `hooks-disabled` may return without either restoring config or retaining the marker for recovery.
 
@@ -2652,7 +2720,7 @@ Stop before live mutation if:
 - `execution_head` differs from `source_implementation_commit` without a docs/evidence-only allowed-delta proof;
 - the unmocked Task 1A read-only home-binding discovery artifact is missing or digest-mismatched;
 - the Task 1A pre-install target authority artifact is missing, digest-mismatched, or does not prove the isolated install destination before writes;
-- the unmocked Task 1A install spike artifact is missing, digest-mismatched, or records sparse `plugin/install` response identity;
+- the unmocked Task 1A install spike artifact is missing, digest-mismatched, records sparse `plugin/install` success without same-child and fresh-child post-install app-server corroboration, or lacks local installed-cache manifest proof for the requested isolated home;
 - the approved run id, expected local-only evidence root, expected run-state marker path, expected certified summary path, or expected failed-summary path is absent from the approval packet;
 - the approved run id is malformed or any expected path for that run id already exists;
 - the external-shell Python path or exact `platform.python_version()` value differs from the approval packet;
