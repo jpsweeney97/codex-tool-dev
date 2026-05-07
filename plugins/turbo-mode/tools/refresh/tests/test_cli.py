@@ -989,7 +989,7 @@ def test_cli_record_summary_publishes_after_candidate_and_final_validation(
     candidate_payload = json.loads(candidate.read_text(encoding="utf-8"))
     final_payload = json.loads(final.read_text(encoding="utf-8"))
     published_payload = json.loads(published.read_text(encoding="utf-8"))
-    assert candidate_payload["schema_version"] == "turbo-mode-refresh-commit-safe-plan-05"
+    assert candidate_payload["schema_version"] == "turbo-mode-refresh-commit-safe-plan-06"
     assert candidate_payload["mode"] == "dry-run"
     assert candidate_payload["metadata_validation_summary_sha256"] is None
     assert candidate_payload["redaction_validation_summary_sha256"] is None

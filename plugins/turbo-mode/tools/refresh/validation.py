@@ -15,6 +15,10 @@ COMMIT_SAFE_TOP_LEVEL_KEYS = {
     "source_local_summary_schema_version",
     "repo_head",
     "repo_tree",
+    "source_implementation_commit",
+    "source_implementation_tree",
+    "execution_head",
+    "execution_tree",
     "tool_path",
     "tool_sha256",
     "dirty_state_policy",
@@ -24,6 +28,29 @@ COMMIT_SAFE_TOP_LEVEL_KEYS = {
     "local_only_summary_sha256",
     "terminal_plan_status",
     "final_status",
+    "isolated_rehearsal_run_id",
+    "rehearsal_proof_sha256",
+    "rehearsal_proof_validation_status",
+    "source_to_rehearsal_execution_delta_status",
+    "source_to_rehearsal_allowed_delta_proof_sha256",
+    "source_to_rehearsal_changed_paths_sha256",
+    "isolated_app_server_authority_proof_sha256",
+    "no_real_home_authority_proof_sha256",
+    "pre_snapshot_app_server_launch_authority_sha256",
+    "pre_install_app_server_target_authority_sha256",
+    "live_app_server_authority_proof_sha256",
+    "source_manifest_sha256",
+    "pre_refresh_cache_manifest_sha256",
+    "post_refresh_cache_manifest_sha256",
+    "pre_refresh_config_sha256",
+    "post_refresh_config_sha256",
+    "post_refresh_inventory_sha256",
+    "selected_smoke_tier",
+    "smoke_summary_sha256",
+    "post_mutation_process_census_sha256",
+    "exclusivity_status",
+    "phase_reached",
+    "rollback_or_restore_status",
     "axes",
     "diff_classification",
     "runtime_config",
@@ -223,7 +250,7 @@ BROAD_ABSOLUTE_PATH_PATTERN = re.compile(r"(^|\s)/(Users|private|tmp|var|etc|opt
 EXPECTED_TOOL_PATH = "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py"
 EXPECTED_DIRTY_STATE_POLICY = "fail-relevant-dirty-state"
 EXPECTED_SOURCE_LOCAL_SUMMARY_SCHEMA_VERSION = "turbo-mode-refresh-plan-03"
-EXPECTED_COMMIT_SAFE_SCHEMA_VERSION = "turbo-mode-refresh-commit-safe-plan-05"
+EXPECTED_COMMIT_SAFE_SCHEMA_VERSION = "turbo-mode-refresh-commit-safe-plan-06"
 ALLOWED_DIRTY_RELEVANT_PATHS = {
     ".agents/plugins/marketplace.json",
     "plugins/turbo-mode/handoff/1.6.0",
@@ -435,6 +462,8 @@ def _assert_field_values(payload: dict[str, Any]) -> None:
             "validate commit-safe payload failed: invalid codex executable path. "
             f"Got: {executable!r:.100}"
         )
+    if payload.get("mode") == "guarded-refresh":
+        _assert_guarded_refresh_values(payload)
 
 
 def _assert_equals_if_present(name: str, value: object, expected: object) -> None:
@@ -442,6 +471,71 @@ def _assert_equals_if_present(name: str, value: object, expected: object) -> Non
         raise ValueError(
             f"validate commit-safe payload failed: invalid {name}. Got: {value!r:.100}"
         )
+
+
+def _assert_guarded_refresh_values(payload: dict[str, Any]) -> None:
+    required = {
+        "source_implementation_commit",
+        "source_implementation_tree",
+        "execution_head",
+        "execution_tree",
+        "isolated_rehearsal_run_id",
+        "rehearsal_proof_sha256",
+        "rehearsal_proof_validation_status",
+        "source_to_rehearsal_execution_delta_status",
+        "source_to_rehearsal_allowed_delta_proof_sha256",
+        "source_to_rehearsal_changed_paths_sha256",
+        "isolated_app_server_authority_proof_sha256",
+        "no_real_home_authority_proof_sha256",
+        "pre_snapshot_app_server_launch_authority_sha256",
+        "pre_install_app_server_target_authority_sha256",
+        "live_app_server_authority_proof_sha256",
+        "source_manifest_sha256",
+        "pre_refresh_cache_manifest_sha256",
+        "post_refresh_cache_manifest_sha256",
+        "pre_refresh_config_sha256",
+        "post_refresh_config_sha256",
+        "post_refresh_inventory_sha256",
+        "selected_smoke_tier",
+        "smoke_summary_sha256",
+        "post_mutation_process_census_sha256",
+        "exclusivity_status",
+        "phase_reached",
+        "final_status",
+        "rollback_or_restore_status",
+    }
+    missing = sorted(key for key in required if key not in payload)
+    if missing:
+        raise ValueError(
+            "validate commit-safe payload failed: missing guarded-refresh field. "
+            f"Got: {missing!r:.100}"
+        )
+    if payload.get("rehearsal_proof_validation_status") != "validated-before-live-mutation":
+        raise ValueError(
+            "validate commit-safe payload failed: invalid rehearsal proof validation status. "
+            f"Got: {payload.get('rehearsal_proof_validation_status')!r:.100}"
+        )
+    if payload.get("source_to_rehearsal_execution_delta_status") not in {
+        "identical",
+        "approved-docs-evidence-only",
+    }:
+        raise ValueError(
+            "validate commit-safe payload failed: invalid source-to-rehearsal delta status. "
+            f"Got: {payload.get('source_to_rehearsal_execution_delta_status')!r:.100}"
+        )
+    if payload.get("final_status") == "MUTATION_COMPLETE_CERTIFIED" and payload.get(
+        "rollback_or_restore_status"
+    ) != "not-attempted":
+        raise ValueError(
+            "validate commit-safe payload failed: invalid rollback_or_restore_status. "
+            f"Got: {payload.get('rollback_or_restore_status')!r:.100}"
+        )
+    if payload.get("exclusivity_status") == "exclusive_window_observed_by_process_samples":
+        if not payload.get("post_mutation_process_census_sha256"):
+            raise ValueError(
+                "validate commit-safe payload failed: missing process gate summary. "
+                "Got: post_mutation_process_census_sha256"
+            )
 
 
 def _assert_local_only_evidence_root(value: object) -> None:
