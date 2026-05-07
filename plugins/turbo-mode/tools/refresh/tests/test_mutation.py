@@ -313,10 +313,21 @@ def test_isolated_guarded_orchestration_runs_core_phases_and_writes_rehearsal_pr
         "prove_app_server_home_authority",
         lambda active_context: order.append("authority") or launch,
     )
+
+    def fake_install_plugins(
+        _active_context: object,
+        **kwargs: object,
+    ) -> tuple[dict[str, str]]:
+        restore = kwargs["restore_config_before_post_install"]
+        assert callable(restore)
+        restore()
+        order.append("install")
+        return ({"kind": "install-authority"},)
+
     monkeypatch.setattr(
         mutation_module,
         "install_plugins_via_app_server",
-        lambda active_context: order.append("install") or ({"kind": "install-authority"},),
+        fake_install_plugins,
     )
     monkeypatch.setattr(
         mutation_module,
@@ -350,6 +361,114 @@ def test_isolated_guarded_orchestration_runs_core_phases_and_writes_rehearsal_pr
     assert not (
         ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json"
     ).exists()
+
+
+def test_install_plugins_restores_hooks_before_same_child_corroboration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    ctx = context(tmp_path)
+    seed_plugins(ctx)
+    seed_config(ctx, DISABLED_CONFIG_TEXT)
+    launch = launch_authority(ctx)
+    ticket_hook = ctx.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+    observed: dict[str, object] = {}
+
+    def restore_config() -> None:
+        (ctx.codex_home / "config.toml").write_text(
+            "[features]\nplugin_hooks = true\n",
+            encoding="utf-8",
+        )
+
+    def fake_roundtrip(
+        requests: list[dict[str, object]],
+        **kwargs: object,
+    ) -> list[dict[str, object]]:
+        after_response = kwargs.get("after_response")
+        assert callable(after_response)
+        transcript: list[dict[str, object]] = []
+        for request in requests:
+            transcript.append({"direction": "send", "body": request})
+            request_id = request.get("id")
+            if request.get("method") == "hooks/list":
+                observed["config_at_same_child_hooks_list"] = (
+                    ctx.codex_home / "config.toml"
+                ).read_text(encoding="utf-8")
+                observed["ticket_hook_at_same_child_hooks_list"] = ticket_hook.read_text(
+                    encoding="utf-8"
+                )
+            if request_id is None:
+                continue
+            response = {"id": request_id, "result": {}}
+            if request_id == 2:
+                ticket_hook.parent.mkdir(parents=True, exist_ok=True)
+                ticket_hook.write_text(
+                    json.dumps(
+                        {
+                            "hooks": {
+                                "PreToolUse": [
+                                    {
+                                        "matcher": "Bash",
+                                        "hooks": [
+                                            {
+                                                "type": "command",
+                                                "command": (
+                                                    "python3 /Users/jp/.codex/plugins/cache/"
+                                                    "turbo-mode/ticket/1.4.0/hooks/"
+                                                    "ticket_engine_guard.py"
+                                                ),
+                                            }
+                                        ],
+                                    }
+                                ]
+                            }
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            transcript.append({"direction": "recv", "body": response})
+            after_response(request, response, transcript)
+        return transcript
+
+    def fake_validate_install_responses(**kwargs: object) -> AppServerInstallAuthority:
+        same_child = kwargs["same_child_post_install_transcript"]
+        assert isinstance(same_child, tuple)
+        response_ids = [
+            item["body"]["id"]
+            for item in same_child
+            if item.get("direction") == "recv" and isinstance(item.get("body"), dict)
+        ]
+        assert response_ids == [0, 1, 2, 3, 4, 5]
+        return install_authority(ctx, launch)
+
+    monkeypatch.setattr(
+        mutation_module,
+        "prove_app_server_home_authority",
+        lambda active_context: launch,
+    )
+    monkeypatch.setattr(mutation_module, "app_server_roundtrip", fake_roundtrip)
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda paths: ("fresh-child-inventory", ()),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "validate_install_responses",
+        fake_validate_install_responses,
+    )
+
+    install_plugins_via_app_server(
+        ctx,
+        restore_config_before_post_install=restore_config,
+    )
+
+    assert observed["config_at_same_child_hooks_list"] == "[features]\nplugin_hooks = true\n"
+    assert str(ctx.codex_home) in str(observed["ticket_hook_at_same_child_hooks_list"])
+    assert "/Users/jp/.codex/plugins/cache" not in str(
+        observed["ticket_hook_at_same_child_hooks_list"]
+    )
 
 
 def pre_install_authority(
@@ -501,9 +620,28 @@ def test_install_uses_app_server_plugin_install_after_authority_proofs(
     def fake_roundtrip(**kwargs: object) -> tuple[dict[str, object], ...]:
         order.append("install")
         requests = kwargs["requests"]
-        assert [request["method"] for request in requests] == ["plugin/install", "plugin/install"]
-        assert [request["params"]["pluginName"] for request in requests] == ["handoff", "ticket"]
-        assert all(request["params"]["remoteMarketplaceName"] is None for request in requests)
+        assert [request["method"] for request in requests] == [
+            "initialize",
+            "initialized",
+            "plugin/install",
+            "plugin/install",
+            "plugin/read",
+            "plugin/read",
+            "plugin/list",
+            "skills/list",
+            "hooks/list",
+        ]
+        install_requests = [
+            request for request in requests if request["method"] == "plugin/install"
+        ]
+        assert [request["params"]["pluginName"] for request in install_requests] == [
+            "handoff",
+            "ticket",
+        ]
+        assert all(
+            request["params"]["remoteMarketplaceName"] is None
+            for request in install_requests
+        )
         return (
             {
                 "direction": "recv",

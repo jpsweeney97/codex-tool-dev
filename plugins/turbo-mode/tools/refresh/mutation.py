@@ -6,6 +6,8 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -18,8 +20,11 @@ from .app_server_inventory import (
     authority_digest,
     build_install_requests,
     build_pre_install_target_authority,
+    build_readonly_inventory_requests,
+    build_same_child_post_install_requests,
     collect_app_server_launch_authority,
     collect_readonly_runtime_inventory,
+    normalize_same_child_post_install_transcript,
     rewrite_ticket_hook_manifest,
     serialize_authority_record,
     validate_install_responses,
@@ -493,13 +498,14 @@ def run_guarded_refresh_orchestration(
             _raise_if_process_blocked(before_install, failed_phase="before-install")
             phase_log.append("before-install")
 
-            install_records = install_plugins_via_app_server(context)
-            phase_log.append("install-complete")
-
-            restore_config_snapshot(
-                snapshot,
-                current_expected_sha256=hook_state["expected_intermediate_config_sha256"],
+            install_records = install_plugins_via_app_server(
+                context,
+                restore_config_before_post_install=lambda: restore_config_snapshot(
+                    snapshot,
+                    current_expected_sha256=hook_state["expected_intermediate_config_sha256"],
+                ),
             )
+            phase_log.append("install-complete")
             phase_log.append("config-restored")
 
             final_inventory, final_inventory_transcript = collect_readonly_runtime_inventory(
@@ -915,7 +921,11 @@ def _restore_cache_snapshots(context: MutationContext, snapshot: SnapshotSet) ->
         shutil.copytree(source, spec.cache_root)
 
 
-def install_plugins_via_app_server(context: MutationContext) -> tuple[dict[str, object], ...]:
+def install_plugins_via_app_server(
+    context: MutationContext,
+    *,
+    restore_config_before_post_install: Callable[[], None] | None = None,
+) -> tuple[dict[str, object], ...]:
     if context.codex_home == REAL_CODEX_HOME:
         state = _read_existing_run_state(context)
         validate_cache_install_allowed(state)
@@ -932,15 +942,40 @@ def install_plugins_via_app_server(context: MutationContext) -> tuple[dict[str, 
         expected_launch_authority_sha256=authority_digest(launch_authority),
         expected_marketplace_path=context.repo_root / ".agents/plugins/marketplace.json",
     )
-    install_transcript = tuple(
-        app_server_roundtrip(
-            requests=install_requests,
-            env_overrides=launch_authority.child_environment_delta,
-            cwd=Path(launch_authority.child_cwd),
+    paths = _refresh_paths(context)
+    with tempfile.TemporaryDirectory(prefix="turbo-mode-refresh-install-") as tmpdir:
+        scratch_cwd = Path(tmpdir)
+        install_roundtrip_requests = [
+            build_readonly_inventory_requests(paths, scratch_cwd=scratch_cwd)[0],
+            {"method": "initialized"},
+            *install_requests,
+            *build_same_child_post_install_requests(paths, scratch_cwd=scratch_cwd),
+        ]
+
+        def after_install_response(
+            request: dict[str, Any],
+            response: dict[str, Any],
+            _transcript: list[dict[str, Any]],
+        ) -> None:
+            if request.get("id") != 2 or response.get("id") != 2:
+                return
+            rewrite_ticket_hook_manifest(
+                ticket_plugin_root=context.codex_home
+                / "plugins/cache/turbo-mode/ticket/1.4.0"
+            )
+            if restore_config_before_post_install is not None:
+                restore_config_before_post_install()
+
+        install_transcript = tuple(
+            app_server_roundtrip(
+                requests=install_roundtrip_requests,
+                env_overrides=launch_authority.child_environment_delta,
+                cwd=Path(launch_authority.child_cwd),
+                after_response=after_install_response,
+            )
         )
-    )
-    _, same_child_transcript = collect_readonly_runtime_inventory(_refresh_paths(context))
-    _, fresh_child_transcript = collect_readonly_runtime_inventory(_refresh_paths(context))
+    same_child_transcript = normalize_same_child_post_install_transcript(install_transcript)
+    _, fresh_child_transcript = collect_readonly_runtime_inventory(paths)
     install_authority: AppServerInstallAuthority = validate_install_responses(
         transcript=install_transcript,
         launch_authority=launch_authority,

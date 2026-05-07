@@ -269,6 +269,39 @@ def build_readonly_inventory_requests(paths: Any, *, scratch_cwd: Path) -> list[
     ]
 
 
+def build_same_child_post_install_requests(
+    paths: Any,
+    *,
+    scratch_cwd: Path,
+) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    for request in build_readonly_inventory_requests(paths, scratch_cwd=scratch_cwd):
+        if request.get("method") in {"initialize", "initialized"}:
+            continue
+        copied = dict(request)
+        copied["id"] = int(copied["id"]) + 2
+        requests.append(copied)
+    return requests
+
+
+def normalize_same_child_post_install_transcript(
+    raw_transcript: tuple[dict[str, Any], ...],
+) -> tuple[dict[str, Any], ...]:
+    response_id_map = {0: 0, 3: 1, 4: 2, 5: 3, 6: 4, 7: 5}
+    normalized: list[dict[str, Any]] = []
+    for item in raw_transcript:
+        body = item.get("body")
+        if item.get("direction") != "recv" or not isinstance(body, dict):
+            continue
+        response_id = body.get("id")
+        if not isinstance(response_id, int) or response_id not in response_id_map:
+            continue
+        copied = dict(item)
+        copied["body"] = {**body, "id": response_id_map[response_id]}
+        normalized.append(copied)
+    return tuple(normalized)
+
+
 def collect_readonly_runtime_inventory(
     paths: Any,
     *,
