@@ -543,6 +543,7 @@ def collect_app_server_launch_authority(
     app_server_help_text: str | None = None,
     codex_help_text: str | None = None,
     executable: str | None = None,
+    ticket_hook_policy: str = "required",
 ) -> tuple[AppServerLaunchAuthority, tuple[dict[str, Any], ...]]:
     active_executable = executable or resolve_codex_executable()
     active_scratch_cwd = scratch_cwd or Path(
@@ -603,6 +604,7 @@ def collect_app_server_launch_authority(
         paths=paths,
         identity=identity,
         request_methods=tuple(request.get("method", "") for request in requests),
+        ticket_hook_policy=ticket_hook_policy,
     )
     candidates = discover_binding_candidates(
         app_server_help_text=active_app_server_help,
@@ -756,6 +758,7 @@ def validate_install_responses(
     install_requests: tuple[dict[str, Any], ...],
     same_child_post_install_transcript: tuple[dict[str, Any], ...] | None = None,
     fresh_child_post_install_transcript: tuple[dict[str, Any], ...] | None = None,
+    same_child_ticket_hook_policy: str = "required",
 ) -> AppServerInstallAuthority:
     _validate_install_authority_link(
         launch_authority=launch_authority,
@@ -779,12 +782,14 @@ def validate_install_responses(
         label="same-child",
         launch_authority=launch_authority,
         pre_install_authority=pre_install_authority,
+        ticket_hook_policy=same_child_ticket_hook_policy,
     )
     fresh_child_corroboration_sha256 = _validate_post_install_corroboration(
         transcript=fresh_child_post_install_transcript,
         label="fresh-child",
         launch_authority=launch_authority,
         pre_install_authority=pre_install_authority,
+        ticket_hook_policy="required",
     )
     for request_id, plugin_name in ((1, "handoff"), (2, "ticket")):
         request = request_by_id.get(request_id)
@@ -878,6 +883,7 @@ def _validate_post_install_corroboration(
     label: str,
     launch_authority: AppServerLaunchAuthority,
     pre_install_authority: AppServerPreInstallTargetAuthority,
+    ticket_hook_policy: str,
 ) -> str:
     if transcript is None:
         fail(
@@ -902,6 +908,7 @@ def _validate_post_install_corroboration(
         paths=paths,
         identity=identity,
         request_methods=("post-install-corroboration", label),
+        ticket_hook_policy=ticket_hook_policy,
     )
     if paths.codex_home != REAL_CODEX_HOME and json_contains(transcript, f"{REAL_CODEX_HOME}/"):
         fail(
@@ -1202,7 +1209,10 @@ def validate_readonly_inventory_contract(
     paths: Any,
     identity: CodexRuntimeIdentity,
     request_methods: tuple[str, ...],
+    ticket_hook_policy: str = "required",
 ) -> AppServerInventoryCheck:
+    if ticket_hook_policy not in {"required", "disabled"}:
+        fail("inventory contract", "unexpected Ticket hook policy", ticket_hook_policy)
     responses = response_by_id(transcript)
     missing = sorted({0, 1, 2, 3, 4, 5} - set(responses))
     if missing:
@@ -1213,7 +1223,13 @@ def validate_readonly_inventory_contract(
     }
     plugin_list = validate_plugin_list_response(responses[3], paths)
     skills = validate_skills_response(responses[4], paths)
-    ticket_hook = validate_hooks_response(responses[5], paths)
+    if ticket_hook_policy == "required":
+        ticket_hook = validate_hooks_response(responses[5], paths)
+        reasons: tuple[str, ...] = ()
+    else:
+        validate_hooks_disabled_response(responses[5])
+        ticket_hook = {}
+        reasons = ("ticket-hook-disabled-by-config",)
     handoff_hooks = validate_no_handoff_hooks(responses[5])
     return AppServerInventoryCheck(
         state="aligned",
@@ -1225,6 +1241,7 @@ def validate_readonly_inventory_contract(
         handoff_hooks=tuple(handoff_hooks),
         request_methods=request_methods,
         transcript_sha256=transcript_sha256(transcript),
+        reasons=reasons,
     )
 
 
@@ -1302,6 +1319,12 @@ def validate_hooks_response(response: dict[str, Any], paths: Any) -> dict[str, s
     if "/plugin-dev/" in command or "/plugin-dev/" in source_path:
         fail("inventory contract", "Ticket hook contains plugin-dev path", hook)
     return {"command": command, "sourcePath": source_path}
+
+
+def validate_hooks_disabled_response(response: dict[str, Any]) -> None:
+    hooks = hook_records(response)
+    if hooks:
+        fail("inventory contract", "expected no hooks while plugin hooks are disabled", hooks)
 
 
 def validate_no_handoff_hooks(response: dict[str, Any]) -> list[dict[str, str]]:

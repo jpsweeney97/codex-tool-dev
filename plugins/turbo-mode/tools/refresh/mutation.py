@@ -122,8 +122,15 @@ class SeedIsolatedRehearsalHomeResult:
     canonical_drift_paths: tuple[str, ...]
 
 
-def prove_app_server_home_authority(context: MutationContext) -> AppServerLaunchAuthority:
-    authority, transcript = collect_app_server_launch_authority(_refresh_paths(context))
+def prove_app_server_home_authority(
+    context: MutationContext,
+    *,
+    ticket_hook_policy: str = "required",
+) -> AppServerLaunchAuthority:
+    authority, transcript = collect_app_server_launch_authority(
+        _refresh_paths(context),
+        ticket_hook_policy=ticket_hook_policy,
+    )
     _validate_launch_authority(authority, context=context, transcript=transcript)
     return authority
 
@@ -503,6 +510,11 @@ def run_guarded_refresh_orchestration(
                 restore_config_before_post_install=lambda: restore_config_snapshot(
                     snapshot,
                     current_expected_sha256=hook_state["expected_intermediate_config_sha256"],
+                ),
+                same_child_ticket_hook_policy=(
+                    "disabled"
+                    if hook_state["plugin_hooks_start_state"] == "true"
+                    else "required"
                 ),
             )
             phase_log.append("install-complete")
@@ -925,11 +937,15 @@ def install_plugins_via_app_server(
     context: MutationContext,
     *,
     restore_config_before_post_install: Callable[[], None] | None = None,
+    same_child_ticket_hook_policy: str = "required",
 ) -> tuple[dict[str, object], ...]:
     if context.codex_home == REAL_CODEX_HOME:
         state = _read_existing_run_state(context)
         validate_cache_install_allowed(state)
-    launch_authority = prove_app_server_home_authority(context)
+    launch_authority = prove_app_server_home_authority(
+        context,
+        ticket_hook_policy=same_child_ticket_hook_policy,
+    )
     pre_install_authority = build_pre_install_target_authority(
         launch_authority=launch_authority,
         marketplace_path=context.repo_root / ".agents/plugins/marketplace.json",
@@ -983,6 +999,7 @@ def install_plugins_via_app_server(
         install_requests=tuple(install_requests),
         same_child_post_install_transcript=same_child_transcript,
         fresh_child_post_install_transcript=fresh_child_transcript,
+        same_child_ticket_hook_policy=same_child_ticket_hook_policy,
     )
     return (
         {

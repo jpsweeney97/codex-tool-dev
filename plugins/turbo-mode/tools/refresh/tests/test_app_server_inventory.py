@@ -607,6 +607,26 @@ def test_validate_readonly_inventory_contract_rejects_missing_ticket_hook(
         )
 
 
+def test_validate_readonly_inventory_contract_accepts_disabled_ticket_hooks(
+    tmp_path: Path,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    raw = list(transcript(refresh_paths))
+    raw[-1] = {"direction": "recv", "body": {"id": 5, "result": {"hooks": []}}}
+
+    inventory = validate_readonly_inventory_contract(
+        tuple(raw),
+        paths=refresh_paths,
+        identity=identity(),
+        request_methods=("initialize",),
+        ticket_hook_policy="disabled",
+    )
+
+    assert inventory.state == "aligned"
+    assert inventory.ticket_hook == {}
+    assert inventory.reasons == ("ticket-hook-disabled-by-config",)
+
+
 def test_validate_readonly_inventory_contract_rejects_unexpected_handoff_hook(
     tmp_path: Path,
 ) -> None:
@@ -1321,6 +1341,39 @@ def test_validate_install_responses_record_noop_pre_and_post_manifests(
     )
     assert install_authority.cache_manifest_delta_sha256["handoff"]
     assert install_authority.cache_manifest_delta_sha256["ticket"]
+
+
+def test_validate_install_responses_accepts_disabled_same_child_hooks(
+    tmp_path: Path,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    seed_installed_plugin_roots(refresh_paths.codex_home / "plugins/cache/turbo-mode")
+    launch_authority = launch_authority_for_tests(refresh_paths, scratch_cwd=tmp_path / "scratch")
+    pre_install_authority = pre_install_authority_for_tests(
+        refresh_paths,
+        launch_authority=launch_authority,
+    )
+    install_requests = build_install_requests(
+        pre_install_authority=pre_install_authority,
+        expected_requested_codex_home=refresh_paths.codex_home,
+        expected_launch_authority_sha256=authority_digest(launch_authority),
+        expected_marketplace_path=refresh_paths.marketplace_path,
+    )
+    same_child = list(transcript(refresh_paths))
+    same_child[-1] = {"direction": "recv", "body": {"id": 5, "result": {"hooks": []}}}
+
+    install_authority = validate_install_responses(
+        transcript=install_transcript(refresh_paths, sparse_success=True),
+        launch_authority=launch_authority,
+        pre_install_authority=pre_install_authority,
+        install_requests=tuple(install_requests),
+        same_child_post_install_transcript=tuple(same_child),
+        fresh_child_post_install_transcript=transcript(refresh_paths),
+        same_child_ticket_hook_policy="disabled",
+    )
+
+    assert install_authority.same_child_post_install_corroboration_sha256
+    assert install_authority.fresh_child_post_install_corroboration_sha256
 
 
 def test_validate_install_responses_reject_stale_preinstall_authority_digest(

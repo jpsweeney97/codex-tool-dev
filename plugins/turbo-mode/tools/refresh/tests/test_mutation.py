@@ -432,6 +432,7 @@ def test_install_plugins_restores_hooks_before_same_child_corroboration(
         return transcript
 
     def fake_validate_install_responses(**kwargs: object) -> AppServerInstallAuthority:
+        assert kwargs["same_child_ticket_hook_policy"] == "disabled"
         same_child = kwargs["same_child_post_install_transcript"]
         assert isinstance(same_child, tuple)
         response_ids = [
@@ -442,10 +443,17 @@ def test_install_plugins_restores_hooks_before_same_child_corroboration(
         assert response_ids == [0, 1, 2, 3, 4, 5]
         return install_authority(ctx, launch)
 
+    def fake_prove_app_server_home_authority(
+        active_context: object,
+        **kwargs: object,
+    ) -> AppServerLaunchAuthority:
+        observed["launch_ticket_hook_policy"] = kwargs["ticket_hook_policy"]
+        return launch
+
     monkeypatch.setattr(
         mutation_module,
         "prove_app_server_home_authority",
-        lambda active_context: launch,
+        fake_prove_app_server_home_authority,
     )
     monkeypatch.setattr(mutation_module, "app_server_roundtrip", fake_roundtrip)
     monkeypatch.setattr(
@@ -462,8 +470,10 @@ def test_install_plugins_restores_hooks_before_same_child_corroboration(
     install_plugins_via_app_server(
         ctx,
         restore_config_before_post_install=restore_config,
+        same_child_ticket_hook_policy="disabled",
     )
 
+    assert observed["launch_ticket_hook_policy"] == "disabled"
     assert observed["config_at_same_child_hooks_list"] == "[features]\nplugin_hooks = true\n"
     assert str(ctx.codex_home) in str(observed["ticket_hook_at_same_child_hooks_list"])
     assert "/Users/jp/.codex/plugins/cache" not in str(
@@ -589,7 +599,7 @@ def test_prove_app_server_home_authority_rejects_real_home_leak(
     monkeypatch.setattr(
         mutation_module,
         "collect_app_server_launch_authority",
-        lambda paths: (leaked, ()),
+        lambda paths, **kwargs: (leaked, ()),
     )
     with pytest.raises(RefreshError, match="live Codex home"):
         prove_app_server_home_authority(ctx)
@@ -609,7 +619,7 @@ def test_install_uses_app_server_plugin_install_after_authority_proofs(
     monkeypatch.setattr(
         mutation_module,
         "collect_app_server_launch_authority",
-        lambda paths: order.append("launch") or (launch, ()),
+        lambda paths, **kwargs: order.append("launch") or (launch, ()),
     )
     monkeypatch.setattr(
         mutation_module,
@@ -706,7 +716,7 @@ def test_install_rejects_stale_pre_install_authority_before_request(
     monkeypatch.setattr(
         mutation_module,
         "collect_app_server_launch_authority",
-        lambda paths: (launch, ()),
+        lambda paths, **kwargs: (launch, ()),
     )
     monkeypatch.setattr(mutation_module, "build_pre_install_target_authority", lambda **kwargs: pre)
     monkeypatch.setattr(
