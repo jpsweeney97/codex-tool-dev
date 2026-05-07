@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import stat
@@ -12,6 +13,18 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 TOOL = REPO_ROOT / "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py"
+
+
+def load_cli_module() -> object:
+    spec = importlib.util.spec_from_file_location(
+        "refresh_installed_turbo_mode_under_test",
+        TOOL,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def write_marketplace(path: Path) -> None:
@@ -753,6 +766,8 @@ def test_cli_guarded_refresh_rejects_real_home_without_rehearsal_proof_before_wr
         [
             "--guarded-refresh",
             "--record-summary",
+            "--run-id",
+            "plan06-live-guarded-refresh-20260507-204500",
             "--codex-home",
             "/Users/jp/.codex",
         ]
@@ -793,6 +808,8 @@ def test_cli_guarded_refresh_rejects_thin_real_home_rehearsal_proof_before_legac
         [
             "--guarded-refresh",
             "--record-summary",
+            "--run-id",
+            "plan06-live-guarded-refresh-20260507-204500",
             "--codex-home",
             "/Users/jp/.codex",
             "--rehearsal-proof",
@@ -809,6 +826,140 @@ def test_cli_guarded_refresh_rejects_thin_real_home_rehearsal_proof_before_legac
     assert completed.returncode == 1
     assert "missing rehearsal proof field" in completed.stderr
     assert "real guarded refresh blocked" not in completed.stderr
+
+
+def test_cli_guarded_refresh_captures_real_home_rehearsal_proof_before_marker_check(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text("{}\n", encoding="utf-8")
+    calls: list[str] = []
+    capture_roots: list[Path] = []
+
+    def fake_validate_rehearsal_proof_bundle(**_kwargs: object) -> object:
+        calls.append("validate")
+        return object()
+
+    def fake_capture_rehearsal_proof_bundle(
+        _validated: object,
+        *,
+        live_run_root: Path,
+    ) -> object:
+        calls.append("capture")
+        capture_roots.append(live_run_root)
+        return type(
+            "Capture",
+            (),
+            {"capture_manifest_path": str(tmp_path / "capture-manifest.json")},
+        )()
+
+    def fake_ensure_no_active_run_state_markers(_local_only_root: Path) -> None:
+        calls.append("marker-check")
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        fake_validate_rehearsal_proof_bundle,
+    )
+    monkeypatch.setattr(
+        cli,
+        "capture_rehearsal_proof_bundle",
+        fake_capture_rehearsal_proof_bundle,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "ensure_no_active_run_state_markers",
+        fake_ensure_no_active_run_state_markers,
+    )
+
+    args = parser.parse_args(
+        [
+            "--guarded-refresh",
+            "--record-summary",
+            "--run-id",
+            "plan06-live-guarded-refresh-20260507-205500",
+            "--codex-home",
+            "/Users/jp/.codex",
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            "proof-sha",
+            "--source-implementation-commit",
+            "source",
+            "--source-implementation-tree",
+            "tree",
+        ]
+    )
+
+    assert cli.guarded_refresh_main(args, parser) == 1
+    captured = capsys.readouterr()
+
+    assert calls == ["validate", "capture", "marker-check"]
+    assert capture_roots == [
+        Path(
+            "/Users/jp/.codex/local-only/turbo-mode-refresh/"
+            "plan06-live-guarded-refresh-20260507-205500"
+        )
+    ]
+    assert "rehearsal proof capture complete" in captured.err
+    assert "validation and capture are not complete" not in captured.err
+
+
+def test_cli_guarded_refresh_rejects_path_shaped_real_home_run_id_before_capture(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        lambda **_kwargs: pytest.fail("rehearsal proof validation should not run"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "capture_rehearsal_proof_bundle",
+        lambda *_args, **_kwargs: pytest.fail("rehearsal proof capture should not run"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "ensure_no_active_run_state_markers",
+        lambda *_args, **_kwargs: pytest.fail("marker check should not run"),
+    )
+
+    args = parser.parse_args(
+        [
+            "--guarded-refresh",
+            "--record-summary",
+            "--run-id",
+            "../escape",
+            "--codex-home",
+            "/Users/jp/.codex",
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            "proof-sha",
+            "--source-implementation-commit",
+            "source",
+            "--source-implementation-tree",
+            "tree",
+        ]
+    )
+
+    assert cli.guarded_refresh_main(args, parser) == 1
+    captured = capsys.readouterr()
+
+    assert "validate run id failed: run id must be one path segment" in captured.err
 
 
 def test_cli_seed_isolated_rehearsal_home_rejects_real_home_before_writes(

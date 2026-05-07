@@ -22,11 +22,12 @@ from refresh.commit_safe import (  # noqa: E402
     ensure_relevant_worktree_clean,
     sha256_file,
 )
-from refresh.evidence import evidence_payload, write_local_evidence  # noqa: E402
+from refresh.evidence import evidence_payload, validate_run_id, write_local_evidence  # noqa: E402
 from refresh.lock_state import ensure_no_active_run_state_markers  # noqa: E402
 from refresh.models import RefreshError  # noqa: E402
 from refresh.mutation import (  # noqa: E402
     MutationContext,
+    capture_rehearsal_proof_bundle,
     run_guarded_refresh_orchestration,
     run_guarded_refresh_recovery,
     seed_isolated_rehearsal_home,
@@ -358,34 +359,49 @@ def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentPars
             parser.error("--rehearsal-proof-sha256 is required for real guarded refresh")
         if not args.record_summary:
             parser.error("--record-summary is required for real guarded refresh")
+        if args.run_id is None:
+            parser.error("--run-id is required for real guarded refresh")
     if args.source_implementation_commit is None:
         parser.error("--source-implementation-commit is required for --guarded-refresh")
     if args.source_implementation_tree is None:
         parser.error("--source-implementation-tree is required for --guarded-refresh")
+    run_id = args.run_id or uuid.uuid4().hex
+    rehearsal_capture = None
     try:
+        run_id = validate_run_id(run_id)
         if is_real_home:
             assert args.rehearsal_proof is not None
             assert args.rehearsal_proof_sha256 is not None
-            validate_rehearsal_proof_bundle(
+            validated_rehearsal_proof = validate_rehearsal_proof_bundle(
                 proof_path=args.rehearsal_proof,
                 expected_sha256=args.rehearsal_proof_sha256,
                 source_implementation_commit=args.source_implementation_commit,
                 source_implementation_tree=args.source_implementation_tree,
                 tool_sha256=sha256_file(CURRENT_FILE),
             )
+            rehearsal_capture = capture_rehearsal_proof_bundle(
+                validated_rehearsal_proof,
+                live_run_root=codex_home / "local-only/turbo-mode-refresh" / run_id,
+            )
         ensure_no_active_run_state_markers(codex_home / "local-only/turbo-mode-refresh")
     except (RefreshError, OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     if is_real_home:
+        if rehearsal_capture is not None:
+            print(
+                "rehearsal proof capture complete: "
+                f"{rehearsal_capture.capture_manifest_path}",
+                file=sys.stderr,
+            )
         print(
-            "real guarded refresh blocked: rehearsal proof validation and capture "
-            "are not complete in this task slice",
+            "real guarded refresh blocked after rehearsal proof capture: "
+            "live mutation and certified summary publication are not complete "
+            "in this task slice",
             file=sys.stderr,
         )
         return 1
 
-    run_id = args.run_id or uuid.uuid4().hex
     try:
         result = plan_refresh(
             repo_root=args.repo_root,

@@ -31,7 +31,7 @@ from .app_server_inventory import (
     serialize_authority_record,
     validate_install_responses,
 )
-from .evidence import write_local_evidence
+from .evidence import ensure_private_evidence_root, write_local_evidence
 from .lock_state import (
     RunState,
     acquire_refresh_lock,
@@ -361,8 +361,17 @@ def capture_rehearsal_proof_bundle(
     live_run_root: Path,
 ) -> RehearsalProofCaptureResult:
     capture_root = live_run_root / "rehearsal-proof-capture"
+    ensure_private_evidence_root(live_run_root.parent)
+    if live_run_root.is_symlink():
+        fail("capture rehearsal proof", "live run root uses symlink", str(live_run_root))
+    if live_run_root.exists() and not live_run_root.is_dir():
+        fail("capture rehearsal proof", "live run root is not a directory", str(live_run_root))
     if capture_root.exists():
         fail("capture rehearsal proof", "capture root already exists", str(capture_root))
+    live_run_root.mkdir(parents=True, exist_ok=True)
+    live_run_root.chmod(0o700)
+    capture_root.mkdir(parents=True, exist_ok=False)
+    capture_root.chmod(0o700)
     artifact_root = Path(validated.artifact_root)
     copy_plan: dict[str, Path] = {}
     proof_path = Path(validated.proof_path)

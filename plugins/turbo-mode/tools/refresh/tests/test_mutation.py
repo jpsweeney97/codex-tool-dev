@@ -552,6 +552,8 @@ def test_rehearsal_proof_validation_and_capture_preserve_referenced_artifacts(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["schema_version"] == "turbo-mode-refresh-rehearsal-capture-v1"
     assert manifest["rehearsal_proof_sha256"] == proof_sha
+    assert stat.S_IMODE(live_run_root.stat().st_mode) == 0o700
+    assert stat.S_IMODE((live_run_root / "rehearsal-proof-capture").stat().st_mode) == 0o700
     captured_rel_paths = {entry["relative_path"] for entry in manifest["captured_artifacts"]}
     assert "rehearsal-run/rehearsal-proof.json" in captured_rel_paths
     assert "rehearsal-run/rehearsal-proof.json.sha256" in captured_rel_paths
@@ -561,6 +563,37 @@ def test_rehearsal_proof_validation_and_capture_preserve_referenced_artifacts(
         assert captured.is_file()
         assert stat.S_IMODE(captured.stat().st_mode) == 0o600
         assert sha256_file(captured) == entry["sha256"]
+
+
+def test_rehearsal_proof_capture_rejects_symlinked_live_evidence_root(
+    tmp_path: Path,
+) -> None:
+    proof_path, proof_sha = write_full_rehearsal_bundle(tmp_path)
+    validated = validate_rehearsal_proof_bundle(
+        proof_path=proof_path,
+        expected_sha256=proof_sha,
+        source_implementation_commit=SOURCE_COMMIT,
+        source_implementation_tree=SOURCE_TREE,
+        tool_sha256=TOOL_SHA256,
+    )
+    outside_root = tmp_path / "outside-local-only"
+    outside_root.mkdir()
+    live_home = tmp_path / "live"
+    live_home.mkdir()
+    symlinked_local_only = live_home / "local-only"
+    symlinked_local_only.symlink_to(outside_root, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlinks are not allowed"):
+        capture_rehearsal_proof_bundle(
+            validated,
+            live_run_root=(
+                symlinked_local_only / "turbo-mode-refresh/live-run"
+            ),
+        )
+
+    assert not (
+        outside_root / "turbo-mode-refresh/live-run/rehearsal-proof-capture"
+    ).exists()
 
 
 def test_rehearsal_proof_validation_rejects_real_home_authority_paths(
