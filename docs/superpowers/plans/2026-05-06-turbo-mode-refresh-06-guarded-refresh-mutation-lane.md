@@ -1010,18 +1010,78 @@ uv run pytest plugins/turbo-mode/tools/refresh/tests/test_app_server_inventory.p
 
 Expected: the command first writes a local-only read-only discovery artifact and pre-install target authority artifact, then writes a local-only isolated install proof artifact and SHA256. If any gate blocks, it exits nonzero after writing a structured local-only blocker report. The pytest command must not edit this plan. If the spike blocks, patch this plan in a separate explicit docs step that cites the blocker report and chooses one reviewed path: update the Codex app-server/protocol, replace `plugin/install` authority with another approved mechanism, or stop Plan 06.
 
+### Blocked Decision: 2026-05-07 Task 1A authority spike
+
+Observed blocker from the operator-run Task 1A authority spike:
+
+- run id: `plan06-task1a-authority-spike-20260507-033041`
+- post-review corrected durable blocker report derived from the original spike transcript: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-task1a-authority-spike-20260507-033041/authority-blocker.json`
+- corrected blocker report SHA256: `89d443384cfa92bb9e940256c74053be1617d82bc19ae69d2139225d91d88118`
+- original raw-write blocker report SHA256 before nested `result.data` count correction: `64c20014ca1b9bb3bb1fde1cc3ee222ddf6f4c697b70810560fa542233b818f9`
+- durable read-only transcript: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-task1a-authority-spike-20260507-033041/readonly-discovery.transcript.json`
+- durable read-only transcript SHA256: `9ad3f61d70af200e519e7f69b1593f27c5988089027276ce14f0c108a5e58ab5`
+- isolated home used for the spike: `/private/tmp/plan06-task1a-authority-spike-20260507-033041-6e4tz9go/.codex`
+
+Observed read-only authority result:
+
+- `initialize.result.codexHome` bound to the isolated home.
+- `skills/list` returned Handoff and Ticket skill paths under the isolated home cache.
+- `hooks/list` returned the Ticket hook `sourcePath` under the isolated home cache.
+- copied or installed Ticket hook metadata still exposed the Ticket hook `command` as `python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py` during isolated read-only discovery, so the command authority still points at the real Codex home.
+
+Plan 06 consequence:
+
+- Task 1A does not pass the read-only launch/read authority gate.
+- Plan 06 cannot prove no-real-home hook command authority before writes.
+- This evidence does not yet prove that the Codex app-server/runtime cannot bind to the requested isolated `CODEX_HOME`; it proves that the isolated read-only authority surface still exposes a real-home absolute hook command.
+- Stop Plan 06 here. Do not begin Task 1B, Task 2, or any process gate, lock, marker, snapshot, smoke, recovery, retained-run, or mutation-orchestration work from this branch state.
+
+Reviewed next paths opened by this blocked decision:
+
+1. update the Ticket hook packaging/install metadata so hook commands are generated or rewritten to the actual installed plugin root, then rerun Task 0 and Task 1A;
+2. update Codex app-server/plugin-install or hook registry behavior so hook command authority is bound to the requested `CODEX_HOME` or install root and exposed before writes, then rerun Task 0 and Task 1A;
+3. revise Plan 06 with a different approved pre-install authority mechanism that does not rely on copied installed hook metadata, then rerun from Task 0 and Task 1A.
+
+Selected unblock path:
+
+- use path 1 as the project-facing repair: install-root-bound Ticket hook metadata;
+- do not satisfy this by replacing one hardcoded absolute source path with another hardcoded absolute source path;
+- do not use a relative hook command unless Codex documents and proves that hook commands execute with the installed plugin root as `cwd`;
+- do not rely on `$CODEX_HOME`, `$CODEX_PLUGIN_ROOT`, or another environment variable in the hook command unless a live `hooks/list` proof and hook execution proof show the runtime supplies that variable for the installed hook;
+- if the repair requires Codex app-server/plugin-install support for manifest placeholder expansion or install-time rewrite, record that as the implementation mechanism for path 1 rather than treating it as a separate Plan 06 escape hatch.
+
+Task 1A unblock acceptance:
+
+- the Ticket hook source or packaging contract has an explicit template, placeholder, or install-time rewrite mechanism for `hooks/hooks.json`;
+- a real-home install still yields `python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py`;
+- an isolated install into a temporary `CODEX_HOME` yields `python3 <isolated-codex-home>/plugins/cache/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py`;
+- `hooks/list.command` and `hooks/list.sourcePath` both resolve under the same installed Ticket plugin root for the requested home;
+- read-only Task 1A discovery proves `initialize.result.codexHome`, Handoff and Ticket skill paths, Ticket hook `sourcePath`, Ticket hook `command`, and local-only roots bind to the requested isolated home or requested repo marketplace as appropriate;
+- pre-install target authority is recorded before any unmocked `plugin/install` request;
+- the isolated `plugin/install` spike produces validated local-only authority artifacts and SHA256s without any config, cache, plugin, hook, local-only, or installed path resolving under `/Users/jp/.codex`;
+- after the unblock implementation lands, rerun Plan 06 from Task 0 with a fresh run id and do not begin Task 1B until Task 1A reaches `authority-validated`.
+
+Until one of those reviewed paths lands and the isolated authority spike passes, Plan 06 remains blocked and must not proceed to mutation scaffolding.
+
 Task 1B and Task 2 must not start until this unmocked isolated install-authority spike artifact exists and validates, or until this plan is patched in that separate docs step with the blocked decision. Mock-only authority tests are insufficient for the process gate, lock, marker, snapshot, recovery, smoke, or evidence scaffolding boundary.
 
 - [ ] **Step 3: Commit Task 1A**
 
-Run:
+If Task 1A outcome is `authority-validated`, run:
 
 ```bash
 git add plugins/turbo-mode/tools/refresh/app_server_inventory.py plugins/turbo-mode/tools/refresh/tests/test_app_server_inventory.py
 git commit -m "feat: prove guarded refresh app-server authority"
 ```
 
-The Task 1A commit message or implementation notes must include the validated spike artifact path/SHA256, or the commit must be a blocked-plan update. Do not include process gate, lock, marker, smoke, recovery, evidence, or mutation orchestration files in this commit.
+If Task 1A outcome is `blocked-plan-update`, do not create the `feat: prove guarded refresh app-server authority` commit. Instead, stage only the blocked-decision plan update and commit a docs-only blocked update, for example:
+
+```bash
+git add docs/superpowers/plans/2026-05-06-turbo-mode-refresh-06-guarded-refresh-mutation-lane.md
+git commit -m "docs: record plan06 task1a authority block"
+```
+
+The validated-path commit message or implementation notes must include the validated spike artifact path/SHA256. The blocked-path commit must not overclaim proof of authority, and it must not stage process gate, lock, marker, smoke, recovery, evidence, or mutation orchestration files.
 
 ## Task 1B: Implement Process Gate Helpers
 
