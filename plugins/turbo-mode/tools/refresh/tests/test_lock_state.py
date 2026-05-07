@@ -12,6 +12,7 @@ from refresh.lock_state import (
     RunState,
     acquire_refresh_lock,
     clear_run_state,
+    ensure_no_active_run_state_markers,
     preserve_original_owner_for_recovery,
     read_run_state,
     replace_run_state,
@@ -147,6 +148,38 @@ def test_nonblocking_lock_acquisition_fails_while_descriptor_holds_lock(
         with pytest.raises(RefreshError, match="refresh lock is already held"):
             with acquire_refresh_lock(**kwargs):
                 pass
+
+
+def test_recovery_lock_writes_recovery_owner_without_overwriting_original_owner(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(lock_state_module, "_collect_owner_process_row", lambda pid: owner(pid=pid))
+    local_only_root = tmp_path / "home/local-only/turbo-mode-refresh"
+    original_owner_path = local_only_root / "run-state" / f"{RUN_ID}.owner.json"
+    lock_state_module.write_owner_file(original_owner_path, owner())
+    original_owner_bytes = original_owner_path.read_bytes()
+
+    with acquire_refresh_lock(
+        local_only_root=local_only_root,
+        run_id=RUN_ID,
+        mode="recover",
+        source_implementation_commit=SOURCE_COMMIT,
+        execution_head=EXECUTION_HEAD,
+        tool_sha256=TOOL_SHA256,
+    ):
+        recovery_owner_path = local_only_root / "run-state" / f"{RUN_ID}.recovery-owner.json"
+        assert recovery_owner_path.is_file()
+
+    assert original_owner_path.read_bytes() == original_owner_bytes
+
+
+def test_guarded_refresh_rejects_any_existing_run_state_marker(tmp_path: Path) -> None:
+    local_only_root = tmp_path / "home/local-only/turbo-mode-refresh"
+    write_initial_run_state(local_only_root, base_state())
+
+    with pytest.raises(RefreshError, match="active run-state marker exists"):
+        ensure_no_active_run_state_markers(local_only_root)
 
 
 def test_preserve_original_owner_for_recovery_copies_owner_before_recovery_owner(

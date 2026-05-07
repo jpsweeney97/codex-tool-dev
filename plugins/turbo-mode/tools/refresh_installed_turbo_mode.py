@@ -22,10 +22,12 @@ from refresh.commit_safe import (  # noqa: E402
     sha256_file,
 )
 from refresh.evidence import evidence_payload, write_local_evidence  # noqa: E402
+from refresh.lock_state import ensure_no_active_run_state_markers  # noqa: E402
 from refresh.models import RefreshError  # noqa: E402
 from refresh.mutation import (  # noqa: E402
     MutationContext,
     run_guarded_refresh_orchestration,
+    run_guarded_refresh_recovery,
     seed_isolated_rehearsal_home,
     verify_source_execution_identity,
 )
@@ -42,6 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     modes.add_argument("--plan-refresh", action="store_true")
     modes.add_argument("--refresh", action="store_true")
     modes.add_argument("--guarded-refresh", action="store_true")
+    modes.add_argument("--recover", metavar="RUN_ID")
     modes.add_argument("--seed-isolated-rehearsal-home", action="store_true")
     parser.add_argument("--smoke", choices=("light", "standard"))
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
@@ -72,6 +75,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--smoke is only accepted with mutation modes")
     if args.seed_isolated_rehearsal_home:
         return seed_isolated_rehearsal_home_main(args, parser)
+    if args.recover is not None:
+        return recover_main(args, parser)
     if args.guarded_refresh:
         return guarded_refresh_main(args, parser)
     mode = "plan-refresh" if args.plan_refresh else "dry-run"
@@ -351,6 +356,11 @@ def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentPars
         parser.error("--source-implementation-commit is required for --guarded-refresh")
     if args.source_implementation_tree is None:
         parser.error("--source-implementation-tree is required for --guarded-refresh")
+    try:
+        ensure_no_active_run_state_markers(codex_home / "local-only/turbo-mode-refresh")
+    except RefreshError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     if is_real_home:
         print(
             "real guarded refresh blocked: rehearsal proof validation and capture "
@@ -417,6 +427,63 @@ def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentPars
     except (RefreshError, ValueError, OSError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
+
+
+def recover_main(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    if args.source_implementation_commit is None:
+        parser.error("--source-implementation-commit is required for --recover")
+    if args.source_implementation_tree is None:
+        parser.error("--source-implementation-tree is required for --recover")
+    if args.inventory_check:
+        parser.error("--inventory-check is not accepted with --recover")
+    if args.record_summary or args.no_record_summary:
+        parser.error("--record-summary is not accepted with --recover")
+    if args.require_terminal_status is not None:
+        parser.error("--require-terminal-status is not accepted with --recover")
+    if args.summary_output is not None:
+        parser.error("--summary-output is not accepted with --recover")
+    if args.isolated_rehearsal:
+        parser.error("--isolated-rehearsal is not accepted with --recover")
+    if args.rehearsal_proof is not None or args.rehearsal_proof_sha256 is not None:
+        parser.error("--rehearsal-proof is not accepted with --recover")
+
+    run_id = str(args.recover)
+    try:
+        repo_root = args.repo_root.expanduser().resolve(strict=True)
+        codex_home = args.codex_home.expanduser().resolve(strict=False)
+        result = run_guarded_refresh_recovery(
+            MutationContext(
+                run_id=run_id,
+                mode="recover",
+                repo_root=repo_root,
+                codex_home=codex_home,
+                local_only_run_root=(
+                    codex_home / "local-only/turbo-mode-refresh" / run_id
+                ),
+                source_implementation_commit=args.source_implementation_commit,
+                source_implementation_tree=args.source_implementation_tree,
+                execution_head=git_rev_parse(repo_root, "HEAD"),
+                execution_tree=git_rev_parse(repo_root, "HEAD^{tree}"),
+                tool_sha256=sha256_file(CURRENT_FILE),
+            ),
+        )
+    except (RefreshError, ValueError, OSError, subprocess.CalledProcessError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload = {
+        "run_id": run_id,
+        "mode": "recover",
+        "final_status": result.final_status,
+        "final_status_path": result.final_status_path,
+        "phase_log": result.phase_log,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"recovery final_status: {result.final_status}")
+        print(f"final_status_path: {result.final_status_path}")
+    return 0 if result.final_status == "RECOVERY_COMPLETE" else 1
 
 
 def git_rev_parse(repo_root: Path, revision: str) -> str:

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
 
 import pytest
+import refresh.lock_state as lock_state_module
 import refresh.mutation as mutation_module
 from refresh.app_server_inventory import (
     AppServerInstallAuthority,
@@ -12,6 +14,7 @@ from refresh.app_server_inventory import (
     AppServerPreInstallTargetAuthority,
     authority_digest,
 )
+from refresh.lock_state import LockOwner, RunState, write_initial_run_state
 from refresh.models import RefreshError
 from refresh.mutation import (
     GuardedRefreshResult,
@@ -24,6 +27,7 @@ from refresh.mutation import (
     restore_config_snapshot,
     rollback_guarded_refresh,
     run_guarded_refresh_orchestration,
+    run_guarded_refresh_recovery,
     verify_source_cache_equality,
     verify_source_execution_identity,
 )
@@ -639,3 +643,231 @@ def test_abort_after_config_mutation_restores_config_only(tmp_path: Path) -> Non
     result = abort_after_config_mutation(ctx, snapshot, failed_phase="after-hook-disable")
     assert result["final_status"] == "config-restored"
     assert "plugin_hooks = true" in (ctx.codex_home / "config.toml").read_text(encoding="utf-8")
+
+
+def write_recovery_marker(
+    ctx: MutationContext,
+    snapshot,
+    *,
+    phase: str = "install-complete",
+    source_commit: str = SOURCE_COMMIT,
+    source_tree: str = SOURCE_TREE,
+    execution_head: str = EXECUTION_HEAD,
+    execution_tree: str = EXECUTION_TREE,
+    tool_sha256: str = TOOL_SHA256,
+    expected_intermediate_config_sha256: str | None = None,
+) -> None:
+    local_only_root = ctx.local_only_run_root.parent
+    original_owner = {
+        "run_id": ctx.run_id,
+        "mode": "guarded-refresh",
+        "source_implementation_commit": source_commit,
+        "execution_head": execution_head,
+        "tool_sha256": tool_sha256,
+        "pid": 1234,
+        "parent_pid": 99,
+        "observed_process_start": "Thu May  7 10:00:00 2026",
+        "raw_owner_process_row_sha256": "row-sha",
+        "acquisition_timestamp": "2026-05-07T10:00:00Z",
+        "command_line_sequence": ["python3", "refresh.py", "--guarded-refresh"],
+        "schema_version": "turbo-mode-refresh-lock-owner-v1",
+    }
+    owner_path = local_only_root / "run-state" / f"{ctx.run_id}.owner.json"
+    owner_path.parent.mkdir(parents=True, exist_ok=True)
+    owner_path.write_text(json.dumps(original_owner, indent=2, sort_keys=True) + "\n")
+    original_owner_sha256 = authority_digest(original_owner)
+    write_initial_run_state(
+        local_only_root,
+        RunState(
+            run_id=ctx.run_id,
+            mode="guarded-refresh",
+            source_implementation_commit=source_commit,
+            source_implementation_tree=source_tree,
+            execution_head=execution_head,
+            execution_tree=execution_tree,
+            tool_sha256=tool_sha256,
+            original_run_owner_sha256=original_owner_sha256,
+            phase=phase,
+            pre_snapshot_app_server_launch_authority_sha256="launch-sha",
+            original_config_sha256=snapshot.config_sha256,
+            expected_intermediate_config_sha256=(
+                expected_intermediate_config_sha256 or snapshot.config_sha256
+            ),
+            hook_disabled_config_sha256=expected_intermediate_config_sha256,
+            pre_refresh_cache_manifest_sha256=snapshot.pre_refresh_cache_manifest_sha256,
+            snapshot_path_map={
+                "config": str(snapshot.config_snapshot_path),
+                "cache": str(snapshot.cache_snapshot_root),
+                "manifest": str(snapshot.snapshot_manifest_path),
+            },
+            snapshot_manifest_digest=mutation_module._sha256_file(
+                snapshot.snapshot_manifest_path
+            ),
+            recovery_eligibility="restore-cache-and-config",
+        ),
+    )
+
+
+def recovery_owner() -> LockOwner:
+    return LockOwner(
+        run_id=RUN_ID,
+        mode="recover",
+        source_implementation_commit=SOURCE_COMMIT,
+        execution_head=EXECUTION_HEAD,
+        tool_sha256=TOOL_SHA256,
+        pid=4321,
+        parent_pid=99,
+        observed_process_start="Thu May  7 11:00:00 2026",
+        raw_owner_process_row_sha256="recovery-row-sha",
+        acquisition_timestamp="2026-05-07T11:00:00Z",
+        command_line_sequence=("python3", "refresh.py", "--recover", RUN_ID),
+    )
+
+
+def test_recovery_rejects_source_identity_mismatch_before_lock_or_process_gate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    ctx = context(tmp_path)
+    seed_config(ctx)
+    seed_plugins(ctx)
+    snapshot = create_snapshot_set(ctx)
+    write_recovery_marker(ctx, snapshot, source_commit="marker-source")
+    monkeypatch.setattr(
+        mutation_module,
+        "acquire_refresh_lock",
+        lambda **kwargs: pytest.fail("recovery lock should not be acquired"),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "capture_process_gate",
+        lambda **kwargs: pytest.fail("process gate should not run"),
+    )
+
+    with pytest.raises(RefreshError, match="source implementation commit mismatch"):
+        run_guarded_refresh_recovery(ctx)
+
+
+def test_recovery_restores_snapshots_runs_inventory_and_clears_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    ctx = context(tmp_path)
+    seed_config(ctx)
+    seed_plugins(ctx)
+    snapshot = create_snapshot_set(ctx)
+    disabled_sha256 = hashlib.sha256(DISABLED_CONFIG_TEXT.encode()).hexdigest()
+    write_recovery_marker(
+        ctx,
+        snapshot,
+        expected_intermediate_config_sha256=disabled_sha256,
+    )
+    (ctx.codex_home / "config.toml").write_text(DISABLED_CONFIG_TEXT, encoding="utf-8")
+    (ctx.codex_home / "plugins/cache/turbo-mode/handoff/1.6.0/payload.txt").write_text(
+        "changed",
+        encoding="utf-8",
+    )
+    labels: list[str] = []
+
+    def fake_process_gate(**kwargs: object) -> dict[str, object]:
+        label = str(kwargs["label"])
+        labels.append(label)
+        return {"label": label, "blocked_process_count": 0}
+
+    monkeypatch.setattr(mutation_module, "capture_process_gate", fake_process_gate)
+    monkeypatch.setattr(
+        lock_state_module,
+        "_collect_owner_process_row",
+        lambda pid: recovery_owner(),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda paths: ("inventory", ({"body": "transcript"},)),
+    )
+
+    result = run_guarded_refresh_recovery(ctx)
+
+    assert result.final_status == "RECOVERY_COMPLETE"
+    assert labels == ["before-recovery-restore", "post-recovery"]
+    assert "plugin_hooks = true" in (ctx.codex_home / "config.toml").read_text(encoding="utf-8")
+    assert (ctx.codex_home / "plugins/cache/turbo-mode/handoff/1.6.0/payload.txt").read_text(
+        encoding="utf-8"
+    ) == "same"
+    assert Path(result.final_status_path).is_file()
+    assert not (
+        ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json"
+    ).exists()
+    assert (ctx.local_only_run_root / "recovery/original-owner.json").is_file()
+    assert (
+        ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.recovery-owner.json"
+    ).is_file()
+
+
+def test_recovery_before_hook_disable_accepts_original_config_without_cache_restore(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    ctx = context(tmp_path)
+    seed_config(ctx)
+    seed_plugins(ctx)
+    snapshot = create_snapshot_set(ctx)
+    write_recovery_marker(ctx, snapshot, phase="snapshot-written")
+    cache_payload = ctx.codex_home / "plugins/cache/turbo-mode/handoff/1.6.0/payload.txt"
+    cache_payload.write_text("not-restored-before-install\n", encoding="utf-8")
+    monkeypatch.setattr(
+        lock_state_module,
+        "_collect_owner_process_row",
+        lambda pid: recovery_owner(),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "capture_process_gate",
+        lambda **kwargs: {"label": kwargs["label"], "blocked_process_count": 0},
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda paths: ("inventory", ({"body": "transcript"},)),
+    )
+
+    result = run_guarded_refresh_recovery(ctx)
+
+    assert result.final_status == "RECOVERY_COMPLETE"
+    assert "plugin_hooks = true" in (ctx.codex_home / "config.toml").read_text(encoding="utf-8")
+    assert cache_payload.read_text(encoding="utf-8") == "not-restored-before-install\n"
+
+
+def test_recovery_fails_closed_when_config_sha_is_externally_changed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    ctx = context(tmp_path)
+    seed_config(ctx)
+    seed_plugins(ctx)
+    snapshot = create_snapshot_set(ctx)
+    write_recovery_marker(ctx, snapshot, expected_intermediate_config_sha256="disabled-sha")
+    (ctx.codex_home / "config.toml").write_text("external-change\n", encoding="utf-8")
+    monkeypatch.setattr(
+        lock_state_module,
+        "_collect_owner_process_row",
+        lambda pid: recovery_owner(),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "capture_process_gate",
+        lambda **kwargs: {"label": kwargs["label"], "blocked_process_count": 0},
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda paths: pytest.fail("inventory should not run"),
+    )
+
+    with pytest.raises(RefreshError, match="phase-appropriate expected config SHA256"):
+        run_guarded_refresh_recovery(ctx)
+
+    assert (ctx.codex_home / "config.toml").read_text(encoding="utf-8") == "external-change\n"
+    assert (
+        ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json"
+    ).exists()

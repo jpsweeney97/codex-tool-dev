@@ -29,9 +29,12 @@ from .lock_state import (
     RunState,
     acquire_refresh_lock,
     clear_run_state,
+    preserve_original_owner_for_recovery,
+    read_owner_file,
     read_run_state,
     replace_run_state,
     validate_cache_install_allowed,
+    validate_recovery_run_state,
     write_initial_run_state,
 )
 from .manifests import build_manifest, diff_manifests
@@ -95,6 +98,13 @@ class GuardedRefreshResult:
     final_status: str
     final_status_path: str
     rehearsal_proof_path: str | None
+    phase_log: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RecoveryResult:
+    final_status: str
+    final_status_path: str
     phase_log: tuple[str, ...]
 
 
@@ -558,6 +568,102 @@ def run_guarded_refresh_orchestration(
             clear_run_state(local_only_root, context.run_id)
 
 
+def run_guarded_refresh_recovery(context: MutationContext) -> RecoveryResult:
+    local_only_root = context.local_only_run_root.parent
+    state = read_run_state(local_only_root, context.run_id)
+    _validate_recovery_identity(context, state)
+    validate_recovery_run_state(state, expected_run_id=context.run_id)
+    owner_path = local_only_root / "run-state" / f"{context.run_id}.owner.json"
+    original_owner = read_owner_file(owner_path)
+    original_owner_sha256 = authority_digest(original_owner)
+    if state.original_run_owner_sha256 != original_owner_sha256:
+        fail(
+            "run guarded refresh recovery",
+            "original run owner SHA256 mismatch",
+            {
+                "expected": state.original_run_owner_sha256,
+                "actual": original_owner_sha256,
+            },
+        )
+
+    phase_log: list[str] = []
+    final_status_path = context.local_only_run_root / "final-status.json"
+    with acquire_refresh_lock(
+        local_only_root=local_only_root,
+        run_id=context.run_id,
+        mode="recover",
+        source_implementation_commit=context.source_implementation_commit,
+        execution_head=context.execution_head,
+        tool_sha256=context.tool_sha256,
+    ) as recovery_owner:
+        state = read_run_state(local_only_root, context.run_id)
+        _validate_recovery_identity(context, state)
+        preserved_owner = preserve_original_owner_for_recovery(
+            local_only_root,
+            context.run_id,
+            owner_path,
+        )
+        recovery_owner_sha256 = authority_digest(recovery_owner)
+        replace_run_state(
+            local_only_root,
+            replace(
+                state,
+                recovery_owner_sha256=recovery_owner_sha256,
+            ),
+        )
+
+        before_restore = _run_process_gate(context, label="before-recovery-restore")
+        _raise_if_process_blocked(before_restore, failed_phase="before-recovery-restore")
+        phase_log.append("before-recovery-restore")
+
+        snapshot = _snapshot_from_recovery_state(context, state)
+        restored_config_sha256 = _restore_config_for_recovery(snapshot, state)
+        cache_restore_status = "not-needed-before-cache-mutation"
+        if _recovery_phase_may_have_cache_mutation(state.phase):
+            _restore_cache_snapshots(context, snapshot)
+            cache_restore_status = "restored-from-snapshot"
+        phase_log.append("snapshots-restored")
+
+        inventory, transcript = collect_readonly_runtime_inventory(_refresh_paths(context))
+        phase_log.append("inventory-complete")
+
+        post_recovery = _run_process_gate(context, label="post-recovery")
+        _raise_if_process_blocked(post_recovery, failed_phase="post-recovery")
+        phase_log.append("post-recovery")
+
+        _write_private_json(
+            final_status_path,
+            {
+                "schema_version": "turbo-mode-refresh-recovery-status-v1",
+                "run_id": context.run_id,
+                "mode": "recover",
+                "source_implementation_commit": context.source_implementation_commit,
+                "source_implementation_tree": context.source_implementation_tree,
+                "execution_head": context.execution_head,
+                "execution_tree": context.execution_tree,
+                "final_status": "RECOVERY_COMPLETE",
+                "phase_log": tuple(phase_log),
+                "preserved_original_owner_path": preserved_owner["preserved_owner_path"],
+                "preserved_original_owner_sha256": preserved_owner[
+                    "preserved_owner_sha256"
+                ],
+                "recovery_owner_sha256": recovery_owner_sha256,
+                "restored_config_sha256": restored_config_sha256,
+                "cache_restore_status": cache_restore_status,
+                "recovery_inventory_sha256": authority_digest(inventory),
+                "recovery_transcript_sha256": authority_digest(transcript),
+                "post_recovery_process_summary_sha256": authority_digest(post_recovery),
+                "certification_status": "local-only-non-certified",
+            },
+        )
+        clear_run_state(local_only_root, context.run_id)
+        return RecoveryResult(
+            final_status="RECOVERY_COMPLETE",
+            final_status_path=str(final_status_path),
+            phase_log=tuple(phase_log),
+        )
+
+
 def create_snapshot_set(context: MutationContext) -> SnapshotSet:
     config_path = context.codex_home / "config.toml"
     if not config_path.exists():
@@ -659,6 +765,154 @@ def restore_config_snapshot(snapshot: SnapshotSet, *, current_expected_sha256: s
             "restored config SHA256 mismatch",
             str(snapshot.config_path),
         )
+
+
+def _validate_recovery_identity(context: MutationContext, state: RunState) -> None:
+    if state.source_implementation_commit != context.source_implementation_commit:
+        fail(
+            "run guarded refresh recovery",
+            "source implementation commit mismatch",
+            {
+                "expected": state.source_implementation_commit,
+                "actual": context.source_implementation_commit,
+            },
+        )
+    if state.source_implementation_tree != context.source_implementation_tree:
+        fail(
+            "run guarded refresh recovery",
+            "source implementation tree mismatch",
+            {
+                "expected": state.source_implementation_tree,
+                "actual": context.source_implementation_tree,
+            },
+        )
+    if state.execution_head != context.execution_head:
+        fail(
+            "run guarded refresh recovery",
+            "execution head mismatch",
+            {"expected": state.execution_head, "actual": context.execution_head},
+        )
+    if state.execution_tree != context.execution_tree:
+        fail(
+            "run guarded refresh recovery",
+            "execution tree mismatch",
+            {"expected": state.execution_tree, "actual": context.execution_tree},
+        )
+    if state.tool_sha256 != context.tool_sha256:
+        fail(
+            "run guarded refresh recovery",
+            "tool SHA256 mismatch",
+            {"expected": state.tool_sha256, "actual": context.tool_sha256},
+        )
+
+
+def _snapshot_from_recovery_state(context: MutationContext, state: RunState) -> SnapshotSet:
+    config_snapshot = state.snapshot_path_map.get("config")
+    cache_snapshot = state.snapshot_path_map.get("cache")
+    manifest = state.snapshot_path_map.get("manifest")
+    if not config_snapshot or not cache_snapshot or not manifest:
+        fail(
+            "run guarded refresh recovery",
+            "snapshot path map incomplete",
+            state.snapshot_path_map,
+        )
+    snapshot = SnapshotSet(
+        config_snapshot_path=Path(config_snapshot),
+        config_sha256=str(state.original_config_sha256),
+        cache_snapshot_root=Path(cache_snapshot),
+        source_manifest_sha256={},
+        pre_refresh_cache_manifest_sha256=state.pre_refresh_cache_manifest_sha256,
+        config_path=context.codex_home / "config.toml",
+        snapshot_manifest_path=Path(manifest),
+    )
+    _validate_snapshot_for_rollback(snapshot)
+    actual_manifest_digest = _sha256_file(snapshot.snapshot_manifest_path)
+    if actual_manifest_digest != state.snapshot_manifest_digest:
+        fail(
+            "run guarded refresh recovery",
+            "snapshot manifest digest mismatch",
+            {
+                "expected": state.snapshot_manifest_digest,
+                "actual": actual_manifest_digest,
+            },
+        )
+    return snapshot
+
+
+def _restore_config_for_recovery(snapshot: SnapshotSet, state: RunState) -> str:
+    if _recovery_phase_requires_original_config(state.phase):
+        current_sha256 = _sha256_file(snapshot.config_path)
+        if current_sha256 != state.original_config_sha256:
+            fail(
+                "run guarded refresh recovery",
+                "phase-appropriate expected config SHA256 mismatch",
+                {
+                    "phase": state.phase,
+                    "expected": state.original_config_sha256,
+                    "actual": current_sha256,
+                },
+            )
+        return current_sha256
+    expected = state.expected_intermediate_config_sha256
+    if not expected:
+        fail(
+            "run guarded refresh recovery",
+            "expected intermediate config SHA256 missing",
+            state.phase,
+        )
+    current_sha256 = _sha256_file(snapshot.config_path)
+    if current_sha256 != expected:
+        fail(
+            "run guarded refresh recovery",
+            "phase-appropriate expected config SHA256 mismatch",
+            {
+                "phase": state.phase,
+                "expected": expected,
+                "actual": current_sha256,
+            },
+        )
+    restore_config_snapshot(snapshot, current_expected_sha256=expected)
+    return _sha256_file(snapshot.config_path)
+
+
+def _recovery_phase_requires_original_config(phase: str) -> bool:
+    return phase in {
+        "marker-started",
+        "before-snapshot-process-checked",
+        "app-server-launch-authority-proven",
+        "pre-refresh-inventory-proven",
+        "snapshot-written",
+        "config-restored-before-final-inventory",
+        "inventory-complete",
+        "equality-complete",
+        "smoke-complete",
+        "post-mutation-process-checked",
+        "evidence-published",
+        "exclusivity-unproven",
+    }
+
+
+def _recovery_phase_may_have_cache_mutation(phase: str) -> bool:
+    return phase in {
+        "install-complete",
+        "config-restored-before-final-inventory",
+        "inventory-complete",
+        "equality-complete",
+        "smoke-complete",
+        "post-mutation-process-checked",
+        "evidence-published",
+        "exclusivity-unproven",
+    }
+
+
+def _restore_cache_snapshots(context: MutationContext, snapshot: SnapshotSet) -> None:
+    for spec in build_plugin_specs(repo_root=context.repo_root, codex_home=context.codex_home):
+        source = snapshot.cache_snapshot_root / spec.name / spec.version
+        if not source.exists():
+            fail("run guarded refresh recovery", "cache snapshot path missing", str(source))
+        if spec.cache_root.exists():
+            shutil.rmtree(spec.cache_root)
+        shutil.copytree(source, spec.cache_root)
 
 
 def install_plugins_via_app_server(context: MutationContext) -> tuple[dict[str, object], ...]:

@@ -624,6 +624,64 @@ def test_cli_guarded_refresh_requires_source_identity_before_planning(tmp_path: 
     assert not (codex_home / "local-only").exists()
 
 
+def test_cli_guarded_refresh_rejects_any_existing_run_state_marker_before_planning(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+    marker_dir = codex_home / "local-only/turbo-mode-refresh/run-state"
+    marker_dir.mkdir(parents=True)
+    marker = marker_dir / "stale.marker.json"
+    marker.write_text("{}\n", encoding="utf-8")
+
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--isolated-rehearsal",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--source-implementation-commit",
+            "source",
+            "--source-implementation-tree",
+            "tree",
+        ]
+    )
+
+    assert completed.returncode == 1
+    assert "active run-state marker exists" in completed.stderr
+
+
+def test_cli_recover_conflicts_with_guarded_refresh() -> None:
+    completed = run_tool(["--guarded-refresh", "--recover", "run-1"])
+
+    assert completed.returncode == 2
+    assert "not allowed with argument" in completed.stderr
+
+
+def test_cli_recover_requires_source_identity_before_writes(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+
+    completed = run_tool(
+        [
+            "--recover",
+            "run-1",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--source-implementation-commit is required for --recover" in completed.stderr
+    assert not codex_home.exists()
+
+
 def test_cli_isolated_rehearsal_requires_guarded_refresh(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     codex_home = tmp_path / ".codex"

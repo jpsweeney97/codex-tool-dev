@@ -117,7 +117,11 @@ def acquire_refresh_lock(
             tool_sha256=tool_sha256,
             acquisition_timestamp=_utc_now(),
         )
-        owner_path = _owner_path(local_only_root, run_id)
+        owner_path = (
+            _recovery_owner_path(local_only_root, run_id)
+            if mode == "recover"
+            else _owner_path(local_only_root, run_id)
+        )
         write_owner_file(owner_path, owner_record)
         yield owner_record
     finally:
@@ -169,6 +173,18 @@ def clear_run_state(local_only_root: Path, run_id: str) -> None:
         return
 
 
+def ensure_no_active_run_state_markers(local_only_root: Path) -> None:
+    markers = tuple(
+        sorted(
+            str(path)
+            for path in (local_only_root / "run-state").glob("*.marker.json")
+            if path.is_file()
+        )
+    )
+    if markers:
+        fail("validate active run state", "active run-state marker exists", list(markers))
+
+
 def preserve_original_owner_for_recovery(
     local_only_root: Path,
     run_id: str,
@@ -184,6 +200,14 @@ def preserve_original_owner_for_recovery(
         "preserved_owner_path": str(destination),
         "preserved_owner_sha256": hashlib.sha256(data).hexdigest(),
     }
+
+
+def read_owner_file(path: Path) -> LockOwner:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        fail("read lock owner", str(exc), str(path))
+    return _owner_from_payload(payload)
 
 
 def write_owner_file(path: Path, owner: LockOwner) -> None:
@@ -329,6 +353,11 @@ def _owner_path(local_only_root: Path, run_id: str) -> Path:
     return local_only_root / "run-state" / f"{run_id}.owner.json"
 
 
+def _recovery_owner_path(local_only_root: Path, run_id: str) -> Path:
+    ensure_local_only_root(local_only_root)
+    return local_only_root / "run-state" / f"{run_id}.recovery-owner.json"
+
+
 def _marker_path(local_only_root: Path, run_id: str) -> Path:
     ensure_local_only_root(local_only_root)
     return local_only_root / "run-state" / f"{run_id}.marker.json"
@@ -362,6 +391,19 @@ def _run_state_from_payload(payload: object) -> RunState:
         if key in field_names:
             kwargs[key] = value
     return RunState(**kwargs)
+
+
+def _owner_from_payload(payload: object) -> LockOwner:
+    if not isinstance(payload, dict):
+        fail("read lock owner", "payload is not an object", payload)
+    kwargs: dict[str, Any] = {}
+    field_names = {field.name for field in dataclasses.fields(LockOwner)}
+    for key, value in payload.items():
+        if key == "command_line_sequence" and isinstance(value, list):
+            kwargs[key] = tuple(str(item) for item in value)
+        elif key in field_names:
+            kwargs[key] = value
+    return LockOwner(**kwargs)
 
 
 def _require_launch_authority(state: RunState, *, operation: str) -> None:
