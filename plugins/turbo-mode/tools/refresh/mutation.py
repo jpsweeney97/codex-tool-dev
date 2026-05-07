@@ -10,6 +10,7 @@ import tempfile
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +63,57 @@ PLAN05_SEED_FIXTURE = Path(__file__).parent / (
 )
 TICKET_HOOK_MANIFEST_CANONICAL_PATH = "ticket/1.4.0/hooks/hooks.json"
 TICKET_HOOK_COMMAND_SENTINEL = "<ticket-hook-command>"
+REHEARSAL_PROOF_SCHEMA_VERSION = "turbo-mode-refresh-rehearsal-proof-v1"
+REHEARSAL_CAPTURE_SCHEMA_VERSION = "turbo-mode-refresh-rehearsal-capture-v1"
+NO_REAL_HOME_AUTHORITY_SCHEMA_VERSION = "turbo-mode-refresh-no-real-home-proof-v1"
+NO_REAL_HOME_AUTHORITY_PATH_FIELDS = (
+    "resolved_config_path",
+    "resolved_plugin_cache_root",
+    "resolved_local_only_root",
+    "resolved_run_root",
+    "resolved_handoff_plugin_root",
+    "resolved_ticket_plugin_root",
+    "resolved_ticket_hook_manifest_path",
+)
+REQUIRED_REHEARSAL_PROOF_FIELDS = frozenset(
+    {
+        "schema_version",
+        "rehearsal_run_id",
+        "seed_run_id",
+        "seed_manifest_path",
+        "seed_manifest_sha256",
+        "seed_expected_drift_paths_sha256",
+        "seed_source_manifest_sha256",
+        "seed_pre_refresh_cache_manifest_sha256",
+        "seed_post_seed_dry_run_manifest_sha256",
+        "isolated_dry_run_id",
+        "isolated_dry_run_proof_sha256",
+        "source_implementation_commit",
+        "source_implementation_tree",
+        "execution_head",
+        "execution_tree",
+        "source_to_rehearsal_execution_delta_status",
+        "source_to_rehearsal_changed_paths_sha256",
+        "source_to_rehearsal_allowed_delta_proof_sha256",
+        "tool_sha256",
+        "requested_codex_home",
+        "app_server_authority_proof_sha256",
+        "no_real_home_authority_proof_sha256",
+        "smoke_summary_sha256",
+        "final_status",
+        "certification_status",
+        "referenced_artifacts",
+    }
+)
+REQUIRED_REHEARSAL_ARTIFACT_DIGEST_FIELDS = (
+    "seed_manifest_sha256",
+    "seed_post_seed_dry_run_manifest_sha256",
+    "isolated_dry_run_proof_sha256",
+    "source_to_rehearsal_allowed_delta_proof_sha256",
+    "app_server_authority_proof_sha256",
+    "no_real_home_authority_proof_sha256",
+    "smoke_summary_sha256",
+)
 
 
 @dataclass(frozen=True)
@@ -132,6 +184,23 @@ class SeedIsolatedRehearsalHomeResult:
     canonical_drift_paths: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ValidatedRehearsalProof:
+    proof_path: str
+    proof_sha256: str
+    companion_path: str
+    artifact_root: str
+    payload: dict[str, Any]
+    referenced_artifacts: tuple[dict[str, str], ...]
+
+
+@dataclass(frozen=True)
+class RehearsalProofCaptureResult:
+    capture_root: str
+    capture_manifest_path: str
+    capture_manifest_sha256: str
+
+
 def prove_app_server_home_authority(
     context: MutationContext,
     *,
@@ -143,6 +212,205 @@ def prove_app_server_home_authority(
     )
     _validate_launch_authority(authority, context=context, transcript=transcript)
     return authority
+
+
+def validate_rehearsal_proof_bundle(
+    *,
+    proof_path: Path,
+    expected_sha256: str,
+    source_implementation_commit: str,
+    source_implementation_tree: str,
+    tool_sha256: str,
+) -> ValidatedRehearsalProof:
+    normalized_proof = proof_path.expanduser().resolve(strict=True)
+    actual_sha256 = _sha256_file(normalized_proof)
+    if actual_sha256 != expected_sha256:
+        fail(
+            "validate rehearsal proof",
+            "rehearsal proof SHA256 mismatch",
+            {"expected": expected_sha256, "actual": actual_sha256},
+        )
+    companion_path = normalized_proof.with_name(f"{normalized_proof.name}.sha256")
+    _validate_sha256_companion(
+        companion_path,
+        expected_path=normalized_proof,
+        expected_sha256=actual_sha256,
+    )
+    proof = _load_json_object(normalized_proof, operation="validate rehearsal proof")
+    missing = sorted(REQUIRED_REHEARSAL_PROOF_FIELDS - set(proof))
+    if missing:
+        fail("validate rehearsal proof", "missing rehearsal proof field", missing)
+    _require_field(
+        proof,
+        "schema_version",
+        REHEARSAL_PROOF_SCHEMA_VERSION,
+        operation="validate rehearsal proof",
+    )
+    _require_field(
+        proof,
+        "source_implementation_commit",
+        source_implementation_commit,
+        operation="validate rehearsal proof",
+    )
+    _require_field(
+        proof,
+        "source_implementation_tree",
+        source_implementation_tree,
+        operation="validate rehearsal proof",
+    )
+    _require_field(proof, "tool_sha256", tool_sha256, operation="validate rehearsal proof")
+    _require_field(
+        proof,
+        "final_status",
+        "MUTATION_REHEARSAL_COMPLETE_NON_CERTIFIED",
+        operation="validate rehearsal proof",
+    )
+    _require_field(
+        proof,
+        "certification_status",
+        "local-only-non-certified",
+        operation="validate rehearsal proof",
+    )
+    requested_home = Path(str(proof["requested_codex_home"]))
+    if _is_under_path(requested_home, REAL_CODEX_HOME):
+        fail(
+            "validate rehearsal proof",
+            "requested Codex home resolves under real home",
+            str(requested_home),
+        )
+    delta_status = proof["source_to_rehearsal_execution_delta_status"]
+    if delta_status not in {
+        "identical",
+        "approved-docs-evidence-only",
+    }:
+        fail(
+            "validate rehearsal proof",
+            "invalid source-to-rehearsal delta status",
+            delta_status,
+        )
+    if delta_status == "identical":
+        _require_field(
+            proof,
+            "execution_head",
+            source_implementation_commit,
+            operation="validate rehearsal proof",
+        )
+        _require_field(
+            proof,
+            "execution_tree",
+            source_implementation_tree,
+            operation="validate rehearsal proof",
+        )
+    artifact_root = normalized_proof.parent.parent
+    referenced_artifacts = _validate_referenced_artifacts(
+        proof,
+        artifact_root=artifact_root,
+    )
+    _validate_source_to_rehearsal_delta_proof(
+        proof,
+        referenced_artifacts,
+        artifact_root=artifact_root,
+        source_implementation_commit=source_implementation_commit,
+        source_implementation_tree=source_implementation_tree,
+    )
+    _validate_seed_manifest(
+        proof,
+        artifact_root=artifact_root,
+        expected_requested_home=str(requested_home),
+    )
+    _validate_digest_referenced_json(
+        proof,
+        referenced_artifacts,
+        "isolated_dry_run_proof_sha256",
+        artifact_root=artifact_root,
+        expected_fields={"terminal_plan_status": "guarded-refresh-required"},
+    )
+    _validate_digest_referenced_json(
+        proof,
+        referenced_artifacts,
+        "app_server_authority_proof_sha256",
+        artifact_root=artifact_root,
+        expected_fields={"requested_codex_home": str(requested_home)},
+    )
+    _validate_no_real_home_authority_proof(
+        proof,
+        referenced_artifacts,
+        artifact_root=artifact_root,
+        expected_requested_home=str(requested_home),
+    )
+    _validate_digest_referenced_json(
+        proof,
+        referenced_artifacts,
+        "smoke_summary_sha256",
+        artifact_root=artifact_root,
+        expected_fields={"final_status": "passed"},
+    )
+    return ValidatedRehearsalProof(
+        proof_path=str(normalized_proof),
+        proof_sha256=actual_sha256,
+        companion_path=str(companion_path),
+        artifact_root=str(artifact_root),
+        payload=proof,
+        referenced_artifacts=referenced_artifacts,
+    )
+
+
+def capture_rehearsal_proof_bundle(
+    validated: ValidatedRehearsalProof,
+    *,
+    live_run_root: Path,
+) -> RehearsalProofCaptureResult:
+    capture_root = live_run_root / "rehearsal-proof-capture"
+    if capture_root.exists():
+        fail("capture rehearsal proof", "capture root already exists", str(capture_root))
+    artifact_root = Path(validated.artifact_root)
+    copy_plan: dict[str, Path] = {}
+    proof_path = Path(validated.proof_path)
+    companion_path = Path(validated.companion_path)
+    copy_plan[_relative_to_artifact_root(proof_path, artifact_root)] = proof_path
+    copy_plan[_relative_to_artifact_root(companion_path, artifact_root)] = companion_path
+    for artifact in validated.referenced_artifacts:
+        relative_path = artifact["relative_path"]
+        copy_plan[relative_path] = _resolve_referenced_artifact_path(
+            artifact_root,
+            relative_path,
+            operation="capture rehearsal proof",
+        )
+
+    captured_at = datetime.now(UTC).isoformat()
+    captured_artifacts: list[dict[str, object]] = []
+    for relative_path in sorted(copy_plan):
+        source_path = copy_plan[relative_path]
+        captured_path = capture_root / relative_path
+        _copy_private_file(source_path, captured_path)
+        digest = _sha256_file(captured_path)
+        captured_artifacts.append(
+            {
+                "relative_path": relative_path,
+                "source_path": str(source_path),
+                "captured_path": str(captured_path),
+                "sha256": digest,
+                "byte_size": captured_path.stat().st_size,
+                "captured_at": captured_at,
+            }
+        )
+    manifest_path = capture_root / "capture-manifest.json"
+    manifest = {
+        "schema_version": REHEARSAL_CAPTURE_SCHEMA_VERSION,
+        "rehearsal_proof_path": validated.proof_path,
+        "rehearsal_proof_sha256": validated.proof_sha256,
+        "source_artifact_root": validated.artifact_root,
+        "capture_root": str(capture_root),
+        "captured_artifacts": captured_artifacts,
+    }
+    _write_private_json(manifest_path, manifest)
+    _fsync_file_and_parent(manifest_path)
+    _validate_capture_manifest(manifest)
+    return RehearsalProofCaptureResult(
+        capture_root=str(capture_root),
+        capture_manifest_path=str(manifest_path),
+        capture_manifest_sha256=_sha256_file(manifest_path),
+    )
 
 
 def verify_source_execution_identity(
@@ -455,6 +723,10 @@ def run_guarded_refresh_orchestration(
             phase_log.append("before-snapshot")
 
             launch_authority = prove_app_server_home_authority(context)
+            launch_authority_proof_path = context.local_only_run_root / (
+                "app-server-authority.proof.json"
+            )
+            _write_private_json(launch_authority_proof_path, launch_authority)
             launch_authority_sha256 = authority_digest(launch_authority)
             _replace_state(
                 context,
@@ -558,11 +830,90 @@ def run_guarded_refresh_orchestration(
             )
             if isolated_rehearsal:
                 rehearsal_proof_path = context.local_only_run_root / "rehearsal-proof.json"
+                smoke_summary_path = context.local_only_run_root / "standard-smoke.summary.json"
+                if not smoke_summary_path.exists():
+                    _write_private_json(smoke_summary_path, smoke_summary)
+                no_real_home_proof_path = context.local_only_run_root / (
+                    "no-real-home-authority.proof.json"
+                )
+                _write_private_json(
+                    no_real_home_proof_path,
+                    {
+                        "schema_version": NO_REAL_HOME_AUTHORITY_SCHEMA_VERSION,
+                        "run_id": context.run_id,
+                        "requested_codex_home": str(context.codex_home),
+                        "authority_result": "isolated-home-authority-proven",
+                        "no_real_home_paths": True,
+                        "resolved_config_path": str(context.codex_home / "config.toml"),
+                        "resolved_plugin_cache_root": str(
+                            context.codex_home / "plugins/cache/turbo-mode"
+                        ),
+                        "resolved_local_only_root": str(
+                            context.codex_home / "local-only/turbo-mode-refresh"
+                        ),
+                        "resolved_run_root": str(context.local_only_run_root),
+                        "resolved_handoff_plugin_root": str(
+                            context.codex_home
+                            / "plugins/cache/turbo-mode/handoff/1.6.0"
+                        ),
+                        "resolved_ticket_plugin_root": str(
+                            context.codex_home
+                            / "plugins/cache/turbo-mode/ticket/1.4.0"
+                        ),
+                        "resolved_ticket_hook_manifest_path": str(
+                            context.codex_home
+                            / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+                        ),
+                        "app_server_authority_proof_sha256": _sha256_file(
+                            launch_authority_proof_path
+                        ),
+                        "smoke_summary_sha256": _sha256_file(smoke_summary_path),
+                    },
+                )
+                seed_manifest_path, seed_manifest = _find_seed_manifest_for_rehearsal(context)
+                source_delta_proof_path = _require_existing_artifact_path(
+                    context.source_execution_identity_proof_path,
+                    operation="write rehearsal proof",
+                    reason="source execution identity proof missing",
+                )
+                referenced_artifacts = _build_rehearsal_referenced_artifacts(
+                    context.local_only_run_root.parent,
+                    (
+                        seed_manifest_path,
+                        Path(str(seed_manifest["post_seed_dry_run_path"])),
+                        source_delta_proof_path,
+                        launch_authority_proof_path,
+                        no_real_home_proof_path,
+                        smoke_summary_path,
+                    ),
+                )
                 _write_private_json(
                     rehearsal_proof_path,
                     {
-                        "schema_version": "turbo-mode-refresh-rehearsal-proof-v1",
-                        "run_id": context.run_id,
+                        "schema_version": REHEARSAL_PROOF_SCHEMA_VERSION,
+                        "rehearsal_run_id": context.run_id,
+                        "seed_run_id": seed_manifest["run_id"],
+                        "seed_manifest_path": _relative_to_artifact_root(
+                            seed_manifest_path,
+                            context.local_only_run_root.parent,
+                        ),
+                        "seed_manifest_sha256": _sha256_file(seed_manifest_path),
+                        "seed_expected_drift_paths_sha256": seed_manifest[
+                            "canonical_drift_paths_sha256"
+                        ],
+                        "seed_source_manifest_sha256": seed_manifest[
+                            "source_manifest_sha256"
+                        ],
+                        "seed_pre_refresh_cache_manifest_sha256": seed_manifest[
+                            "pre_refresh_isolated_cache_manifest_sha256"
+                        ],
+                        "seed_post_seed_dry_run_manifest_sha256": seed_manifest[
+                            "post_seed_dry_run_manifest_sha256"
+                        ],
+                        "isolated_dry_run_id": seed_manifest["post_seed_dry_run_id"],
+                        "isolated_dry_run_proof_sha256": seed_manifest[
+                            "post_seed_dry_run_manifest_sha256"
+                        ],
                         "source_implementation_commit": (context.source_implementation_commit),
                         "source_implementation_tree": context.source_implementation_tree,
                         "execution_head": context.execution_head,
@@ -583,17 +934,24 @@ def run_guarded_refresh_orchestration(
                             context.source_to_rehearsal_changed_paths_sha256
                         ),
                         "source_to_rehearsal_allowed_delta_proof_sha256": (
-                            context.source_to_rehearsal_allowed_delta_proof_sha256
+                            _sha256_file(source_delta_proof_path)
                         ),
+                        "app_server_authority_proof_sha256": _sha256_file(
+                            launch_authority_proof_path
+                        ),
+                        "no_real_home_authority_proof_sha256": _sha256_file(
+                            no_real_home_proof_path
+                        ),
+                        "smoke_summary_sha256": _sha256_file(smoke_summary_path),
+                        "final_status": final_status,
+                        "certification_status": "local-only-non-certified",
+                        "referenced_artifacts": referenced_artifacts,
                         "install_records_sha256": authority_digest(install_records),
                         "final_inventory_sha256": authority_digest(final_inventory),
                         "final_inventory_transcript_sha256": authority_digest(
                             final_inventory_transcript
                         ),
                         "source_cache_equality_sha256": authority_digest(equality),
-                        "smoke_summary_sha256": authority_digest(smoke_summary),
-                        "final_status": final_status,
-                        "certification_status": "local-only-non-certified",
                     },
                 )
                 rehearsal_proof_sha256 = _write_sha256_companion(rehearsal_proof_path)
@@ -976,6 +1334,10 @@ def install_plugins_via_app_server(
         remote_marketplace_name=None,
         allow_real_codex_home=context.codex_home == REAL_CODEX_HOME,
     )
+    pre_install_authority_path = context.local_only_run_root / (
+        "pre-install-target-authority.proof.json"
+    )
+    _write_private_json(pre_install_authority_path, pre_install_authority)
     install_requests = build_install_requests(
         pre_install_authority=pre_install_authority,
         expected_requested_codex_home=context.codex_home,
@@ -1024,9 +1386,15 @@ def install_plugins_via_app_server(
         fresh_child_post_install_transcript=fresh_child_transcript,
         same_child_ticket_hook_policy=same_child_ticket_hook_policy,
     )
+    install_authority_path = context.local_only_run_root / "install-authority.proof.json"
+    _write_private_json(install_authority_path, install_authority)
     return (
         {
             "kind": "install-authority",
+            "pre_install_target_authority_path": str(pre_install_authority_path),
+            "pre_install_target_authority_sha256": _sha256_file(pre_install_authority_path),
+            "install_authority_path": str(install_authority_path),
+            "install_authority_file_sha256": _sha256_file(install_authority_path),
             "install_authority": serialize_authority_record(install_authority),
             "install_authority_sha256": authority_digest(install_authority),
         },
@@ -1159,6 +1527,117 @@ def _refresh_paths(context: MutationContext) -> RefreshPaths:
     )
 
 
+def _find_seed_manifest_for_rehearsal(
+    context: MutationContext,
+) -> tuple[Path, dict[str, Any]]:
+    local_only_root = context.local_only_run_root.parent
+    candidates: list[tuple[Path, dict[str, Any]]] = []
+    for path in sorted(local_only_root.glob("*/seed-manifest.json")):
+        seed = _load_json_object(path, operation="find isolated seed manifest")
+        if (
+            seed.get("requested_codex_home") == str(context.codex_home)
+            and seed.get("source_implementation_commit")
+            == context.source_implementation_commit
+            and seed.get("source_implementation_tree") == context.source_implementation_tree
+            and seed.get("post_seed_terminal_status") == "guarded-refresh-required"
+            and seed.get("no_real_home_paths") is True
+        ):
+            candidates.append((path, seed))
+    if len(candidates) != 1:
+        fail(
+            "find isolated seed manifest",
+            "expected exactly one matching seed manifest",
+            [str(path) for path, _seed in candidates],
+        )
+    return candidates[0]
+
+
+def _require_existing_artifact_path(
+    raw_path: str | None,
+    *,
+    operation: str,
+    reason: str,
+) -> Path:
+    if raw_path is None:
+        fail(operation, reason, None)
+    path = Path(raw_path)
+    if not path.is_file():
+        fail(operation, reason, str(path))
+    return path
+
+
+def _build_rehearsal_referenced_artifacts(
+    artifact_root: Path,
+    paths: tuple[Path, ...],
+) -> list[dict[str, str]]:
+    artifacts: list[dict[str, str]] = []
+    for path in paths:
+        relative_path = _relative_to_artifact_root(path, artifact_root)
+        artifacts.append({"relative_path": relative_path, "sha256": _sha256_file(path)})
+    artifacts.sort(key=lambda item: item["relative_path"])
+    return artifacts
+
+
+def _relative_to_artifact_root(path: Path, artifact_root: Path) -> str:
+    try:
+        return path.resolve(strict=False).relative_to(
+            artifact_root.resolve(strict=False)
+        ).as_posix()
+    except ValueError:
+        fail(
+            "resolve rehearsal artifact path",
+            "artifact is outside rehearsal artifact root",
+            {"artifact": str(path), "artifact_root": str(artifact_root)},
+        )
+
+
+def _copy_private_file(source_path: Path, destination_path: Path) -> None:
+    if source_path.is_symlink() or not source_path.is_file():
+        fail("capture rehearsal proof", "source artifact missing", str(source_path))
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    destination_path.parent.chmod(0o700)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(destination_path, flags, 0o600)
+    with source_path.open("rb") as source, os.fdopen(fd, "wb") as destination:
+        shutil.copyfileobj(source, destination)
+        destination.flush()
+        os.fsync(destination.fileno())
+    os.chmod(destination_path, 0o600)
+    _fsync_directory(destination_path.parent)
+
+
+def _fsync_file_and_parent(path: Path) -> None:
+    with path.open("rb") as handle:
+        os.fsync(handle.fileno())
+    _fsync_directory(path.parent)
+
+
+def _fsync_directory(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _validate_capture_manifest(manifest: dict[str, Any]) -> None:
+    artifacts = manifest.get("captured_artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        fail("capture rehearsal proof", "capture manifest has no artifacts", manifest)
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            fail("capture rehearsal proof", "capture manifest artifact invalid", artifact)
+        captured_path = Path(str(artifact.get("captured_path")))
+        if not captured_path.is_file():
+            fail("capture rehearsal proof", "captured artifact missing", str(captured_path))
+        if _sha256_file(captured_path) != artifact.get("sha256"):
+            fail("capture rehearsal proof", "captured artifact SHA256 mismatch", artifact)
+        if captured_path.stat().st_size != artifact.get("byte_size"):
+            fail("capture rehearsal proof", "captured artifact byte size mismatch", artifact)
+
+
 def _validate_launch_authority(
     authority: AppServerLaunchAuthority,
     *,
@@ -1173,12 +1652,485 @@ def _validate_launch_authority(
         )
     if context.codex_home != REAL_CODEX_HOME:
         for value in _authority_strings(authority, transcript):
-            if value.startswith(f"{REAL_CODEX_HOME}/"):
+            if _contains_real_home_path(value):
                 fail(
                     "prove app-server home authority",
                     "isolated authority resolved live Codex home path",
                     value,
                 )
+
+
+def _validate_sha256_companion(
+    companion_path: Path,
+    *,
+    expected_path: Path,
+    expected_sha256: str,
+) -> None:
+    if not companion_path.is_file():
+        fail("validate rehearsal proof", "SHA256 companion is missing", str(companion_path))
+    lines = companion_path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        fail("validate rehearsal proof", "SHA256 companion is empty", str(companion_path))
+    first_line = lines[0]
+    parts = first_line.split()
+    if not parts or parts[0] != expected_sha256:
+        fail(
+            "validate rehearsal proof",
+            "SHA256 companion digest mismatch",
+            {"expected": expected_sha256, "actual": parts[0] if parts else None},
+        )
+    if len(parts) > 1 and Path(parts[1]).name != expected_path.name:
+        fail(
+            "validate rehearsal proof",
+            "SHA256 companion path mismatch",
+            {"expected": expected_path.name, "actual": parts[1]},
+        )
+
+
+def _load_json_object(path: Path, *, operation: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        fail(operation, str(exc), str(path))
+    if not isinstance(payload, dict):
+        fail(operation, "JSON payload is not an object", type(payload).__name__)
+    return payload
+
+
+def _require_field(
+    payload: dict[str, Any],
+    key: str,
+    expected: object,
+    *,
+    operation: str,
+) -> None:
+    actual = payload.get(key)
+    if actual != expected:
+        fail(
+            operation,
+            f"{key} mismatch",
+            {"expected": expected, "actual": actual},
+        )
+
+
+def _validate_referenced_artifacts(
+    proof: dict[str, Any],
+    *,
+    artifact_root: Path,
+) -> tuple[dict[str, str], ...]:
+    raw_artifacts = proof.get("referenced_artifacts")
+    if not isinstance(raw_artifacts, list) or not raw_artifacts:
+        fail(
+            "validate rehearsal proof",
+            "referenced_artifacts must be a non-empty list",
+            raw_artifacts,
+        )
+    artifacts: list[dict[str, str]] = []
+    last_relative_path = ""
+    observed_digests: set[str] = set()
+    for raw in raw_artifacts:
+        if not isinstance(raw, dict):
+            fail("validate rehearsal proof", "referenced artifact is not an object", raw)
+        relative_path = raw.get("relative_path")
+        expected_sha256 = raw.get("sha256")
+        if not isinstance(relative_path, str) or not isinstance(expected_sha256, str):
+            fail("validate rehearsal proof", "referenced artifact fields invalid", raw)
+        relative = Path(relative_path)
+        if relative.is_absolute() or ".." in relative.parts or relative_path == "":
+            fail("validate rehearsal proof", "referenced artifact path invalid", relative_path)
+        if relative_path <= last_relative_path:
+            fail(
+                "validate rehearsal proof",
+                "referenced_artifacts must be sorted by relative_path",
+                raw_artifacts,
+            )
+        path = _resolve_referenced_artifact_path(
+            artifact_root,
+            relative_path,
+            operation="validate rehearsal proof",
+        )
+        actual_sha256 = _sha256_file(path)
+        if actual_sha256 != expected_sha256:
+            fail(
+                "validate rehearsal proof",
+                "referenced artifact SHA256 mismatch",
+                {
+                    "relative_path": relative_path,
+                    "expected": expected_sha256,
+                    "actual": actual_sha256,
+                },
+            )
+        _reject_real_home_strings_in_json_artifact(path)
+        artifacts.append({"relative_path": relative_path, "sha256": expected_sha256})
+        observed_digests.add(expected_sha256)
+        last_relative_path = relative_path
+    missing_digest_fields = [
+        field
+        for field in REQUIRED_REHEARSAL_ARTIFACT_DIGEST_FIELDS
+        if proof.get(field) not in observed_digests
+    ]
+    if missing_digest_fields:
+        fail(
+            "validate rehearsal proof",
+            "rehearsal digest field is not backed by referenced_artifacts",
+            missing_digest_fields,
+        )
+    return tuple(artifacts)
+
+
+def _resolve_referenced_artifact_path(
+    artifact_root: Path,
+    relative_path: str,
+    *,
+    operation: str,
+) -> Path:
+    relative = Path(relative_path)
+    if relative.is_absolute() or ".." in relative.parts or relative_path == "":
+        fail(operation, "referenced artifact path invalid", relative_path)
+    root = artifact_root.expanduser().resolve(strict=True)
+    candidate = root
+    for part in relative.parts:
+        candidate = candidate / part
+        if candidate.is_symlink():
+            fail(operation, "referenced artifact path uses symlink", str(candidate))
+    if not candidate.is_file():
+        fail(operation, "referenced artifact is missing", str(candidate))
+    resolved = candidate.resolve(strict=True)
+    if not _is_under_path(resolved, root):
+        fail(
+            operation,
+            "referenced artifact escapes artifact root",
+            {"artifact": str(candidate), "artifact_root": str(root)},
+        )
+    return candidate
+
+
+def _reject_real_home_strings_in_json_artifact(path: Path) -> None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return
+    for value in _strings_in(payload):
+        if _contains_real_home_path(value):
+            fail(
+                "validate rehearsal proof",
+                "referenced artifact resolves real Codex home path",
+                {"artifact": str(path), "value": value},
+        )
+
+
+def _validate_source_to_rehearsal_delta_proof(
+    proof: dict[str, Any],
+    artifacts: tuple[dict[str, str], ...],
+    *,
+    artifact_root: Path,
+    source_implementation_commit: str,
+    source_implementation_tree: str,
+) -> None:
+    _path, delta_proof = _load_digest_referenced_json(
+        proof,
+        artifacts,
+        "source_to_rehearsal_allowed_delta_proof_sha256",
+        artifact_root=artifact_root,
+    )
+    expected_fields = {
+        "source_implementation_commit": source_implementation_commit,
+        "source_implementation_tree": source_implementation_tree,
+        "execution_head": proof["execution_head"],
+        "execution_tree": proof["execution_tree"],
+    }
+    for key, expected in expected_fields.items():
+        if delta_proof.get(key) != expected:
+            fail(
+                "validate rehearsal proof",
+                f"source-to-rehearsal proof {key} mismatch",
+                {"expected": expected, "actual": delta_proof.get(key)},
+            )
+
+    raw_changed_paths = delta_proof.get("changed_paths")
+    if not isinstance(raw_changed_paths, list) or not all(
+        isinstance(path, str) for path in raw_changed_paths
+    ):
+        fail(
+            "validate rehearsal proof",
+            "source-to-rehearsal proof changed_paths invalid",
+            raw_changed_paths,
+        )
+    changed_paths = tuple(raw_changed_paths)
+    invalid_paths = [
+        path
+        for path in changed_paths
+        if path == "" or Path(path).is_absolute() or ".." in Path(path).parts
+    ]
+    if invalid_paths:
+        fail(
+            "validate rehearsal proof",
+            "source-to-rehearsal proof changed_paths invalid",
+            invalid_paths,
+        )
+    if len(set(changed_paths)) != len(changed_paths):
+        fail(
+            "validate rehearsal proof",
+            "source-to-rehearsal proof changed_paths contain duplicates",
+            list(changed_paths),
+        )
+    expected_changed_paths_sha256 = authority_digest(changed_paths)
+    if proof["source_to_rehearsal_changed_paths_sha256"] != expected_changed_paths_sha256:
+        fail(
+            "validate rehearsal proof",
+            "source-to-rehearsal changed paths SHA256 mismatch",
+            {
+                "expected": expected_changed_paths_sha256,
+                "actual": proof["source_to_rehearsal_changed_paths_sha256"],
+            },
+        )
+
+    raw_untracked = delta_proof.get("untracked_relevant_paths")
+    if raw_untracked != []:
+        fail(
+            "validate rehearsal proof",
+            "source-to-rehearsal proof has untracked relevant paths",
+            raw_untracked,
+        )
+
+    delta_status = proof["source_to_rehearsal_execution_delta_status"]
+    if delta_status == "identical":
+        if changed_paths:
+            fail(
+                "validate rehearsal proof",
+                "identical source-to-rehearsal proof has changed paths",
+                list(changed_paths),
+            )
+        if delta_proof.get("allowed_delta_status") != "none":
+            fail(
+                "validate rehearsal proof",
+                "source-to-rehearsal proof allowed_delta_status mismatch",
+                {"expected": "none", "actual": delta_proof.get("allowed_delta_status")},
+            )
+        return
+
+    if delta_proof.get("allowed_delta_status") != "docs-evidence-only":
+        fail(
+            "validate rehearsal proof",
+            "source-to-rehearsal proof allowed_delta_status mismatch",
+            {
+                "expected": "docs-evidence-only",
+                "actual": delta_proof.get("allowed_delta_status"),
+            },
+        )
+    if not changed_paths:
+        fail(
+            "validate rehearsal proof",
+            "approved source-to-rehearsal proof has no changed paths",
+            changed_paths,
+        )
+    disallowed_paths = [
+        path for path in changed_paths if not _is_allowed_delta_path(path)
+    ]
+    if disallowed_paths:
+        fail(
+            "validate rehearsal proof",
+            "disallowed source-to-rehearsal proof paths",
+            disallowed_paths,
+        )
+
+
+def _validate_seed_manifest(
+    proof: dict[str, Any],
+    *,
+    artifact_root: Path,
+    expected_requested_home: str,
+) -> None:
+    seed_path = _resolve_proof_artifact_path(
+        artifact_root,
+        str(proof["seed_manifest_path"]),
+    )
+    seed = _load_json_object(seed_path, operation="validate rehearsal proof")
+    if _sha256_file(seed_path) != proof["seed_manifest_sha256"]:
+        fail("validate rehearsal proof", "seed manifest SHA256 mismatch", str(seed_path))
+    expected_fields = {
+        "run_id": proof["seed_run_id"],
+        "requested_codex_home": expected_requested_home,
+        "canonical_drift_paths_sha256": proof["seed_expected_drift_paths_sha256"],
+        "source_manifest_sha256": proof["seed_source_manifest_sha256"],
+        "pre_refresh_isolated_cache_manifest_sha256": proof[
+            "seed_pre_refresh_cache_manifest_sha256"
+        ],
+        "post_seed_dry_run_manifest_sha256": proof[
+            "seed_post_seed_dry_run_manifest_sha256"
+        ],
+        "post_seed_terminal_status": "guarded-refresh-required",
+        "no_real_home_paths": True,
+    }
+    for key, expected in expected_fields.items():
+        if seed.get(key) != expected:
+            fail(
+                "validate rehearsal proof",
+                f"seed manifest {key} mismatch",
+                {"expected": expected, "actual": seed.get(key)},
+            )
+    if tuple(seed.get("canonical_drift_paths", ())) != PLAN05_DRIFT_PATHS:
+        fail(
+            "validate rehearsal proof",
+            "seed manifest drift path set mismatch",
+            seed.get("canonical_drift_paths"),
+        )
+
+
+def _resolve_proof_artifact_path(artifact_root: Path, value: str) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        artifact_root_resolved = artifact_root.resolve(strict=True)
+        try:
+            relative_path = path.resolve(strict=True).relative_to(
+                artifact_root_resolved
+            ).as_posix()
+        except ValueError:
+            fail(
+                "validate rehearsal proof",
+                "proof artifact path is outside rehearsal artifact root",
+                {"artifact": str(path), "artifact_root": str(artifact_root_resolved)},
+            )
+    else:
+        relative_path = value
+    return _resolve_referenced_artifact_path(
+        artifact_root,
+        relative_path,
+        operation="validate rehearsal proof",
+    )
+
+
+def _load_digest_referenced_json(
+    proof: dict[str, Any],
+    artifacts: tuple[dict[str, str], ...],
+    digest_field: str,
+    *,
+    artifact_root: Path,
+) -> tuple[Path, dict[str, Any]]:
+    digest = proof[digest_field]
+    matches = [artifact for artifact in artifacts if artifact["sha256"] == digest]
+    if not matches:
+        fail(
+            "validate rehearsal proof",
+            "digest field has no referenced artifact",
+            digest_field,
+        )
+    for artifact in matches:
+        path = _resolve_referenced_artifact_path(
+            artifact_root,
+            artifact["relative_path"],
+            operation="validate rehearsal proof",
+        )
+        payload = _load_json_object(path, operation="validate rehearsal proof")
+        return path, payload
+    fail(
+        "validate rehearsal proof",
+        "digest field has no JSON referenced artifact",
+        digest_field,
+    )
+
+
+def _validate_digest_referenced_json(
+    proof: dict[str, Any],
+    artifacts: tuple[dict[str, str], ...],
+    digest_field: str,
+    *,
+    artifact_root: Path,
+    expected_fields: dict[str, object],
+) -> None:
+    _path, payload = _load_digest_referenced_json(
+        proof,
+        artifacts,
+        digest_field,
+        artifact_root=artifact_root,
+    )
+    if all(payload.get(key) == expected for key, expected in expected_fields.items()):
+        return
+    fail(
+        "validate rehearsal proof",
+        "referenced artifact content mismatch",
+        {"digest_field": digest_field, "expected_fields": expected_fields},
+    )
+
+
+def _validate_no_real_home_authority_proof(
+    proof: dict[str, Any],
+    artifacts: tuple[dict[str, str], ...],
+    *,
+    artifact_root: Path,
+    expected_requested_home: str,
+) -> None:
+    _path, payload = _load_digest_referenced_json(
+        proof,
+        artifacts,
+        "no_real_home_authority_proof_sha256",
+        artifact_root=artifact_root,
+    )
+    expected_fields = {
+        "schema_version": NO_REAL_HOME_AUTHORITY_SCHEMA_VERSION,
+        "requested_codex_home": expected_requested_home,
+        "authority_result": "isolated-home-authority-proven",
+        "no_real_home_paths": True,
+        "app_server_authority_proof_sha256": proof["app_server_authority_proof_sha256"],
+        "smoke_summary_sha256": proof["smoke_summary_sha256"],
+    }
+    for key, expected in expected_fields.items():
+        if payload.get(key) != expected:
+            fail(
+                "validate rehearsal proof",
+                f"no-real-home authority proof {key} mismatch",
+                {"expected": expected, "actual": payload.get(key)},
+            )
+
+    requested_home = Path(expected_requested_home)
+    if not requested_home.is_absolute():
+        fail(
+            "validate rehearsal proof",
+            "requested Codex home is not absolute",
+            expected_requested_home,
+        )
+    expected_paths = {
+        "resolved_config_path": requested_home / "config.toml",
+        "resolved_plugin_cache_root": requested_home / "plugins/cache/turbo-mode",
+        "resolved_local_only_root": requested_home / "local-only/turbo-mode-refresh",
+        "resolved_run_root": (
+            requested_home
+            / "local-only/turbo-mode-refresh"
+            / str(proof["rehearsal_run_id"])
+        ),
+        "resolved_handoff_plugin_root": (
+            requested_home / "plugins/cache/turbo-mode/handoff/1.6.0"
+        ),
+        "resolved_ticket_plugin_root": (
+            requested_home / "plugins/cache/turbo-mode/ticket/1.4.0"
+        ),
+        "resolved_ticket_hook_manifest_path": (
+            requested_home / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+        ),
+    }
+    for field, expected_path in expected_paths.items():
+        actual = payload.get(field)
+        if actual != str(expected_path):
+            fail(
+                "validate rehearsal proof",
+                f"no-real-home authority proof {field} mismatch",
+                {"expected": str(expected_path), "actual": actual},
+            )
+    path_values = [payload[field] for field in NO_REAL_HOME_AUTHORITY_PATH_FIELDS]
+    for value in path_values:
+        path = Path(str(value))
+        if not _is_under_path(path, requested_home):
+            fail(
+                "validate rehearsal proof",
+                "no-real-home authority proof path outside requested home",
+                str(path),
+            )
+        if _is_under_path(path, REAL_CODEX_HOME):
+            fail(
+                "validate rehearsal proof",
+                "no-real-home authority proof resolves real Codex home path",
+                str(path),
+            )
 
 
 def _authority_strings(
@@ -1203,6 +2155,11 @@ def _strings_in(value: object) -> list[str]:
             result.extend(_strings_in(inner))
         return result
     return []
+
+
+def _contains_real_home_path(value: str) -> bool:
+    real_home = str(REAL_CODEX_HOME)
+    return value == real_home or f"{real_home}/" in value
 
 
 def _read_existing_run_state(context: MutationContext) -> RunState:

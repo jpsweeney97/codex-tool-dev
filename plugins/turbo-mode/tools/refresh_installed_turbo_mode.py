@@ -30,6 +30,7 @@ from refresh.mutation import (  # noqa: E402
     run_guarded_refresh_orchestration,
     run_guarded_refresh_recovery,
     seed_isolated_rehearsal_home,
+    validate_rehearsal_proof_bundle,
     verify_source_execution_identity,
 )
 from refresh.planner import plan_refresh  # noqa: E402
@@ -362,8 +363,18 @@ def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentPars
     if args.source_implementation_tree is None:
         parser.error("--source-implementation-tree is required for --guarded-refresh")
     try:
+        if is_real_home:
+            assert args.rehearsal_proof is not None
+            assert args.rehearsal_proof_sha256 is not None
+            validate_rehearsal_proof_bundle(
+                proof_path=args.rehearsal_proof,
+                expected_sha256=args.rehearsal_proof_sha256,
+                source_implementation_commit=args.source_implementation_commit,
+                source_implementation_tree=args.source_implementation_tree,
+                tool_sha256=sha256_file(CURRENT_FILE),
+            )
         ensure_no_active_run_state_markers(codex_home / "local-only/turbo-mode-refresh")
-    except RefreshError as exc:
+    except (RefreshError, OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     if is_real_home:

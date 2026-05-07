@@ -778,11 +778,16 @@ def test_cli_guarded_refresh_rejects_real_home_isolated_rehearsal_before_writes(
     )
 
 
-def test_cli_guarded_refresh_blocks_real_home_after_required_proof_args_in_this_slice(
+def test_cli_guarded_refresh_rejects_thin_real_home_rehearsal_proof_before_legacy_block(
     tmp_path: Path,
 ) -> None:
     proof = tmp_path / "proof.json"
     proof.write_text("{}\n", encoding="utf-8")
+    proof_sha256 = hashlib.sha256(proof.read_bytes()).hexdigest()
+    proof.with_name(f"{proof.name}.sha256").write_text(
+        f"{proof_sha256}  {proof}\n",
+        encoding="utf-8",
+    )
 
     completed = run_tool(
         [
@@ -793,7 +798,7 @@ def test_cli_guarded_refresh_blocks_real_home_after_required_proof_args_in_this_
             "--rehearsal-proof",
             str(proof),
             "--rehearsal-proof-sha256",
-            "0" * 64,
+            proof_sha256,
             "--source-implementation-commit",
             "source",
             "--source-implementation-tree",
@@ -802,7 +807,8 @@ def test_cli_guarded_refresh_blocks_real_home_after_required_proof_args_in_this_
     )
 
     assert completed.returncode == 1
-    assert "real guarded refresh blocked" in completed.stderr
+    assert "missing rehearsal proof field" in completed.stderr
+    assert "real guarded refresh blocked" not in completed.stderr
 
 
 def test_cli_seed_isolated_rehearsal_home_rejects_real_home_before_writes(
