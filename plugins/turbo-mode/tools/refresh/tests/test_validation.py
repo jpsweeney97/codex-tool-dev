@@ -923,6 +923,110 @@ def test_guarded_final_replay_allows_only_published_summary_dirty_path(
     assert "relevant paths dirty" in rejected.stderr
 
 
+def test_retained_run_metadata_uses_certification_identity_for_split_root(
+    tmp_path: Path,
+) -> None:
+    case = build_candidate_summary(tmp_path)
+    guarded = guarded_payload(case)
+    retained = {
+        **guarded,
+        "certification_mode": "retained-run",
+        "certification_source_commit": guarded["source_implementation_commit"],
+        "certification_source_tree": guarded["source_implementation_tree"],
+        "certification_execution_head": guarded["execution_head"],
+        "certification_execution_tree": guarded["execution_tree"],
+        "retained_summary_path": (
+            "plugins/turbo-mode/evidence/refresh/run-1.retained.summary.json"
+        ),
+        "original_run_final_status": "MUTATION_COMPLETE_EVIDENCE_FAILED",
+        "retained_certification_outcome": "retained-certified",
+        "prior_summary_path_state": "none",
+        "retained_no_mutation_proof_sha256": "1" * 64,
+        "rehearsal_proof_capture_manifest_sha256": "2" * 64,
+        "prior_failed_summary_path": None,
+        "prior_failed_summary_sha256": None,
+        "prior_failed_summary_status": None,
+    }
+    retained["source_implementation_commit"] = "0" * 40
+    retained["source_implementation_tree"] = "0" * 40
+    summary = case["run_root"] / "retained.candidate.summary.json"
+    write_json(summary, retained)
+    metadata_summary = case["run_root"] / "retained-metadata.summary.json"
+
+    completed = run_metadata(
+        [
+            *guarded_common_args(case, summary=summary, mode="candidate"),
+            "--summary-output",
+            str(metadata_summary),
+        ]
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(metadata_summary.read_text(encoding="utf-8"))
+    assert payload["certification_mode"] == "retained-run"
+    assert payload["certification_source_commit"] == retained["certification_source_commit"]
+
+
+def test_retained_final_replay_allows_only_retained_summary_dirty_path(
+    tmp_path: Path,
+) -> None:
+    case = build_candidate_summary(tmp_path)
+    retained_published = (
+        case["repo_root"] / "plugins/turbo-mode/evidence/refresh/run-1.retained.summary.json"
+    )
+    case = {**case, "published": retained_published}
+    retained = {
+        **guarded_payload(case),
+        "certification_mode": "retained-run",
+        "certification_source_commit": git(case["repo_root"], "rev-parse", "HEAD"),
+        "certification_source_tree": git(case["repo_root"], "rev-parse", "HEAD^{tree}"),
+        "certification_execution_head": git(case["repo_root"], "rev-parse", "HEAD"),
+        "certification_execution_tree": git(case["repo_root"], "rev-parse", "HEAD^{tree}"),
+        "retained_summary_path": (
+            "plugins/turbo-mode/evidence/refresh/run-1.retained.summary.json"
+        ),
+        "original_run_final_status": "MUTATION_COMPLETE_EVIDENCE_FAILED",
+        "retained_certification_outcome": "retained-certified",
+        "prior_summary_path_state": "none",
+        "retained_no_mutation_proof_sha256": "1" * 64,
+        "rehearsal_proof_capture_manifest_sha256": "2" * 64,
+        "prior_failed_summary_path": None,
+        "prior_failed_summary_sha256": None,
+        "prior_failed_summary_status": None,
+    }
+    candidate = case["run_root"] / "retained.candidate.summary.json"
+    write_json(candidate, retained)
+    metadata_summary = case["run_root"] / "retained-metadata.summary.json"
+    metadata = run_metadata(
+        [
+            *guarded_common_args(case, summary=candidate, mode="candidate"),
+            "--summary-output",
+            str(metadata_summary),
+        ]
+    )
+    assert metadata.returncode == 0, metadata.stderr
+    final_payload = {
+        **retained,
+        "metadata_validation_summary_sha256": sha256_file(metadata_summary),
+    }
+    final_summary = case["run_root"] / "retained.final.summary.json"
+    write_json(final_summary, final_payload)
+    retained_published.parent.mkdir(parents=True, exist_ok=True)
+    retained_published.write_text("published dirty\n", encoding="utf-8")
+
+    allowed = run_metadata(
+        [
+            *guarded_common_args(case, summary=final_summary, mode="final"),
+            "--candidate-summary",
+            str(candidate),
+            "--existing-validation-summary",
+            str(metadata_summary),
+        ]
+    )
+
+    assert allowed.returncode == 0, allowed.stderr
+
+
 def test_metadata_validator_rejects_stale_existing_candidate_summary(tmp_path: Path) -> None:
     case = build_candidate_summary(tmp_path)
     metadata_summary = case["run_root"] / "metadata-validation.summary.json"

@@ -32,6 +32,7 @@ from refresh.mutation import (  # noqa: E402
     verify_source_execution_identity,
 )
 from refresh.planner import plan_refresh  # noqa: E402
+from refresh.retained_run import certify_retained_run  # noqa: E402
 from refresh.validation import assert_commit_safe_payload  # noqa: E402
 
 
@@ -45,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     modes.add_argument("--refresh", action="store_true")
     modes.add_argument("--guarded-refresh", action="store_true")
     modes.add_argument("--recover", metavar="RUN_ID")
+    modes.add_argument("--certify-retained-run", metavar="RUN_ID")
     modes.add_argument("--seed-isolated-rehearsal-home", action="store_true")
     parser.add_argument("--smoke", choices=("light", "standard"))
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
@@ -77,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
         return seed_isolated_rehearsal_home_main(args, parser)
     if args.recover is not None:
         return recover_main(args, parser)
+    if args.certify_retained_run is not None:
+        return certify_retained_run_main(args, parser)
     if args.guarded_refresh:
         return guarded_refresh_main(args, parser)
     mode = "plan-refresh" if args.plan_refresh else "dry-run"
@@ -484,6 +488,56 @@ def recover_main(args: argparse.Namespace, parser: argparse.ArgumentParser) -> i
         print(f"recovery final_status: {result.final_status}")
         print(f"final_status_path: {result.final_status_path}")
     return 0 if result.final_status == "RECOVERY_COMPLETE" else 1
+
+
+def certify_retained_run_main(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+) -> int:
+    if args.inventory_check:
+        parser.error("--inventory-check is not accepted with --certify-retained-run")
+    if args.record_summary or args.no_record_summary:
+        parser.error("--record-summary is not accepted with --certify-retained-run")
+    if args.require_terminal_status is not None:
+        parser.error("--require-terminal-status is not accepted with --certify-retained-run")
+    if args.summary_output is not None:
+        parser.error("--summary-output is not accepted with --certify-retained-run")
+    if args.isolated_rehearsal:
+        parser.error("--isolated-rehearsal is not accepted with --certify-retained-run")
+    if args.rehearsal_proof is not None or args.rehearsal_proof_sha256 is not None:
+        parser.error("--rehearsal-proof is not accepted with --certify-retained-run")
+    if args.source_implementation_commit is not None or args.source_implementation_tree is not None:
+        parser.error(
+            "--source-implementation-commit is not accepted with --certify-retained-run"
+        )
+
+    run_id = str(args.certify_retained_run)
+    try:
+        result = certify_retained_run(
+            run_id=run_id,
+            repo_root=args.repo_root,
+            codex_home=args.codex_home,
+        )
+    except (RefreshError, ValueError, OSError, subprocess.CalledProcessError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload = {
+        "run_id": run_id,
+        "mode": "certify-retained-run",
+        "outcome": result.outcome,
+        "final_status": result.final_status,
+        "published_summary_path": result.published_summary_path,
+        "retained_certification_status_path": result.status_path,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"retained certification outcome: {result.outcome}")
+        print(f"final_status: {result.final_status}")
+        print(f"published_summary_path: {result.published_summary_path}")
+        print(f"retained_certification_status_path: {result.status_path}")
+    return 0 if result.outcome == "retained-certified" else 1
 
 
 def git_rev_parse(repo_root: Path, revision: str) -> str:

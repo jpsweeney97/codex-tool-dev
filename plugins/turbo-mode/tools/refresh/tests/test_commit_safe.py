@@ -522,3 +522,82 @@ def test_guarded_refresh_summary_requires_validated_rehearsal_proof(
             metadata_validation_summary_sha256=None,
             redaction_validation_summary_sha256=None,
         )
+
+
+def test_retained_run_summary_records_certification_identity_and_forensics(
+    tmp_path: Path,
+) -> None:
+    evidence = guarded_refresh_evidence()
+
+    payload = commit_safe.build_retained_run_commit_safe_summary(
+        evidence,
+        run_id="run-1",
+        local_only_evidence_root=tmp_path / ".codex/local-only/turbo-mode-refresh/run-1",
+        tool_path=TOOL_PATH,
+        tool_sha256="tool-sha",
+        dirty_state={
+            "status": "clean-relevant-paths",
+            "relevant_paths_checked": [],
+            "post_commit_binding": False,
+        },
+        metadata_validation_summary_sha256=None,
+        redaction_validation_summary_sha256=None,
+        certification_source_commit="a" * 40,
+        certification_source_tree="b" * 40,
+        certification_execution_head="a" * 40,
+        certification_execution_tree="b" * 40,
+        retained_summary_path="plugins/turbo-mode/evidence/refresh/run-1.retained.summary.json",
+        original_run_final_status="MUTATION_COMPLETE_EVIDENCE_FAILED",
+        retained_certification_outcome="retained-certified",
+        prior_summary_path_state="forensic-demotion-retained",
+        retained_no_mutation_proof_sha256="c" * 64,
+        rehearsal_proof_capture_manifest_sha256="d" * 64,
+        prior_failed_summary_path=(
+            "plugins/turbo-mode/evidence/refresh/run-1.summary.failed.json"
+        ),
+        prior_failed_summary_sha256="e" * 64,
+        prior_failed_summary_status="forensic-demotion-retained",
+    )
+
+    assert payload["mode"] == "guarded-refresh"
+    assert payload["certification_mode"] == "retained-run"
+    assert payload["retained_summary_path"].endswith("run-1.retained.summary.json")
+    assert payload["prior_failed_summary_status"] == "forensic-demotion-retained"
+    validation.assert_commit_safe_payload(payload)
+
+
+def test_retained_run_summary_requires_forensic_digest_when_failed_summary_exists(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="prior failed summary digest"):
+        commit_safe.build_retained_run_commit_safe_summary(
+            guarded_refresh_evidence(),
+            run_id="run-1",
+            local_only_evidence_root=tmp_path / ".codex/local-only/turbo-mode-refresh/run-1",
+            tool_path=TOOL_PATH,
+            tool_sha256="tool-sha",
+            dirty_state={
+                "status": "clean-relevant-paths",
+                "relevant_paths_checked": [],
+                "post_commit_binding": False,
+            },
+            metadata_validation_summary_sha256=None,
+            redaction_validation_summary_sha256=None,
+            certification_source_commit="a" * 40,
+            certification_source_tree="b" * 40,
+            certification_execution_head="a" * 40,
+            certification_execution_tree="b" * 40,
+            retained_summary_path=(
+                "plugins/turbo-mode/evidence/refresh/run-1.retained.summary.json"
+            ),
+            original_run_final_status="MUTATION_COMPLETE_EVIDENCE_FAILED",
+            retained_certification_outcome="retained-certified",
+            prior_summary_path_state="forensic-demotion-retained",
+            retained_no_mutation_proof_sha256="c" * 64,
+            rehearsal_proof_capture_manifest_sha256="d" * 64,
+            prior_failed_summary_path=(
+                "plugins/turbo-mode/evidence/refresh/run-1.summary.failed.json"
+            ),
+            prior_failed_summary_sha256=None,
+            prior_failed_summary_status="forensic-demotion-retained",
+        )

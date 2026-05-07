@@ -200,6 +200,23 @@ def validate_guarded_refresh_metadata_payload(
     source_tree = git(source_code_root, "rev-parse", "HEAD^{tree}")
     execution_head = git(execution_repo_root, "rev-parse", "HEAD")
     execution_tree = git(execution_repo_root, "rev-parse", "HEAD^{tree}")
+    if payload.get("certification_mode") == "retained-run":
+        _assert_retained_certification_identity(
+            payload,
+            certification_source_head=source_head,
+            certification_source_tree=source_tree,
+            certification_execution_head=execution_head,
+            certification_execution_tree=execution_tree,
+        )
+        allowed_dirty = args.published_summary_path if args.mode == "final" else None
+        _assert_recomputed_dirty_state(
+            execution_repo_root,
+            payload.get("dirty_state"),
+            mode=args.mode,
+            published_summary_path=args.published_summary_path,
+            allowed_published_summary_path=allowed_dirty,
+        )
+        return payload, sha256_payload(projected_summary_for_validator_digest(payload))
     if payload.get("source_implementation_commit") != source_head:
         raise ValueError(
             "validate run metadata failed: source implementation commit mismatch. "
@@ -245,6 +262,28 @@ def validate_guarded_refresh_metadata_payload(
         allowed_published_summary_path=allowed_dirty,
     )
     return payload, sha256_payload(projected_summary_for_validator_digest(payload))
+
+
+def _assert_retained_certification_identity(
+    payload: dict[str, object],
+    *,
+    certification_source_head: str,
+    certification_source_tree: str,
+    certification_execution_head: str,
+    certification_execution_tree: str,
+) -> None:
+    expected = {
+        "certification_source_commit": certification_source_head,
+        "certification_source_tree": certification_source_tree,
+        "certification_execution_head": certification_execution_head,
+        "certification_execution_tree": certification_execution_tree,
+    }
+    for key, expected_value in expected.items():
+        if payload.get(key) != expected_value:
+            raise ValueError(
+                "validate run metadata failed: retained certification identity mismatch. "
+                f"Got: {key!r:.100}"
+            )
 
 
 def _assert_recomputed_dirty_state(
@@ -362,6 +401,18 @@ def validate_candidate(args: argparse.Namespace) -> int:
             "source_code_root_role": "validator-and-source",
             "execution_repo_root_role": "runtime-and-dirty-state",
         }
+        if payload.get("certification_mode") == "retained-run":
+            summary.update(
+                {
+                    "certification_mode": "retained-run",
+                    "certification_source_commit": payload["certification_source_commit"],
+                    "certification_source_tree": payload["certification_source_tree"],
+                    "certification_execution_head": payload["certification_execution_head"],
+                    "certification_execution_tree": payload["certification_execution_tree"],
+                    "original_run_final_status": payload["original_run_final_status"],
+                    "retained_summary_path": payload["retained_summary_path"],
+                }
+            )
         if args.summary_output is None:
             raise ValueError(
                 "validate run metadata failed: summary output is required in candidate mode. "
@@ -420,6 +471,18 @@ def validate_final(args: argparse.Namespace) -> int:
             "source_code_root_role": "validator-and-source",
             "execution_repo_root_role": "runtime-and-dirty-state",
         }
+        if payload.get("certification_mode") == "retained-run":
+            expected_fields.update(
+                {
+                    "certification_mode": "retained-run",
+                    "certification_source_commit": payload["certification_source_commit"],
+                    "certification_source_tree": payload["certification_source_tree"],
+                    "certification_execution_head": payload["certification_execution_head"],
+                    "certification_execution_tree": payload["certification_execution_tree"],
+                    "original_run_final_status": payload["original_run_final_status"],
+                    "retained_summary_path": payload["retained_summary_path"],
+                }
+            )
         for key, expected in expected_fields.items():
             if existing.get(key) != expected:
                 raise ValueError(

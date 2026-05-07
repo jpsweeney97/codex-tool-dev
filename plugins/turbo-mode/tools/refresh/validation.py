@@ -51,6 +51,20 @@ COMMIT_SAFE_TOP_LEVEL_KEYS = {
     "exclusivity_status",
     "phase_reached",
     "rollback_or_restore_status",
+    "certification_mode",
+    "certification_source_commit",
+    "certification_source_tree",
+    "certification_execution_head",
+    "certification_execution_tree",
+    "retained_summary_path",
+    "original_run_final_status",
+    "retained_certification_outcome",
+    "prior_summary_path_state",
+    "retained_no_mutation_proof_sha256",
+    "rehearsal_proof_capture_manifest_sha256",
+    "prior_failed_summary_path",
+    "prior_failed_summary_sha256",
+    "prior_failed_summary_status",
     "axes",
     "diff_classification",
     "runtime_config",
@@ -536,6 +550,92 @@ def _assert_guarded_refresh_values(payload: dict[str, Any]) -> None:
                 "validate commit-safe payload failed: missing process gate summary. "
                 "Got: post_mutation_process_census_sha256"
             )
+    if payload.get("certification_mode") == "retained-run":
+        _assert_retained_run_values(payload)
+
+
+def _assert_retained_run_values(payload: dict[str, Any]) -> None:
+    required = {
+        "certification_source_commit",
+        "certification_source_tree",
+        "certification_execution_head",
+        "certification_execution_tree",
+        "retained_summary_path",
+        "original_run_final_status",
+        "retained_certification_outcome",
+        "prior_summary_path_state",
+        "retained_no_mutation_proof_sha256",
+        "rehearsal_proof_capture_manifest_sha256",
+        "prior_failed_summary_path",
+        "prior_failed_summary_sha256",
+        "prior_failed_summary_status",
+    }
+    missing = sorted(key for key in required if key not in payload)
+    if missing:
+        raise ValueError(
+            "validate commit-safe payload failed: missing retained-run field. "
+            f"Got: {missing!r:.100}"
+        )
+    if payload.get("retained_summary_path") != (
+        f"plugins/turbo-mode/evidence/refresh/{payload.get('run_id')}.retained.summary.json"
+    ):
+        raise ValueError(
+            "validate commit-safe payload failed: invalid retained summary path. "
+            f"Got: {payload.get('retained_summary_path')!r:.100}"
+        )
+    if payload.get("original_run_final_status") not in {
+        "MUTATION_COMPLETE_EVIDENCE_FAILED",
+        "MUTATION_COMPLETE_EXCLUSIVITY_UNPROVEN",
+    }:
+        raise ValueError(
+            "validate commit-safe payload failed: invalid original run final status. "
+            f"Got: {payload.get('original_run_final_status')!r:.100}"
+        )
+    if payload.get("retained_certification_outcome") not in {
+        "retained-certified",
+        "retained-uncertified",
+        "manual-rollback-required",
+        "manual-adjudication-required",
+    }:
+        raise ValueError(
+            "validate commit-safe payload failed: invalid retained certification outcome. "
+            f"Got: {payload.get('retained_certification_outcome')!r:.100}"
+        )
+    if payload.get("prior_summary_path_state") not in {
+        "none",
+        "forensic-demotion-retained",
+    }:
+        raise ValueError(
+            "validate commit-safe payload failed: invalid prior summary path state. "
+            f"Got: {payload.get('prior_summary_path_state')!r:.100}"
+        )
+    if payload.get("prior_summary_path_state") == "forensic-demotion-retained":
+        if not payload.get("prior_failed_summary_path"):
+            raise ValueError(
+                "validate commit-safe payload failed: missing prior failed summary path. "
+                "Got: prior_failed_summary_path"
+            )
+        if not payload.get("prior_failed_summary_sha256"):
+            raise ValueError(
+                "validate commit-safe payload failed: missing prior failed summary digest. "
+                "Got: prior_failed_summary_sha256"
+            )
+        if payload.get("prior_failed_summary_status") != "forensic-demotion-retained":
+            raise ValueError(
+                "validate commit-safe payload failed: invalid prior failed summary status. "
+                f"Got: {payload.get('prior_failed_summary_status')!r:.100}"
+            )
+    else:
+        for key in (
+            "prior_failed_summary_path",
+            "prior_failed_summary_sha256",
+            "prior_failed_summary_status",
+        ):
+            if payload.get(key) is not None:
+                raise ValueError(
+                    "validate commit-safe payload failed: unexpected prior failed summary "
+                    f"field. Got: {key!r:.100}"
+                )
 
 
 def _assert_local_only_evidence_root(value: object) -> None:
