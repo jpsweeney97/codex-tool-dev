@@ -1976,7 +1976,7 @@ git commit -m "feat: add retained run certification"
 
 - Modify: `docs/superpowers/plans/2026-05-06-turbo-mode-refresh-06-guarded-refresh-mutation-lane.md`
 
-- [ ] **Step 1: Verify implementation runtime**
+- [x] **Step 1: Verify implementation runtime**
 
 Run:
 
@@ -1994,7 +1994,7 @@ Expected:
 - Python is `>= 3.11`;
 - record the exact version in `## Pre-Live Verification Evidence`.
 
-- [ ] **Step 2: Run targeted refresh tests**
+- [x] **Step 2: Run targeted refresh tests**
 
 Run:
 
@@ -2007,7 +2007,7 @@ Expected:
 - all refresh tests pass;
 - no `__pycache__`, `.pytest_cache`, or `.ruff_cache` residue appears under `plugins/turbo-mode/`.
 
-- [ ] **Step 3: Run formatting and lint gates**
+- [x] **Step 3: Run formatting and lint gates**
 
 Run:
 
@@ -2018,7 +2018,7 @@ git diff --check
 
 Expected: both commands pass.
 
-- [ ] **Step 4: Run residue scan**
+- [x] **Step 4: Run residue scan**
 
 Run:
 
@@ -2029,7 +2029,7 @@ find plugins/turbo-mode -type f \( -name '*.pyc' -o -name .DS_Store \) -print
 
 Expected: no output.
 
-- [ ] **Step 5: Re-run non-mutating plan status**
+- [x] **Step 5: Re-run non-mutating plan status**
 
 Run:
 
@@ -2053,7 +2053,7 @@ Expected:
 
 Do not continue to live mutation if this returns `blocked-preflight`, `coverage-gap-blocked`, `repairable-runtime-config-mismatch`, `unrepairable-runtime-config-mismatch`, `filesystem-no-drift`, or `no-drift`.
 
-- [ ] **Step 6: Run isolated full-dress guarded-refresh rehearsal**
+- [x] **Step 6: Run isolated full-dress guarded-refresh rehearsal**
 
 This is mandatory before any real `/Users/jp/.codex` mutation. It must exercise the integrated app-server install, config handling, marker lifecycle, rollback eligibility, source/cache equality, smoke, process gates, and evidence path against an isolated Codex home. It must not read or mutate `/Users/jp/.codex` as app-server config/cache/plugin authority, and it must not return `MUTATION_COMPLETE_CERTIFIED`.
 
@@ -2145,7 +2145,7 @@ Expected:
 
 If the current app-server cannot be explicitly bound to `$ISOLATED_CODEX_HOME`, record that as a rehearsal blocker and do not proceed to Task 9.
 
-- [ ] **Step 7: Commit pre-live plan evidence**
+- [x] **Step 7: Commit pre-live plan evidence**
 
 Add a `## Pre-Live Verification Evidence` section to this plan with:
 
@@ -2182,6 +2182,124 @@ Run:
 git add docs/superpowers/plans/2026-05-06-turbo-mode-refresh-06-guarded-refresh-mutation-lane.md
 git commit -m "docs: record guarded refresh pre-live gate"
 ```
+
+## Pre-Live Verification Evidence
+
+Recorded on 2026-05-07 after Task 8 Step 6 completed the isolated full-dress rehearsal.
+This section is an evidence-only docs boundary. It must not be treated as the
+source implementation boundary for executable refresh code.
+
+Source implementation identity:
+
+- `source_implementation_commit`: `9c27be7e1c87c0dac740ac0db8aa1eb473c60c12`
+- `source_implementation_tree`: `8fb96f947cab2c68db146bd02abd034b8e2ee07c`
+- Tree command: `git rev-parse 9c27be7e1c87c0dac740ac0db8aa1eb473c60c12^{tree}`
+- Expected live execution policy after this docs commit: `execution_head` may differ from `source_implementation_commit` only by approved docs/evidence paths. The live CLI must compute and validate `execution_head/tree` at launch; this self-recording docs section does not replace that runtime identity proof.
+
+Implementation runtime and local verification:
+
+- Python command: `python3 - <<'PY' ... sys.version_info >= (3, 11) ... PY`
+- Python executable: `/Users/jp/.local/share/mise/installs/python/3.14.2/bin/python3`
+- Python version: `3.14.2 (main, Dec 17 2025, 20:54:49) [Clang 21.1.4 ]`
+- Test command: `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q`
+- Test result: `411 passed, 1 skipped in 31.45s`
+- Lint command: `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py plugins/turbo-mode/tools/refresh_validate_run_metadata.py plugins/turbo-mode/tools/refresh_validate_redaction.py`
+- Lint result: passed
+- Diff whitespace command: `git diff --check`
+- Diff whitespace result after this docs edit: passed
+- Residue commands: `find plugins/turbo-mode -type d \( -name __pycache__ -o -name .pytest_cache -o -name .ruff_cache -o -name .mypy_cache -o -name .venv \) -print` and `find plugins/turbo-mode -type f \( -name '*.pyc' -o -name .DS_Store \) -print`
+- Residue result: no output
+
+Task 1A authority artifacts:
+
+- Artifact root: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-task1a-authority-spike-20260507-044924`
+- Read-only home-binding artifact: `launch-authority.json`
+- Read-only home-binding file SHA256: `6a84eb2262fed4bb2c916d94bb37cff34b4817e1ae440871f7edac21e5e33d28`
+- Pre-install target authority artifact: `preinstall-target-authority.json`
+- Pre-install target authority file SHA256: `add463e2604b8f879ba34af8d183e7b62add23f6af83dc241c1142cc9bc5f349`
+- Isolated install-authority artifact: `install-authority.json`
+- Isolated install-authority file SHA256: `f1f7cef1dec15e5caff7de5d4ce5a7ac4bd2f5c84fa23f9ba661de20dc520f28`
+- Same-child post-install transcript SHA256: `edbd11cb6a93baf1adee6fc9752847b38da246d6a0b7bb6b1155d1d77d2ff615`
+- Fresh-child post-install transcript SHA256: `cbd5093c0b0fec1b22c14b6d0565cddefbd74df75a141ab3b468b806fd3a549b`
+- Internal install-authority digests recorded in `install-authority.json`: `launch_authority_sha256 = 0211f7efeba86bfc0c4fb3ec80cd1dc1f44060e937a29474a939ad5bd3063233`; `pre_install_target_authority_sha256 = ef246b6e1d6cbf132dfc1446245fc1e974d4fc6ee68cbd3081a770918d5f1af4`.
+
+Real-home non-mutating re-anchor:
+
+- Command: `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py --dry-run --inventory-check --run-id plan06-prelive-reanchor-20260507-180841 --repo-root /Users/jp/Projects/active/codex-tool-dev --codex-home /Users/jp/.codex --json`
+- Run id: `plan06-prelive-reanchor-20260507-180841`
+- Terminal plan status: `guarded-refresh-required`
+- App-server inventory status: `collected`
+- Residue result in summary: `residue_issues = []`
+- Evidence path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-prelive-reanchor-20260507-180841/dry-run.summary.json`
+- Evidence SHA256: `cd673d065a9b393c5cdeeedce631b93d364b196fce572ca511db31f5cc370b68`
+- App-server inventory transcript SHA256: `b8be6629be047fb77c3737f56e184f108a839c11624e311c072f9abced870951`
+
+Isolated rehearsal:
+
+- External command: `bash /private/tmp/plan06-step6-rerun.sh`
+- Log: `/private/tmp/plan06-step6-plan06-isolated-rehearsal-20260507-180718.log`
+- Log SHA256 in preserved bundle: `54124577baaea689cc3b99ba14326536fb7d7ecb3141af8b9d134199ffdb74fb`
+- Isolated Codex home: `/private/tmp/codex-tool-dev-plan06-rehearsal-home.IFnNJ1`
+- Seed run id: `plan06-isolated-seed-20260507-180718`
+- Preflight run id: `plan06-isolated-preflight-20260507-180718`
+- Rehearsal run id: `plan06-isolated-rehearsal-20260507-180718`
+- Isolated rehearsal terminal status: `MUTATION_REHEARSAL_COMPLETE_NON_CERTIFIED`
+- Final status path: `/private/tmp/codex-tool-dev-plan06-rehearsal-home.IFnNJ1/local-only/turbo-mode-refresh/plan06-isolated-rehearsal-20260507-180718/final-status.json`
+- Final status SHA256: `82b35874fb9de5f49a472291710507ae609ca7f214425261afe41449489f0dd6`
+- Phase log reached: `before-snapshot`, `app-server-launch-authority-proven`, `snapshot-written`, `hooks-disabled`, `after-hook-disable`, `before-install`, `install-complete`, `config-restored`, `smoke-passed`, `post-mutation`.
+- Rehearsal proof path from run: `/private/tmp/codex-tool-dev-plan06-rehearsal-home.IFnNJ1/local-only/turbo-mode-refresh/plan06-isolated-rehearsal-20260507-180718/rehearsal-proof.json`
+- Rehearsal proof SHA256: `aa24c3cdbb7798d6714ded06b56971a38443ee66415a949d364bd1e8e104b311`
+- Rehearsal proof companion path from run: `/private/tmp/codex-tool-dev-plan06-rehearsal-home.IFnNJ1/local-only/turbo-mode-refresh/plan06-isolated-rehearsal-20260507-180718/rehearsal-proof.json.sha256`
+- Rehearsal execution head: `9c27be7e1c87c0dac740ac0db8aa1eb473c60c12`
+- Rehearsal execution tree: `8fb96f947cab2c68db146bd02abd034b8e2ee07c`
+- Rehearsal tool SHA256: `62d42ed1e42d4518d561326b7378a53428a1259b974cd8aa6b4c0f76301253d2`
+- Source-to-rehearsal execution delta status: `identical`
+- Source-to-rehearsal changed paths SHA256: `4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945`
+- Source-to-rehearsal allowed-delta proof SHA256: `349a8fc6756825ff7fc4957b46adfdde180148898123d42d30d479f73173a686`
+- Source execution identity proof path: `/private/tmp/codex-tool-dev-plan06-rehearsal-home.IFnNJ1/local-only/turbo-mode-refresh/plan06-isolated-rehearsal-20260507-180718/source-execution-identity.proof.json`
+- Source execution identity proof SHA256: `349a8fc6756825ff7fc4957b46adfdde180148898123d42d30d479f73173a686`
+- Standard smoke summary path: `/private/tmp/codex-tool-dev-plan06-rehearsal-home.IFnNJ1/local-only/turbo-mode-refresh/plan06-isolated-rehearsal-20260507-180718/standard-smoke.summary.json`
+- Standard smoke file SHA256: `33d33a72c988dabe170e3caefa06df9686b05df4a785b0003e8a7fd77a2c2b00`
+- Standard smoke proof digest recorded in rehearsal proof: `c206c273c495c3e88fd975cd0e52118426b700ad7da84410fddfa05b19735e1d`
+
+Seed and preflight evidence:
+
+- Seed manifest path: `/private/tmp/codex-tool-dev-plan06-rehearsal-home.IFnNJ1/local-only/turbo-mode-refresh/plan06-isolated-seed-20260507-180718/seed-manifest.json`
+- Seed manifest file SHA256: `64d6fa6087e546ad38bf8209fb7468d530c7bafc1d5e7ba7f0f8ef9ff277c3a8`
+- Seed expected drift path-set SHA256: `26450b19df6c6fa4d996446121381559a93880d830a60ba31a985877270b8564`
+- Seed source manifest SHA256: `9f16b3b1fd80aaf28fb4e35e3785746a836b337405dafdebb85c14543283d437`
+- Seed pre-refresh isolated-cache manifest SHA256: `5a3509216b5ea90b52a2e2e802acd4027639547da3b257e850e45753364a9e3a`
+- Seed post-seed dry-run manifest SHA256: `468e5135f9b0a06b4fa16f4324aa0907a1d6040aa6fa30e4651f43cfa9bd7954`
+- Isolated preflight summary path: `/private/tmp/codex-tool-dev-plan06-rehearsal-home.IFnNJ1/local-only/turbo-mode-refresh/plan06-isolated-preflight-20260507-180718/dry-run.summary.json`
+- Isolated preflight summary SHA256: `36b9f3f6f4550ffbdc1c3d6b03d6c72d3d659a8f1caafc772588c9e6322f8788`
+- Isolated preflight app-server transcript SHA256: `a9c677ae15d481265179200fd2b8c4f3d5eb9b525a89db74cc1220cad7f4582a`
+- Isolated preflight app-server authority result: `initialize_result.codexHome = /private/tmp/codex-tool-dev-plan06-rehearsal-home.IFnNJ1`; `ticket_hook.command` and `ticket_hook.sourcePath` both resolve under the isolated home.
+
+No-real-home authority:
+
+- No-real-home authority proof path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-isolated-rehearsal-20260507-180718-preserved/no-real-home-authority.proof.json`
+- No-real-home authority proof SHA256: `5c5400f392b02b07c9d183c64347f67b870f78b20f2a1470d288d3b6cdcdca63`
+- Rehearsal proof field: `no_real_home_proof = true`
+- Explicit authority statement: the rehearsal app-server `codexHome`, installed Ticket hook command, installed Ticket hook source path, standard-smoke `codex_home`, and generated local-only evidence roots resolve under `/private/tmp/codex-tool-dev-plan06-rehearsal-home.IFnNJ1`, not under `/Users/jp/.codex`.
+- Scope note: a literal scan found `/Users/jp/.codex` strings only inside copied source/test files under the cache snapshot. Those literals are not app-server config/cache/plugin authority for the rehearsal.
+
+Preserved proof bundle:
+
+- Preserved bundle root: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-isolated-rehearsal-20260507-180718-preserved`
+- Preserved entries include the seed run, post-seed dry-run, isolated preflight run, isolated rehearsal run, external log, and no-real-home authority proof.
+- Preserved proof path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-isolated-rehearsal-20260507-180718-preserved/plan06-isolated-rehearsal-20260507-180718/rehearsal-proof.json`
+- Preserved proof SHA256: `aa24c3cdbb7798d6714ded06b56971a38443ee66415a949d364bd1e8e104b311`
+- Preserved companion SHA256 file path: `/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-isolated-rehearsal-20260507-180718-preserved/plan06-isolated-rehearsal-20260507-180718/rehearsal-proof.json.sha256`
+- Preserved companion file SHA256: `8fcb0651ce7f5af61590090db9b3a24cc03dd73c9e162b53df7f732e742bddba`
+- Preserved seed manifest SHA256: `64d6fa6087e546ad38bf8209fb7468d530c7bafc1d5e7ba7f0f8ef9ff277c3a8`
+- Preserved post-seed dry-run SHA256: `468e5135f9b0a06b4fa16f4324aa0907a1d6040aa6fa30e4651f43cfa9bd7954`
+- Preserved isolated preflight summary SHA256: `36b9f3f6f4550ffbdc1c3d6b03d6c72d3d659a8f1caafc772588c9e6322f8788`
+
+Live marker field expectations:
+
+- Pre-snapshot app-server launch authority field: `pre_snapshot_app_server_launch_authority_sha256`
+- Pre-install app-server target authority field: `pre_install_app_server_target_authority_sha256`
+- Task 9 must validate and capture the preserved rehearsal proof bundle before any real `/Users/jp/.codex` process gate, lock acquisition, marker creation, snapshot, config edit, cache edit, app-server install, smoke, or summary publication.
 
 ## Task 9: Operator-Approved Live Guarded Refresh
 
