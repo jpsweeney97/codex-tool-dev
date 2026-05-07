@@ -511,11 +511,12 @@ def run_guarded_refresh_orchestration(
                     snapshot,
                     current_expected_sha256=hook_state["expected_intermediate_config_sha256"],
                 ),
-                same_child_ticket_hook_policy=(
+                pre_install_ticket_hook_policy=(
                     "disabled"
                     if hook_state["plugin_hooks_start_state"] == "true"
                     else "required"
                 ),
+                same_child_ticket_hook_policy="required",
             )
             phase_log.append("install-complete")
             phase_log.append("config-restored")
@@ -937,6 +938,7 @@ def install_plugins_via_app_server(
     context: MutationContext,
     *,
     restore_config_before_post_install: Callable[[], None] | None = None,
+    pre_install_ticket_hook_policy: str = "required",
     same_child_ticket_hook_policy: str = "required",
 ) -> tuple[dict[str, object], ...]:
     if context.codex_home == REAL_CODEX_HOME:
@@ -944,7 +946,7 @@ def install_plugins_via_app_server(
         validate_cache_install_allowed(state)
     launch_authority = prove_app_server_home_authority(
         context,
-        ticket_hook_policy=same_child_ticket_hook_policy,
+        ticket_hook_policy=pre_install_ticket_hook_policy,
     )
     pre_install_authority = build_pre_install_target_authority(
         launch_authority=launch_authority,

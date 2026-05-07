@@ -432,7 +432,7 @@ def test_install_plugins_restores_hooks_before_same_child_corroboration(
         return transcript
 
     def fake_validate_install_responses(**kwargs: object) -> AppServerInstallAuthority:
-        assert kwargs["same_child_ticket_hook_policy"] == "disabled"
+        assert kwargs["same_child_ticket_hook_policy"] == "required"
         same_child = kwargs["same_child_post_install_transcript"]
         assert isinstance(same_child, tuple)
         response_ids = [
@@ -470,7 +470,8 @@ def test_install_plugins_restores_hooks_before_same_child_corroboration(
     install_plugins_via_app_server(
         ctx,
         restore_config_before_post_install=restore_config,
-        same_child_ticket_hook_policy="disabled",
+        pre_install_ticket_hook_policy="disabled",
+        same_child_ticket_hook_policy="required",
     )
 
     assert observed["launch_ticket_hook_policy"] == "disabled"
