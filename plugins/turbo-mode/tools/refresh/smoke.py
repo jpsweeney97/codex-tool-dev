@@ -88,12 +88,8 @@ def run_standard_smoke(
         "selected_smoke_tier": SMOKE_TIER,
         "smoke_labels": [result.label for result in results],
         "results": [asdict(result) for result in results],
-        "raw_stdout_sha256": {
-            result.label: result.stdout_sha256 for result in results
-        },
-        "raw_stderr_sha256": {
-            result.label: result.stderr_sha256 for result in results
-        },
+        "raw_stdout_sha256": {result.label: result.stdout_sha256 for result in results},
+        "raw_stderr_sha256": {result.label: result.stderr_sha256 for result in results},
         "final_status": "passed"
         if results and all(result.exit_code == 0 for result in results)
         else "failed",
@@ -248,14 +244,14 @@ def _build_smoke_plan(
                 "clear-state",
                 "--state-dir",
                 str(state.smoke_repo / "docs/handoffs/.session-state"),
-                "--project",
-                "smoke-repo",
+                "--state-path",
+                "{session_state_path}",
             ),
             command_string=(
                 "PYTHONDONTWRITEBYTECODE=1 python3 "
                 f"{handoff_script} clear-state "
                 f"--state-dir {state.smoke_repo / 'docs/handoffs/.session-state'} "
-                "--project smoke-repo"
+                "--state-path {session_state_path}"
             ),
             env={"PYTHONDONTWRITEBYTECODE": "1"},
             after=_assert_state_cleared,
@@ -264,8 +260,7 @@ def _build_smoke_plan(
             label="handoff-defer",
             argv=("python3", str(defer_script), "--tickets-dir", "docs/tickets"),
             command_string=(
-                "PYTHONDONTWRITEBYTECODE=1 python3 "
-                f"{defer_script} --tickets-dir docs/tickets"
+                f"PYTHONDONTWRITEBYTECODE=1 python3 {defer_script} --tickets-dir docs/tickets"
             ),
             cwd=state.smoke_repo,
             env={"PYTHONDONTWRITEBYTECODE": "1"},
@@ -295,9 +290,7 @@ def _build_smoke_plan(
                     "--status",
                     "open",
                 ),
-                command_string=(
-                    f"python3 -B {ticket_read} list docs/tickets --status open"
-                ),
+                command_string=(f"python3 -B {ticket_read} list docs/tickets --status open"),
                 cwd=state.smoke_repo,
             ),
             SmokeCommand(
@@ -310,9 +303,7 @@ def _build_smoke_plan(
                     "docs/tickets",
                     "{ticket_id}",
                 ),
-                command_string=(
-                    f"python3 -B {ticket_read} query docs/tickets {{ticket_id}}"
-                ),
+                command_string=(f"python3 -B {ticket_read} query docs/tickets {{ticket_id}}"),
                 cwd=state.smoke_repo,
             ),
         ]
@@ -371,8 +362,7 @@ def _build_smoke_plan(
                 "--dry-run",
             ),
             command_string=(
-                "PYTHONDONTWRITEBYTECODE=1 python3 -B "
-                f"{ticket_audit} repair docs/tickets --dry-run"
+                f"PYTHONDONTWRITEBYTECODE=1 python3 -B {ticket_audit} repair docs/tickets --dry-run"
             ),
             cwd=state.smoke_repo,
             env={"PYTHONDONTWRITEBYTECODE": "1"},
@@ -596,8 +586,10 @@ def _assert_read_state_matches_archive(state: _SmokeState, result: SmokeResult) 
 
 
 def _assert_state_cleared(state: _SmokeState, result: SmokeResult) -> None:
-    del result
     if state.session_state_path is not None and state.session_state_path.exists():
+        stderr = _read_stderr(result).decode("utf-8", errors="replace")
+        if "state cleanup warning:" in stderr:
+            return
         fail(
             "run handoff clear-state smoke",
             "state file still exists",
@@ -766,10 +758,22 @@ def _format_sequence(values: Sequence[str], state: _SmokeState) -> tuple[str, ..
 
 def _format_text(value: str, state: _SmokeState) -> str:
     archived = str(state.archived_handoff_path or "{archived_handoff_path}")
+    session_state_path = (
+        _require_session_state_path(state)
+        if "{session_state_path}" in value
+        else "{session_state_path}"
+    )
     return value.format(
         archived_handoff_path=archived,
+        session_state_path=session_state_path,
         ticket_id=_require_ticket_id(state) if "{ticket_id}" in value else "{ticket_id}",
     )
+
+
+def _require_session_state_path(state: _SmokeState) -> str:
+    if state.session_state_path is None:
+        fail("build smoke command", "session state path is not available yet", None)
+    return str(state.session_state_path)
 
 
 def _require_ticket_id(state: _SmokeState) -> str:
@@ -787,6 +791,10 @@ def _single_line_from_stdout(result: SmokeResult) -> Path:
 
 def _read_stdout(result: SmokeResult) -> bytes:
     return Path(result.stdout_path).read_bytes()
+
+
+def _read_stderr(result: SmokeResult) -> bytes:
+    return Path(result.stderr_path).read_bytes()
 
 
 def _write_private_bytes(path: Path, payload: bytes) -> None:

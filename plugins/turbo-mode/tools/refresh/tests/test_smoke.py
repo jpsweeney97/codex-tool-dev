@@ -52,8 +52,7 @@ def test_isolated_smoke_rejects_real_home_command_paths_before_execution(
             str(REAL_CODEX_HOME / "plugins/cache/turbo-mode/handoff/1.6.0/scripts/defer.py"),
         ),
         command_string=(
-            "python3 "
-            f"{REAL_CODEX_HOME}/plugins/cache/turbo-mode/handoff/1.6.0/scripts/defer.py"
+            f"python3 {REAL_CODEX_HOME}/plugins/cache/turbo-mode/handoff/1.6.0/scripts/defer.py"
         ),
     )
     monkeypatch.setattr(smoke_module, "_build_smoke_plan", lambda **kwargs: (command,))
@@ -148,12 +147,42 @@ def test_nonzero_command_marks_smoke_failed(
 
     assert summary["final_status"] == "failed"
     audit_result = [
-        result
-        for result in summary["results"]
-        if result["label"] == "ticket-audit-repair-dry-run"
+        result for result in summary["results"] if result["label"] == "ticket-audit-repair-dry-run"
     ][0]
     assert audit_result["exit_code"] == 2
     assert audit_result["redacted_status"] == "failed"
+
+
+def test_handoff_clear_state_smoke_uses_recorded_state_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runner = FakeSmokeRunner(require_clear_state_path=True)
+    monkeypatch.setattr(smoke_module.subprocess, "run", runner.run)
+
+    summary = run_standard_smoke(
+        local_only_run_root=tmp_path / "home/local-only/turbo-mode-refresh/run-1",
+        codex_home=tmp_path / "home",
+        repo_root=tmp_path / "repo",
+    )
+
+    assert summary["final_status"] == "passed"
+
+
+def test_handoff_clear_state_smoke_allows_cleanup_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runner = FakeSmokeRunner(require_clear_state_path=True, warn_clear_state_not_removed=True)
+    monkeypatch.setattr(smoke_module.subprocess, "run", runner.run)
+
+    summary = run_standard_smoke(
+        local_only_run_root=tmp_path / "home/local-only/turbo-mode-refresh/run-1",
+        codex_home=tmp_path / "home",
+        repo_root=tmp_path / "repo",
+    )
+
+    assert summary["final_status"] == "passed"
 
 
 class FakeSmokeRunner:
@@ -163,10 +192,14 @@ class FakeSmokeRunner:
         stdout: bytes = b'{"status":"ok"}\n',
         stderr: bytes = b"",
         fail_labels: set[str] | None = None,
+        require_clear_state_path: bool = False,
+        warn_clear_state_not_removed: bool = False,
     ) -> None:
         self.stdout = stdout
         self.stderr = stderr
         self.fail_labels = fail_labels or set()
+        self.require_clear_state_path = require_clear_state_path
+        self.warn_clear_state_not_removed = warn_clear_state_not_removed
         self.command_texts: list[str] = []
         self.payloads: dict[str, dict[str, Any]] = {}
         self.ticket_id = "T-SMOKE-1"
@@ -203,10 +236,27 @@ class FakeSmokeRunner:
             stdout = f"{self.state_file}\n".encode()
         elif "session_state.py" in command_text and "read-state" in args:
             assert self.state_file is not None
-            stdout = json.loads(self.state_file.read_text(encoding="utf-8"))[
-                "archive_path"
-            ].encode() + b"\n"
+            stdout = (
+                json.loads(self.state_file.read_text(encoding="utf-8"))["archive_path"].encode()
+                + b"\n"
+            )
         elif "session_state.py" in command_text and "clear-state" in args:
+            if self.require_clear_state_path and "--state-path" not in args:
+                return subprocess.CompletedProcess(
+                    args,
+                    2,
+                    b"",
+                    b"the following arguments are required: --state-path\n",
+                )
+            if "--state-path" in args:
+                assert self.state_file == _value_after(args, "--state-path")
+            if self.warn_clear_state_not_removed:
+                return subprocess.CompletedProcess(
+                    args,
+                    0,
+                    b"",
+                    b"state cleanup warning: clear-state failed\n",
+                )
             if self.state_file is not None:
                 self.state_file.unlink()
         elif "defer.py" in command_text:
@@ -227,9 +277,7 @@ class FakeSmokeRunner:
             )
             payload_path.write_text(json.dumps(payload), encoding="utf-8")
             self.payloads[payload_path.name] = payload
-            stdout = json.dumps(
-                {"hookSpecificOutput": {"permissionDecision": "allow"}}
-            ).encode()
+            stdout = json.dumps({"hookSpecificOutput": {"permissionDecision": "allow"}}).encode()
         elif "ticket_workflow.py" in command_text and "execute" in args:
             payload = json.loads(Path(args[-1]).read_text(encoding="utf-8"))
             action = payload["action"]

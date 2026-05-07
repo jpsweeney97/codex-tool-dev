@@ -656,18 +656,20 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$HANDOFF_PLUGIN/scripts/session_state.py" arc
   --source "$SMOKE_REPO/docs/handoffs/2026-05-06_00-00_smoke.md" \
   --archive-dir "$SMOKE_REPO/docs/handoffs/archive" \
   --field archived_path
-PYTHONDONTWRITEBYTECODE=1 python3 "$HANDOFF_PLUGIN/scripts/session_state.py" write-state \
-  --state-dir "$SMOKE_REPO/docs/handoffs/.session-state" \
-  --project smoke-repo \
-  --archive-path "$SMOKE_REPO/docs/handoffs/archive/2026-05-06_00-00_smoke.md" \
-  --field state_path
+STATE_PATH="$(
+  PYTHONDONTWRITEBYTECODE=1 python3 "$HANDOFF_PLUGIN/scripts/session_state.py" write-state \
+    --state-dir "$SMOKE_REPO/docs/handoffs/.session-state" \
+    --project smoke-repo \
+    --archive-path "$SMOKE_REPO/docs/handoffs/archive/2026-05-06_00-00_smoke.md" \
+    --field state_path
+)"
 PYTHONDONTWRITEBYTECODE=1 python3 "$HANDOFF_PLUGIN/scripts/session_state.py" read-state \
   --state-dir "$SMOKE_REPO/docs/handoffs/.session-state" \
   --project smoke-repo \
   --field archive_path
 PYTHONDONTWRITEBYTECODE=1 python3 "$HANDOFF_PLUGIN/scripts/session_state.py" clear-state \
   --state-dir "$SMOKE_REPO/docs/handoffs/.session-state" \
-  --project smoke-repo
+  --state-path "$STATE_PATH"
 ```
 
 Expected Handoff result:
@@ -676,7 +678,7 @@ Expected Handoff result:
 - `archive` moves the source into the archive directory;
 - `write-state` returns a JSON state path;
 - `read-state` returns the archived handoff path;
-- `clear-state` removes the state file without writing `__pycache__`.
+- `clear-state` removes the state file without writing `__pycache__`, or records the helper's documented non-fatal `state cleanup warning` when `trash` cannot remove the state file.
 
 Handoff defer command smoke:
 
