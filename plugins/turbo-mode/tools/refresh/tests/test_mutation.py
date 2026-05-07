@@ -89,6 +89,26 @@ def seed_config(ctx: MutationContext, text: str = "[features]\nplugin_hooks = tr
     (ctx.codex_home / "config.toml").write_text(text, encoding="utf-8")
 
 
+def ticket_hooks_payload(command: str, *, timeout: int = 10) -> dict[str, object]:
+    return {
+        "description": "Ticket engine guard \u2014 validates engine invocations",
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": command,
+                            "timeout": timeout,
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+
+
 def init_git_repo(repo_root: Path) -> None:
     import subprocess
 
@@ -154,10 +174,7 @@ def launch_authority(ctx: MutationContext) -> AppServerLaunchAuthority:
         candidate_mechanisms_checked=(),
         plugin_read_sources={"handoff": str(ctx.repo_root), "ticket": str(ctx.repo_root)},
         skill_paths=(
-            str(
-                ctx.codex_home
-                / "plugins/cache/turbo-mode/handoff/1.6.0/skills/save/SKILL.md"
-            ),
+            str(ctx.codex_home / "plugins/cache/turbo-mode/handoff/1.6.0/skills/save/SKILL.md"),
         ),
         hook_paths=(
             str(ctx.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"),
@@ -358,9 +375,7 @@ def test_isolated_guarded_orchestration_runs_core_phases_and_writes_rehearsal_pr
     proof = json.loads(rehearsal_proof.read_text(encoding="utf-8"))
     assert proof["final_status"] == "MUTATION_REHEARSAL_COMPLETE_NON_CERTIFIED"
     assert proof["certification_status"] == "local-only-non-certified"
-    assert not (
-        ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json"
-    ).exists()
+    assert not (ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json").exists()
 
 
 def test_install_plugins_restores_hooks_before_same_child_corroboration(
@@ -580,9 +595,8 @@ def test_restore_config_snapshot_rejects_external_change(tmp_path: Path) -> None
         restore_config_snapshot(snapshot, current_expected_sha256="not-current")
     restore_config_snapshot(snapshot, current_expected_sha256=None)
     assert (
-        (ctx.codex_home / "config.toml").read_bytes()
-        == snapshot.config_snapshot_path.read_bytes()
-    )
+        ctx.codex_home / "config.toml"
+    ).read_bytes() == snapshot.config_snapshot_path.read_bytes()
 
 
 def test_prove_app_server_home_authority_rejects_real_home_leak(
@@ -650,8 +664,7 @@ def test_install_uses_app_server_plugin_install_after_authority_proofs(
             "ticket",
         ]
         assert all(
-            request["params"]["remoteMarketplaceName"] is None
-            for request in install_requests
+            request["params"]["remoteMarketplaceName"] is None for request in install_requests
         )
         return (
             {
@@ -745,6 +758,70 @@ def test_verify_source_cache_equality_detects_drift(tmp_path: Path) -> None:
         dirs_exist_ok=True,
     )
     assert set(verify_source_cache_equality(ctx)) == {"handoff", "ticket"}
+
+
+def test_verify_source_cache_equality_accepts_ticket_hook_manifest_localization(
+    tmp_path: Path,
+) -> None:
+    ctx = context(tmp_path)
+    seed_plugins(ctx)
+    source_hooks = ctx.repo_root / "plugins/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+    cache_hooks = ctx.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+    source_hooks.parent.mkdir(parents=True)
+    cache_hooks.parent.mkdir(parents=True)
+    source_payload = ticket_hooks_payload(
+        "python3 /Users/jp/.codex/plugins/cache/turbo-mode/"
+        "ticket/1.4.0/hooks/ticket_engine_guard.py"
+    )
+    cache_payload = ticket_hooks_payload(
+        f"python3 {ctx.codex_home}/plugins/cache/turbo-mode/"
+        "ticket/1.4.0/hooks/ticket_engine_guard.py"
+    )
+    source_hooks.write_text(
+        json.dumps(source_payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    cache_hooks.write_text(json.dumps(cache_payload, indent=2) + "\n", encoding="utf-8")
+
+    assert set(verify_source_cache_equality(ctx)) == {"handoff", "ticket"}
+
+
+def test_verify_source_cache_equality_rejects_extra_ticket_hook_manifest_drift(
+    tmp_path: Path,
+) -> None:
+    ctx = context(tmp_path)
+    seed_plugins(ctx)
+    source_hooks = ctx.repo_root / "plugins/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+    cache_hooks = ctx.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+    source_hooks.parent.mkdir(parents=True)
+    cache_hooks.parent.mkdir(parents=True)
+    source_hooks.write_text(
+        json.dumps(
+            ticket_hooks_payload(
+                "python3 /Users/jp/.codex/plugins/cache/turbo-mode/"
+                "ticket/1.4.0/hooks/ticket_engine_guard.py"
+            ),
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    cache_hooks.write_text(
+        json.dumps(
+            ticket_hooks_payload(
+                f"python3 {ctx.codex_home}/plugins/cache/turbo-mode/"
+                "ticket/1.4.0/hooks/ticket_engine_guard.py",
+                timeout=20,
+            ),
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RefreshError, match="source/cache manifest mismatch"):
+        verify_source_cache_equality(ctx)
 
 
 def test_rollback_restores_config_and_cache_from_snapshot(
@@ -849,9 +926,7 @@ def write_recovery_marker(
                 "cache": str(snapshot.cache_snapshot_root),
                 "manifest": str(snapshot.snapshot_manifest_path),
             },
-            snapshot_manifest_digest=mutation_module._sha256_file(
-                snapshot.snapshot_manifest_path
-            ),
+            snapshot_manifest_digest=mutation_module._sha256_file(snapshot.snapshot_manifest_path),
             recovery_eligibility="restore-cache-and-config",
         ),
     )
@@ -944,9 +1019,7 @@ def test_recovery_restores_snapshots_runs_inventory_and_clears_marker(
         encoding="utf-8"
     ) == "same"
     assert Path(result.final_status_path).is_file()
-    assert not (
-        ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json"
-    ).exists()
+    assert not (ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json").exists()
     assert (ctx.local_only_run_root / "recovery/original-owner.json").is_file()
     assert (
         ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.recovery-owner.json"
@@ -1017,6 +1090,4 @@ def test_recovery_fails_closed_when_config_sha_is_externally_changed(
         run_guarded_refresh_recovery(ctx)
 
     assert (ctx.codex_home / "config.toml").read_text(encoding="utf-8") == "external-change\n"
-    assert (
-        ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json"
-    ).exists()
+    assert (ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json").exists()

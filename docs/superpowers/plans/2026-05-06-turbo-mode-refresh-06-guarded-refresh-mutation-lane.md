@@ -1374,7 +1374,7 @@ Required public API in `mutation.py`:
 - `prepare_plugin_hooks_for_guarded_refresh(context: MutationContext, *, plugin_hooks_state: str) -> dict[str, str]`.
 - `restore_config_snapshot(snapshot: SnapshotSet, *, current_expected_sha256: str | None) -> None`.
 - `install_plugins_via_app_server(context: MutationContext) -> Sequence[dict[str, object]]`.
-- `verify_source_cache_equality(context: MutationContext) -> dict[str, str]`.
+- `verify_source_cache_equality(context: MutationContext) -> dict[str, str]`, permitting only the expected Ticket hook manifest command localization from the source real-home command to the active cache root.
 - `rollback_guarded_refresh(context: MutationContext, snapshot: SnapshotSet, *, failed_phase: str) -> dict[str, object]`.
 - `abort_after_config_mutation(context: MutationContext, snapshot: SnapshotSet, *, failed_phase: str) -> dict[str, object]`.
 
@@ -1587,7 +1587,7 @@ Required behavior:
 31. Atomically replace marker with install transcript digest, same-child and fresh-child corroboration transcript digests, `AppServerInstallAuthority` digest, retained `pre_install_app_server_target_authority_sha256`, app-server child PID records, and post-install cache manifest SHA256 map.
 32. Restore config before final inventory and smoke.
 33. Start fresh app-server inventory and verify runtime alignment.
-34. Verify source/cache equality.
+34. Verify source/cache equality, permitting only the expected Ticket hook manifest command localization from the source real-home command to the active cache root.
 35. Run standard smoke.
 36. Run `post-mutation` process gate.
 37. If `post-mutation` blocks, write `MUTATION_COMPLETE_EXCLUSIVITY_UNPROVEN`, suppress certified commit-safe summary, and clear marker only after local-only evidence is durable. The operator must then choose retained-run certification or manual rollback/adjudication before claiming closeout.

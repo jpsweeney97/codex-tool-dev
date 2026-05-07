@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -43,7 +44,7 @@ from .lock_state import (
     write_initial_run_state,
 )
 from .manifests import build_manifest, diff_manifests
-from .models import fail
+from .models import DiffEntry, DiffKind, PluginSpec, fail
 from .planner import RefreshPaths, build_plugin_specs, plan_refresh
 from .process_gate import capture_process_gate
 from .smoke import run_standard_smoke
@@ -59,6 +60,8 @@ PLAN05_DRIFT_PATHS = (
 PLAN05_SEED_FIXTURE = Path(__file__).parent / (
     "tests/fixtures/handoff_state_helper_doc_migration.json"
 )
+TICKET_HOOK_MANIFEST_CANONICAL_PATH = "ticket/1.4.0/hooks/hooks.json"
+TICKET_HOOK_COMMAND_SENTINEL = "<ticket-hook-command>"
 
 
 @dataclass(frozen=True)
@@ -278,9 +281,7 @@ def seed_isolated_rehearsal_home(
         source_path = normalized_repo_root / "plugins/turbo-mode" / canonical_path
         cache_path = normalized_codex_home / "plugins/cache/turbo-mode" / canonical_path
         source_text = source_path.read_text(encoding="utf-8")
-        if hashlib.sha256(source_text.encode("utf-8")).hexdigest() != record.get(
-            "source_sha256"
-        ):
+        if hashlib.sha256(source_text.encode("utf-8")).hexdigest() != record.get("source_sha256"):
             fail(
                 "seed isolated rehearsal home",
                 "source seed fixture hash mismatch",
@@ -512,9 +513,7 @@ def run_guarded_refresh_orchestration(
                     current_expected_sha256=hook_state["expected_intermediate_config_sha256"],
                 ),
                 pre_install_ticket_hook_policy=(
-                    "disabled"
-                    if hook_state["plugin_hooks_start_state"] == "true"
-                    else "required"
+                    "disabled" if hook_state["plugin_hooks_start_state"] == "true" else "required"
                 ),
                 same_child_ticket_hook_policy="required",
             )
@@ -557,9 +556,7 @@ def run_guarded_refresh_orchestration(
                     {
                         "schema_version": "turbo-mode-refresh-rehearsal-proof-v1",
                         "run_id": context.run_id,
-                        "source_implementation_commit": (
-                            context.source_implementation_commit
-                        ),
+                        "source_implementation_commit": (context.source_implementation_commit),
                         "source_implementation_tree": context.source_implementation_tree,
                         "execution_head": context.execution_head,
                         "execution_tree": context.execution_tree,
@@ -663,9 +660,7 @@ def run_guarded_refresh_recovery(context: MutationContext) -> RecoveryResult:
                 "final_status": "RECOVERY_COMPLETE",
                 "phase_log": tuple(phase_log),
                 "preserved_original_owner_path": preserved_owner["preserved_owner_path"],
-                "preserved_original_owner_sha256": preserved_owner[
-                    "preserved_owner_sha256"
-                ],
+                "preserved_original_owner_sha256": preserved_owner["preserved_owner_sha256"],
                 "recovery_owner_sha256": recovery_owner_sha256,
                 "restored_config_sha256": restored_config_sha256,
                 "cache_restore_status": cache_restore_status,
@@ -978,8 +973,7 @@ def install_plugins_via_app_server(
             if request.get("id") != 2 or response.get("id") != 2:
                 return
             rewrite_ticket_hook_manifest(
-                ticket_plugin_root=context.codex_home
-                / "plugins/cache/turbo-mode/ticket/1.4.0"
+                ticket_plugin_root=context.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
             )
             if restore_config_before_post_install is not None:
                 restore_config_before_post_install()
@@ -1018,14 +1012,76 @@ def verify_source_cache_equality(context: MutationContext) -> dict[str, str]:
         source_manifest = build_manifest(spec, root_kind="source")
         cache_manifest = build_manifest(spec, root_kind="cache")
         diffs = diff_manifests(source_manifest, cache_manifest)
-        if diffs:
+        unexpected_diffs = [
+            diff
+            for diff in diffs
+            if not _is_expected_ticket_hook_manifest_localization(context, spec, diff)
+        ]
+        if unexpected_diffs:
             fail(
                 "verify source/cache equality",
                 "source/cache manifest mismatch",
-                [diff.canonical_path for diff in diffs],
+                [diff.canonical_path for diff in unexpected_diffs],
             )
         equality[spec.name] = authority_digest(source_manifest)
     return equality
+
+
+def _is_expected_ticket_hook_manifest_localization(
+    context: MutationContext,
+    spec: PluginSpec,
+    diff: DiffEntry,
+) -> bool:
+    if (
+        spec.name != "ticket"
+        or spec.version != "1.4.0"
+        or diff.kind is not DiffKind.CHANGED
+        or diff.canonical_path != TICKET_HOOK_MANIFEST_CANONICAL_PATH
+        or diff.source is None
+        or diff.cache is None
+    ):
+        return False
+    if (
+        diff.source.mode != diff.cache.mode
+        or diff.source.executable != diff.cache.executable
+        or diff.source.has_shebang != diff.cache.has_shebang
+    ):
+        return False
+
+    source_path = spec.source_root / "hooks/hooks.json"
+    cache_path = spec.cache_root / "hooks/hooks.json"
+    try:
+        source_payload = json.loads(source_path.read_text(encoding="utf-8"))
+        cache_payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        source_command = _ticket_hook_manifest_command(source_payload)
+        cache_command = _ticket_hook_manifest_command(cache_payload)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, IndexError, TypeError):
+        return False
+
+    expected_source_command = (
+        f"python3 {REAL_CODEX_HOME}/plugins/cache/turbo-mode/ticket/"
+        f"{spec.version}/hooks/ticket_engine_guard.py"
+    )
+    expected_cache_command = f"python3 {spec.cache_root}/hooks/ticket_engine_guard.py"
+    if source_command != expected_source_command or cache_command != expected_cache_command:
+        return False
+
+    normalized_source = deepcopy(source_payload)
+    normalized_cache = deepcopy(cache_payload)
+    _set_ticket_hook_manifest_command(normalized_source, TICKET_HOOK_COMMAND_SENTINEL)
+    _set_ticket_hook_manifest_command(normalized_cache, TICKET_HOOK_COMMAND_SENTINEL)
+    return normalized_source == normalized_cache
+
+
+def _ticket_hook_manifest_command(payload: dict[str, Any]) -> str:
+    command = payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    if not isinstance(command, str):
+        raise TypeError("Ticket hook command is not a string")
+    return command
+
+
+def _set_ticket_hook_manifest_command(payload: dict[str, Any], command: str) -> None:
+    payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = command
 
 
 def rollback_guarded_refresh(
