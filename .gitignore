@@ -10,7 +10,10 @@ __pycache__/
 .mypy_cache/
 tmp/
 *settings*.json
-docs/handoffs/
+# Handoff plugin runtime/resume artifacts are local by default.
+docs/handoffs/.session-state/
+docs/handoffs/archive/
+docs/handoffs/*.md
 .codex/local/
 .codex/plugin-dev/**/.codex/ticket-tmp/
 .codex/plugin-dev/
