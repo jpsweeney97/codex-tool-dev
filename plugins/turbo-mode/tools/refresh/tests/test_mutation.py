@@ -60,6 +60,13 @@ def context(tmp_path: Path, *, codex_home: Path | None = None) -> MutationContex
         execution_head=EXECUTION_HEAD,
         execution_tree=EXECUTION_TREE,
         tool_sha256=TOOL_SHA256,
+        source_execution_identity_proof_path=str(
+            active_home / "local-only/turbo-mode-refresh" / RUN_ID / "source-execution.proof.json"
+        ),
+        source_execution_identity_proof_sha256="source-execution-proof-sha",
+        source_to_rehearsal_execution_delta_status="identical",
+        source_to_rehearsal_changed_paths_sha256=authority_digest(()),
+        source_to_rehearsal_allowed_delta_proof_sha256="source-execution-proof-sha",
     )
 
 
@@ -371,10 +378,31 @@ def test_isolated_guarded_orchestration_runs_core_phases_and_writes_rehearsal_pr
     assert "plugin_hooks = true" in (ctx.codex_home / "config.toml").read_text(encoding="utf-8")
     assert (ctx.local_only_run_root / "final-status.json").is_file()
     rehearsal_proof = ctx.local_only_run_root / "rehearsal-proof.json"
+    rehearsal_proof_sha256 = ctx.local_only_run_root / "rehearsal-proof.json.sha256"
     assert rehearsal_proof.is_file()
+    assert rehearsal_proof_sha256.is_file()
     proof = json.loads(rehearsal_proof.read_text(encoding="utf-8"))
     assert proof["final_status"] == "MUTATION_REHEARSAL_COMPLETE_NON_CERTIFIED"
     assert proof["certification_status"] == "local-only-non-certified"
+    assert proof["tool_sha256"] == TOOL_SHA256
+    assert proof["source_execution_identity_proof_sha256"] == "source-execution-proof-sha"
+    assert proof["source_to_rehearsal_execution_delta_status"] == "identical"
+    assert proof["source_to_rehearsal_changed_paths_sha256"] == authority_digest(())
+    assert (
+        proof["source_to_rehearsal_allowed_delta_proof_sha256"]
+        == "source-execution-proof-sha"
+    )
+    expected_proof_sha256 = hashlib.sha256(rehearsal_proof.read_bytes()).hexdigest()
+    assert rehearsal_proof_sha256.read_text(encoding="utf-8") == (
+        f"{expected_proof_sha256}  {rehearsal_proof}\n"
+    )
+    final_status = json.loads(
+        (ctx.local_only_run_root / "final-status.json").read_text(encoding="utf-8")
+    )
+    assert final_status["rehearsal_proof_sha256"] == expected_proof_sha256
+    assert final_status["rehearsal_proof_sha256_path"] == str(rehearsal_proof_sha256)
+    assert result.rehearsal_proof_sha256 == expected_proof_sha256
+    assert result.rehearsal_proof_sha256_path == str(rehearsal_proof_sha256)
     assert not (ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json").exists()
 
 

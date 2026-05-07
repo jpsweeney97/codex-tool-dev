@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import stat
@@ -394,6 +395,14 @@ def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentPars
         )
         if result.runtime_config is None:
             raise RefreshError("guarded refresh preflight failed: runtime config unavailable")
+        source_execution_identity_proof_sha256 = sha256_file(Path(proof.proof_path))
+        source_to_rehearsal_delta_status = (
+            "identical"
+            if proof.execution_head == args.source_implementation_commit
+            and proof.execution_tree == args.source_implementation_tree
+            and not proof.changed_paths
+            else "approved-docs-evidence-only"
+        )
         orchestration = run_guarded_refresh_orchestration(
             MutationContext(
                 run_id=run_id,
@@ -406,6 +415,15 @@ def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentPars
                 execution_head=proof.execution_head,
                 execution_tree=proof.execution_tree,
                 tool_sha256=sha256_file(CURRENT_FILE),
+                source_execution_identity_proof_path=proof.proof_path,
+                source_execution_identity_proof_sha256=source_execution_identity_proof_sha256,
+                source_to_rehearsal_execution_delta_status=(
+                    source_to_rehearsal_delta_status
+                ),
+                source_to_rehearsal_changed_paths_sha256=sha256_json(proof.changed_paths),
+                source_to_rehearsal_allowed_delta_proof_sha256=(
+                    source_execution_identity_proof_sha256
+                ),
             ),
             terminal_plan_status=result.terminal_status.value,
             plugin_hooks_state=result.runtime_config.plugin_hooks_state,
@@ -419,6 +437,8 @@ def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentPars
             "final_status": orchestration.final_status,
             "final_status_path": orchestration.final_status_path,
             "rehearsal_proof_path": orchestration.rehearsal_proof_path,
+            "rehearsal_proof_sha256": orchestration.rehearsal_proof_sha256,
+            "rehearsal_proof_sha256_path": orchestration.rehearsal_proof_sha256_path,
         }
         if args.json:
             print(json.dumps(payload, indent=2, sort_keys=True))
@@ -427,7 +447,14 @@ def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentPars
             print(f"final_status_path: {orchestration.final_status_path}")
             if orchestration.rehearsal_proof_path is not None:
                 print(f"rehearsal_proof_path: {orchestration.rehearsal_proof_path}")
-        return 0 if orchestration.final_status == "MUTATION_COMPLETE_CERTIFIED" else 1
+        if orchestration.final_status == "MUTATION_COMPLETE_CERTIFIED":
+            return 0
+        if (
+            args.isolated_rehearsal
+            and orchestration.final_status == "MUTATION_REHEARSAL_COMPLETE_NON_CERTIFIED"
+        ):
+            return 0
+        return 1
     except (RefreshError, ValueError, OSError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -549,6 +576,11 @@ def git_rev_parse(repo_root: Path, revision: str) -> str:
         check=True,
     )
     return completed.stdout.strip()
+
+
+def sha256_json(payload: object) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def resolve_commit_safe_summary_output(

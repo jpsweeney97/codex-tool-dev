@@ -76,6 +76,11 @@ class MutationContext:
     execution_head: str
     execution_tree: str
     tool_sha256: str
+    source_execution_identity_proof_path: str | None = None
+    source_execution_identity_proof_sha256: str | None = None
+    source_to_rehearsal_execution_delta_status: str = "identical"
+    source_to_rehearsal_changed_paths_sha256: str = ""
+    source_to_rehearsal_allowed_delta_proof_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -106,6 +111,8 @@ class GuardedRefreshResult:
     final_status: str
     final_status_path: str
     rehearsal_proof_path: str | None
+    rehearsal_proof_sha256: str | None
+    rehearsal_proof_sha256_path: str | None
     phase_log: tuple[str, ...]
 
 
@@ -560,8 +567,24 @@ def run_guarded_refresh_orchestration(
                         "source_implementation_tree": context.source_implementation_tree,
                         "execution_head": context.execution_head,
                         "execution_tree": context.execution_tree,
+                        "tool_sha256": context.tool_sha256,
                         "requested_codex_home": str(context.codex_home),
                         "no_real_home_proof": context.codex_home != REAL_CODEX_HOME,
+                        "source_execution_identity_proof_path": (
+                            context.source_execution_identity_proof_path
+                        ),
+                        "source_execution_identity_proof_sha256": (
+                            context.source_execution_identity_proof_sha256
+                        ),
+                        "source_to_rehearsal_execution_delta_status": (
+                            context.source_to_rehearsal_execution_delta_status
+                        ),
+                        "source_to_rehearsal_changed_paths_sha256": (
+                            context.source_to_rehearsal_changed_paths_sha256
+                        ),
+                        "source_to_rehearsal_allowed_delta_proof_sha256": (
+                            context.source_to_rehearsal_allowed_delta_proof_sha256
+                        ),
                         "install_records_sha256": authority_digest(install_records),
                         "final_inventory_sha256": authority_digest(final_inventory),
                         "final_inventory_transcript_sha256": authority_digest(
@@ -573,12 +596,16 @@ def run_guarded_refresh_orchestration(
                         "certification_status": "local-only-non-certified",
                     },
                 )
+                rehearsal_proof_sha256 = _write_sha256_companion(rehearsal_proof_path)
             return _write_final_status(
                 context,
                 final_status=final_status,
                 phase_log=phase_log,
                 final_status_path=final_status_path,
                 rehearsal_proof_path=rehearsal_proof_path,
+                rehearsal_proof_sha256=rehearsal_proof_sha256
+                if isolated_rehearsal
+                else None,
             )
         finally:
             clear_run_state(local_only_root, context.run_id)
@@ -1251,7 +1278,11 @@ def _write_final_status(
     phase_log: list[str],
     final_status_path: Path,
     rehearsal_proof_path: Path | None,
+    rehearsal_proof_sha256: str | None = None,
 ) -> GuardedRefreshResult:
+    rehearsal_proof_sha256_path = (
+        f"{rehearsal_proof_path}.sha256" if rehearsal_proof_path is not None else None
+    )
     _write_private_json(
         final_status_path,
         {
@@ -1267,6 +1298,8 @@ def _write_final_status(
             "rehearsal_proof_path": str(rehearsal_proof_path)
             if rehearsal_proof_path is not None
             else None,
+            "rehearsal_proof_sha256": rehearsal_proof_sha256,
+            "rehearsal_proof_sha256_path": rehearsal_proof_sha256_path,
         },
     )
     return GuardedRefreshResult(
@@ -1275,6 +1308,8 @@ def _write_final_status(
         rehearsal_proof_path=str(rehearsal_proof_path)
         if rehearsal_proof_path is not None
         else None,
+        rehearsal_proof_sha256=rehearsal_proof_sha256,
+        rehearsal_proof_sha256_path=rehearsal_proof_sha256_path,
         phase_log=tuple(phase_log),
     )
 
@@ -1363,6 +1398,16 @@ def _validate_snapshot_for_rollback(snapshot: SnapshotSet) -> None:
 
 def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_sha256_companion(path: Path) -> str:
+    digest = _sha256_file(path)
+    companion = path.with_name(f"{path.name}.sha256")
+    fd = os.open(companion, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(f"{digest}  {path}\n")
+    os.chmod(companion, 0o600)
+    return digest
 
 
 def _write_private_json(path: Path, payload: object) -> None:
