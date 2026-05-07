@@ -782,6 +782,8 @@ def test_collect_readonly_runtime_inventory_binds_roundtrip_and_identity_executa
     executable.parent.mkdir(parents=True)
     executable.write_bytes(b"codex executable")
     launched: list[list[str]] = []
+    launched_env: list[dict[str, str]] = []
+    launched_cwd: list[str | None] = []
     processes: list[object] = []
 
     class FakeStdin:
@@ -792,8 +794,10 @@ def test_collect_readonly_runtime_inventory_binds_roundtrip_and_identity_executa
             return None
 
     class FakeProcess:
-        def __init__(self, cmd: list[str], **_kwargs: object) -> None:
+        def __init__(self, cmd: list[str], **kwargs: object) -> None:
             launched.append(cmd)
+            launched_env.append(dict(kwargs["env"]))  # type: ignore[arg-type]
+            launched_cwd.append(kwargs.get("cwd"))  # type: ignore[arg-type]
             processes.append(self)
             self.stdin = FakeStdin()
             self.stdout = [
@@ -821,13 +825,17 @@ def test_collect_readonly_runtime_inventory_binds_roundtrip_and_identity_executa
     monkeypatch.setattr(inventory_module.shutil, "which", lambda _name: str(executable))
     monkeypatch.setattr(inventory_module.subprocess, "Popen", FakeProcess)
     monkeypatch.setattr(inventory_module.subprocess, "run", fake_run)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
 
+    scratch_cwd = tmp_path / "scratch"
     inventory, _raw_transcript = collect_readonly_runtime_inventory(
         refresh_paths,
-        scratch_cwd=tmp_path / "scratch",
+        scratch_cwd=scratch_cwd,
     )
 
     assert launched == [[str(executable), "app-server", "--listen", "stdio://"]]
+    assert launched_env[0]["CODEX_HOME"] == str(refresh_paths.codex_home)
+    assert launched_cwd == [str(scratch_cwd)]
     assert getattr(processes[0], "terminated")
     assert inventory.identity.executable_path == str(executable)
     assert inventory.identity.codex_version == "codex-cli 0.bound"

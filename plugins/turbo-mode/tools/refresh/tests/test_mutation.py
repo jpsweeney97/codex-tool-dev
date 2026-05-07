@@ -14,6 +14,7 @@ from refresh.app_server_inventory import (
 )
 from refresh.models import RefreshError
 from refresh.mutation import (
+    GuardedRefreshResult,
     MutationContext,
     abort_after_config_mutation,
     create_snapshot_set,
@@ -22,7 +23,9 @@ from refresh.mutation import (
     prove_app_server_home_authority,
     restore_config_snapshot,
     rollback_guarded_refresh,
+    run_guarded_refresh_orchestration,
     verify_source_cache_equality,
+    verify_source_execution_identity,
 )
 
 RUN_ID = "mutation-run"
@@ -36,6 +39,8 @@ DISABLED_CONFIG_TEXT = "[features]\nplugin_hooks = false\n"
 LIVE_HOME_SKILL_PATH = (
     "/Users/jp/.codex/plugins/cache/turbo-mode/handoff/1.6.0/skills/save/SKILL.md"
 )
+RELEVANT_TOOL_PATH = "plugins/turbo-mode/tools/refresh/orchestration.py"
+APPROVED_EVIDENCE_PATH = "plugins/turbo-mode/evidence/refresh/notes.md"
 
 
 def context(tmp_path: Path, *, codex_home: Path | None = None) -> MutationContext:
@@ -80,6 +85,50 @@ def seed_config(ctx: MutationContext, text: str = "[features]\nplugin_hooks = tr
     (ctx.codex_home / "config.toml").write_text(text, encoding="utf-8")
 
 
+def init_git_repo(repo_root: Path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_root, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo_root, check=True)
+
+
+def git(repo_root: Path, *args: str) -> str:
+    import subprocess
+
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return completed.stdout.strip()
+
+
+def write_repo_file(repo_root: Path, rel: str, text: str) -> None:
+    path = repo_root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def commit_repo(repo_root: Path, message: str) -> str:
+    git(repo_root, "add", ".")
+    git(repo_root, "commit", "-qm", message)
+    return git(repo_root, "rev-parse", "HEAD")
+
+
+def source_identity_repo(tmp_path: Path) -> tuple[Path, Path, str, str]:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    init_git_repo(repo_root)
+    write_repo_file(repo_root, "README.md", "baseline\n")
+    source_commit = commit_repo(repo_root, "source")
+    source_tree = git(repo_root, "rev-parse", f"{source_commit}^{{tree}}")
+    local_only_run_root = tmp_path / ".codex/local-only/turbo-mode-refresh/run"
+    return repo_root, local_only_run_root, source_commit, source_tree
+
+
 def launch_authority(ctx: MutationContext) -> AppServerLaunchAuthority:
     return AppServerLaunchAuthority(
         requested_codex_home=str(ctx.codex_home),
@@ -110,6 +159,193 @@ def launch_authority(ctx: MutationContext) -> AppServerLaunchAuthority:
             str(ctx.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"),
         ),
     )
+
+
+def test_source_identity_rejects_tree_mismatch_before_evidence_or_mutation(
+    tmp_path: Path,
+) -> None:
+    repo_root, local_only_run_root, source_commit, _source_tree = source_identity_repo(tmp_path)
+
+    with pytest.raises(RefreshError, match="source implementation tree mismatch"):
+        verify_source_execution_identity(
+            repo_root=repo_root,
+            local_only_run_root=local_only_run_root,
+            source_implementation_commit=source_commit,
+            source_implementation_tree="stale-tree",
+        )
+
+    assert not local_only_run_root.exists()
+
+
+def test_source_identity_rejects_non_ancestor_before_delta_allowlist(
+    tmp_path: Path,
+) -> None:
+    repo_root, local_only_run_root, source_commit, source_tree = source_identity_repo(tmp_path)
+    git(repo_root, "checkout", "--orphan", "unrelated")
+    write_repo_file(repo_root, "README.md", "unrelated\n")
+    commit_repo(repo_root, "unrelated")
+
+    with pytest.raises(RefreshError, match="source implementation commit is not an ancestor"):
+        verify_source_execution_identity(
+            repo_root=repo_root,
+            local_only_run_root=local_only_run_root,
+            source_implementation_commit=source_commit,
+            source_implementation_tree=source_tree,
+        )
+
+    assert not local_only_run_root.exists()
+
+
+def test_source_identity_rejects_disallowed_tracked_delta_before_evidence(
+    tmp_path: Path,
+) -> None:
+    repo_root, local_only_run_root, source_commit, source_tree = source_identity_repo(tmp_path)
+    write_repo_file(repo_root, RELEVANT_TOOL_PATH, "print('changed')\n")
+    commit_repo(repo_root, "disallowed source delta")
+
+    with pytest.raises(RefreshError, match="disallowed source-to-execution delta"):
+        verify_source_execution_identity(
+            repo_root=repo_root,
+            local_only_run_root=local_only_run_root,
+            source_implementation_commit=source_commit,
+            source_implementation_tree=source_tree,
+        )
+
+    assert not local_only_run_root.exists()
+
+
+def test_source_identity_allows_docs_evidence_delta_and_records_local_proof(
+    tmp_path: Path,
+) -> None:
+    repo_root, local_only_run_root, source_commit, source_tree = source_identity_repo(tmp_path)
+    write_repo_file(repo_root, APPROVED_EVIDENCE_PATH, "operator note\n")
+    execution_head = commit_repo(repo_root, "approved evidence delta")
+    execution_tree = git(repo_root, "rev-parse", f"{execution_head}^{{tree}}")
+
+    proof = verify_source_execution_identity(
+        repo_root=repo_root,
+        local_only_run_root=local_only_run_root,
+        source_implementation_commit=source_commit,
+        source_implementation_tree=source_tree,
+    )
+
+    assert proof.source_implementation_commit == source_commit
+    assert proof.execution_head == execution_head
+    assert proof.execution_tree == execution_tree
+    assert proof.changed_paths == (APPROVED_EVIDENCE_PATH,)
+    proof_path = local_only_run_root / "source-execution-identity.proof.json"
+    assert proof_path.is_file()
+    assert APPROVED_EVIDENCE_PATH in proof_path.read_text(encoding="utf-8")
+
+
+def test_source_identity_rejects_untracked_relevant_file_before_evidence(
+    tmp_path: Path,
+) -> None:
+    repo_root, local_only_run_root, source_commit, source_tree = source_identity_repo(tmp_path)
+    write_repo_file(repo_root, RELEVANT_TOOL_PATH, "print('untracked')\n")
+
+    with pytest.raises(RefreshError, match="untracked relevant files"):
+        verify_source_execution_identity(
+            repo_root=repo_root,
+            local_only_run_root=local_only_run_root,
+            source_implementation_commit=source_commit,
+            source_implementation_tree=source_tree,
+        )
+
+    assert not local_only_run_root.exists()
+
+
+def test_guarded_orchestration_rejects_unexpected_terminal_status_before_process_gate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    ctx = context(tmp_path)
+
+    monkeypatch.setattr(
+        mutation_module,
+        "capture_process_gate",
+        lambda **kwargs: pytest.fail("process gate should not run"),
+    )
+
+    with pytest.raises(RefreshError, match="terminal plan status is not guarded-refresh-required"):
+        run_guarded_refresh_orchestration(
+            ctx,
+            terminal_plan_status="blocked-preflight",
+            plugin_hooks_state="true",
+            isolated_rehearsal=True,
+        )
+
+
+def test_isolated_guarded_orchestration_runs_core_phases_and_writes_rehearsal_proof(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from contextlib import contextmanager
+
+    ctx = context(tmp_path)
+    seed_config(ctx)
+    seed_plugins(ctx)
+    launch = launch_authority(ctx)
+    labels: list[str] = []
+    order: list[str] = []
+
+    @contextmanager
+    def fake_lock(**kwargs: object):
+        yield {"owner": "test", "run_id": kwargs["run_id"]}
+
+    def fake_process_gate(**kwargs: object) -> dict[str, object]:
+        label = str(kwargs["label"])
+        labels.append(label)
+        return {
+            "label": label,
+            "blocked_process_count": 0,
+            "exclusivity_status": "exclusive_window_observed_by_process_samples",
+        }
+
+    monkeypatch.setattr(mutation_module, "acquire_refresh_lock", fake_lock)
+    monkeypatch.setattr(mutation_module, "capture_process_gate", fake_process_gate)
+    monkeypatch.setattr(
+        mutation_module,
+        "prove_app_server_home_authority",
+        lambda active_context: order.append("authority") or launch,
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "install_plugins_via_app_server",
+        lambda active_context: order.append("install") or ({"kind": "install-authority"},),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda paths: order.append("inventory") or ("inventory", ()),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "run_standard_smoke",
+        lambda **kwargs: order.append("smoke") or {"final_status": "passed"},
+    )
+
+    result = run_guarded_refresh_orchestration(
+        ctx,
+        terminal_plan_status="guarded-refresh-required",
+        plugin_hooks_state="true",
+        isolated_rehearsal=True,
+    )
+
+    assert isinstance(result, GuardedRefreshResult)
+    assert result.final_status == "MUTATION_REHEARSAL_COMPLETE_NON_CERTIFIED"
+    assert labels == ["before-snapshot", "after-hook-disable", "before-install", "post-mutation"]
+    assert order == ["authority", "install", "inventory", "smoke"]
+    assert "plugin_hooks = true" in (ctx.codex_home / "config.toml").read_text(encoding="utf-8")
+    assert (ctx.local_only_run_root / "final-status.json").is_file()
+    rehearsal_proof = ctx.local_only_run_root / "rehearsal-proof.json"
+    assert rehearsal_proof.is_file()
+    proof = json.loads(rehearsal_proof.read_text(encoding="utf-8"))
+    assert proof["final_status"] == "MUTATION_REHEARSAL_COMPLETE_NON_CERTIFIED"
+    assert proof["certification_status"] == "local-only-non-certified"
+    assert not (
+        ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json"
+    ).exists()
 
 
 def pre_install_authority(

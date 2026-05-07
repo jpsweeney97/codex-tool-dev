@@ -308,6 +308,8 @@ def _collect_readonly_runtime_inventory(
         lambda active_requests: app_server_roundtrip(
             active_requests,
             executable=codex_executable,
+            env_overrides={"CODEX_HOME": str(paths.codex_home)},
+            cwd=scratch_cwd,
         )
     )
     transcript: tuple[dict[str, Any], ...] = ()

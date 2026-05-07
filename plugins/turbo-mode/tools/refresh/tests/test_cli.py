@@ -116,9 +116,64 @@ def write_refresh_tooling_sources(repo_root: Path) -> None:
         target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
 
 
+def write_plan05_seed_sources(repo_root: Path) -> None:
+    fixture = (
+        REPO_ROOT
+        / "plugins/turbo-mode/tools/refresh/tests/fixtures/"
+        "handoff_state_helper_doc_migration.json"
+    )
+    data = json.loads(fixture.read_text(encoding="utf-8"))
+    for rel, record in data.items():
+        source = repo_root / f"plugins/turbo-mode/{rel}"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(record["source_text"], encoding="utf-8")
+    ticket = repo_root / "plugins/turbo-mode/ticket/1.4.0/README.md"
+    ticket.parent.mkdir(parents=True, exist_ok=True)
+    ticket.write_text("ticket source\n", encoding="utf-8")
+    ticket_hook = repo_root / "plugins/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+    ticket_hook.parent.mkdir(parents=True, exist_ok=True)
+    ticket_hook.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": (
+                                        "python3 /Users/jp/.codex/plugins/cache/turbo-mode/"
+                                        "ticket/1.4.0/hooks/ticket_engine_guard.py"
+                                    ),
+                                    "timeout": 10,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    ticket_guard = repo_root / "plugins/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py"
+    ticket_guard.write_text("#!/usr/bin/env python3\nprint('guard')\n", encoding="utf-8")
+
+
 def commit_all(repo_root: Path) -> None:
     subprocess.run(["git", "add", "."], cwd=repo_root, check=True)
     subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repo_root, check=True)
+
+
+def git_output(repo_root: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return completed.stdout.strip()
 
 
 def setup_record_summary_repo(tmp_path: Path) -> tuple[Path, Path]:
@@ -132,6 +187,19 @@ def setup_record_summary_repo(tmp_path: Path) -> tuple[Path, Path]:
     write_refresh_tooling_sources(repo_root)
     commit_all(repo_root)
     return repo_root, codex_home
+
+
+def setup_plan05_seed_repo(tmp_path: Path) -> tuple[Path, str, str]:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    init_git_repo(repo_root)
+    write_valid_marketplace(repo_root)
+    write_plan05_seed_sources(repo_root)
+    write_refresh_tooling_sources(repo_root)
+    commit_all(repo_root)
+    source_commit = git_output(repo_root, "rev-parse", "HEAD")
+    source_tree = git_output(repo_root, "rev-parse", "HEAD^{tree}")
+    return repo_root, source_commit, source_tree
 
 
 def run_tool(
@@ -524,19 +592,258 @@ def test_cli_rejects_mutation_modes_in_plan_02() -> None:
     completed = run_tool(["--refresh"])
 
     assert completed.returncode == 2
-    assert "outside non-mutating refresh planning" in completed.stderr
+    assert "--refresh is outside non-mutating refresh planning" in completed.stderr
 
 
-def test_cli_rejects_exact_future_command_shapes_with_plan_02_message() -> None:
+def test_cli_rejects_refresh_future_command_shape_with_plan_neutral_message() -> None:
     refresh = run_tool(["--refresh", "--smoke", "light"])
-    guarded = run_tool(["--guarded-refresh", "--smoke", "standard"])
 
     assert refresh.returncode == 2
-    assert guarded.returncode == 2
-    assert "outside non-mutating refresh planning" in refresh.stderr
-    assert "outside non-mutating refresh planning" in guarded.stderr
+    assert "--refresh is outside non-mutating refresh planning" in refresh.stderr
     assert "unrecognized arguments" not in refresh.stderr
-    assert "unrecognized arguments" not in guarded.stderr
+
+
+def test_cli_guarded_refresh_requires_source_identity_before_planning(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--isolated-rehearsal",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--source-implementation-commit is required" in completed.stderr
+    assert not (codex_home / "local-only").exists()
+
+
+def test_cli_isolated_rehearsal_requires_guarded_refresh(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+
+    completed = run_tool(
+        [
+            "--dry-run",
+            "--isolated-rehearsal",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--isolated-rehearsal requires --guarded-refresh" in completed.stderr
+
+
+def test_cli_guarded_refresh_rejects_real_home_no_record_summary_before_writes() -> None:
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--no-record-summary",
+            "--codex-home",
+            "/Users/jp/.codex",
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--no-record-summary is not allowed for real guarded refresh" in completed.stderr
+
+
+def test_cli_guarded_refresh_rejects_real_home_without_rehearsal_proof_before_writes() -> None:
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--record-summary",
+            "--codex-home",
+            "/Users/jp/.codex",
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--rehearsal-proof is required for real guarded refresh" in completed.stderr
+
+
+def test_cli_guarded_refresh_rejects_real_home_isolated_rehearsal_before_writes() -> None:
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--isolated-rehearsal",
+            "--codex-home",
+            "/Users/jp/.codex",
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--isolated-rehearsal requires --codex-home outside /Users/jp/.codex" in (
+        completed.stderr
+    )
+
+
+def test_cli_guarded_refresh_blocks_real_home_after_required_proof_args_in_this_slice(
+    tmp_path: Path,
+) -> None:
+    proof = tmp_path / "proof.json"
+    proof.write_text("{}\n", encoding="utf-8")
+
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--record-summary",
+            "--codex-home",
+            "/Users/jp/.codex",
+            "--rehearsal-proof",
+            str(proof),
+            "--rehearsal-proof-sha256",
+            "0" * 64,
+            "--source-implementation-commit",
+            "source",
+            "--source-implementation-tree",
+            "tree",
+        ]
+    )
+
+    assert completed.returncode == 1
+    assert "real guarded refresh blocked" in completed.stderr
+
+
+def test_cli_seed_isolated_rehearsal_home_rejects_real_home_before_writes(
+    tmp_path: Path,
+) -> None:
+    repo_root, source_commit, source_tree = setup_plan05_seed_repo(tmp_path)
+
+    completed = run_tool(
+        [
+            "--seed-isolated-rehearsal-home",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            "/Users/jp/.codex",
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--seed-isolated-rehearsal-home requires --codex-home outside /Users/jp/.codex" in (
+        completed.stderr
+    )
+
+
+def test_cli_seed_isolated_rehearsal_home_requires_source_identity_before_writes(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+
+    completed = run_tool(
+        [
+            "--seed-isolated-rehearsal-home",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--source-implementation-commit is required for --seed-isolated-rehearsal-home" in (
+        completed.stderr
+    )
+    assert not codex_home.exists()
+
+
+def test_cli_seed_isolated_rehearsal_home_creates_plan05_drift_and_manifest(
+    tmp_path: Path,
+) -> None:
+    repo_root, source_commit, source_tree = setup_plan05_seed_repo(tmp_path)
+    codex_home = tmp_path / "isolated-home"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_fake_codex(bin_dir)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "FAKE_REPO_ROOT": str(repo_root),
+        "FAKE_CODEX_HOME": str(codex_home),
+    }
+
+    completed = run_tool(
+        [
+            "--seed-isolated-rehearsal-home",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--run-id",
+            "seed-run",
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+            "--json",
+        ],
+        env=env,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["terminal_plan_status"] == "guarded-refresh-required"
+    seed_manifest = Path(payload["seed_manifest_path"])
+    assert seed_manifest.is_file()
+    assert codex_home in seed_manifest.parents
+    manifest = json.loads(seed_manifest.read_text(encoding="utf-8"))
+    assert manifest["canonical_drift_paths"] == [
+        "handoff/1.6.0/skills/load/SKILL.md",
+        "handoff/1.6.0/skills/quicksave/SKILL.md",
+        "handoff/1.6.0/skills/save/SKILL.md",
+        "handoff/1.6.0/skills/summary/SKILL.md",
+        "handoff/1.6.0/tests/test_session_state.py",
+        "handoff/1.6.0/tests/test_skill_docs.py",
+    ]
+    assert manifest["no_real_home_paths"] is True
+    assert not any("/Users/jp/.codex" in path for path in manifest["generated_paths"])
+    hook_manifest = json.loads(
+        (codex_home / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    hook_command = hook_manifest["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert hook_command == (
+        f"python3 {codex_home}/plugins/cache/turbo-mode/ticket/1.4.0/"
+        "hooks/ticket_engine_guard.py"
+    )
+
+    dry_run = run_tool(
+        [
+            "--dry-run",
+            "--inventory-check",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ],
+        env=env,
+    )
+
+    assert dry_run.returncode == 0, dry_run.stderr
+    dry_run_payload = json.loads(
+        Path(payload["post_seed_dry_run_path"]).read_text(encoding="utf-8")
+    )
+    assert dry_run_payload["terminal_plan_status"] == "guarded-refresh-required"
 
 
 def test_cli_dry_run_does_not_modify_cache_tree_or_config(tmp_path: Path) -> None:
