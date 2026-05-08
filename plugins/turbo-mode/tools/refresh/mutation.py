@@ -146,6 +146,7 @@ class MutationContext:
     source_to_rehearsal_execution_delta_status: str = "identical"
     source_to_rehearsal_changed_paths_sha256: str = ""
     source_to_rehearsal_allowed_delta_proof_sha256: str | None = None
+    live_target: bool = False
 
 
 @dataclass(frozen=True)
@@ -236,6 +237,7 @@ def validate_rehearsal_proof_bundle(
     source_implementation_commit: str,
     source_implementation_tree: str,
     tool_sha256: str,
+    approved_codex_home: Path | None = None,
 ) -> ValidatedRehearsalProof:
     normalized_proof = proof_path.expanduser().resolve(strict=True)
     actual_sha256 = _sha256_file(normalized_proof)
@@ -287,12 +289,14 @@ def validate_rehearsal_proof_bundle(
         operation="validate rehearsal proof",
     )
     requested_home = Path(str(proof["requested_codex_home"]))
-    if _is_under_path(requested_home, REAL_CODEX_HOME):
-        fail(
-            "validate rehearsal proof",
-            "requested Codex home resolves under real home",
-            str(requested_home),
-        )
+    forbidden_live_homes = _forbidden_live_codex_homes(approved_codex_home)
+    for live_home in forbidden_live_homes:
+        if _is_under_path(requested_home, live_home):
+            fail(
+                "validate rehearsal proof",
+                "requested Codex home resolves under real home",
+                str(requested_home),
+            )
     delta_status = proof["source_to_rehearsal_execution_delta_status"]
     if delta_status not in {
         "identical",
@@ -320,6 +324,7 @@ def validate_rehearsal_proof_bundle(
     referenced_artifacts = _validate_referenced_artifacts(
         proof,
         artifact_root=artifact_root,
+        forbidden_live_homes=forbidden_live_homes,
     )
     _validate_source_to_rehearsal_delta_proof(
         proof,
@@ -352,6 +357,7 @@ def validate_rehearsal_proof_bundle(
         referenced_artifacts,
         artifact_root=artifact_root,
         expected_requested_home=str(requested_home),
+        forbidden_live_homes=forbidden_live_homes,
     )
     _validate_digest_referenced_json(
         proof,
@@ -1734,7 +1740,7 @@ def install_plugins_via_app_server(
     pre_install_ticket_hook_policy: str = "required",
     same_child_ticket_hook_policy: str = "required",
 ) -> tuple[dict[str, object], ...]:
-    if context.codex_home == REAL_CODEX_HOME:
+    if context.live_target or context.codex_home == REAL_CODEX_HOME:
         state = _read_existing_run_state(context)
         validate_cache_install_allowed(state)
     launch_authority = prove_app_server_home_authority(
@@ -1745,7 +1751,7 @@ def install_plugins_via_app_server(
         launch_authority=launch_authority,
         marketplace_path=context.repo_root / ".agents/plugins/marketplace.json",
         remote_marketplace_name=None,
-        allow_real_codex_home=context.codex_home == REAL_CODEX_HOME,
+        allow_real_codex_home=context.live_target or context.codex_home == REAL_CODEX_HOME,
     )
     pre_install_authority_path = context.local_only_run_root / (
         "pre-install-target-authority.proof.json"
@@ -1965,7 +1971,7 @@ def _run_standard_smoke_for_context(context: MutationContext) -> dict[str, objec
 
 @contextmanager
 def _allow_real_home_smoke_for_context(context: MutationContext):
-    if context.codex_home != REAL_CODEX_HOME:
+    if not context.live_target and context.codex_home != REAL_CODEX_HOME:
         yield
         return
 
@@ -2170,6 +2176,7 @@ def _validate_referenced_artifacts(
     proof: dict[str, Any],
     *,
     artifact_root: Path,
+    forbidden_live_homes: tuple[Path, ...],
 ) -> tuple[dict[str, str], ...]:
     raw_artifacts = proof.get("referenced_artifacts")
     if not isinstance(raw_artifacts, list) or not raw_artifacts:
@@ -2213,7 +2220,10 @@ def _validate_referenced_artifacts(
                     "actual": actual_sha256,
                 },
             )
-        _reject_real_home_strings_in_json_artifact(path)
+        _reject_real_home_strings_in_json_artifact(
+            path,
+            forbidden_live_homes=forbidden_live_homes,
+        )
         artifacts.append({"relative_path": relative_path, "sha256": expected_sha256})
         observed_digests.add(expected_sha256)
         last_relative_path = relative_path
@@ -2258,7 +2268,16 @@ def _resolve_referenced_artifact_path(
     return candidate
 
 
-def _reject_real_home_strings_in_json_artifact(path: Path) -> None:
+def _reject_real_home_strings_in_json_artifact(
+    path: Path,
+    *,
+    forbidden_live_homes: tuple[Path, ...] | None = None,
+) -> None:
+    active_forbidden_live_homes = (
+        forbidden_live_homes
+        if forbidden_live_homes is not None
+        else _forbidden_live_codex_homes(None)
+    )
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -2268,7 +2287,10 @@ def _reject_real_home_strings_in_json_artifact(path: Path) -> None:
             {"artifact": str(path), "error": str(exc)},
         )
     for value in _strings_in(payload):
-        if _contains_real_home_path(value):
+        if _contains_real_home_path(
+            value,
+            forbidden_live_homes=active_forbidden_live_homes,
+        ):
             fail(
                 "validate rehearsal proof",
                 "referenced artifact resolves real Codex home path",
@@ -2516,6 +2538,7 @@ def _validate_no_real_home_authority_proof(
     *,
     artifact_root: Path,
     expected_requested_home: str,
+    forbidden_live_homes: tuple[Path, ...],
 ) -> None:
     _path, payload = _load_digest_referenced_json(
         proof,
@@ -2582,12 +2605,13 @@ def _validate_no_real_home_authority_proof(
                 "no-real-home authority proof path outside requested home",
                 str(path),
             )
-        if _is_under_path(path, REAL_CODEX_HOME):
-            fail(
-                "validate rehearsal proof",
-                "no-real-home authority proof resolves real Codex home path",
-                str(path),
-            )
+        for live_home in forbidden_live_homes:
+            if _is_under_path(path, live_home):
+                fail(
+                    "validate rehearsal proof",
+                    "no-real-home authority proof resolves real Codex home path",
+                    str(path),
+                )
 
 
 def _authority_strings(
@@ -2614,9 +2638,32 @@ def _strings_in(value: object) -> list[str]:
     return []
 
 
-def _contains_real_home_path(value: str) -> bool:
-    real_home = str(REAL_CODEX_HOME)
-    return value == real_home or f"{real_home}/" in value
+def _forbidden_live_codex_homes(approved_codex_home: Path | None) -> tuple[Path, ...]:
+    homes: list[Path] = []
+    for home in (REAL_CODEX_HOME, approved_codex_home):
+        if home is None:
+            continue
+        normalized = home.expanduser().resolve(strict=False)
+        if normalized not in homes:
+            homes.append(normalized)
+    return tuple(homes)
+
+
+def _contains_real_home_path(
+    value: str,
+    *,
+    forbidden_live_homes: tuple[Path, ...] | None = None,
+) -> bool:
+    active_forbidden_live_homes = (
+        forbidden_live_homes
+        if forbidden_live_homes is not None
+        else _forbidden_live_codex_homes(None)
+    )
+    for live_home in active_forbidden_live_homes:
+        live_home_text = str(live_home)
+        if value == live_home_text or f"{live_home_text}/" in value:
+            return True
+    return False
 
 
 def _read_existing_run_state(context: MutationContext) -> RunState:

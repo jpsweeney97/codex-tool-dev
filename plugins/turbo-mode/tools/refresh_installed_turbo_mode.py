@@ -432,6 +432,7 @@ def generate_guarded_refresh_approval_candidate(
         source_implementation_commit=source_implementation_commit,
         source_implementation_tree=source_implementation_tree,
         tool_sha256=sha256_file(CURRENT_FILE),
+        approved_codex_home=normalized_codex_home,
     )
 
     local_only_root = normalized_codex_home / "local-only/turbo-mode-refresh"
@@ -638,16 +639,14 @@ def generate_guarded_refresh_approval_candidate(
 def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     codex_home = args.codex_home.expanduser().resolve(strict=False)
     real_codex_home = REAL_CODEX_HOME
-    is_real_home = codex_home == real_codex_home
-    if args.no_record_summary and is_real_home:
+    live_target = not args.isolated_rehearsal
+    if args.no_record_summary and live_target:
         parser.error("--no-record-summary is not allowed for real guarded refresh")
-    if args.isolated_rehearsal and is_real_home:
+    if args.isolated_rehearsal and codex_home == real_codex_home:
         parser.error(
             f"--isolated-rehearsal requires --codex-home outside {real_codex_home}"
         )
-    if not is_real_home and not args.isolated_rehearsal:
-        parser.error("--guarded-refresh with temporary --codex-home requires --isolated-rehearsal")
-    if is_real_home:
+    if live_target:
         if args.rehearsal_proof is None:
             parser.error("--rehearsal-proof is required for real guarded refresh")
         if args.rehearsal_proof_sha256 is None:
@@ -664,7 +663,7 @@ def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentPars
     rehearsal_capture = None
     try:
         run_id = validate_run_id(run_id)
-        if is_real_home:
+        if live_target:
             if args.rehearsal_proof is None:
                 raise RefreshError(
                     "run guarded refresh failed: rehearsal proof is required. Got: None"
@@ -680,6 +679,7 @@ def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentPars
                 source_implementation_commit=args.source_implementation_commit,
                 source_implementation_tree=args.source_implementation_tree,
                 tool_sha256=sha256_file(CURRENT_FILE),
+                approved_codex_home=codex_home,
             )
             rehearsal_capture = capture_rehearsal_proof_bundle(
                 validated_rehearsal_proof,
@@ -745,6 +745,7 @@ def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentPars
                 source_to_rehearsal_allowed_delta_proof_sha256=(
                     source_execution_identity_proof_sha256
                 ),
+                live_target=live_target,
             ),
             terminal_plan_status=result.terminal_status.value,
             plugin_hooks_state=result.runtime_config.plugin_hooks_state,

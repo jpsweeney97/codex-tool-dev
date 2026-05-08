@@ -892,6 +892,54 @@ def test_rehearsal_proof_validation_rejects_embedded_real_home_path_in_artifact(
         )
 
 
+def test_rehearsal_proof_validation_rejects_approved_live_home_path_in_artifact(
+    tmp_path: Path,
+) -> None:
+    proof_path, _proof_sha = write_full_rehearsal_bundle(tmp_path)
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    artifact_root = proof_path.parent.parent
+    approved_live_home = tmp_path / "operator/.codex"
+    app_server_artifact = next(
+        artifact
+        for artifact in proof["referenced_artifacts"]
+        if artifact["relative_path"].endswith("/app-server-authority.proof.json")
+    )
+    no_real_home_artifact = next(
+        artifact
+        for artifact in proof["referenced_artifacts"]
+        if artifact["relative_path"].endswith("/no-real-home-authority.proof.json")
+    )
+    app_server_path = artifact_root / app_server_artifact["relative_path"]
+    no_real_home_path = artifact_root / no_real_home_artifact["relative_path"]
+    write_json(
+        app_server_path,
+        {
+            "requested_codex_home": proof["requested_codex_home"],
+            "ticket_hook_command": (
+                f"python3 {approved_live_home}/plugins/cache/turbo-mode/"
+                "ticket/1.4.0/hooks/ticket_engine_guard.py"
+            ),
+        },
+    )
+    no_real_home = json.loads(no_real_home_path.read_text(encoding="utf-8"))
+    no_real_home["app_server_authority_proof_sha256"] = sha256_file(app_server_path)
+    write_json(no_real_home_path, no_real_home)
+    proof_sha = refresh_full_rehearsal_bundle_digests(proof_path)
+
+    with pytest.raises(
+        RefreshError,
+        match="referenced artifact resolves real Codex home path",
+    ):
+        validate_rehearsal_proof_bundle(
+            proof_path=proof_path,
+            expected_sha256=proof_sha,
+            source_implementation_commit=SOURCE_COMMIT,
+            source_implementation_tree=SOURCE_TREE,
+            tool_sha256=TOOL_SHA256,
+            approved_codex_home=approved_live_home,
+        )
+
+
 def test_rehearsal_proof_validation_rejects_symlinked_referenced_artifact(
     tmp_path: Path,
 ) -> None:
@@ -1362,6 +1410,83 @@ def test_live_guarded_orchestration_sets_real_home_smoke_context(
 
     monkeypatch.delenv("ALLOW_REAL_CODEX_HOME_SMOKE", raising=False)
     monkeypatch.setattr(mutation_module, "REAL_CODEX_HOME", ctx.codex_home)
+    monkeypatch.setattr(mutation_module, "acquire_refresh_lock", fake_lock)
+    monkeypatch.setattr(mutation_module, "capture_process_gate", fake_process_gate)
+    monkeypatch.setattr(
+        mutation_module,
+        "prove_app_server_home_authority",
+        lambda _active_context: launch,
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "install_plugins_via_app_server",
+        lambda *_args, **_kwargs: (
+            {
+                "pre_install_target_authority_sha256": "target-sha",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda _paths: ("inventory", ()),
+    )
+    monkeypatch.setattr(mutation_module, "run_standard_smoke", fake_smoke)
+    monkeypatch.setattr(
+        mutation_module,
+        "publish_guarded_refresh_commit_safe_summary",
+        lambda **_kwargs: type("Publication", (), {"published_summary_path": "summary"})(),
+    )
+
+    result = run_guarded_refresh_orchestration(
+        ctx,
+        terminal_plan_status="guarded-refresh-required",
+        plugin_hooks_state="true",
+        isolated_rehearsal=False,
+    )
+
+    assert result.final_status == "MUTATION_COMPLETE_CERTIFIED"
+    assert smoke_env_values == ["1"]
+    assert "ALLOW_REAL_CODEX_HOME_SMOKE" not in mutation_module.os.environ
+
+
+def test_live_guarded_orchestration_sets_smoke_context_for_non_current_live_home(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from contextlib import contextmanager
+
+    ctx = replace(
+        context(tmp_path, codex_home=tmp_path / "operator/.codex"),
+        live_target=True,
+    )
+    seed_config(ctx)
+    seed_plugins(ctx)
+    seed_live_rehearsal_capture(ctx)
+    launch = launch_authority(ctx)
+    smoke_env_values: list[str | None] = []
+
+    @contextmanager
+    def fake_lock(**_kwargs: object):
+        yield {"owner": "test", "run_id": ctx.run_id}
+
+    def fake_process_gate(**kwargs: object) -> dict[str, object]:
+        label = str(kwargs["label"])
+        payload = {
+            "label": label,
+            "blocked_process_count": 0,
+            "exclusivity_status": "exclusive_window_observed_by_process_samples",
+        }
+        write_json(ctx.local_only_run_root / f"process-{label}.summary.json", payload)
+        return payload
+
+    def fake_smoke(**_kwargs: object) -> dict[str, object]:
+        smoke_env_values.append(mutation_module.os.environ.get("ALLOW_REAL_CODEX_HOME_SMOKE"))
+        payload = {"final_status": "passed"}
+        write_json(ctx.local_only_run_root / "standard-smoke.summary.json", payload)
+        return payload
+
+    monkeypatch.delenv("ALLOW_REAL_CODEX_HOME_SMOKE", raising=False)
     monkeypatch.setattr(mutation_module, "acquire_refresh_lock", fake_lock)
     monkeypatch.setattr(mutation_module, "capture_process_gate", fake_process_gate)
     monkeypatch.setattr(
@@ -2172,6 +2297,24 @@ def test_real_home_install_requires_durable_snapshot_marker_before_app_server(
     tmp_path: Path,
 ) -> None:
     ctx = context(tmp_path, codex_home=Path("/Users/jp/.codex"))
+    called = False
+
+    def fail_if_called(paths: object) -> object:
+        nonlocal called
+        called = True
+        return object()
+
+    monkeypatch.setattr(mutation_module, "collect_app_server_launch_authority", fail_if_called)
+    with pytest.raises(RefreshError, match="snapshot marker"):
+        install_plugins_via_app_server(ctx)
+    assert called is False
+
+
+def test_live_target_install_requires_durable_snapshot_marker_before_app_server(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    ctx = replace(context(tmp_path, codex_home=tmp_path / "operator/.codex"), live_target=True)
     called = False
 
     def fail_if_called(paths: object) -> object:

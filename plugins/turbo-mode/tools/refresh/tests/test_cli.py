@@ -839,6 +839,25 @@ def test_cli_guarded_refresh_rejects_real_home_without_rehearsal_proof_before_wr
     assert "--rehearsal-proof is required for real guarded refresh" in completed.stderr
 
 
+def test_cli_guarded_refresh_treats_non_current_home_without_isolated_as_live(
+    tmp_path: Path,
+) -> None:
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--record-summary",
+            "--run-id",
+            "plan06-live-guarded-refresh-20260508-132000",
+            "--codex-home",
+            str(tmp_path / "operator/.codex"),
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--rehearsal-proof is required for real guarded refresh" in completed.stderr
+    assert "temporary --codex-home requires --isolated-rehearsal" not in completed.stderr
+
+
 def test_cli_guarded_refresh_rejects_real_home_isolated_rehearsal_before_writes() -> None:
     completed = run_tool(
         [
@@ -1110,6 +1129,150 @@ def test_cli_guarded_refresh_real_home_runs_orchestration_after_proof_capture(
     assert "rehearsal proof capture complete" in captured.err
     assert "real guarded refresh blocked" not in captured.err
     assert calls == ["plan-refresh", "verify-source-execution", "orchestrate"]
+
+
+def test_cli_guarded_refresh_non_current_live_home_runs_orchestration(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    live_codex_home = (tmp_path / "operator/.codex").resolve(strict=False)
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text("{}\n", encoding="utf-8")
+    validator_kwargs: dict[str, object] = {}
+    calls: list[str] = []
+
+    def fake_validate_rehearsal_proof_bundle(**kwargs: object) -> object:
+        validator_kwargs.update(kwargs)
+        return object()
+
+    def fake_capture_rehearsal_proof_bundle(
+        _validated: object,
+        *,
+        live_run_root: Path,
+    ) -> object:
+        calls.append("capture")
+        assert live_run_root == (
+            live_codex_home
+            / "local-only/turbo-mode-refresh/"
+            "plan06-live-guarded-refresh-20260508-132500"
+        )
+        return type(
+            "Capture",
+            (),
+            {"capture_manifest_path": str(live_run_root / "capture-manifest.json")},
+        )()
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        fake_validate_rehearsal_proof_bundle,
+    )
+    monkeypatch.setattr(
+        cli,
+        "capture_rehearsal_proof_bundle",
+        fake_capture_rehearsal_proof_bundle,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "ensure_no_active_run_state_markers",
+        lambda _local_only_root: None,
+    )
+
+    paths = type(
+        "Paths",
+        (),
+        {
+            "repo_root": tmp_path / "repo",
+            "codex_home": live_codex_home,
+            "local_only_root": live_codex_home / "local-only/turbo-mode-refresh",
+        },
+    )()
+    terminal_status = type("TerminalStatus", (), {"value": "guarded-refresh-required"})()
+    runtime_config = type("RuntimeConfig", (), {"plugin_hooks_state": "true"})()
+
+    monkeypatch.setattr(
+        cli,
+        "plan_refresh",
+        lambda **_kwargs: type(
+            "PlanRefresh",
+            (),
+            {
+                "terminal_status": terminal_status,
+                "paths": paths,
+                "runtime_config": runtime_config,
+            },
+        )(),
+    )
+    source_proof_path = tmp_path / "source-execution-identity.proof.json"
+    source_proof_path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cli,
+        "verify_source_execution_identity",
+        lambda **_kwargs: type(
+            "Proof",
+            (),
+            {
+                "proof_path": str(source_proof_path),
+                "execution_head": "source",
+                "execution_tree": "tree",
+                "changed_paths": [],
+            },
+        )(),
+    )
+
+    def fake_run_guarded_refresh_orchestration(ctx: object, **kwargs: object) -> object:
+        calls.append("orchestrate")
+        assert ctx.codex_home == live_codex_home
+        assert ctx.live_target is True
+        assert kwargs["isolated_rehearsal"] is False
+        return type(
+            "Orchestration",
+            (),
+            {
+                "final_status": "MUTATION_COMPLETE_CERTIFIED",
+                "final_status_path": str(tmp_path / "final-status.json"),
+                "rehearsal_proof_path": None,
+                "rehearsal_proof_sha256": None,
+                "rehearsal_proof_sha256_path": None,
+            },
+        )()
+
+    monkeypatch.setattr(
+        cli,
+        "run_guarded_refresh_orchestration",
+        fake_run_guarded_refresh_orchestration,
+    )
+
+    args = parser.parse_args(
+        [
+            "--guarded-refresh",
+            "--record-summary",
+            "--json",
+            "--run-id",
+            "plan06-live-guarded-refresh-20260508-132500",
+            "--codex-home",
+            str(live_codex_home),
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            "proof-sha",
+            "--source-implementation-commit",
+            "source",
+            "--source-implementation-tree",
+            "tree",
+        ]
+    )
+
+    assert cli.guarded_refresh_main(args, parser) == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["final_status"] == "MUTATION_COMPLETE_CERTIFIED"
+    assert validator_kwargs["approved_codex_home"] == live_codex_home
+    assert calls == ["capture", "orchestrate"]
 
 
 def test_cli_guarded_refresh_rejects_path_shaped_real_home_run_id_before_capture(
