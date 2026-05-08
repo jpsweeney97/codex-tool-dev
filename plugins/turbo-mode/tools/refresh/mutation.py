@@ -38,7 +38,7 @@ from .commit_safe import (
     build_guarded_refresh_commit_safe_summary,
     ensure_relevant_worktree_clean,
 )
-from .evidence import ensure_private_evidence_root, write_local_evidence
+from .evidence import ensure_private_evidence_root, validate_run_id, write_local_evidence
 from .lock_state import (
     RunState,
     acquire_refresh_lock,
@@ -532,6 +532,7 @@ def seed_isolated_rehearsal_home(
 ) -> SeedIsolatedRehearsalHomeResult:
     normalized_repo_root = repo_root.expanduser().resolve(strict=True)
     normalized_codex_home = codex_home.expanduser().resolve(strict=False)
+    run_id = validate_run_id(run_id)
     if _is_under_path(normalized_codex_home, REAL_CODEX_HOME):
         fail(
             "seed isolated rehearsal home",

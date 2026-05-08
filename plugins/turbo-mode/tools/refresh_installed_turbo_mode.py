@@ -322,8 +322,8 @@ def seed_isolated_rehearsal_home_main(
     if args.source_implementation_tree is None:
         parser.error("--source-implementation-tree is required for --seed-isolated-rehearsal-home")
 
-    run_id = args.run_id or uuid.uuid4().hex
     try:
+        run_id = validate_run_id(args.run_id or uuid.uuid4().hex)
         seed = seed_isolated_rehearsal_home(
             repo_root=args.repo_root,
             codex_home=args.codex_home,
@@ -496,7 +496,7 @@ def generate_guarded_refresh_approval_candidate(
         expected_marker_path=expected_marker_path,
         expected_summary_path=expected_summary_path,
         expected_failed_summary_path=expected_failed_summary_path,
-        codex_home=REAL_CODEX_HOME,
+        codex_home=normalized_codex_home,
         source_implementation_commit=source_implementation_commit,
         source_implementation_tree=source_implementation_tree,
         execution_head=source_execution_proof.execution_head,
@@ -552,8 +552,12 @@ def generate_guarded_refresh_approval_candidate(
             "close_active_codex_desktop": True,
             "close_active_codex_cli_sessions": True,
             "do_not_reopen_until_external_command_exits": True,
-            "mutates_installed_cache": f"{REAL_CODEX_HOME / 'plugins/cache/turbo-mode'}/",
-            "may_temporarily_edit_config": str(REAL_CODEX_HOME / "config.toml"),
+            "mutates_installed_cache": (
+                f"{normalized_codex_home / 'plugins/cache/turbo-mode'}/"
+            ),
+            "may_temporarily_edit_config": str(
+                normalized_codex_home / "config.toml"
+            ),
         },
         "rollback_and_recovery_behavior": {
             "rollback_complete_status": "MUTATION_FAILED_ROLLBACK_COMPLETE",
@@ -603,6 +607,7 @@ def generate_guarded_refresh_approval_candidate(
         python_version=python_version,
         rehearsal_proof=proof_path,
         rehearsal_proof_sha256=rehearsal_proof_sha256,
+        codex_home=normalized_codex_home,
         expected_local_only_run_root=expected_local_only_run_root,
         expected_marker_path=expected_marker_path,
         expected_summary_path=expected_summary_path,
@@ -1028,6 +1033,7 @@ APPROVAL_JSON_PATH={_shell_quote(approval_json_path)}
 APPROVED_DIGESTS_PATH={_shell_quote(digests_path)}
 APPROVAL_STATUS="blocked-before-operator-approval"
 APPROVED_RUN_ID={_shell_quote(run_id)}
+APPROVED_CODEX_HOME={_shell_quote(codex_home)}
 EXPECTED_LOCAL_ONLY_RUN_ROOT={_shell_quote(expected_local_only_run_root)}
 EXPECTED_MARKER_PATH={_shell_quote(expected_marker_path)}
 EXPECTED_SUMMARY_PATH={_shell_quote(expected_summary_path)}
@@ -1042,7 +1048,8 @@ APPROVED_PYTHON_VERSION={_shell_quote(python_version)}
 APPROVED_REHEARSAL_PROOF={_shell_quote(rehearsal_proof)}
 APPROVED_REHEARSAL_PROOF_SHA256={_shell_quote(rehearsal_proof_sha256)}
 export EXECUTION_ROOT APPROVAL_JSON_PATH APPROVED_DIGESTS_PATH APPROVAL_STATUS
-export APPROVED_RUN_ID EXPECTED_LOCAL_ONLY_RUN_ROOT EXPECTED_MARKER_PATH
+export APPROVED_RUN_ID APPROVED_CODEX_HOME
+export EXPECTED_LOCAL_ONLY_RUN_ROOT EXPECTED_MARKER_PATH
 export EXPECTED_SUMMARY_PATH EXPECTED_FAILED_SUMMARY_PATH
 export APPROVED_SOURCE_IMPLEMENTATION_COMMIT APPROVED_SOURCE_IMPLEMENTATION_TREE
 export APPROVED_EXECUTION_HEAD APPROVED_EXECUTION_TREE APPROVED_CHANGED_PATHS_FILE
@@ -1075,6 +1082,7 @@ require_value() {{
 
 for pair in \\
   "APPROVED_RUN_ID=$APPROVED_RUN_ID" \\
+  "APPROVED_CODEX_HOME=$APPROVED_CODEX_HOME" \\
   "EXPECTED_LOCAL_ONLY_RUN_ROOT=$EXPECTED_LOCAL_ONLY_RUN_ROOT" \\
   "EXPECTED_MARKER_PATH=$EXPECTED_MARKER_PATH" \\
   "EXPECTED_SUMMARY_PATH=$EXPECTED_SUMMARY_PATH" \\
@@ -1140,6 +1148,7 @@ checks = {{
     "run_id": os.environ["APPROVED_RUN_ID"],
     "approval_status": os.environ["APPROVAL_STATUS"],
     "execution_root": os.environ["EXECUTION_ROOT"],
+    "codex_home": os.environ["APPROVED_CODEX_HOME"],
     "expected_local_only_run_root": os.environ["EXPECTED_LOCAL_ONLY_RUN_ROOT"],
     "expected_marker_path": os.environ["EXPECTED_MARKER_PATH"],
     "expected_summary_path": os.environ["EXPECTED_SUMMARY_PATH"],
@@ -1258,7 +1267,7 @@ PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache \\
   --smoke standard \\
   --run-id "$APPROVED_RUN_ID" \\
   --repo-root "$EXECUTION_ROOT" \\
-  --codex-home {_shell_quote(codex_home)} \\
+  --codex-home "$APPROVED_CODEX_HOME" \\
   --source-implementation-commit "$SOURCE_IMPLEMENTATION_COMMIT" \\
   --source-implementation-tree "$SOURCE_IMPLEMENTATION_TREE" \\
   --rehearsal-proof "$APPROVED_REHEARSAL_PROOF" \\
@@ -1290,6 +1299,7 @@ def _build_operator_approval_packet(
     python_version: str,
     rehearsal_proof: Path,
     rehearsal_proof_sha256: str,
+    codex_home: Path,
     expected_local_only_run_root: Path,
     expected_marker_path: Path,
     expected_summary_path: Path,
@@ -1333,6 +1343,7 @@ maintenance window is still required.
 
 - Python: `{python_bin}`
 - Python version: `{python_version}`
+- Codex home: `{codex_home}`
 - Rehearsal proof: `{rehearsal_proof}`
 - Rehearsal proof SHA256: `{rehearsal_proof_sha256}`
 

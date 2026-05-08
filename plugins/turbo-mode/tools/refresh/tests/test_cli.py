@@ -1226,6 +1226,13 @@ def test_cli_generate_guarded_refresh_approval_candidate_writes_static_runbook(
         encoding="utf-8"
     ) == ""
     assert approval["python_bin"] == sys.executable
+    assert approval["codex_home"] == str(codex_home)
+    assert approval["operator_requirements"]["mutates_installed_cache"] == (
+        f"{codex_home / 'plugins/cache/turbo-mode'}/"
+    )
+    assert approval["operator_requirements"]["may_temporarily_edit_config"] == str(
+        codex_home / "config.toml"
+    )
     expected_marker_path = (
         codex_home
         / "local-only/turbo-mode-refresh/run-state/"
@@ -1236,6 +1243,11 @@ def test_cli_generate_guarded_refresh_approval_candidate_writes_static_runbook(
         encoding="utf-8"
     )
     assert str(expected_marker_path) in runbook
+    assert f"APPROVED_CODEX_HOME='{codex_home}'" in runbook
+    assert '--codex-home "$APPROVED_CODEX_HOME"' in runbook
+    assert f"--codex-home '{cli.REAL_CODEX_HOME}'" not in runbook
+    packet = (approval_dir / "operator-approval-packet.md").read_text(encoding="utf-8")
+    assert f"- Codex home: `{codex_home}`" in packet
 
     completed = subprocess.run(
         [
@@ -1408,6 +1420,34 @@ def test_cli_seed_isolated_rehearsal_home_requires_source_identity_before_writes
         completed.stderr
     )
     assert not codex_home.exists()
+
+
+def test_cli_seed_isolated_rehearsal_home_rejects_invalid_run_id_before_writes(
+    tmp_path: Path,
+) -> None:
+    repo_root, source_commit, source_tree = setup_plan05_seed_repo(tmp_path)
+    codex_home = tmp_path / "isolated-home"
+
+    completed = run_tool(
+        [
+            "--seed-isolated-rehearsal-home",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--run-id",
+            "../escape",
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+        ]
+    )
+
+    assert completed.returncode == 1
+    assert "validate run id failed: run id must be one path segment" in completed.stderr
+    assert not codex_home.exists()
+    assert not (tmp_path / "isolated-home/local-only/escape").exists()
 
 
 def test_cli_seed_isolated_rehearsal_home_creates_plan05_drift_and_manifest(
