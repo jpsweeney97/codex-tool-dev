@@ -1111,6 +1111,7 @@ def test_cli_generate_guarded_refresh_approval_candidate_writes_static_runbook(
     repo_root, _fixture_codex_home = setup_record_summary_repo(tmp_path)
     source_commit = git_output(repo_root, "rev-parse", "HEAD")
     source_tree = git_output(repo_root, "rev-parse", "HEAD^{tree}")
+    source_branch = git_output(repo_root, "rev-parse", "--abbrev-ref", "HEAD")
     codex_home = tmp_path / ".codex"
     proof_path = tmp_path / "rehearsal-proof.json"
     proof_path.write_text('{"proof": true}\n', encoding="utf-8")
@@ -1154,6 +1155,7 @@ def test_cli_generate_guarded_refresh_approval_candidate_writes_static_runbook(
     )
 
     assert approval["approval_status"] == "blocked-before-operator-approval"
+    assert approval["branch"] == source_branch
     assert approval["source_implementation_commit"] == source_commit
     assert approval["execution_head"] == source_commit
     assert approval["source_execution_identity_match"] is True

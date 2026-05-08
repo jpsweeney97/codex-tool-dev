@@ -510,7 +510,7 @@ def generate_guarded_refresh_approval_candidate(
             "Operator approval has not been granted for the external maintenance window."
         ),
         "project": normalized_repo_root.name,
-        "branch": git_rev_parse(normalized_repo_root, "--abbrev-ref HEAD"),
+        "branch": git_rev_parse(normalized_repo_root, "--abbrev-ref", "HEAD"),
         "generated_at": generated_at,
         "run_id": run_id,
         "execution_root": str(normalized_repo_root),
@@ -867,9 +867,9 @@ def certify_retained_run_main(
     return 0 if result.outcome == "retained-certified" else 1
 
 
-def git_rev_parse(repo_root: Path, revision: str) -> str:
+def git_rev_parse(repo_root: Path, *revision: str) -> str:
     completed = subprocess.run(
-        ["git", "rev-parse", revision],
+        ["git", "rev-parse", *revision],
         cwd=repo_root,
         text=True,
         capture_output=True,
