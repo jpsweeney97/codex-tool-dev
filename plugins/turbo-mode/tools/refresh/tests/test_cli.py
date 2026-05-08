@@ -920,6 +920,22 @@ def test_cli_guarded_refresh_rejects_real_home_isolated_rehearsal_before_writes(
     )
 
 
+def test_cli_guarded_refresh_rejects_nested_real_home_isolated_rehearsal() -> None:
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--isolated-rehearsal",
+            "--codex-home",
+            "/Users/jp/.codex/sandbox",
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--isolated-rehearsal requires --codex-home outside /Users/jp/.codex" in (
+        completed.stderr
+    )
+
+
 def test_cli_guarded_refresh_rejects_thin_real_home_rehearsal_proof_before_legacy_block(
     tmp_path: Path,
 ) -> None:

@@ -648,7 +648,9 @@ def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentPars
     live_target = not args.isolated_rehearsal
     if args.no_record_summary and live_target:
         parser.error("--no-record-summary is not allowed for real guarded refresh")
-    if args.isolated_rehearsal and codex_home == real_codex_home:
+    if args.isolated_rehearsal and (
+        codex_home == real_codex_home or real_codex_home in codex_home.parents
+    ):
         parser.error(
             f"--isolated-rehearsal requires --codex-home outside {real_codex_home}"
         )

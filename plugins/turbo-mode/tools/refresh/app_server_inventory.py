@@ -935,7 +935,8 @@ def _install_authority_paths(
 
 
 def _ticket_guard_command(plugin_root: Path) -> str:
-    return f"python3 {plugin_root}/hooks/ticket_engine_guard.py"
+    script_path = plugin_root / "hooks/ticket_engine_guard.py"
+    return f"python3 {shlex.quote(str(script_path))}"
 
 
 def parse_ticket_guard_command(

@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -1673,6 +1674,48 @@ def test_rewrite_ticket_hook_manifest_binds_command_to_requested_plugin_root(
     command = payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
     assert command == f"python3 {plugin_root}/hooks/ticket_engine_guard.py"
     assert "/Users/jp/.codex/" not in command
+
+
+def test_rewrite_ticket_hook_manifest_quotes_requested_plugin_root_with_spaces(
+    tmp_path: Path,
+) -> None:
+    plugin_root = (
+        tmp_path / "operator home/.codex/plugins/cache/turbo-mode/ticket/1.4.0"
+    )
+    plugin_root.mkdir(parents=True)
+    hooks_path = plugin_root / "hooks/hooks.json"
+    hooks_path.parent.mkdir(parents=True)
+    hooks_path.write_text(
+        json.dumps(
+            {
+                "description": "Ticket engine guard",
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": OTHER_HOME_TICKET_COMMAND,
+                                    "timeout": 10,
+                                }
+                            ],
+                        }
+                    ]
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rewrite_ticket_hook_manifest(ticket_plugin_root=plugin_root)
+
+    payload = json.loads(hooks_path.read_text(encoding="utf-8"))
+    command = payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    script_path = plugin_root / "hooks/ticket_engine_guard.py"
+    assert shlex.split(command) == ["python3", str(script_path)]
 
 
 @pytest.mark.parametrize(
