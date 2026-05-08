@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -825,11 +826,18 @@ def run_guarded_refresh_orchestration(
                 _refresh_paths(context)
             )
             equality = verify_source_cache_equality(context)
-            smoke_summary = run_standard_smoke(
-                local_only_run_root=context.local_only_run_root,
-                codex_home=context.codex_home,
-                repo_root=context.repo_root,
-            )
+            try:
+                smoke_summary = _run_standard_smoke_for_context(context)
+            except (RefreshError, OSError, ValueError) as exc:
+                rollback_guarded_refresh(context, snapshot, failed_phase="smoke")
+                return _write_final_status(
+                    context,
+                    final_status="MUTATION_FAILED_ROLLBACK_COMPLETE",
+                    phase_log=phase_log,
+                    final_status_path=final_status_path,
+                    rehearsal_proof_path=None,
+                    failure_reason=str(exc),
+                )
             if smoke_summary.get("final_status") != "passed":
                 rollback_guarded_refresh(context, snapshot, failed_phase="smoke")
                 return _write_final_status(
@@ -1881,6 +1889,32 @@ def _refresh_paths(context: MutationContext) -> RefreshPaths:
     )
 
 
+def _run_standard_smoke_for_context(context: MutationContext) -> dict[str, object]:
+    with _allow_real_home_smoke_for_context(context):
+        return run_standard_smoke(
+            local_only_run_root=context.local_only_run_root,
+            codex_home=context.codex_home,
+            repo_root=context.repo_root,
+        )
+
+
+@contextmanager
+def _allow_real_home_smoke_for_context(context: MutationContext):
+    if context.codex_home != REAL_CODEX_HOME:
+        yield
+        return
+
+    previous = os.environ.get("ALLOW_REAL_CODEX_HOME_SMOKE")
+    os.environ["ALLOW_REAL_CODEX_HOME_SMOKE"] = "1"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("ALLOW_REAL_CODEX_HOME_SMOKE", None)
+        else:
+            os.environ["ALLOW_REAL_CODEX_HOME_SMOKE"] = previous
+
+
 def _find_seed_manifest_for_rehearsal(
     context: MutationContext,
 ) -> tuple[Path, dict[str, Any]]:
@@ -2699,6 +2733,7 @@ def _write_final_status(
     rehearsal_proof_sha256: str | None = None,
     demoted_summary_path: str | None = None,
     publication_failure_reason: str | None = None,
+    failure_reason: str | None = None,
 ) -> GuardedRefreshResult:
     rehearsal_proof_sha256_path = (
         f"{rehearsal_proof_path}.sha256" if rehearsal_proof_path is not None else None
@@ -2722,6 +2757,7 @@ def _write_final_status(
             "rehearsal_proof_sha256_path": rehearsal_proof_sha256_path,
             "demoted_summary_path": demoted_summary_path,
             "publication_failure_reason": publication_failure_reason,
+            "failure_reason": failure_reason,
         },
     )
     return GuardedRefreshResult(
