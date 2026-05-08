@@ -13,7 +13,7 @@ The branch is `chore/turbo-refresh-plan06-guarded-lane`.
 
 ## Boundary Summary
 
-- Base merge point: `2b0a1f4f789ac302d0227f0150fd969bc1de514f`
+- Base merge point: `bd428c758da565514b6de91493147ce28b22211a`
 - Live mutation source boundary: `081a1a2989f685517d19ab3dde98113ea5c24a57`
 - Live certified evidence commit: `913bf62558f98ec611156f9b1a3b4b45f5058214`
 - Post-certification cleanup commit: `77ee353183325b6d57b4ebfaac10b0a7e8d89ef5`
