@@ -1338,6 +1338,11 @@ def test_cli_generate_guarded_refresh_approval_candidate_writes_static_runbook(
     source_tree = git_output(repo_root, "rev-parse", "HEAD^{tree}")
     source_branch = git_output(repo_root, "rev-parse", "--abbrev-ref", "HEAD")
     codex_home = tmp_path / ".codex"
+    spaced_python_dir = tmp_path / "python with spaces"
+    spaced_python_dir.mkdir()
+    spaced_python = spaced_python_dir / "python bin"
+    spaced_python.symlink_to(Path(sys.executable))
+    monkeypatch.setattr(cli.sys, "executable", str(spaced_python))
     proof_path = tmp_path / "rehearsal-proof.json"
     proof_path.write_text('{"proof": true}\n', encoding="utf-8")
     proof_sha256 = hashlib.sha256(proof_path.read_bytes()).hexdigest()
@@ -1388,7 +1393,7 @@ def test_cli_generate_guarded_refresh_approval_candidate_writes_static_runbook(
     assert (approval_dir / "approved-source-to-execution-changed-paths.txt").read_text(
         encoding="utf-8"
     ) == ""
-    assert approval["python_bin"] == sys.executable
+    assert approval["python_bin"] == str(spaced_python)
     assert approval["codex_home"] == str(codex_home)
     assert approval["operator_requirements"]["mutates_installed_cache"] == (
         f"{codex_home / 'plugins/cache/turbo-mode'}/"
@@ -1406,6 +1411,9 @@ def test_cli_generate_guarded_refresh_approval_candidate_writes_static_runbook(
         encoding="utf-8"
     )
     assert str(expected_marker_path) in runbook
+    assert f"APPROVED_PYTHON_BIN='{spaced_python}'" in runbook
+    assert '"$APPROVED_PYTHON_BIN" - "$APPROVAL_JSON_PATH"' in runbook
+    assert 'ACTUAL_PYTHON_VERSION="$("$APPROVED_PYTHON_BIN" -' in runbook
     assert f"APPROVED_CODEX_HOME='{codex_home}'" in runbook
     assert '--codex-home "$APPROVED_CODEX_HOME"' in runbook
     assert f"--codex-home '{cli.REAL_CODEX_HOME}'" not in runbook

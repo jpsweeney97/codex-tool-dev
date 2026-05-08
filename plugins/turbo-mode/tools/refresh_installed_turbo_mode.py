@@ -1138,7 +1138,7 @@ if [ "$ACTUAL_RUNBOOK_SHA256" != "$DIGEST_RUNBOOK_SHA256" ]; then
   fail "guarded refresh aborted: runbook SHA256 differs from approved digest"
 fi
 
-$APPROVED_PYTHON_BIN - "$APPROVAL_JSON_PATH" <<'RUNBOOK_JSON_CHECK'
+"$APPROVED_PYTHON_BIN" - "$APPROVAL_JSON_PATH" <<'RUNBOOK_JSON_CHECK'
 from __future__ import annotations
 import json
 import os
@@ -1228,7 +1228,7 @@ ACTUAL_REHEARSAL_PROOF_SHA256="$(sha256_file "$APPROVED_REHEARSAL_PROOF")"
 if [ "$ACTUAL_REHEARSAL_PROOF_SHA256" != "$APPROVED_REHEARSAL_PROOF_SHA256" ]; then
   fail "guarded refresh aborted: rehearsal proof SHA256 changed after approval"
 fi
-ACTUAL_PYTHON_VERSION="$($APPROVED_PYTHON_BIN - <<'RUNBOOK_PY_VERSION'
+ACTUAL_PYTHON_VERSION="$("$APPROVED_PYTHON_BIN" - <<'RUNBOOK_PY_VERSION'
 import platform
 print(platform.python_version())
 RUNBOOK_PY_VERSION
