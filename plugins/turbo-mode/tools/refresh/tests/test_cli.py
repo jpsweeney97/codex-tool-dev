@@ -1226,6 +1226,16 @@ def test_cli_generate_guarded_refresh_approval_candidate_writes_static_runbook(
         encoding="utf-8"
     ) == ""
     assert approval["python_bin"] == sys.executable
+    expected_marker_path = (
+        codex_home
+        / "local-only/turbo-mode-refresh/run-state/"
+        "plan06-live-guarded-refresh-20260508-120000.marker.json"
+    )
+    assert approval["expected_marker_path"] == str(expected_marker_path)
+    runbook = (approval_dir / "guarded-refresh-runbook.sh").read_text(
+        encoding="utf-8"
+    )
+    assert str(expected_marker_path) in runbook
 
     completed = subprocess.run(
         [
@@ -1242,6 +1252,60 @@ def test_cli_generate_guarded_refresh_approval_candidate_writes_static_runbook(
         "plan06-live-guarded-refresh-20260508-120000"
     ) in completed.stdout
     assert "approval_status=blocked-before-operator-approval" in completed.stdout
+
+
+def test_cli_generate_guarded_refresh_approval_rejects_existing_marker_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    repo_root, _fixture_codex_home = setup_record_summary_repo(tmp_path)
+    source_commit = git_output(repo_root, "rev-parse", "HEAD")
+    source_tree = git_output(repo_root, "rev-parse", "HEAD^{tree}")
+    codex_home = tmp_path / ".codex"
+    run_id = "plan06-live-guarded-refresh-20260508-123000"
+    marker_path = (
+        codex_home / f"local-only/turbo-mode-refresh/run-state/{run_id}.marker.json"
+    )
+    marker_path.parent.mkdir(parents=True)
+    marker_path.write_text("{}\n", encoding="utf-8")
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text('{"proof": true}\n', encoding="utf-8")
+    proof_sha256 = hashlib.sha256(proof_path.read_bytes()).hexdigest()
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        lambda **_kwargs: object(),
+    )
+
+    args = parser.parse_args(
+        [
+            "--generate-guarded-refresh-approval",
+            "--run-id",
+            run_id,
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            proof_sha256,
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+        ]
+    )
+
+    assert cli.generate_guarded_refresh_approval_main(args, parser) == 1
+    captured = capsys.readouterr()
+    assert "approved run id already has evidence path" in captured.err
+    approval_dir = codex_home / f"local-only/turbo-mode-refresh/approvals/{run_id}"
+    assert not approval_dir.exists()
 
 
 def test_cli_generate_guarded_refresh_approval_rejects_disallowed_delta_before_writes(

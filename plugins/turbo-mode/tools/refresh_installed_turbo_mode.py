@@ -437,7 +437,7 @@ def generate_guarded_refresh_approval_candidate(
     local_only_root = normalized_codex_home / "local-only/turbo-mode-refresh"
     approval_dir = local_only_root / "approvals" / run_id
     expected_local_only_run_root = local_only_root / run_id
-    expected_marker_path = local_only_root / "run-state" / f"{run_id}.json"
+    expected_marker_path = local_only_root / "run-state" / f"{run_id}.marker.json"
     evidence_root = normalized_repo_root / "plugins/turbo-mode/evidence/refresh"
     expected_summary_path = evidence_root / f"{run_id}.summary.json"
     expected_failed_summary_path = evidence_root / f"{run_id}.summary.failed.json"
