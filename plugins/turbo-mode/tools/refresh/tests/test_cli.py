@@ -860,6 +860,10 @@ def test_cli_guarded_refresh_captures_real_home_rehearsal_proof_before_marker_ch
     def fake_ensure_no_active_run_state_markers(_local_only_root: Path) -> None:
         calls.append("marker-check")
 
+    def fake_plan_refresh(**_kwargs: object) -> object:
+        calls.append("plan-refresh")
+        raise cli.RefreshError("stop after real-home proof capture")
+
     monkeypatch.setattr(
         cli,
         "validate_rehearsal_proof_bundle",
@@ -876,6 +880,7 @@ def test_cli_guarded_refresh_captures_real_home_rehearsal_proof_before_marker_ch
         "ensure_no_active_run_state_markers",
         fake_ensure_no_active_run_state_markers,
     )
+    monkeypatch.setattr(cli, "plan_refresh", fake_plan_refresh)
 
     args = parser.parse_args(
         [
@@ -899,7 +904,7 @@ def test_cli_guarded_refresh_captures_real_home_rehearsal_proof_before_marker_ch
     assert cli.guarded_refresh_main(args, parser) == 1
     captured = capsys.readouterr()
 
-    assert calls == ["validate", "capture", "marker-check"]
+    assert calls == ["validate", "capture", "marker-check", "plan-refresh"]
     assert capture_roots == [
         Path(
             "/Users/jp/.codex/local-only/turbo-mode-refresh/"
@@ -910,7 +915,7 @@ def test_cli_guarded_refresh_captures_real_home_rehearsal_proof_before_marker_ch
     assert "validation and capture are not complete" not in captured.err
 
 
-def test_cli_guarded_refresh_real_home_block_prevents_orchestration(
+def test_cli_guarded_refresh_real_home_runs_orchestration_after_proof_capture(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
@@ -940,18 +945,87 @@ def test_cli_guarded_refresh_real_home_block_prevents_orchestration(
         "ensure_no_active_run_state_markers",
         lambda _local_only_root: None,
     )
+    calls: list[str] = []
+
+    paths = type(
+        "Paths",
+        (),
+        {
+            "repo_root": tmp_path / "repo",
+            "codex_home": Path("/Users/jp/.codex"),
+            "local_only_root": tmp_path / "local-only",
+        },
+    )()
+    terminal_status = type("TerminalStatus", (), {"value": "guarded-refresh-required"})()
+    runtime_config = type("RuntimeConfig", (), {"plugin_hooks_state": "true"})()
+
+    def fake_plan_refresh(**_kwargs: object) -> object:
+        calls.append("plan-refresh")
+        return type(
+            "PlanRefresh",
+            (),
+            {
+                "terminal_status": terminal_status,
+                "paths": paths,
+                "runtime_config": runtime_config,
+            },
+        )()
+
+    proof_path = tmp_path / "source-execution-identity.proof.json"
+    proof_path.write_text("{}\n", encoding="utf-8")
+
+    def fake_verify_source_execution_identity(**_kwargs: object) -> object:
+        calls.append("verify-source-execution")
+        return type(
+            "Proof",
+            (),
+            {
+                "proof_path": str(proof_path),
+                "execution_head": "source",
+                "execution_tree": "tree",
+                "changed_paths": [],
+            },
+        )()
+
+    def fake_run_guarded_refresh_orchestration(ctx: object, **kwargs: object) -> object:
+        calls.append("orchestrate")
+        assert ctx.run_id == "plan06-live-guarded-refresh-20260508-101500"
+        assert ctx.codex_home == Path("/Users/jp/.codex")
+        assert ctx.local_only_run_root == (
+            tmp_path
+            / "local-only"
+            / "plan06-live-guarded-refresh-20260508-101500"
+        )
+        assert kwargs["isolated_rehearsal"] is False
+        return type(
+            "Orchestration",
+            (),
+            {
+                "final_status": "MUTATION_COMPLETE_CERTIFIED",
+                "final_status_path": str(tmp_path / "final-status.json"),
+                "rehearsal_proof_path": None,
+                "rehearsal_proof_sha256": None,
+                "rehearsal_proof_sha256_path": None,
+            },
+        )()
+
+    monkeypatch.setattr(cli, "plan_refresh", fake_plan_refresh)
+    monkeypatch.setattr(
+        cli,
+        "verify_source_execution_identity",
+        fake_verify_source_execution_identity,
+    )
     monkeypatch.setattr(
         cli,
         "run_guarded_refresh_orchestration",
-        lambda *_args, **_kwargs: pytest.fail(
-            "real-home guarded refresh should remain blocked before orchestration"
-        ),
+        fake_run_guarded_refresh_orchestration,
     )
 
     args = parser.parse_args(
         [
             "--guarded-refresh",
             "--record-summary",
+            "--json",
             "--run-id",
             "plan06-live-guarded-refresh-20260508-101500",
             "--codex-home",
@@ -967,9 +1041,13 @@ def test_cli_guarded_refresh_real_home_block_prevents_orchestration(
         ]
     )
 
-    assert cli.guarded_refresh_main(args, parser) == 1
+    assert cli.guarded_refresh_main(args, parser) == 0
     captured = capsys.readouterr()
-    assert "real guarded refresh blocked" in captured.err
+    payload = json.loads(captured.out)
+    assert payload["final_status"] == "MUTATION_COMPLETE_CERTIFIED"
+    assert "rehearsal proof capture complete" in captured.err
+    assert "real guarded refresh blocked" not in captured.err
+    assert calls == ["plan-refresh", "verify-source-execution", "orchestrate"]
 
 
 def test_cli_guarded_refresh_rejects_path_shaped_real_home_run_id_before_capture(

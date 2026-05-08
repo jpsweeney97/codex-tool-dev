@@ -387,20 +387,12 @@ def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentPars
     except (RefreshError, OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    if is_real_home:
-        if rehearsal_capture is not None:
-            print(
-                "rehearsal proof capture complete: "
-                f"{rehearsal_capture.capture_manifest_path}",
-                file=sys.stderr,
-            )
+    if rehearsal_capture is not None:
         print(
-            "real guarded refresh blocked after rehearsal proof capture: "
-            "live mutation and certified summary publication are not complete "
-            "in this task slice",
+            "rehearsal proof capture complete: "
+            f"{rehearsal_capture.capture_manifest_path}",
             file=sys.stderr,
         )
-        return 1
 
     try:
         result = plan_refresh(
