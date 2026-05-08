@@ -501,9 +501,20 @@ def _run_validation(
             ]
         )
         return
-    assert candidate is not None
-    assert existing_metadata is not None
-    assert existing_redaction is not None
+    missing_inputs = [
+        name
+        for name, value in (
+            ("candidate", candidate),
+            ("existing_metadata", existing_metadata),
+            ("existing_redaction", existing_redaction),
+        )
+        if value is None
+    ]
+    if missing_inputs:
+        raise RefreshError(
+            "certify retained run failed: final validation inputs are incomplete. "
+            f"Got: {missing_inputs!r:.100}"
+        )
     _run_validator(
         [
             *metadata_command,

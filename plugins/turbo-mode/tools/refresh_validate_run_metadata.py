@@ -155,7 +155,8 @@ def _assert_top_level_metadata_contract(
             "validate run metadata failed: local summary path mismatch. "
             f"Got: {str(local_summary)!r:.100}"
         )
-    assert args.repo_root is not None
+    if args.repo_root is None:
+        raise ValueError("validate run metadata failed: repo_root is required. Got: None")
     _assert_recomputed_dirty_state(
         args.repo_root,
         payload.get("dirty_state"),

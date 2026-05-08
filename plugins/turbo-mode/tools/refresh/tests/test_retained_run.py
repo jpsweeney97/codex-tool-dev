@@ -244,6 +244,42 @@ def test_retained_run_rejects_certification_surface_mutation(
         )
 
 
+def test_retained_run_rejects_captured_manifest_digest_mismatch(
+    tmp_path: Path,
+) -> None:
+    repo_root, codex_home, run_root = write_retained_run(tmp_path)
+    manifest = run_root / "rehearsal-proof-capture/capture-manifest.json"
+    manifest.write_text('{"schema_version":"tampered"}\n', encoding="utf-8")
+
+    with pytest.raises(
+        RefreshError,
+        match="captured rehearsal proof manifest digest mismatch",
+    ):
+        retained_run.certify_retained_run(
+            run_id="run-1",
+            repo_root=repo_root,
+            codex_home=codex_home,
+            plan_status_collector=lambda: "no-drift",
+            validator_runner=no_op_validator,
+        )
+
+
+def test_retained_run_final_validation_requires_candidate_inputs(tmp_path: Path) -> None:
+    with pytest.raises(RefreshError, match="final validation inputs are incomplete"):
+        retained_run._run_validation(
+            phase="final",
+            run_id="run-1",
+            repo_root=tmp_path / "repo",
+            run_root=tmp_path / "run",
+            summary=tmp_path / "run/final.json",
+            published=tmp_path / "repo/plugins/turbo-mode/evidence/refresh/run-1.json",
+            validator_runner=None,
+            candidate=None,
+            existing_metadata=None,
+            existing_redaction=None,
+        )
+
+
 def test_retained_run_rejects_second_green_summary_path_state(tmp_path: Path) -> None:
     repo_root, codex_home, _run_root = write_retained_run(tmp_path)
     write_json(repo_root / "plugins/turbo-mode/evidence/refresh/run-1.summary.json", {})

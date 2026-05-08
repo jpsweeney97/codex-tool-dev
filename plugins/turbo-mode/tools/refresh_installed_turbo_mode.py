@@ -116,7 +116,11 @@ def main(argv: list[str] | None = None) -> int:
         candidate_summary_path = None
         final_summary_path = None
         if args.record_summary:
-            assert dirty_state is not None
+            if dirty_state is None:
+                raise RefreshError(
+                    "record refresh summary failed: dirty state invariant missing. "
+                    "Got: None"
+                )
             published_summary_path = resolve_commit_safe_summary_output(
                 repo_root=args.repo_root,
                 run_id=run_id,

@@ -8,6 +8,7 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -1472,6 +1473,44 @@ def test_cli_record_summary_publishes_after_candidate_and_final_validation(
         "plan-04-cli",
     )
     assert payload["published_summary_path"] == str(published)
+
+
+def test_cli_record_summary_rejects_missing_dirty_state_invariant(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = load_cli_module()
+    monkeypatch.setattr(module, "ensure_relevant_worktree_clean", lambda _repo_root: None)
+    monkeypatch.setattr(
+        module,
+        "plan_refresh",
+        lambda **_kwargs: SimpleNamespace(
+            terminal_status=SimpleNamespace(value="filesystem-no-drift"),
+            paths=SimpleNamespace(local_only_root=tmp_path / "local-only"),
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "write_local_evidence",
+        lambda _result, *, run_id: tmp_path / f"{run_id}.summary.json",
+    )
+
+    exit_code = module.main(
+        [
+            "--dry-run",
+            "--record-summary",
+            "--run-id",
+            "run-1",
+            "--repo-root",
+            str(tmp_path / "repo"),
+            "--codex-home",
+            str(tmp_path / "home"),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "dirty state invariant" in capsys.readouterr().err
 
 
 def test_cli_record_summary_plan_refresh_writes_plan_refresh_candidate(
