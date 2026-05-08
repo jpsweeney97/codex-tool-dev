@@ -465,6 +465,7 @@ def generate_guarded_refresh_approval_candidate(
     runbook_path = approval_dir / "guarded-refresh-runbook.sh"
     changed_paths_path = approval_dir / "approved-source-to-execution-changed-paths.txt"
     digests_path = approval_dir / "guarded-refresh-approved-digests.json"
+    operator_approval_grant_path = approval_dir / "operator-maintenance-approval.json"
     packet_path = approval_dir / "operator-approval-packet.md"
 
     _write_text_0600_exclusive(
@@ -491,6 +492,7 @@ def generate_guarded_refresh_approval_candidate(
     runbook = _build_guarded_refresh_runbook(
         approval_json_path=approval_json_path,
         digests_path=digests_path,
+        operator_approval_grant_path=operator_approval_grant_path,
         run_id=run_id,
         repo_root=normalized_repo_root,
         expected_local_only_run_root=expected_local_only_run_root,
@@ -525,6 +527,7 @@ def generate_guarded_refresh_approval_candidate(
         "codex_home": str(normalized_codex_home),
         "approval_json_path": str(approval_json_path),
         "approved_digests_path": str(digests_path),
+        "operator_approval_grant_path": str(operator_approval_grant_path),
         "runbook_path": str(runbook_path),
         "runbook_sha256": runbook_sha256,
         "approved_changed_paths": list(source_execution_proof.changed_paths),
@@ -596,8 +599,10 @@ def generate_guarded_refresh_approval_candidate(
         runbook_sha256=runbook_sha256,
         digests_path=digests_path,
         digests_sha256=digests_sha256,
+        operator_approval_grant_path=operator_approval_grant_path,
         changed_paths_path=changed_paths_path,
         changed_paths_sha256=changed_paths_sha256,
+        repo_root=normalized_repo_root,
         branch=str(approval_payload["branch"]),
         source_implementation_commit=source_implementation_commit,
         source_implementation_tree=source_implementation_tree,
@@ -627,6 +632,7 @@ def generate_guarded_refresh_approval_candidate(
         "runbook_sha256": runbook_sha256,
         "approved_digests_path": str(digests_path),
         "approved_digests_sha256": digests_sha256,
+        "operator_approval_grant_path": str(operator_approval_grant_path),
         "approved_changed_paths_file": str(changed_paths_path),
         "approved_changed_paths_file_sha256": changed_paths_sha256,
         "source_implementation_commit": source_implementation_commit,
@@ -1009,6 +1015,7 @@ def _build_guarded_refresh_runbook(
     *,
     approval_json_path: Path,
     digests_path: Path,
+    operator_approval_grant_path: Path,
     run_id: str,
     repo_root: Path,
     expected_local_only_run_root: Path,
@@ -1032,7 +1039,8 @@ set -euo pipefail
 EXECUTION_ROOT={_shell_quote(repo_root)}
 APPROVAL_JSON_PATH={_shell_quote(approval_json_path)}
 APPROVED_DIGESTS_PATH={_shell_quote(digests_path)}
-APPROVAL_STATUS="blocked-before-operator-approval"
+OPERATOR_APPROVAL_GRANT_PATH={_shell_quote(operator_approval_grant_path)}
+CANDIDATE_APPROVAL_STATUS="blocked-before-operator-approval"
 APPROVED_RUN_ID={_shell_quote(run_id)}
 APPROVED_CODEX_HOME={_shell_quote(codex_home)}
 EXPECTED_LOCAL_ONLY_RUN_ROOT={_shell_quote(expected_local_only_run_root)}
@@ -1048,7 +1056,8 @@ APPROVED_PYTHON_BIN={_shell_quote(python_bin)}
 APPROVED_PYTHON_VERSION={_shell_quote(python_version)}
 APPROVED_REHEARSAL_PROOF={_shell_quote(rehearsal_proof)}
 APPROVED_REHEARSAL_PROOF_SHA256={_shell_quote(rehearsal_proof_sha256)}
-export EXECUTION_ROOT APPROVAL_JSON_PATH APPROVED_DIGESTS_PATH APPROVAL_STATUS
+export EXECUTION_ROOT APPROVAL_JSON_PATH APPROVED_DIGESTS_PATH
+export OPERATOR_APPROVAL_GRANT_PATH CANDIDATE_APPROVAL_STATUS
 export APPROVED_RUN_ID APPROVED_CODEX_HOME
 export EXPECTED_LOCAL_ONLY_RUN_ROOT EXPECTED_MARKER_PATH
 export EXPECTED_SUMMARY_PATH EXPECTED_FAILED_SUMMARY_PATH
@@ -1082,6 +1091,7 @@ require_value() {{
 }}
 
 for pair in \\
+  "OPERATOR_APPROVAL_GRANT_PATH=$OPERATOR_APPROVAL_GRANT_PATH" \\
   "APPROVED_RUN_ID=$APPROVED_RUN_ID" \\
   "APPROVED_CODEX_HOME=$APPROVED_CODEX_HOME" \\
   "EXPECTED_LOCAL_ONLY_RUN_ROOT=$EXPECTED_LOCAL_ONLY_RUN_ROOT" \\
@@ -1115,6 +1125,7 @@ fi
 
 ACTUAL_APPROVAL_JSON_SHA256="$(sha256_file "$APPROVAL_JSON_PATH")"
 ACTUAL_RUNBOOK_SHA256="$(sha256_file "$0")"
+ACTUAL_APPROVED_DIGESTS_SHA256="$(sha256_file "$APPROVED_DIGESTS_PATH")"
 DIGEST_APPROVAL_JSON_SHA256="$(
   "$APPROVED_PYTHON_BIN" - "$APPROVED_DIGESTS_PATH" <<'RUNBOOK_DIGEST_APPROVAL'
 import json
@@ -1147,9 +1158,10 @@ import sys
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
 checks = {{
     "run_id": os.environ["APPROVED_RUN_ID"],
-    "approval_status": os.environ["APPROVAL_STATUS"],
+    "approval_status": os.environ["CANDIDATE_APPROVAL_STATUS"],
     "execution_root": os.environ["EXECUTION_ROOT"],
     "codex_home": os.environ["APPROVED_CODEX_HOME"],
+    "operator_approval_grant_path": os.environ["OPERATOR_APPROVAL_GRANT_PATH"],
     "expected_local_only_run_root": os.environ["EXPECTED_LOCAL_ONLY_RUN_ROOT"],
     "expected_marker_path": os.environ["EXPECTED_MARKER_PATH"],
     "expected_summary_path": os.environ["EXPECTED_SUMMARY_PATH"],
@@ -1250,14 +1262,78 @@ if [ -e "$EXPECTED_LOCAL_ONLY_RUN_ROOT" ] || \
   fail "guarded refresh aborted: approved run id already has evidence paths"
 fi
 
-if [ "${{1:-}}" = "--static-preflight-only" ]; then
+RUNBOOK_MODE="${{1:-}}"
+case "$RUNBOOK_MODE" in
+  ""|--static-preflight-only|--approval-preflight-only)
+    ;;
+  *) fail "guarded refresh aborted: unsupported runbook argument: $RUNBOOK_MODE" ;;
+esac
+
+if [ "$RUNBOOK_MODE" = "--static-preflight-only" ]; then
   echo "guarded refresh static preflight passed for $APPROVED_RUN_ID"
-  echo "approval_status=$APPROVAL_STATUS"
+  echo "approval_status=$CANDIDATE_APPROVAL_STATUS"
   exit 0
 fi
 
-if [ "$APPROVAL_STATUS" != "approved-for-external-maintenance-window" ]; then
-  fail "guarded refresh aborted: approval packet is not approved for live mutation"
+if [ ! -f "$OPERATOR_APPROVAL_GRANT_PATH" ]; then
+  fail "guarded refresh aborted: operator approval grant is missing: $OPERATOR_APPROVAL_GRANT_PATH"
+fi
+
+"$APPROVED_PYTHON_BIN" - \\
+  "$OPERATOR_APPROVAL_GRANT_PATH" \\
+  "$ACTUAL_APPROVAL_JSON_SHA256" \\
+  "$ACTUAL_RUNBOOK_SHA256" \\
+  "$ACTUAL_APPROVED_DIGESTS_SHA256" <<'RUNBOOK_OPERATOR_GRANT_CHECK'
+from __future__ import annotations
+import json
+import os
+import sys
+
+grant_path, approval_json_sha256, runbook_sha256, digests_sha256 = sys.argv[1:5]
+payload = json.load(open(grant_path, encoding="utf-8"))
+checks = {{
+    "schema_version": "turbo-mode-plan06-operator-approval-v1",
+    "approval_status": "approved-for-external-maintenance-window",
+    "run_id": os.environ["APPROVED_RUN_ID"],
+    "execution_root": os.environ["EXECUTION_ROOT"],
+    "codex_home": os.environ["APPROVED_CODEX_HOME"],
+    "source_implementation_commit": os.environ["APPROVED_SOURCE_IMPLEMENTATION_COMMIT"],
+    "source_implementation_tree": os.environ["APPROVED_SOURCE_IMPLEMENTATION_TREE"],
+    "execution_head": os.environ["APPROVED_EXECUTION_HEAD"],
+    "execution_tree": os.environ["APPROVED_EXECUTION_TREE"],
+    "approval_json_sha256": approval_json_sha256,
+    "runbook_sha256": runbook_sha256,
+    "approved_digests_sha256": digests_sha256,
+}}
+for key, expected in checks.items():
+    actual = payload.get(key)
+    if actual != expected:
+        raise SystemExit(
+            f"guarded refresh aborted: operator approval grant mismatch for {{key}}. "
+            f"Got: {{actual!r}} expected {{expected!r}}"
+        )
+acknowledgements = payload.get("operator_acknowledgements")
+if not isinstance(acknowledgements, dict):
+    raise SystemExit(
+        "guarded refresh aborted: operator approval grant acknowledgements missing"
+    )
+for key in (
+    "external_shell",
+    "codex_desktop_closed",
+    "codex_cli_sessions_closed",
+    "maintenance_window_approved",
+    "do_not_reopen_until_external_command_exits",
+):
+    if acknowledgements.get(key) is not True:
+        raise SystemExit(
+            f"guarded refresh aborted: operator approval acknowledgement missing: {{key}}"
+        )
+RUNBOOK_OPERATOR_GRANT_CHECK
+
+if [ "$RUNBOOK_MODE" = "--approval-preflight-only" ]; then
+  echo "guarded refresh approval preflight passed for $APPROVED_RUN_ID"
+  echo "approval_status=approved-for-external-maintenance-window"
+  exit 0
 fi
 
 PYTHONDONTWRITEBYTECODE=1 \\
@@ -1288,8 +1364,10 @@ def _build_operator_approval_packet(
     runbook_sha256: str,
     digests_path: Path,
     digests_sha256: str,
+    operator_approval_grant_path: Path,
     changed_paths_path: Path,
     changed_paths_sha256: str,
+    repo_root: Path,
     branch: str,
     source_implementation_commit: str,
     source_implementation_tree: str,
@@ -1309,6 +1387,28 @@ def _build_operator_approval_packet(
     changed_paths_text = "\n".join(f"- `{path}`" for path in changed_paths)
     if not changed_paths_text:
         changed_paths_text = "- none; the approved changed-path file exists and is empty."
+    grant_payload = {
+        "schema_version": "turbo-mode-plan06-operator-approval-v1",
+        "approval_status": "approved-for-external-maintenance-window",
+        "run_id": run_id,
+        "execution_root": str(repo_root),
+        "codex_home": str(codex_home),
+        "source_implementation_commit": source_implementation_commit,
+        "source_implementation_tree": source_implementation_tree,
+        "execution_head": execution_head,
+        "execution_tree": execution_tree,
+        "approval_json_sha256": approval_json_sha256,
+        "runbook_sha256": runbook_sha256,
+        "approved_digests_sha256": digests_sha256,
+        "operator_acknowledgements": {
+            "external_shell": True,
+            "codex_desktop_closed": True,
+            "codex_cli_sessions_closed": True,
+            "maintenance_window_approved": True,
+            "do_not_reopen_until_external_command_exits": True,
+        },
+    }
+    grant_json = json.dumps(grant_payload, indent=2, sort_keys=True)
     return f"""# Plan 06 Task 9 Operator Approval Candidate
 
 Status: blocked-before-operator-approval
@@ -1325,6 +1425,7 @@ maintenance window is still required.
 - Runbook SHA256: `{runbook_sha256}`
 - Approved digest sidecar: `{digests_path}`
 - Approved digest sidecar SHA256: `{digests_sha256}`
+- Operator approval grant: `{operator_approval_grant_path}`
 - Approved changed paths file: `{changed_paths_path}`
 - Approved changed paths SHA256: `{changed_paths_sha256}`
 
@@ -1362,10 +1463,24 @@ The operator must close active Codex Desktop and CLI sessions, keep them closed
 until the external command exits, and run the generated runbook from an external
 shell only after explicitly approving the maintenance window.
 
+## Operator Approval Grant
+
+After explicitly approving the maintenance window, create the grant file:
+
+```json
+{grant_json}
+```
+
 ## Static Check
 
 ```bash
 {runbook_path} --static-preflight-only
+```
+
+## Approval Check
+
+```bash
+{runbook_path} --approval-preflight-only
 ```
 """
 

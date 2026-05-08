@@ -230,6 +230,52 @@ def run_tool(
     )
 
 
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def write_operator_approval_grant(
+    approval_dir: Path,
+    *,
+    repo_root: Path,
+    codex_home: Path,
+    run_id: str,
+    source_commit: str,
+    source_tree: str,
+    overrides: dict[str, object] | None = None,
+) -> Path:
+    grant_path = approval_dir / "operator-maintenance-approval.json"
+    payload: dict[str, object] = {
+        "schema_version": "turbo-mode-plan06-operator-approval-v1",
+        "approval_status": "approved-for-external-maintenance-window",
+        "run_id": run_id,
+        "execution_root": str(repo_root),
+        "codex_home": str(codex_home),
+        "source_implementation_commit": source_commit,
+        "source_implementation_tree": source_tree,
+        "execution_head": source_commit,
+        "execution_tree": source_tree,
+        "approval_json_sha256": file_sha256(
+            approval_dir / "guarded-refresh-approval.json"
+        ),
+        "runbook_sha256": file_sha256(approval_dir / "guarded-refresh-runbook.sh"),
+        "approved_digests_sha256": file_sha256(
+            approval_dir / "guarded-refresh-approved-digests.json"
+        ),
+        "operator_acknowledgements": {
+            "external_shell": True,
+            "codex_desktop_closed": True,
+            "codex_cli_sessions_closed": True,
+            "maintenance_window_approved": True,
+            "do_not_reopen_until_external_command_exits": True,
+        },
+    }
+    if overrides:
+        payload.update(overrides)
+    grant_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return grant_path
+
+
 def run_system_python_tool(
     args: list[str],
     *,
@@ -1385,6 +1431,8 @@ def test_cli_generate_guarded_refresh_approval_candidate_writes_static_runbook(
     )
 
     assert approval["approval_status"] == "blocked-before-operator-approval"
+    grant_path = approval_dir / "operator-maintenance-approval.json"
+    assert approval["operator_approval_grant_path"] == str(grant_path)
     assert approval["branch"] == source_branch
     assert approval["source_implementation_commit"] == source_commit
     assert approval["execution_head"] == source_commit
@@ -1411,6 +1459,7 @@ def test_cli_generate_guarded_refresh_approval_candidate_writes_static_runbook(
         encoding="utf-8"
     )
     assert str(expected_marker_path) in runbook
+    assert f"OPERATOR_APPROVAL_GRANT_PATH='{grant_path}'" in runbook
     assert f"APPROVED_PYTHON_BIN='{spaced_python}'" in runbook
     assert '"$APPROVED_PYTHON_BIN" - "$APPROVAL_JSON_PATH"' in runbook
     assert 'ACTUAL_PYTHON_VERSION="$("$APPROVED_PYTHON_BIN" -' in runbook
@@ -1419,6 +1468,8 @@ def test_cli_generate_guarded_refresh_approval_candidate_writes_static_runbook(
     assert f"--codex-home '{cli.REAL_CODEX_HOME}'" not in runbook
     packet = (approval_dir / "operator-approval-packet.md").read_text(encoding="utf-8")
     assert f"- Codex home: `{codex_home}`" in packet
+    assert f"- Operator approval grant: `{grant_path}`" in packet
+    assert '"approval_status": "approved-for-external-maintenance-window"' in packet
 
     completed = subprocess.run(
         [
@@ -1435,6 +1486,213 @@ def test_cli_generate_guarded_refresh_approval_candidate_writes_static_runbook(
         "plan06-live-guarded-refresh-20260508-120000"
     ) in completed.stdout
     assert "approval_status=blocked-before-operator-approval" in completed.stdout
+
+
+def test_cli_generated_runbook_rejects_live_without_operator_grant(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    repo_root, _fixture_codex_home = setup_record_summary_repo(tmp_path)
+    source_commit = git_output(repo_root, "rev-parse", "HEAD")
+    source_tree = git_output(repo_root, "rev-parse", "HEAD^{tree}")
+    codex_home = tmp_path / ".codex"
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text('{"proof": true}\n', encoding="utf-8")
+    proof_sha256 = hashlib.sha256(proof_path.read_bytes()).hexdigest()
+    run_id = "plan06-live-guarded-refresh-20260508-120500"
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        lambda **_kwargs: object(),
+    )
+
+    args = parser.parse_args(
+        [
+            "--generate-guarded-refresh-approval",
+            "--run-id",
+            run_id,
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            proof_sha256,
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+        ]
+    )
+
+    assert cli.generate_guarded_refresh_approval_main(args, parser) == 0
+    approval_dir = codex_home / f"local-only/turbo-mode-refresh/approvals/{run_id}"
+
+    completed = subprocess.run(
+        [str(approval_dir / "guarded-refresh-runbook.sh")],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert "operator approval grant is missing" in completed.stderr
+
+
+def test_cli_generated_runbook_accepts_operator_grant_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    repo_root, _fixture_codex_home = setup_record_summary_repo(tmp_path)
+    source_commit = git_output(repo_root, "rev-parse", "HEAD")
+    source_tree = git_output(repo_root, "rev-parse", "HEAD^{tree}")
+    codex_home = tmp_path / ".codex"
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text('{"proof": true}\n', encoding="utf-8")
+    proof_sha256 = hashlib.sha256(proof_path.read_bytes()).hexdigest()
+    run_id = "plan06-live-guarded-refresh-20260508-121000"
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        lambda **_kwargs: object(),
+    )
+
+    args = parser.parse_args(
+        [
+            "--generate-guarded-refresh-approval",
+            "--run-id",
+            run_id,
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            proof_sha256,
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+        ]
+    )
+
+    assert cli.generate_guarded_refresh_approval_main(args, parser) == 0
+    approval_dir = codex_home / f"local-only/turbo-mode-refresh/approvals/{run_id}"
+    write_operator_approval_grant(
+        approval_dir,
+        repo_root=repo_root,
+        codex_home=codex_home,
+        run_id=run_id,
+        source_commit=source_commit,
+        source_tree=source_tree,
+    )
+
+    completed = subprocess.run(
+        [
+            str(approval_dir / "guarded-refresh-runbook.sh"),
+            "--approval-preflight-only",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert (
+        f"guarded refresh approval preflight passed for {run_id}"
+        in completed.stdout
+    )
+    assert "approval_status=approved-for-external-maintenance-window" in completed.stdout
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected_error"),
+    [
+        (
+            {"run_id": "plan06-live-guarded-refresh-20260508-999999"},
+            "operator approval grant mismatch for run_id",
+        ),
+        (
+            {"approval_json_sha256": "0" * 64},
+            "operator approval grant mismatch for approval_json_sha256",
+        ),
+    ],
+)
+def test_cli_generated_runbook_rejects_operator_grant_mismatches(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    overrides: dict[str, object],
+    expected_error: str,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    repo_root, _fixture_codex_home = setup_record_summary_repo(tmp_path)
+    source_commit = git_output(repo_root, "rev-parse", "HEAD")
+    source_tree = git_output(repo_root, "rev-parse", "HEAD^{tree}")
+    codex_home = tmp_path / ".codex"
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text('{"proof": true}\n', encoding="utf-8")
+    proof_sha256 = hashlib.sha256(proof_path.read_bytes()).hexdigest()
+    run_id = "plan06-live-guarded-refresh-20260508-121500"
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        lambda **_kwargs: object(),
+    )
+
+    args = parser.parse_args(
+        [
+            "--generate-guarded-refresh-approval",
+            "--run-id",
+            run_id,
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            proof_sha256,
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+        ]
+    )
+
+    assert cli.generate_guarded_refresh_approval_main(args, parser) == 0
+    approval_dir = codex_home / f"local-only/turbo-mode-refresh/approvals/{run_id}"
+    write_operator_approval_grant(
+        approval_dir,
+        repo_root=repo_root,
+        codex_home=codex_home,
+        run_id=run_id,
+        source_commit=source_commit,
+        source_tree=source_tree,
+        overrides=overrides,
+    )
+
+    completed = subprocess.run(
+        [
+            str(approval_dir / "guarded-refresh-runbook.sh"),
+            "--approval-preflight-only",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert expected_error in completed.stderr
 
 
 def test_cli_generate_guarded_refresh_approval_rejects_existing_marker_path(
