@@ -1374,6 +1374,94 @@ def test_live_guarded_orchestration_returns_evidence_failed_when_publication_fai
     )
 
     assert result.final_status == "MUTATION_COMPLETE_EVIDENCE_FAILED"
+    assert result.publication_failure_reason == "forced publication failure"
+    assert result.demoted_summary_path is None
+    final_status = json.loads(Path(result.final_status_path).read_text(encoding="utf-8"))
+    assert final_status["publication_failure_reason"] == "forced publication failure"
+    assert final_status["demoted_summary_path"] is None
+
+
+def test_live_guarded_orchestration_records_demoted_summary_path_on_post_publish_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from contextlib import contextmanager
+
+    ctx = context(tmp_path, codex_home=tmp_path / ".codex")
+    seed_config(ctx)
+    seed_plugins(ctx)
+    seed_live_rehearsal_capture(ctx)
+    launch = launch_authority(ctx)
+    demoted_summary_path = str(
+        ctx.repo_root / "plugins/turbo-mode/evidence/refresh/mutation-run.summary.failed.json"
+    )
+
+    @contextmanager
+    def fake_lock(**_kwargs: object):
+        yield {"owner": "test", "run_id": ctx.run_id}
+
+    def fake_process_gate(**kwargs: object) -> dict[str, object]:
+        label = str(kwargs["label"])
+        payload = {
+            "label": label,
+            "blocked_process_count": 0,
+            "exclusivity_status": "exclusive_window_observed_by_process_samples",
+        }
+        write_json(ctx.local_only_run_root / f"process-{label}.summary.json", payload)
+        return payload
+
+    def fake_smoke(**_kwargs: object) -> dict[str, object]:
+        payload = {"final_status": "passed"}
+        write_json(ctx.local_only_run_root / "standard-smoke.summary.json", payload)
+        return payload
+
+    monkeypatch.setattr(mutation_module, "acquire_refresh_lock", fake_lock)
+    monkeypatch.setattr(mutation_module, "capture_process_gate", fake_process_gate)
+    monkeypatch.setattr(
+        mutation_module,
+        "prove_app_server_home_authority",
+        lambda _active_context: launch,
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "install_plugins_via_app_server",
+        lambda *_args, **_kwargs: (
+            {
+                "pre_install_target_authority_sha256": "target-sha",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda _paths: ("inventory", ()),
+    )
+    monkeypatch.setattr(mutation_module, "run_standard_smoke", fake_smoke)
+
+    def fail_with_demotion(**_kwargs: object) -> object:
+        exc = RefreshError("forced post-publish replay failure")
+        setattr(exc, "demoted_summary_path", demoted_summary_path)
+        raise exc
+
+    monkeypatch.setattr(
+        mutation_module,
+        "publish_guarded_refresh_commit_safe_summary",
+        fail_with_demotion,
+    )
+
+    result = run_guarded_refresh_orchestration(
+        ctx,
+        terminal_plan_status="guarded-refresh-required",
+        plugin_hooks_state="true",
+        isolated_rehearsal=False,
+    )
+
+    assert result.final_status == "MUTATION_COMPLETE_EVIDENCE_FAILED"
+    assert result.publication_failure_reason == "forced post-publish replay failure"
+    assert result.demoted_summary_path == demoted_summary_path
+    final_status = json.loads(Path(result.final_status_path).read_text(encoding="utf-8"))
+    assert final_status["publication_failure_reason"] == "forced post-publish replay failure"
+    assert final_status["demoted_summary_path"] == demoted_summary_path
 
 
 def test_install_plugins_restores_hooks_before_same_child_corroboration(

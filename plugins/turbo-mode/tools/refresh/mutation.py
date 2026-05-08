@@ -176,6 +176,8 @@ class GuardedRefreshResult:
     rehearsal_proof_path: str | None
     rehearsal_proof_sha256: str | None
     rehearsal_proof_sha256_path: str | None
+    demoted_summary_path: str | None
+    publication_failure_reason: str | None
     phase_log: tuple[str, ...]
 
 
@@ -997,13 +999,15 @@ def run_guarded_refresh_orchestration(
                     ),
                 )
                 phase_log.append("evidence-published")
-            except BaseException:
+            except BaseException as exc:
                 return _write_final_status(
                     context,
                     final_status="MUTATION_COMPLETE_EVIDENCE_FAILED",
                     phase_log=phase_log,
                     final_status_path=final_status_path,
                     rehearsal_proof_path=None,
+                    demoted_summary_path=getattr(exc, "demoted_summary_path", None),
+                    publication_failure_reason=str(exc),
                 )
             return _write_final_status(
                 context,
@@ -2693,6 +2697,8 @@ def _write_final_status(
     final_status_path: Path,
     rehearsal_proof_path: Path | None,
     rehearsal_proof_sha256: str | None = None,
+    demoted_summary_path: str | None = None,
+    publication_failure_reason: str | None = None,
 ) -> GuardedRefreshResult:
     rehearsal_proof_sha256_path = (
         f"{rehearsal_proof_path}.sha256" if rehearsal_proof_path is not None else None
@@ -2714,6 +2720,8 @@ def _write_final_status(
             else None,
             "rehearsal_proof_sha256": rehearsal_proof_sha256,
             "rehearsal_proof_sha256_path": rehearsal_proof_sha256_path,
+            "demoted_summary_path": demoted_summary_path,
+            "publication_failure_reason": publication_failure_reason,
         },
     )
     return GuardedRefreshResult(
@@ -2724,6 +2732,8 @@ def _write_final_status(
         else None,
         rehearsal_proof_sha256=rehearsal_proof_sha256,
         rehearsal_proof_sha256_path=rehearsal_proof_sha256_path,
+        demoted_summary_path=demoted_summary_path,
+        publication_failure_reason=publication_failure_reason,
         phase_log=tuple(phase_log),
     )
 
