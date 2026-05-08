@@ -48,6 +48,7 @@ OTHER_HOME_TICKET_COMMAND = (
     "python3 /private/tmp/other/plugins/cache/turbo-mode/ticket/1.4.0/"
     "hooks/ticket_engine_guard.py"
 )
+OTHER_HOME_WRONG_LAYOUT_TICKET_COMMAND = "python3 /private/tmp/other/hooks/ticket_engine_guard.py"
 REAL_HOME_TICKET_COMMAND_WITH_ARGS = REAL_HOME_TICKET_COMMAND + " --guard"
 REAL_HOME_WRONG_TICKET_COMMAND = (
     "python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/"
@@ -1626,8 +1627,16 @@ def test_blocker_inventory_counts_include_nested_data_shapes() -> None:
     assert hooks_count == 1
 
 
+@pytest.mark.parametrize(
+    "source_command",
+    [
+        REAL_HOME_TICKET_COMMAND,
+        OTHER_HOME_TICKET_COMMAND,
+    ],
+)
 def test_rewrite_ticket_hook_manifest_binds_command_to_requested_plugin_root(
     tmp_path: Path,
+    source_command: str,
 ) -> None:
     plugin_root = tmp_path / ".codex/plugins/cache/turbo-mode/ticket/1.4.0"
     plugin_root.mkdir(parents=True)
@@ -1644,7 +1653,7 @@ def test_rewrite_ticket_hook_manifest_binds_command_to_requested_plugin_root(
                             "hooks": [
                                 {
                                     "type": "command",
-                                    "command": REAL_HOME_TICKET_COMMAND,
+                                    "command": source_command,
                                     "timeout": 10,
                                 }
                             ],
@@ -1670,7 +1679,7 @@ def test_rewrite_ticket_hook_manifest_binds_command_to_requested_plugin_root(
     "command",
     [
         REAL_HOME_TICKET_COMMAND.replace("python3 ", "python ", 1),
-        OTHER_HOME_TICKET_COMMAND,
+        OTHER_HOME_WRONG_LAYOUT_TICKET_COMMAND,
         REAL_HOME_TICKET_COMMAND_WITH_ARGS,
         REAL_HOME_WRONG_TICKET_COMMAND,
     ],

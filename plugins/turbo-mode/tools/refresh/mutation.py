@@ -29,6 +29,7 @@ from .app_server_inventory import (
     collect_app_server_launch_authority,
     collect_readonly_runtime_inventory,
     normalize_same_child_post_install_transcript,
+    parse_ticket_guard_command,
     rewrite_ticket_hook_manifest,
     serialize_authority_record,
     validate_install_responses,
@@ -1861,15 +1862,29 @@ def _is_expected_ticket_hook_manifest_localization(
         cache_payload = json.loads(cache_path.read_text(encoding="utf-8"))
         source_command = _ticket_hook_manifest_command(source_payload)
         cache_command = _ticket_hook_manifest_command(cache_payload)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, IndexError, TypeError):
+        parse_ticket_guard_command(
+            source_command,
+            operation="verify source/cache equality",
+            ticket_version=spec.version,
+        )
+        cache_script_path = parse_ticket_guard_command(
+            cache_command,
+            operation="verify source/cache equality",
+            ticket_version=spec.version,
+        )
+    except (
+        OSError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        KeyError,
+        IndexError,
+        TypeError,
+        RefreshError,
+    ):
         return False
 
-    expected_source_command = (
-        f"python3 {REAL_CODEX_HOME}/plugins/cache/turbo-mode/ticket/"
-        f"{spec.version}/hooks/ticket_engine_guard.py"
-    )
-    expected_cache_command = f"python3 {spec.cache_root}/hooks/ticket_engine_guard.py"
-    if source_command != expected_source_command or cache_command != expected_cache_command:
+    expected_cache_script_path = spec.cache_root / "hooks/ticket_engine_guard.py"
+    if cache_script_path != expected_cache_script_path:
         return False
 
     normalized_source = deepcopy(source_payload)

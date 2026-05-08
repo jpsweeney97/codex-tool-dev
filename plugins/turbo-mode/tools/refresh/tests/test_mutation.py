@@ -2237,7 +2237,7 @@ def test_verify_source_cache_equality_accepts_ticket_hook_manifest_localization(
     source_hooks.parent.mkdir(parents=True)
     cache_hooks.parent.mkdir(parents=True)
     source_payload = ticket_hooks_payload(
-        "python3 /Users/jp/.codex/plugins/cache/turbo-mode/"
+        "python3 /private/tmp/other/plugins/cache/turbo-mode/"
         "ticket/1.4.0/hooks/ticket_engine_guard.py"
     )
     cache_payload = ticket_hooks_payload(
@@ -2251,6 +2251,40 @@ def test_verify_source_cache_equality_accepts_ticket_hook_manifest_localization(
     cache_hooks.write_text(json.dumps(cache_payload, indent=2) + "\n", encoding="utf-8")
 
     assert set(verify_source_cache_equality(ctx)) == {"handoff", "ticket"}
+
+
+def test_verify_source_cache_equality_rejects_ticket_hook_wrong_source_layout(
+    tmp_path: Path,
+) -> None:
+    ctx = context(tmp_path)
+    seed_plugins(ctx)
+    source_hooks = ctx.repo_root / "plugins/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+    cache_hooks = ctx.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+    source_hooks.parent.mkdir(parents=True)
+    cache_hooks.parent.mkdir(parents=True)
+    source_hooks.write_text(
+        json.dumps(
+            ticket_hooks_payload("python3 /private/tmp/other/hooks/ticket_engine_guard.py"),
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    cache_hooks.write_text(
+        json.dumps(
+            ticket_hooks_payload(
+                f"python3 {ctx.codex_home}/plugins/cache/turbo-mode/"
+                "ticket/1.4.0/hooks/ticket_engine_guard.py"
+            ),
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RefreshError, match="source/cache manifest mismatch"):
+        verify_source_cache_equality(ctx)
 
 
 def test_verify_source_cache_equality_rejects_extra_ticket_hook_manifest_drift(

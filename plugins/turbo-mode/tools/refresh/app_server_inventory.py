@@ -209,27 +209,10 @@ def rewrite_ticket_hook_manifest(*, ticket_plugin_root: Path) -> Path:
             "unexpected Ticket hook command",
             current_command,
         )
-    current_script_path = _parse_ticket_guard_command(
+    parse_ticket_guard_command(
         current_command,
         operation="rewrite Ticket hook manifest",
     )
-    expected_current_paths = {
-        ticket_plugin_root / "hooks" / "ticket_engine_guard.py",
-        REAL_CODEX_HOME
-        / "plugins"
-        / "cache"
-        / "turbo-mode"
-        / "ticket"
-        / PLUGIN_VERSIONS["ticket"]
-        / "hooks"
-        / "ticket_engine_guard.py",
-    }
-    if current_script_path not in expected_current_paths:
-        fail(
-            "rewrite Ticket hook manifest",
-            "unexpected Ticket hook command",
-            current_command,
-        )
     hook["command"] = _ticket_guard_command(ticket_plugin_root)
     hooks_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return hooks_path
@@ -955,7 +938,12 @@ def _ticket_guard_command(plugin_root: Path) -> str:
     return f"python3 {plugin_root}/hooks/ticket_engine_guard.py"
 
 
-def _parse_ticket_guard_command(command: str, *, operation: str) -> Path:
+def parse_ticket_guard_command(
+    command: str,
+    *,
+    operation: str,
+    ticket_version: str = PLUGIN_VERSIONS["ticket"],
+) -> Path:
     try:
         argv = shlex.split(command)
     except ValueError as exc:
@@ -965,7 +953,16 @@ def _parse_ticket_guard_command(command: str, *, operation: str) -> Path:
     script_path = Path(argv[1])
     if not script_path.is_absolute():
         fail(operation, "unexpected Ticket hook command", command)
-    if tuple(script_path.parts[-2:]) != ("hooks", "ticket_engine_guard.py"):
+    expected_suffix = (
+        "plugins",
+        "cache",
+        "turbo-mode",
+        "ticket",
+        ticket_version,
+        "hooks",
+        "ticket_engine_guard.py",
+    )
+    if tuple(script_path.parts[-len(expected_suffix) :]) != expected_suffix:
         fail(operation, "unexpected Ticket hook command", command)
     return script_path
 
