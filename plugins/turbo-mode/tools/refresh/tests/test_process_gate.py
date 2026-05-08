@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 import refresh.process_gate as process_gate_module
+from refresh.models import RefreshError
 from refresh.process_gate import (
     ProcessGateFinding,
     ProcessRow,
@@ -113,7 +114,7 @@ def test_unparsable_ps_row_is_uncertain_high_risk() -> None:
     assert_classification(rows[0], "uncertain-high-risk", blocking=True)
 
 
-def test_capture_process_gate_fails_hard_when_ps_exits_nonzero(
+def test_capture_process_gate_wraps_ps_nonzero_as_refresh_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -122,7 +123,7 @@ def test_capture_process_gate_fails_hard_when_ps_exits_nonzero(
 
     monkeypatch.setattr(process_gate_module.subprocess, "run", fake_run)
 
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(RefreshError, match="ps exited non-zero"):
         capture_process_gate(
             label="preflight",
             local_only_run_root=tmp_path / "run",

@@ -10,6 +10,8 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .models import fail
+
 EXCLUSIVE_WINDOW_STATUS = "exclusive_window_observed_by_process_samples"
 PROCESS_GATE_SCHEMA_VERSION = "turbo-mode-refresh-process-gate-v1"
 TICKET_HOOK_ROOT = "/plugins/cache/turbo-mode/ticket/1.4.0/hooks/"
@@ -90,12 +92,23 @@ def capture_process_gate(
     refresh_command: Sequence[str],
     recorded_child_app_server_pids: frozenset[int],
 ) -> dict[str, object]:
-    completed = subprocess.run(
-        ["ps", "-ww", "-axo", "pid,ppid,command"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    try:
+        completed = subprocess.run(
+            ["ps", "-ww", "-axo", "pid,ppid,command"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        fail(
+            "capture process gate",
+            "ps exited non-zero",
+            {
+                "returncode": exc.returncode,
+                "stdout": (exc.stdout or "")[:500],
+                "stderr": (exc.stderr or "")[:500],
+            },
+        )
     raw_listing = completed.stdout
     rows = parse_ps_output(raw_listing)
     findings = classify_processes(

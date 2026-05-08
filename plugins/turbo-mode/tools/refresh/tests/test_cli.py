@@ -244,6 +244,17 @@ def run_system_python_tool(
     )
 
 
+def test_load_cli_module_does_not_write_tools_bytecode() -> None:
+    tools_root = REPO_ROOT / "plugins/turbo-mode/tools"
+    assert not list(tools_root.rglob("__pycache__"))
+    assert not list(tools_root.rglob("*.pyc"))
+
+    load_cli_module()
+
+    assert not list(tools_root.rglob("__pycache__"))
+    assert not list(tools_root.rglob("*.pyc"))
+
+
 def write_fake_codex(bin_dir: Path) -> Path:
     codex = bin_dir / "codex"
     codex.write_text(
