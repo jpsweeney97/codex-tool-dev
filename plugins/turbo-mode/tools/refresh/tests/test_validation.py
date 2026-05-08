@@ -697,6 +697,17 @@ def test_validator_scripts_candidate_and_final_flow(tmp_path: Path) -> None:
 def guarded_payload(case: dict[str, object]) -> dict[str, object]:
     source_head = git(case["repo_root"], "rev-parse", "HEAD")
     source_tree = git(case["repo_root"], "rev-parse", "HEAD^{tree}")
+    rehearsal_proof_sha256 = "3" * 64
+    capture_manifest = case["run_root"] / "rehearsal-proof-capture/capture-manifest.json"
+    capture_manifest.parent.mkdir(parents=True, exist_ok=True)
+    write_json(
+        capture_manifest,
+        {
+            "schema_version": "turbo-mode-refresh-rehearsal-capture-v1",
+            "run_id": "run-1",
+            "rehearsal_proof_sha256": rehearsal_proof_sha256,
+        },
+    )
     return {
         "schema_version": "turbo-mode-refresh-commit-safe-plan-06",
         "run_id": "run-1",
@@ -715,13 +726,14 @@ def guarded_payload(case: dict[str, object]) -> dict[str, object]:
         },
         "local_only_evidence_root": str(case["run_root"]),
         "isolated_rehearsal_run_id": "rehearsal-run",
-        "rehearsal_proof_sha256": "3" * 64,
+        "rehearsal_proof_sha256": rehearsal_proof_sha256,
         "rehearsal_proof_validation_status": "validated-before-live-mutation",
+        "rehearsal_proof_capture_manifest_sha256": sha256_file(capture_manifest),
         "source_to_rehearsal_execution_delta_status": "identical",
         "source_to_rehearsal_allowed_delta_proof_sha256": "4" * 64,
         "source_to_rehearsal_changed_paths_sha256": "5" * 64,
-        "isolated_app_server_authority_proof_sha256": "3" * 64,
-        "no_real_home_authority_proof_sha256": "3" * 64,
+        "isolated_app_server_authority_proof_sha256": "6" * 64,
+        "no_real_home_authority_proof_sha256": "7" * 64,
         "pre_snapshot_app_server_launch_authority_sha256": "6" * 64,
         "pre_install_app_server_target_authority_sha256": "7" * 64,
         "live_app_server_authority_proof_sha256": "8" * 64,
@@ -923,6 +935,48 @@ def test_guarded_final_replay_allows_only_published_summary_dirty_path(
     assert "relevant paths dirty" in rejected.stderr
 
 
+def test_guarded_final_replay_rejects_coexisting_failed_summary_path(
+    tmp_path: Path,
+) -> None:
+    case = build_candidate_summary(tmp_path)
+    guarded = guarded_payload(case)
+    candidate = case["run_root"] / "guarded.candidate.summary.json"
+    write_json(candidate, guarded)
+    metadata_summary = case["run_root"] / "guarded-metadata.summary.json"
+    metadata = run_metadata(
+        [
+            *guarded_common_args(case, summary=candidate, mode="candidate"),
+            "--summary-output",
+            str(metadata_summary),
+        ]
+    )
+    assert metadata.returncode == 0, metadata.stderr
+    final_payload = {
+        **guarded,
+        "metadata_validation_summary_sha256": sha256_file(metadata_summary),
+    }
+    final_summary = case["run_root"] / "guarded.final.summary.json"
+    write_json(final_summary, final_payload)
+    published = case["published"]
+    published.parent.mkdir(parents=True, exist_ok=True)
+    published.write_text("published dirty\n", encoding="utf-8")
+    failed = published.with_name("run-1.summary.failed.json")
+    failed.write_text("failed forensic\n", encoding="utf-8")
+
+    rejected = run_metadata(
+        [
+            *guarded_common_args(case, summary=final_summary, mode="final"),
+            "--candidate-summary",
+            str(candidate),
+            "--existing-validation-summary",
+            str(metadata_summary),
+        ]
+    )
+
+    assert rejected.returncode == 1
+    assert "coexist" in rejected.stderr
+
+
 def test_retained_run_metadata_uses_certification_identity_for_split_root(
     tmp_path: Path,
 ) -> None:
@@ -942,7 +996,6 @@ def test_retained_run_metadata_uses_certification_identity_for_split_root(
         "retained_certification_outcome": "retained-certified",
         "prior_summary_path_state": "none",
         "retained_no_mutation_proof_sha256": "1" * 64,
-        "rehearsal_proof_capture_manifest_sha256": "2" * 64,
         "prior_failed_summary_path": None,
         "prior_failed_summary_sha256": None,
         "prior_failed_summary_status": None,
@@ -989,7 +1042,6 @@ def test_retained_final_replay_allows_only_retained_summary_dirty_path(
         "retained_certification_outcome": "retained-certified",
         "prior_summary_path_state": "none",
         "retained_no_mutation_proof_sha256": "1" * 64,
-        "rehearsal_proof_capture_manifest_sha256": "2" * 64,
         "prior_failed_summary_path": None,
         "prior_failed_summary_sha256": None,
         "prior_failed_summary_status": None,

@@ -104,6 +104,7 @@ GUARDED_REFRESH_REQUIRED_FIELDS = {
     "isolated_rehearsal_run_id",
     "rehearsal_proof_sha256",
     "rehearsal_proof_validation_status",
+    "rehearsal_proof_capture_manifest_sha256",
     "source_to_rehearsal_execution_delta_status",
     "source_to_rehearsal_allowed_delta_proof_sha256",
     "source_to_rehearsal_changed_paths_sha256",
@@ -395,16 +396,11 @@ def _validate_guarded_refresh_evidence(evidence: dict[str, Any]) -> None:
                 "build guarded refresh commit-safe summary failed: missing process census. "
                 "Got: post_mutation_process_census_sha256"
             )
-    rehearsal_digest = evidence.get("rehearsal_proof_sha256")
-    for key in (
-        "isolated_app_server_authority_proof_sha256",
-        "no_real_home_authority_proof_sha256",
-    ):
-        if evidence.get(key) != rehearsal_digest:
-            raise ValueError(
-                "build guarded refresh commit-safe summary failed: rehearsal proof digest "
-                f"mismatch. Got: {key!r:.100}"
-            )
+    if not evidence.get("rehearsal_proof_capture_manifest_sha256"):
+        raise ValueError(
+            "build guarded refresh commit-safe summary failed: missing rehearsal proof "
+            "capture manifest digest. Got: rehearsal_proof_capture_manifest_sha256"
+        )
 
 
 def _validate_retained_run_fields(fields: dict[str, Any]) -> None:

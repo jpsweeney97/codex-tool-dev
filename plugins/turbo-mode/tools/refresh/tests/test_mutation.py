@@ -27,6 +27,7 @@ from refresh.mutation import (
     install_plugins_via_app_server,
     prepare_plugin_hooks_for_guarded_refresh,
     prove_app_server_home_authority,
+    publish_guarded_refresh_commit_safe_summary,
     restore_config_snapshot,
     rollback_guarded_refresh,
     run_guarded_refresh_orchestration,
@@ -354,6 +355,41 @@ def write_full_rehearsal_bundle(tmp_path: Path) -> tuple[Path, str]:
     write_json(proof_path, proof)
     proof_sha = write_sha256_companion(proof_path)
     return proof_path, proof_sha
+
+
+def commit_safe_guarded_evidence(capture_manifest_sha256: str) -> dict[str, object]:
+    return {
+        "mode": "guarded-refresh",
+        "source_implementation_commit": SOURCE_COMMIT,
+        "source_implementation_tree": SOURCE_TREE,
+        "execution_head": EXECUTION_HEAD,
+        "execution_tree": EXECUTION_TREE,
+        "isolated_rehearsal_run_id": "rehearsal-run",
+        "rehearsal_proof_sha256": "3" * 64,
+        "rehearsal_proof_validation_status": "validated-before-live-mutation",
+        "rehearsal_proof_capture_manifest_sha256": capture_manifest_sha256,
+        "source_to_rehearsal_execution_delta_status": "identical",
+        "source_to_rehearsal_allowed_delta_proof_sha256": "4" * 64,
+        "source_to_rehearsal_changed_paths_sha256": "5" * 64,
+        "isolated_app_server_authority_proof_sha256": "6" * 64,
+        "no_real_home_authority_proof_sha256": "7" * 64,
+        "pre_snapshot_app_server_launch_authority_sha256": "8" * 64,
+        "pre_install_app_server_target_authority_sha256": "9" * 64,
+        "live_app_server_authority_proof_sha256": "a" * 64,
+        "source_manifest_sha256": "b" * 64,
+        "pre_refresh_cache_manifest_sha256": "c" * 64,
+        "post_refresh_cache_manifest_sha256": "d" * 64,
+        "pre_refresh_config_sha256": "e" * 64,
+        "post_refresh_config_sha256": "f" * 64,
+        "post_refresh_inventory_sha256": "0" * 64,
+        "selected_smoke_tier": "standard",
+        "smoke_summary_sha256": "1" * 64,
+        "post_mutation_process_census_sha256": "2" * 64,
+        "exclusivity_status": "exclusive_window_observed_by_process_samples",
+        "phase_reached": "evidence-published",
+        "final_status": "MUTATION_COMPLETE_CERTIFIED",
+        "rollback_or_restore_status": "not-attempted",
+    }
 
 
 def refresh_full_rehearsal_bundle_digests(proof_path: Path) -> str:
@@ -971,6 +1007,66 @@ def test_isolated_guarded_orchestration_runs_core_phases_and_writes_rehearsal_pr
     assert result.rehearsal_proof_sha256 == expected_proof_sha256
     assert result.rehearsal_proof_sha256_path == str(rehearsal_proof_sha256)
     assert not (ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json").exists()
+
+
+def test_publish_guarded_refresh_commit_safe_summary_runs_after_publish_and_replay(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    init_git_repo(repo_root)
+    write_repo_file(
+        repo_root,
+        "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
+        "print('tool')\n",
+    )
+    commit_repo(repo_root, "seed")
+
+    codex_home = tmp_path / ".codex"
+    ctx = replace(
+        context(tmp_path, codex_home=codex_home),
+        repo_root=repo_root,
+        local_only_run_root=codex_home / "local-only/turbo-mode-refresh" / RUN_ID,
+    )
+    ctx.local_only_run_root.mkdir(parents=True, exist_ok=True)
+    capture_manifest = (
+        ctx.local_only_run_root / "rehearsal-proof-capture/capture-manifest.json"
+    )
+    write_json(
+        capture_manifest,
+        {
+            "schema_version": "turbo-mode-refresh-rehearsal-capture-v1",
+            "run_id": RUN_ID,
+            "rehearsal_proof_sha256": "3" * 64,
+        },
+    )
+
+    def validator_runner(phase: str, paths: object) -> None:
+        if phase == "candidate":
+            write_json(paths.metadata, {"status": "passed"})  # type: ignore[attr-defined]
+            write_json(paths.redaction, {"status": "passed"})  # type: ignore[attr-defined]
+        else:
+            write_json(paths.redaction_final, {"status": "passed"})  # type: ignore[attr-defined]
+
+    result = publish_guarded_refresh_commit_safe_summary(
+        context=ctx,
+        source_code_root=repo_root,
+        execution_repo_root=repo_root,
+        guarded_evidence=commit_safe_guarded_evidence(sha256_file(capture_manifest)),
+        validator_runner=validator_runner,
+    )
+
+    published = repo_root / f"plugins/turbo-mode/evidence/refresh/{RUN_ID}.summary.json"
+    assert published.is_file()
+    assert result.published_summary_path == str(published)
+    payload = json.loads(published.read_text(encoding="utf-8"))
+    assert payload["rehearsal_proof_capture_manifest_sha256"] == sha256_file(capture_manifest)
+    assert payload["metadata_validation_summary_sha256"] == sha256_file(
+        ctx.local_only_run_root / "metadata-validation.summary.json"
+    )
+    assert payload["redaction_validation_summary_sha256"] == sha256_file(
+        ctx.local_only_run_root / "redaction.summary.json"
+    )
 
 
 def test_install_plugins_restores_hooks_before_same_child_corroboration(

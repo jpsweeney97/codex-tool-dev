@@ -17,6 +17,10 @@ from .commit_safe import (
 )
 from .models import RefreshError
 from .planner import plan_refresh
+from .publication import (
+    PublicationReplayPaths,
+    publish_and_replay_commit_safe_summary,
+)
 from .validation import assert_commit_safe_payload, load_json_object
 
 TOOL_RELATIVE_PATH = Path("plugins/turbo-mode/tools/refresh_installed_turbo_mode.py")
@@ -117,101 +121,108 @@ def certify_retained_run(
             f"Got: {type(guarded_evidence).__name__!r:.100}"
         )
 
-    candidate_payload = build_retained_run_commit_safe_summary(
-        guarded_evidence,
-        run_id=run_id,
-        local_only_evidence_root=run_root,
-        tool_path=TOOL_RELATIVE_PATH,
-        tool_sha256=sha256_file(repo_root / TOOL_RELATIVE_PATH),
-        dirty_state=dirty_state,
-        metadata_validation_summary_sha256=None,
-        redaction_validation_summary_sha256=None,
-        certification_source_commit=certification_source_commit,
-        certification_source_tree=certification_source_tree,
-        certification_execution_head=certification_execution_head,
-        certification_execution_tree=certification_execution_tree,
-        retained_summary_path=_repo_relative(repo_root, summary_paths["published"]),
-        original_run_final_status=original_final_status,
-        retained_certification_outcome=str(evidence["retained_certification_outcome"]),
-        prior_summary_path_state=path_state["state"],
-        retained_no_mutation_proof_sha256=sha256_file(retained_no_mutation_proof_path),
-        rehearsal_proof_capture_manifest_sha256=rehearsal_manifest_sha256,
-        prior_failed_summary_path=path_state["failed_relative"],
-        prior_failed_summary_sha256=path_state["failed_sha256"],
-        prior_failed_summary_status=path_state["failed_status"],
-    )
-    assert_commit_safe_payload(candidate_payload)
-    _write_private_json(summary_paths["candidate"], candidate_payload)
     try:
-        _run_validation(
-            phase="candidate",
-            run_id=run_id,
-            repo_root=repo_root,
-            run_root=run_root,
-            summary=summary_paths["candidate"],
-            published=summary_paths["published"],
-            validator_runner=validator_runner,
-            candidate=None,
-            existing_metadata=None,
-            existing_redaction=None,
+        publication = publish_and_replay_commit_safe_summary(
+            operation="certify retained run",
+            paths=PublicationReplayPaths(
+                candidate=summary_paths["candidate"],
+                final=summary_paths["final"],
+                metadata=summary_paths["metadata"],
+                redaction=summary_paths["redaction"],
+                redaction_final=summary_paths["redaction_final"],
+                published=summary_paths["published"],
+                failed=summary_paths["failed"],
+            ),
+            build_candidate_payload=lambda: build_retained_run_commit_safe_summary(
+                guarded_evidence,
+                run_id=run_id,
+                local_only_evidence_root=run_root,
+                tool_path=TOOL_RELATIVE_PATH,
+                tool_sha256=sha256_file(repo_root / TOOL_RELATIVE_PATH),
+                dirty_state=dirty_state,
+                metadata_validation_summary_sha256=None,
+                redaction_validation_summary_sha256=None,
+                certification_source_commit=certification_source_commit,
+                certification_source_tree=certification_source_tree,
+                certification_execution_head=certification_execution_head,
+                certification_execution_tree=certification_execution_tree,
+                retained_summary_path=_repo_relative(repo_root, summary_paths["published"]),
+                original_run_final_status=original_final_status,
+                retained_certification_outcome=str(evidence["retained_certification_outcome"]),
+                prior_summary_path_state=path_state["state"],
+                retained_no_mutation_proof_sha256=sha256_file(retained_no_mutation_proof_path),
+                rehearsal_proof_capture_manifest_sha256=rehearsal_manifest_sha256,
+                prior_failed_summary_path=path_state["failed_relative"],
+                prior_failed_summary_sha256=path_state["failed_sha256"],
+                prior_failed_summary_status=path_state["failed_status"],
+            ),
+            build_final_payload=lambda metadata_sha, redaction_sha: (
+                build_retained_run_commit_safe_summary(
+                    guarded_evidence,
+                    run_id=run_id,
+                    local_only_evidence_root=run_root,
+                    tool_path=TOOL_RELATIVE_PATH,
+                    tool_sha256=sha256_file(repo_root / TOOL_RELATIVE_PATH),
+                    dirty_state=dirty_state,
+                    metadata_validation_summary_sha256=metadata_sha,
+                    redaction_validation_summary_sha256=redaction_sha,
+                    certification_source_commit=certification_source_commit,
+                    certification_source_tree=certification_source_tree,
+                    certification_execution_head=certification_execution_head,
+                    certification_execution_tree=certification_execution_tree,
+                    retained_summary_path=_repo_relative(repo_root, summary_paths["published"]),
+                    original_run_final_status=original_final_status,
+                    retained_certification_outcome=str(
+                        evidence["retained_certification_outcome"]
+                    ),
+                    prior_summary_path_state=path_state["state"],
+                    retained_no_mutation_proof_sha256=sha256_file(
+                        retained_no_mutation_proof_path
+                    ),
+                    rehearsal_proof_capture_manifest_sha256=rehearsal_manifest_sha256,
+                    prior_failed_summary_path=path_state["failed_relative"],
+                    prior_failed_summary_sha256=path_state["failed_sha256"],
+                    prior_failed_summary_status=path_state["failed_status"],
+                )
+            ),
+            validate_payload=assert_commit_safe_payload,
+            run_candidate_validation=lambda paths: _run_validation(
+                phase="candidate",
+                run_id=run_id,
+                repo_root=repo_root,
+                run_root=run_root,
+                summary=paths.candidate,
+                published=paths.published,
+                validator_runner=validator_runner,
+                candidate=None,
+                existing_metadata=None,
+                existing_redaction=None,
+            ),
+            run_final_validation=lambda paths: _run_validation(
+                phase="final",
+                run_id=run_id,
+                repo_root=repo_root,
+                run_root=run_root,
+                summary=paths.final,
+                published=paths.published,
+                validator_runner=validator_runner,
+                candidate=paths.candidate,
+                existing_metadata=paths.metadata,
+                existing_redaction=paths.redaction,
+            ),
         )
-        final_payload = build_retained_run_commit_safe_summary(
-            guarded_evidence,
-            run_id=run_id,
-            local_only_evidence_root=run_root,
-            tool_path=TOOL_RELATIVE_PATH,
-            tool_sha256=sha256_file(repo_root / TOOL_RELATIVE_PATH),
-            dirty_state=dirty_state,
-            metadata_validation_summary_sha256=sha256_file(summary_paths["metadata"]),
-            redaction_validation_summary_sha256=sha256_file(summary_paths["redaction"]),
-            certification_source_commit=certification_source_commit,
-            certification_source_tree=certification_source_tree,
-            certification_execution_head=certification_execution_head,
-            certification_execution_tree=certification_execution_tree,
-            retained_summary_path=_repo_relative(repo_root, summary_paths["published"]),
-            original_run_final_status=original_final_status,
-            retained_certification_outcome=str(evidence["retained_certification_outcome"]),
-            prior_summary_path_state=path_state["state"],
-            retained_no_mutation_proof_sha256=sha256_file(retained_no_mutation_proof_path),
-            rehearsal_proof_capture_manifest_sha256=rehearsal_manifest_sha256,
-            prior_failed_summary_path=path_state["failed_relative"],
-            prior_failed_summary_sha256=path_state["failed_sha256"],
-            prior_failed_summary_status=path_state["failed_status"],
-        )
-        assert_commit_safe_payload(final_payload)
-        _write_private_json(summary_paths["final"], final_payload)
-    except BaseException:
+    except BaseException as exc:
+        demoted_summary_path = getattr(exc, "demoted_summary_path", None)
         _write_status(
             run_root,
             run_id=run_id,
             outcome="retained-certification-failed",
-            final_status="RETAINED_CERTIFICATION_PRE_PUBLISH_FAILED",
-            demoted_summary_path=None,
-        )
-        raise
-
-    _publish_json_exclusive(summary_paths["final"], summary_paths["published"])
-    try:
-        _run_validation(
-            phase="final",
-            run_id=run_id,
-            repo_root=repo_root,
-            run_root=run_root,
-            summary=summary_paths["final"],
-            published=summary_paths["published"],
-            validator_runner=validator_runner,
-            candidate=summary_paths["candidate"],
-            existing_metadata=summary_paths["metadata"],
-            existing_redaction=summary_paths["redaction"],
-        )
-    except BaseException:
-        demoted = _demote_published_summary(summary_paths["published"], summary_paths["failed"])
-        _write_status(
-            run_root,
-            run_id=run_id,
-            outcome="retained-certification-failed",
-            final_status="RETAINED_CERTIFICATION_POST_PUBLISH_FAILED",
-            demoted_summary_path=demoted,
+            final_status=(
+                "RETAINED_CERTIFICATION_POST_PUBLISH_FAILED"
+                if demoted_summary_path is not None
+                else "RETAINED_CERTIFICATION_PRE_PUBLISH_FAILED"
+            ),
+            demoted_summary_path=demoted_summary_path,
         )
         raise
 
@@ -224,7 +235,7 @@ def certify_retained_run(
     )
     return RetainedRunResult(
         outcome=str(evidence["retained_certification_outcome"]),
-        published_summary_path=str(summary_paths["published"]),
+        published_summary_path=publication.published_summary_path,
         status_path=str(status_path),
         final_status="MUTATION_COMPLETE_CERTIFIED",
     )
@@ -564,22 +575,6 @@ def _write_private_json(path: Path, payload: dict[str, Any]) -> None:
         json.dump(payload, handle, indent=2, sort_keys=True)
         handle.write("\n")
     os.chmod(path, 0o600)
-
-
-def _publish_json_exclusive(source_payload_path: Path, final_path: Path) -> None:
-    final_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = load_json_object(source_payload_path)
-    _write_private_json(final_path, payload)
-
-
-def _demote_published_summary(published: Path, failed: Path) -> Path:
-    if failed.exists():
-        raise RefreshError(
-            "certify retained run failed: retained failed summary already exists. "
-            f"Got: {str(failed)!r:.100}"
-        )
-    published.rename(failed)
-    return failed
 
 
 def _repo_relative(repo_root: Path, path: Path) -> str:

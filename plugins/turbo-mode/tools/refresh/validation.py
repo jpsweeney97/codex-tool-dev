@@ -496,6 +496,7 @@ def _assert_guarded_refresh_values(payload: dict[str, Any]) -> None:
         "isolated_rehearsal_run_id",
         "rehearsal_proof_sha256",
         "rehearsal_proof_validation_status",
+        "rehearsal_proof_capture_manifest_sha256",
         "source_to_rehearsal_execution_delta_status",
         "source_to_rehearsal_allowed_delta_proof_sha256",
         "source_to_rehearsal_changed_paths_sha256",

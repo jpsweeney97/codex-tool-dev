@@ -74,23 +74,24 @@ def guarded_evidence(source_commit: str, source_tree: str) -> dict[str, object]:
         "isolated_rehearsal_run_id": "rehearsal-run",
         "rehearsal_proof_sha256": "3" * 64,
         "rehearsal_proof_validation_status": "validated-before-live-mutation",
+        "rehearsal_proof_capture_manifest_sha256": "4" * 64,
         "source_to_rehearsal_execution_delta_status": "identical",
-        "source_to_rehearsal_allowed_delta_proof_sha256": "4" * 64,
-        "source_to_rehearsal_changed_paths_sha256": "5" * 64,
-        "isolated_app_server_authority_proof_sha256": "3" * 64,
-        "no_real_home_authority_proof_sha256": "3" * 64,
-        "pre_snapshot_app_server_launch_authority_sha256": "6" * 64,
-        "pre_install_app_server_target_authority_sha256": "7" * 64,
-        "live_app_server_authority_proof_sha256": "8" * 64,
-        "source_manifest_sha256": "9" * 64,
-        "pre_refresh_cache_manifest_sha256": "a" * 64,
-        "post_refresh_cache_manifest_sha256": "b" * 64,
-        "pre_refresh_config_sha256": "c" * 64,
-        "post_refresh_config_sha256": "d" * 64,
-        "post_refresh_inventory_sha256": "e" * 64,
+        "source_to_rehearsal_allowed_delta_proof_sha256": "5" * 64,
+        "source_to_rehearsal_changed_paths_sha256": "6" * 64,
+        "isolated_app_server_authority_proof_sha256": "7" * 64,
+        "no_real_home_authority_proof_sha256": "8" * 64,
+        "pre_snapshot_app_server_launch_authority_sha256": "9" * 64,
+        "pre_install_app_server_target_authority_sha256": "a" * 64,
+        "live_app_server_authority_proof_sha256": "b" * 64,
+        "source_manifest_sha256": "c" * 64,
+        "pre_refresh_cache_manifest_sha256": "d" * 64,
+        "post_refresh_cache_manifest_sha256": "e" * 64,
+        "pre_refresh_config_sha256": "f" * 64,
+        "post_refresh_config_sha256": "0" * 64,
+        "post_refresh_inventory_sha256": "1" * 64,
         "selected_smoke_tier": "standard",
-        "smoke_summary_sha256": "f" * 64,
-        "post_mutation_process_census_sha256": "0" * 64,
+        "smoke_summary_sha256": "2" * 64,
+        "post_mutation_process_census_sha256": "4" * 64,
         "exclusivity_status": "exclusive_window_observed_by_process_samples",
         "phase_reached": "evidence-published",
         "final_status": "MUTATION_COMPLETE_CERTIFIED",
@@ -123,8 +124,15 @@ def write_retained_run(
             "final_status": status,
         },
     )
-    manifest = run_root / "rehearsal-proof-capture/manifest.json"
-    write_json(manifest, {"schema_version": "capture-v1", "run_id": "run-1"})
+    manifest = run_root / "rehearsal-proof-capture/capture-manifest.json"
+    write_json(
+        manifest,
+        {
+            "schema_version": "turbo-mode-refresh-rehearsal-capture-v1",
+            "run_id": "run-1",
+            "rehearsal_proof_sha256": "3" * 64,
+        },
+    )
     write_json(
         run_root / "guarded-refresh.summary.json",
         {"mode": "guarded-refresh", "run_id": "run-1"},
@@ -140,7 +148,9 @@ def write_retained_run(
             "source_to_certification_changed_paths": [
                 "plugins/turbo-mode/tools/refresh/validation.py"
             ],
-            "captured_rehearsal_proof_manifest_path": "rehearsal-proof-capture/manifest.json",
+            "captured_rehearsal_proof_manifest_path": (
+                "rehearsal-proof-capture/capture-manifest.json"
+            ),
             "captured_rehearsal_proof_manifest_sha256": sha256_file(manifest),
             "retained_certification_outcome": "retained-certified",
             "guarded_refresh_evidence": guarded_evidence(source_commit, source_tree),

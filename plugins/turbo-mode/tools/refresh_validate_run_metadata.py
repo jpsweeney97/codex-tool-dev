@@ -196,6 +196,10 @@ def validate_guarded_refresh_metadata_payload(
     tool_path = source_code_root / str(payload["tool_path"])
     if payload.get("tool_sha256") != sha256_file(tool_path):
         raise ValueError("validate run metadata failed: tool digest mismatch. Got: tool_sha256")
+    _assert_rehearsal_proof_capture_manifest(
+        args.local_only_root,
+        payload=payload,
+    )
     source_head = git(source_code_root, "rev-parse", "HEAD")
     source_tree = git(source_code_root, "rev-parse", "HEAD^{tree}")
     execution_head = git(execution_repo_root, "rev-parse", "HEAD")
@@ -209,6 +213,7 @@ def validate_guarded_refresh_metadata_payload(
             certification_execution_tree=execution_tree,
         )
         allowed_dirty = args.published_summary_path if args.mode == "final" else None
+        _assert_no_conflicting_failed_summary(args.published_summary_path)
         _assert_recomputed_dirty_state(
             execution_repo_root,
             payload.get("dirty_state"),
@@ -254,6 +259,7 @@ def validate_guarded_refresh_metadata_payload(
             f"Got: {payload.get('source_implementation_commit')!r:.100}"
         )
     allowed_dirty = args.published_summary_path if args.mode == "final" else None
+    _assert_no_conflicting_failed_summary(args.published_summary_path)
     _assert_recomputed_dirty_state(
         execution_repo_root,
         payload.get("dirty_state"),
@@ -262,6 +268,60 @@ def validate_guarded_refresh_metadata_payload(
         allowed_published_summary_path=allowed_dirty,
     )
     return payload, sha256_payload(projected_summary_for_validator_digest(payload))
+
+
+def _assert_rehearsal_proof_capture_manifest(
+    local_only_root: Path,
+    *,
+    payload: dict[str, object],
+) -> None:
+    manifest_path = local_only_root / "rehearsal-proof-capture/capture-manifest.json"
+    if not manifest_path.is_file():
+        raise ValueError(
+            "validate run metadata failed: captured rehearsal proof manifest missing. "
+            f"Got: {str(manifest_path)!r:.100}"
+        )
+    manifest = load_json_object(manifest_path)
+    if manifest.get("schema_version") != "turbo-mode-refresh-rehearsal-capture-v1":
+        raise ValueError(
+            "validate run metadata failed: captured rehearsal proof manifest schema mismatch. "
+            f"Got: {manifest.get('schema_version')!r:.100}"
+        )
+    if payload.get("rehearsal_proof_capture_manifest_sha256") != sha256_file(manifest_path):
+        raise ValueError(
+            "validate run metadata failed: captured rehearsal proof manifest digest mismatch. "
+            "Got: rehearsal_proof_capture_manifest_sha256"
+        )
+    if manifest.get("rehearsal_proof_sha256") != payload.get("rehearsal_proof_sha256"):
+        raise ValueError(
+            "validate run metadata failed: captured rehearsal proof digest mismatch. "
+            "Got: rehearsal_proof_sha256"
+        )
+
+
+def _assert_no_conflicting_failed_summary(published_summary_path: Path) -> None:
+    sibling_failed = _failed_summary_path(published_summary_path)
+    if published_summary_path.exists() and sibling_failed.exists():
+        raise ValueError(
+            "validate run metadata failed: published and failed summary paths coexist. "
+            f"Got: {str(published_summary_path)!r:.100}"
+        )
+
+
+def _failed_summary_path(published_summary_path: Path) -> Path:
+    name = published_summary_path.name
+    if name.endswith(".retained.summary.json"):
+        return published_summary_path.with_name(
+            name.removesuffix(".retained.summary.json") + ".retained.summary.failed.json"
+        )
+    if name.endswith(".summary.json"):
+        return published_summary_path.with_name(
+            name.removesuffix(".summary.json") + ".summary.failed.json"
+        )
+    raise ValueError(
+        "validate run metadata failed: invalid published summary suffix. "
+        f"Got: {name!r:.100}"
+    )
 
 
 def _assert_retained_certification_identity(

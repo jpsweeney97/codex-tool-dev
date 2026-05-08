@@ -910,6 +910,68 @@ def test_cli_guarded_refresh_captures_real_home_rehearsal_proof_before_marker_ch
     assert "validation and capture are not complete" not in captured.err
 
 
+def test_cli_guarded_refresh_real_home_block_prevents_orchestration(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "capture_rehearsal_proof_bundle",
+        lambda _validated, *, live_run_root: type(
+            "Capture",
+            (),
+            {"capture_manifest_path": str(live_run_root / "capture-manifest.json")},
+        )(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "ensure_no_active_run_state_markers",
+        lambda _local_only_root: None,
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_guarded_refresh_orchestration",
+        lambda *_args, **_kwargs: pytest.fail(
+            "real-home guarded refresh should remain blocked before orchestration"
+        ),
+    )
+
+    args = parser.parse_args(
+        [
+            "--guarded-refresh",
+            "--record-summary",
+            "--run-id",
+            "plan06-live-guarded-refresh-20260508-101500",
+            "--codex-home",
+            "/Users/jp/.codex",
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            "proof-sha",
+            "--source-implementation-commit",
+            "source",
+            "--source-implementation-tree",
+            "tree",
+        ]
+    )
+
+    assert cli.guarded_refresh_main(args, parser) == 1
+    captured = capsys.readouterr()
+    assert "real guarded refresh blocked" in captured.err
+
+
 def test_cli_guarded_refresh_rejects_path_shaped_real_home_run_id_before_capture(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

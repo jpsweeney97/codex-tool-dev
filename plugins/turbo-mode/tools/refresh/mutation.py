@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from copy import deepcopy
@@ -31,6 +32,10 @@ from .app_server_inventory import (
     serialize_authority_record,
     validate_install_responses,
 )
+from .commit_safe import (
+    build_guarded_refresh_commit_safe_summary,
+    ensure_relevant_worktree_clean,
+)
 from .evidence import ensure_private_evidence_root, write_local_evidence
 from .lock_state import (
     RunState,
@@ -45,10 +50,16 @@ from .lock_state import (
     write_initial_run_state,
 )
 from .manifests import build_manifest, diff_manifests
-from .models import DiffEntry, DiffKind, PluginSpec, fail
+from .models import DiffEntry, DiffKind, PluginSpec, RefreshError, fail
 from .planner import RefreshPaths, build_plugin_specs, plan_refresh
 from .process_gate import capture_process_gate
+from .publication import (
+    PublicationReplayPaths,
+    PublicationReplayResult,
+    publish_and_replay_commit_safe_summary,
+)
 from .smoke import run_standard_smoke
+from .validation import assert_commit_safe_payload
 
 PLAN05_DRIFT_PATHS = (
     "handoff/1.6.0/skills/load/SKILL.md",
@@ -1070,6 +1081,81 @@ def run_guarded_refresh_recovery(context: MutationContext) -> RecoveryResult:
             final_status_path=str(final_status_path),
             phase_log=tuple(phase_log),
         )
+
+
+def publish_guarded_refresh_commit_safe_summary(
+    *,
+    context: MutationContext,
+    source_code_root: Path,
+    execution_repo_root: Path,
+    guarded_evidence: dict[str, Any],
+    validator_runner: Callable[[str, PublicationReplayPaths], None] | None = None,
+) -> PublicationReplayResult:
+    normalized_source_root = source_code_root.expanduser().resolve(strict=True)
+    normalized_execution_root = execution_repo_root.expanduser().resolve(strict=True)
+    tool_path = Path("plugins/turbo-mode/tools/refresh_installed_turbo_mode.py")
+    dirty_state = ensure_relevant_worktree_clean(normalized_execution_root)
+    publication_paths = PublicationReplayPaths(
+        candidate=context.local_only_run_root / "commit-safe.candidate.summary.json",
+        final=context.local_only_run_root / "commit-safe.final.summary.json",
+        metadata=context.local_only_run_root / "metadata-validation.summary.json",
+        redaction=context.local_only_run_root / "redaction.summary.json",
+        redaction_final=context.local_only_run_root / "redaction-final-scan.summary.json",
+        published=(
+            normalized_execution_root
+            / "plugins/turbo-mode/evidence/refresh"
+            / f"{context.run_id}.summary.json"
+        ),
+        failed=(
+            normalized_execution_root
+            / "plugins/turbo-mode/evidence/refresh"
+            / f"{context.run_id}.summary.failed.json"
+        ),
+    )
+
+    return publish_and_replay_commit_safe_summary(
+        operation="publish guarded refresh summary",
+        paths=publication_paths,
+        build_candidate_payload=lambda: build_guarded_refresh_commit_safe_summary(
+            guarded_evidence,
+            run_id=context.run_id,
+            local_only_evidence_root=context.local_only_run_root,
+            tool_path=tool_path,
+            tool_sha256=_sha256_file(normalized_source_root / tool_path),
+            dirty_state=dirty_state,
+            metadata_validation_summary_sha256=None,
+            redaction_validation_summary_sha256=None,
+        ),
+        build_final_payload=lambda metadata_sha, redaction_sha: (
+            build_guarded_refresh_commit_safe_summary(
+                guarded_evidence,
+                run_id=context.run_id,
+                local_only_evidence_root=context.local_only_run_root,
+                tool_path=tool_path,
+                tool_sha256=_sha256_file(normalized_source_root / tool_path),
+                dirty_state=dirty_state,
+                metadata_validation_summary_sha256=metadata_sha,
+                redaction_validation_summary_sha256=redaction_sha,
+            )
+        ),
+        validate_payload=assert_commit_safe_payload,
+        run_candidate_validation=lambda paths: _run_guarded_refresh_publication_validation(
+            phase="candidate",
+            context=context,
+            source_code_root=normalized_source_root,
+            execution_repo_root=normalized_execution_root,
+            paths=paths,
+            validator_runner=validator_runner,
+        ),
+        run_final_validation=lambda paths: _run_guarded_refresh_publication_validation(
+            phase="final",
+            context=context,
+            source_code_root=normalized_source_root,
+            execution_repo_root=normalized_execution_root,
+            paths=paths,
+            validator_runner=validator_runner,
+        ),
+    )
 
 
 def create_snapshot_set(context: MutationContext) -> SnapshotSet:
@@ -2193,6 +2279,113 @@ def _run_process_gate(context: MutationContext, *, label: str) -> dict[str, obje
         refresh_command=("python3", "refresh_installed_turbo_mode.py", "--guarded-refresh"),
         recorded_child_app_server_pids=frozenset(),
     )
+
+
+def _run_guarded_refresh_publication_validation(
+    *,
+    phase: str,
+    context: MutationContext,
+    source_code_root: Path,
+    execution_repo_root: Path,
+    paths: PublicationReplayPaths,
+    validator_runner: Callable[[str, PublicationReplayPaths], None] | None,
+) -> None:
+    if validator_runner is not None:
+        validator_runner(phase, paths)
+        return
+    tool_root = source_code_root / "plugins/turbo-mode/tools"
+    metadata_command = [
+        sys.executable,
+        str(tool_root / "refresh_validate_run_metadata.py"),
+        "--mode",
+        phase,
+        "--run-id",
+        context.run_id,
+        "--source-code-root",
+        str(source_code_root),
+        "--execution-repo-root",
+        str(execution_repo_root),
+        "--local-only-root",
+        str(context.local_only_run_root),
+        "--summary",
+        str(paths.candidate if phase == "candidate" else paths.final),
+        "--published-summary-path",
+        str(paths.published),
+    ]
+    redaction_command = [
+        sys.executable,
+        str(tool_root / "refresh_validate_redaction.py"),
+        "--mode",
+        phase,
+        "--run-id",
+        context.run_id,
+        "--source-code-root",
+        str(source_code_root),
+        "--execution-repo-root",
+        str(execution_repo_root),
+        "--scope",
+        "commit-safe-summary",
+        "--source",
+        "plan-06-cli",
+        "--summary",
+        str(paths.candidate if phase == "candidate" else paths.final),
+        "--local-only-root",
+        str(context.local_only_run_root),
+        "--published-summary-path",
+        str(paths.published),
+    ]
+    if phase == "candidate":
+        _run_validator_command(
+            [
+                *metadata_command,
+                "--summary-output",
+                str(paths.metadata),
+            ]
+        )
+        _run_validator_command(
+            [
+                *redaction_command,
+                "--summary-output",
+                str(paths.redaction),
+                "--validate-own-summary",
+            ]
+        )
+        return
+    _run_validator_command(
+        [
+            *metadata_command,
+            "--candidate-summary",
+            str(paths.candidate),
+            "--existing-validation-summary",
+            str(paths.metadata),
+        ]
+    )
+    _run_validator_command(
+        [
+            *redaction_command,
+            "--candidate-summary",
+            str(paths.candidate),
+            "--existing-validation-summary",
+            str(paths.redaction),
+            "--final-scan-output",
+            str(paths.redaction_final),
+        ]
+    )
+
+
+def _run_validator_command(command: list[str]) -> None:
+    completed = subprocess.run(
+        command,
+        text=True,
+        capture_output=True,
+        check=False,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    if completed.returncode != 0:
+        raise RefreshError(
+            "publish guarded refresh summary failed: validator exited non-zero. "
+            f"Got: {completed.stderr.strip() or completed.stdout.strip()!r:.100}"
+        )
 
 
 def _raise_if_process_blocked(summary: dict[str, object], *, failed_phase: str) -> None:
