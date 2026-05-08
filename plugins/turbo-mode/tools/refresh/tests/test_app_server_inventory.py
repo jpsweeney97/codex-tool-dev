@@ -1168,6 +1168,54 @@ def test_collect_app_server_launch_authority_records_binding_candidates_and_laun
     assert raw_transcript == tuple(raw)
 
 
+def test_collect_app_server_launch_authority_uses_injected_dependencies_without_codex_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    sent: dict[str, object] = {}
+    raw = list(transcript(refresh_paths))
+    raw[0]["body"]["result"]["codexHome"] = str(refresh_paths.codex_home)
+
+    def fail_resolve_codex_executable() -> str:
+        raise RefreshError("codex lookup failed: executable unavailable. Got: None")
+
+    def fake_roundtrip(
+        requests: list[dict[str, object]],
+        *,
+        executable: str | None = None,
+        env_overrides: dict[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> list[dict[str, object]]:
+        sent["requests"] = requests
+        sent["executable"] = executable
+        sent["env_overrides"] = env_overrides
+        sent["cwd"] = cwd
+        return raw
+
+    monkeypatch.setattr(
+        inventory_module,
+        "resolve_codex_executable",
+        fail_resolve_codex_executable,
+    )
+
+    authority, _raw_transcript = collect_app_server_launch_authority(
+        refresh_paths,
+        scratch_cwd=tmp_path / "scratch",
+        roundtrip=fake_roundtrip,
+        identity_collector=identity,
+        app_server_help_text="codex app-server --help includes -c, --config and --listen",
+        codex_help_text=(
+            "codex exec --help mentions CODEX_HOME and codex --help includes -c, --config"
+        ),
+    )
+
+    assert sent["executable"] is None
+    assert sent["env_overrides"] == {"CODEX_HOME": str(refresh_paths.codex_home)}
+    assert sent["cwd"] == tmp_path / "scratch"
+    assert authority.executable_path == "/usr/local/bin/codex"
+
+
 def test_collect_app_server_launch_authority_rejects_real_home_resolution_for_isolated_run(
     tmp_path: Path,
 ) -> None:

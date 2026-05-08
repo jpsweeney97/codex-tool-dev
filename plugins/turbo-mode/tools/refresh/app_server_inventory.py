@@ -551,7 +551,13 @@ def collect_app_server_launch_authority(
     executable: str | None = None,
     ticket_hook_policy: str = "required",
 ) -> tuple[AppServerLaunchAuthority, tuple[dict[str, Any], ...]]:
-    active_executable = executable or resolve_codex_executable()
+    needs_executable = (
+        roundtrip is None
+        or identity_collector is None
+        or app_server_help_text is None
+        or codex_help_text is None
+    )
+    active_executable = executable or (resolve_codex_executable() if needs_executable else None)
     active_scratch_cwd = scratch_cwd or Path(
         tempfile.mkdtemp(prefix="turbo-mode-refresh-authority-")
     )
