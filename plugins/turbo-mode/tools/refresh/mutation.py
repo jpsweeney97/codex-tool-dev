@@ -885,28 +885,29 @@ def run_guarded_refresh_orchestration(
             try:
                 smoke_summary = _run_standard_smoke_for_context(context)
             except (RefreshError, OSError, ValueError) as exc:
-                rollback_guarded_refresh(context, snapshot, failed_phase="smoke")
-                return _write_final_status(
-                    context,
-                    final_status="MUTATION_FAILED_ROLLBACK_COMPLETE",
-                    phase_log=phase_log,
-                    final_status_path=final_status_path,
-                    rehearsal_proof_path=None,
-                    failure_reason=str(exc),
+                return rollback_failed_mutation(
+                    failed_phase="smoke",
+                    failure=exc,
                 )
-            if smoke_summary.get("final_status") != "passed":
-                rollback_guarded_refresh(context, snapshot, failed_phase="smoke")
-                return _write_final_status(
-                    context,
-                    final_status="MUTATION_FAILED_ROLLBACK_COMPLETE",
-                    phase_log=phase_log,
-                    final_status_path=final_status_path,
-                    rehearsal_proof_path=None,
+            smoke_status = smoke_summary.get("final_status")
+            if smoke_status != "passed":
+                return rollback_failed_mutation(
+                    failed_phase="smoke",
+                    failure=RefreshError(
+                        "run standard smoke failed: final status is not passed. "
+                        f"Got: {smoke_status!r}"
+                    ),
                 )
             phase_log.append("smoke-passed")
 
-            post_mutation = _run_process_gate(context, label="post-mutation")
-            _raise_if_process_blocked(post_mutation, failed_phase="post-mutation")
+            try:
+                post_mutation = _run_process_gate(context, label="post-mutation")
+                _raise_if_process_blocked(post_mutation, failed_phase="post-mutation")
+            except (RefreshError, OSError, ValueError) as exc:
+                return rollback_failed_mutation(
+                    failed_phase="post-mutation",
+                    failure=exc,
+                )
             phase_log.append("post-mutation")
 
             if isolated_rehearsal:

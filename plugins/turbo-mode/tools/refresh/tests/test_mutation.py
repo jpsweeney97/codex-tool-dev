@@ -1604,6 +1604,165 @@ def test_live_guarded_orchestration_rolls_back_when_smoke_raises(
     assert final_status["failure_reason"] == "forced smoke failure"
 
 
+def test_live_guarded_orchestration_retains_marker_when_smoke_rollback_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from contextlib import contextmanager
+
+    ctx = context(tmp_path, codex_home=tmp_path / ".codex")
+    seed_config(ctx)
+    seed_plugins(ctx)
+    seed_live_rehearsal_capture(ctx)
+    launch = launch_authority(ctx)
+    marker_path = ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json"
+
+    @contextmanager
+    def fake_lock(**_kwargs: object):
+        yield {"owner": "test", "run_id": ctx.run_id}
+
+    def fake_process_gate(**kwargs: object) -> dict[str, object]:
+        label = str(kwargs["label"])
+        payload = {
+            "label": label,
+            "blocked_process_count": 0,
+            "exclusivity_status": "exclusive_window_observed_by_process_samples",
+        }
+        write_json(ctx.local_only_run_root / f"process-{label}.summary.json", payload)
+        return payload
+
+    def failing_rollback(
+        _ctx: MutationContext,
+        _snapshot: object,
+        *,
+        failed_phase: str,
+    ) -> dict[str, object]:
+        assert failed_phase == "smoke"
+        raise RefreshError("forced rollback failure")
+
+    monkeypatch.setattr(mutation_module, "acquire_refresh_lock", fake_lock)
+    monkeypatch.setattr(mutation_module, "capture_process_gate", fake_process_gate)
+    monkeypatch.setattr(
+        mutation_module,
+        "prove_app_server_home_authority",
+        lambda _active_context: launch,
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "install_plugins_via_app_server",
+        lambda *_args, **_kwargs: (
+            {
+                "pre_install_target_authority_sha256": "target-sha",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda _paths: ("inventory", ()),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "run_standard_smoke",
+        lambda **_kwargs: (_ for _ in ()).throw(RefreshError("forced smoke failure")),
+    )
+    monkeypatch.setattr(mutation_module, "rollback_guarded_refresh", failing_rollback)
+
+    result = run_guarded_refresh_orchestration(
+        ctx,
+        terminal_plan_status="guarded-refresh-required",
+        plugin_hooks_state="true",
+        isolated_rehearsal=False,
+    )
+
+    assert result.final_status == "MUTATION_FAILED_ROLLBACK_FAILED"
+    assert marker_path.exists()
+    final_status = json.loads(Path(result.final_status_path).read_text(encoding="utf-8"))
+    assert final_status["failure_reason"] == (
+        "forced smoke failure; rollback failed: forced rollback failure"
+    )
+
+
+def test_live_guarded_orchestration_retains_marker_when_smoke_status_rollback_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from contextlib import contextmanager
+
+    ctx = context(tmp_path, codex_home=tmp_path / ".codex")
+    seed_config(ctx)
+    seed_plugins(ctx)
+    seed_live_rehearsal_capture(ctx)
+    launch = launch_authority(ctx)
+    marker_path = ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json"
+
+    @contextmanager
+    def fake_lock(**_kwargs: object):
+        yield {"owner": "test", "run_id": ctx.run_id}
+
+    def fake_process_gate(**kwargs: object) -> dict[str, object]:
+        label = str(kwargs["label"])
+        payload = {
+            "label": label,
+            "blocked_process_count": 0,
+            "exclusivity_status": "exclusive_window_observed_by_process_samples",
+        }
+        write_json(ctx.local_only_run_root / f"process-{label}.summary.json", payload)
+        return payload
+
+    def failing_rollback(
+        _ctx: MutationContext,
+        _snapshot: object,
+        *,
+        failed_phase: str,
+    ) -> dict[str, object]:
+        assert failed_phase == "smoke"
+        raise RefreshError("forced rollback failure")
+
+    monkeypatch.setattr(mutation_module, "acquire_refresh_lock", fake_lock)
+    monkeypatch.setattr(mutation_module, "capture_process_gate", fake_process_gate)
+    monkeypatch.setattr(
+        mutation_module,
+        "prove_app_server_home_authority",
+        lambda _active_context: launch,
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "install_plugins_via_app_server",
+        lambda *_args, **_kwargs: (
+            {
+                "pre_install_target_authority_sha256": "target-sha",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda _paths: ("inventory", ()),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "run_standard_smoke",
+        lambda **_kwargs: {"final_status": "failed"},
+    )
+    monkeypatch.setattr(mutation_module, "rollback_guarded_refresh", failing_rollback)
+
+    result = run_guarded_refresh_orchestration(
+        ctx,
+        terminal_plan_status="guarded-refresh-required",
+        plugin_hooks_state="true",
+        isolated_rehearsal=False,
+    )
+
+    assert result.final_status == "MUTATION_FAILED_ROLLBACK_FAILED"
+    assert marker_path.exists()
+    final_status = json.loads(Path(result.final_status_path).read_text(encoding="utf-8"))
+    assert final_status["failure_reason"] == (
+        "run standard smoke failed: final status is not passed. Got: 'failed'; "
+        "rollback failed: forced rollback failure"
+    )
+
+
 def test_live_guarded_orchestration_rolls_back_when_after_hook_process_gate_blocks(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1733,6 +1892,172 @@ def test_live_guarded_orchestration_rolls_back_when_install_fails(
     assert not (ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json").exists()
     final_status = json.loads(Path(result.final_status_path).read_text(encoding="utf-8"))
     assert final_status["failure_reason"] == "forced install failure"
+
+
+def test_live_guarded_orchestration_rolls_back_when_post_mutation_process_gate_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from contextlib import contextmanager
+
+    ctx = context(tmp_path, codex_home=tmp_path / ".codex")
+    seed_config(ctx)
+    seed_plugins(ctx)
+    seed_live_rehearsal_capture(ctx)
+    launch = launch_authority(ctx)
+    rollback_calls: list[str] = []
+    marker_path = ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json"
+
+    @contextmanager
+    def fake_lock(**_kwargs: object):
+        yield {"owner": "test", "run_id": ctx.run_id}
+
+    def fake_process_gate(**kwargs: object) -> dict[str, object]:
+        label = str(kwargs["label"])
+        payload = {
+            "label": label,
+            "blocked_process_count": 1 if label == "post-mutation" else 0,
+            "exclusivity_status": "blocked" if label == "post-mutation" else (
+                "exclusive_window_observed_by_process_samples"
+            ),
+        }
+        write_json(ctx.local_only_run_root / f"process-{label}.summary.json", payload)
+        return payload
+
+    def fake_rollback(
+        _ctx: MutationContext,
+        snapshot: object,
+        *,
+        failed_phase: str,
+    ) -> dict[str, object]:
+        rollback_calls.append(failed_phase)
+        restore_config_snapshot(snapshot, current_expected_sha256=None)
+        return {"final_status": "rollback-complete", "failed_phase": failed_phase}
+
+    monkeypatch.setattr(mutation_module, "acquire_refresh_lock", fake_lock)
+    monkeypatch.setattr(mutation_module, "capture_process_gate", fake_process_gate)
+    monkeypatch.setattr(
+        mutation_module,
+        "prove_app_server_home_authority",
+        lambda _active_context: launch,
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "install_plugins_via_app_server",
+        lambda *_args, **_kwargs: (
+            {
+                "pre_install_target_authority_sha256": "target-sha",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda _paths: ("inventory", ()),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "run_standard_smoke",
+        lambda **_kwargs: {"final_status": "passed"},
+    )
+    monkeypatch.setattr(mutation_module, "rollback_guarded_refresh", fake_rollback)
+
+    result = run_guarded_refresh_orchestration(
+        ctx,
+        terminal_plan_status="guarded-refresh-required",
+        plugin_hooks_state="true",
+        isolated_rehearsal=False,
+    )
+
+    assert result.final_status == "MUTATION_FAILED_ROLLBACK_COMPLETE"
+    assert rollback_calls == ["post-mutation"]
+    assert not marker_path.exists()
+    final_status = json.loads(Path(result.final_status_path).read_text(encoding="utf-8"))
+    assert final_status["failure_reason"] == (
+        "run process gate failed: process gate blocked. Got: 'post-mutation'"
+    )
+
+
+def test_live_guarded_orchestration_retains_marker_when_post_mutation_rollback_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from contextlib import contextmanager
+
+    ctx = context(tmp_path, codex_home=tmp_path / ".codex")
+    seed_config(ctx)
+    seed_plugins(ctx)
+    seed_live_rehearsal_capture(ctx)
+    launch = launch_authority(ctx)
+    marker_path = ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json"
+
+    @contextmanager
+    def fake_lock(**_kwargs: object):
+        yield {"owner": "test", "run_id": ctx.run_id}
+
+    def fake_process_gate(**kwargs: object) -> dict[str, object]:
+        label = str(kwargs["label"])
+        payload = {
+            "label": label,
+            "blocked_process_count": 1 if label == "post-mutation" else 0,
+            "exclusivity_status": "blocked" if label == "post-mutation" else (
+                "exclusive_window_observed_by_process_samples"
+            ),
+        }
+        write_json(ctx.local_only_run_root / f"process-{label}.summary.json", payload)
+        return payload
+
+    def failing_rollback(
+        _ctx: MutationContext,
+        _snapshot: object,
+        *,
+        failed_phase: str,
+    ) -> dict[str, object]:
+        assert failed_phase == "post-mutation"
+        raise RefreshError("forced rollback failure")
+
+    monkeypatch.setattr(mutation_module, "acquire_refresh_lock", fake_lock)
+    monkeypatch.setattr(mutation_module, "capture_process_gate", fake_process_gate)
+    monkeypatch.setattr(
+        mutation_module,
+        "prove_app_server_home_authority",
+        lambda _active_context: launch,
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "install_plugins_via_app_server",
+        lambda *_args, **_kwargs: (
+            {
+                "pre_install_target_authority_sha256": "target-sha",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda _paths: ("inventory", ()),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "run_standard_smoke",
+        lambda **_kwargs: {"final_status": "passed"},
+    )
+    monkeypatch.setattr(mutation_module, "rollback_guarded_refresh", failing_rollback)
+
+    result = run_guarded_refresh_orchestration(
+        ctx,
+        terminal_plan_status="guarded-refresh-required",
+        plugin_hooks_state="true",
+        isolated_rehearsal=False,
+    )
+
+    assert result.final_status == "MUTATION_FAILED_ROLLBACK_FAILED"
+    assert marker_path.exists()
+    final_status = json.loads(Path(result.final_status_path).read_text(encoding="utf-8"))
+    assert final_status["failure_reason"] == (
+        "run process gate failed: process gate blocked. Got: 'post-mutation'; "
+        "rollback failed: forced rollback failure"
+    )
 
 
 def test_live_guarded_orchestration_returns_evidence_failed_when_publication_fails(
