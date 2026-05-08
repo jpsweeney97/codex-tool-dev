@@ -718,6 +718,7 @@ def run_guarded_refresh_orchestration(
         execution_head=context.execution_head,
         tool_sha256=context.tool_sha256,
     ) as owner:
+        clear_run_state_on_exit = True
         owner_sha256 = authority_digest(owner)
         write_initial_run_state(
             local_only_root,
@@ -800,25 +801,72 @@ def run_guarded_refresh_orchestration(
             )
             phase_log.append("hooks-disabled")
 
-            after_hook = _run_process_gate(context, label="after-hook-disable")
-            _raise_if_process_blocked(after_hook, failed_phase="after-hook-disable")
+            def rollback_failed_mutation(
+                *,
+                failed_phase: str,
+                failure: BaseException,
+            ) -> GuardedRefreshResult:
+                nonlocal clear_run_state_on_exit
+                try:
+                    rollback_guarded_refresh(context, snapshot, failed_phase=failed_phase)
+                    return _write_final_status(
+                        context,
+                        final_status="MUTATION_FAILED_ROLLBACK_COMPLETE",
+                        phase_log=phase_log,
+                        final_status_path=final_status_path,
+                        rehearsal_proof_path=None,
+                        failure_reason=str(failure),
+                    )
+                except (RefreshError, OSError, ValueError) as rollback_exc:
+                    clear_run_state_on_exit = False
+                    return _write_final_status(
+                        context,
+                        final_status="MUTATION_FAILED_ROLLBACK_FAILED",
+                        phase_log=phase_log,
+                        final_status_path=final_status_path,
+                        rehearsal_proof_path=None,
+                        failure_reason=(f"{failure}; rollback failed: {rollback_exc}"),
+                    )
+
+            try:
+                after_hook = _run_process_gate(context, label="after-hook-disable")
+                _raise_if_process_blocked(after_hook, failed_phase="after-hook-disable")
+            except (RefreshError, OSError, ValueError) as exc:
+                return rollback_failed_mutation(
+                    failed_phase="after-hook-disable",
+                    failure=exc,
+                )
             phase_log.append("after-hook-disable")
 
-            before_install = _run_process_gate(context, label="before-install")
-            _raise_if_process_blocked(before_install, failed_phase="before-install")
+            try:
+                before_install = _run_process_gate(context, label="before-install")
+                _raise_if_process_blocked(before_install, failed_phase="before-install")
+            except (RefreshError, OSError, ValueError) as exc:
+                return rollback_failed_mutation(
+                    failed_phase="before-install",
+                    failure=exc,
+                )
             phase_log.append("before-install")
 
-            install_records = install_plugins_via_app_server(
-                context,
-                restore_config_before_post_install=lambda: restore_config_snapshot(
-                    snapshot,
-                    current_expected_sha256=hook_state["expected_intermediate_config_sha256"],
-                ),
-                pre_install_ticket_hook_policy=(
-                    "disabled" if hook_state["plugin_hooks_start_state"] == "true" else "required"
-                ),
-                same_child_ticket_hook_policy="required",
-            )
+            try:
+                install_records = install_plugins_via_app_server(
+                    context,
+                    restore_config_before_post_install=lambda: restore_config_snapshot(
+                        snapshot,
+                        current_expected_sha256=hook_state["expected_intermediate_config_sha256"],
+                    ),
+                    pre_install_ticket_hook_policy=(
+                        "disabled"
+                        if hook_state["plugin_hooks_start_state"] == "true"
+                        else "required"
+                    ),
+                    same_child_ticket_hook_policy="required",
+                )
+            except (RefreshError, OSError, ValueError) as exc:
+                return rollback_failed_mutation(
+                    failed_phase="install",
+                    failure=exc,
+                )
             phase_log.append("install-complete")
             phase_log.append("config-restored")
 
@@ -1025,7 +1073,8 @@ def run_guarded_refresh_orchestration(
                 rehearsal_proof_path=None,
             )
         finally:
-            clear_run_state(local_only_root, context.run_id)
+            if clear_run_state_on_exit:
+                clear_run_state(local_only_root, context.run_id)
 
 
 def run_guarded_refresh_recovery(context: MutationContext) -> RecoveryResult:

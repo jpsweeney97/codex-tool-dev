@@ -794,8 +794,8 @@ def recover_main(args: argparse.Namespace, parser: argparse.ArgumentParser) -> i
     if args.rehearsal_proof is not None or args.rehearsal_proof_sha256 is not None:
         parser.error("--rehearsal-proof is not accepted with --recover")
 
-    run_id = str(args.recover)
     try:
+        run_id = validate_run_id(str(args.recover))
         repo_root = args.repo_root.expanduser().resolve(strict=True)
         codex_home = args.codex_home.expanduser().resolve(strict=False)
         result = run_guarded_refresh_recovery(
@@ -854,8 +854,8 @@ def certify_retained_run_main(
             "--source-implementation-commit is not accepted with --certify-retained-run"
         )
 
-    run_id = str(args.certify_retained_run)
     try:
+        run_id = validate_run_id(str(args.certify_retained_run))
         result = certify_retained_run(
             run_id=run_id,
             repo_root=args.repo_root,

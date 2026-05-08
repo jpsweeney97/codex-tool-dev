@@ -716,6 +716,29 @@ def test_cli_certify_retained_run_refuses_missing_local_only_run_root(
     assert not (codex_home / "plugins/cache/turbo-mode").exists()
 
 
+def test_cli_certify_retained_run_rejects_path_shaped_run_id_before_path_construction(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+
+    completed = run_tool(
+        [
+            "--certify-retained-run",
+            "../bad",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 1
+    assert "validate run id failed" in completed.stderr
+    assert not codex_home.exists()
+
+
 def test_cli_recover_requires_source_identity_before_writes(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     codex_home = tmp_path / ".codex"
@@ -734,6 +757,33 @@ def test_cli_recover_requires_source_identity_before_writes(tmp_path: Path) -> N
 
     assert completed.returncode == 2
     assert "--source-implementation-commit is required for --recover" in completed.stderr
+    assert not codex_home.exists()
+
+
+def test_cli_recover_rejects_path_shaped_run_id_before_path_construction(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+
+    completed = run_tool(
+        [
+            "--recover",
+            "../bad",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--source-implementation-commit",
+            "source-commit",
+            "--source-implementation-tree",
+            "source-tree",
+        ]
+    )
+
+    assert completed.returncode == 1
+    assert "validate run id failed" in completed.stderr
     assert not codex_home.exists()
 
 
