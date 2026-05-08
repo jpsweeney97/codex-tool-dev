@@ -718,6 +718,34 @@ def test_rehearsal_proof_validation_rejects_real_home_authority_paths(
         )
 
 
+def test_rehearsal_proof_validation_rejects_invalid_referenced_json_artifact(
+    tmp_path: Path,
+) -> None:
+    proof_path, _proof_sha = write_full_rehearsal_bundle(tmp_path)
+    artifact_root = proof_path.parent.parent
+    invalid_artifact = proof_path.parent / "invalid-extra.json"
+    invalid_artifact.write_text("{not json\n", encoding="utf-8")
+    payload = json.loads(proof_path.read_text(encoding="utf-8"))
+    payload["referenced_artifacts"].append(
+        {
+            "relative_path": invalid_artifact.relative_to(artifact_root).as_posix(),
+            "sha256": sha256_file(invalid_artifact),
+        }
+    )
+    payload["referenced_artifacts"].sort(key=lambda item: item["relative_path"])
+    write_json(proof_path, payload)
+    proof_sha = write_sha256_companion(proof_path)
+
+    with pytest.raises(RefreshError, match="referenced JSON artifact is invalid"):
+        validate_rehearsal_proof_bundle(
+            proof_path=proof_path,
+            expected_sha256=proof_sha,
+            source_implementation_commit=SOURCE_COMMIT,
+            source_implementation_tree=SOURCE_TREE,
+            tool_sha256=TOOL_SHA256,
+        )
+
+
 def test_rehearsal_proof_validation_rejects_disallowed_approved_delta_paths(
     tmp_path: Path,
 ) -> None:
@@ -1533,6 +1561,76 @@ def test_live_guarded_orchestration_returns_evidence_failed_when_publication_fai
     assert final_status["demoted_summary_path"] is None
 
 
+def test_live_guarded_orchestration_propagates_abort_from_publication(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from contextlib import contextmanager
+
+    ctx = context(tmp_path, codex_home=tmp_path / ".codex")
+    seed_config(ctx)
+    seed_plugins(ctx)
+    seed_live_rehearsal_capture(ctx)
+    launch = launch_authority(ctx)
+
+    @contextmanager
+    def fake_lock(**_kwargs: object):
+        yield {"owner": "test", "run_id": ctx.run_id}
+
+    def fake_process_gate(**kwargs: object) -> dict[str, object]:
+        label = str(kwargs["label"])
+        payload = {
+            "label": label,
+            "blocked_process_count": 0,
+            "exclusivity_status": "exclusive_window_observed_by_process_samples",
+        }
+        write_json(ctx.local_only_run_root / f"process-{label}.summary.json", payload)
+        return payload
+
+    def fake_smoke(**_kwargs: object) -> dict[str, object]:
+        payload = {"final_status": "passed"}
+        write_json(ctx.local_only_run_root / "standard-smoke.summary.json", payload)
+        return payload
+
+    monkeypatch.setattr(mutation_module, "acquire_refresh_lock", fake_lock)
+    monkeypatch.setattr(mutation_module, "capture_process_gate", fake_process_gate)
+    monkeypatch.setattr(
+        mutation_module,
+        "prove_app_server_home_authority",
+        lambda _active_context: launch,
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "install_plugins_via_app_server",
+        lambda *_args, **_kwargs: (
+            {
+                "pre_install_target_authority_sha256": "target-sha",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda _paths: ("inventory", ()),
+    )
+    monkeypatch.setattr(mutation_module, "run_standard_smoke", fake_smoke)
+    monkeypatch.setattr(
+        mutation_module,
+        "publish_guarded_refresh_commit_safe_summary",
+        lambda **_kwargs: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        run_guarded_refresh_orchestration(
+            ctx,
+            terminal_plan_status="guarded-refresh-required",
+            plugin_hooks_state="true",
+            isolated_rehearsal=False,
+        )
+
+    assert not (ctx.local_only_run_root / "final-status.json").exists()
+
+
 def test_live_guarded_orchestration_records_demoted_summary_path_on_post_publish_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -2098,6 +2196,17 @@ def test_rollback_rejects_missing_snapshot_manifest(tmp_path: Path) -> None:
         rollback_guarded_refresh(ctx, snapshot, failed_phase="install-complete")
 
 
+def test_rollback_rejects_missing_cache_snapshot_root(tmp_path: Path) -> None:
+    ctx = context(tmp_path)
+    seed_config(ctx)
+    seed_plugins(ctx)
+    snapshot = create_snapshot_set(ctx)
+    shutil.rmtree(snapshot.cache_snapshot_root)
+
+    with pytest.raises(RefreshError, match="cache snapshot root"):
+        rollback_guarded_refresh(ctx, snapshot, failed_phase="install-complete")
+
+
 def test_abort_after_config_mutation_restores_config_only(tmp_path: Path) -> None:
     ctx = context(tmp_path)
     seed_config(ctx)
@@ -2207,6 +2316,29 @@ def test_recovery_rejects_source_identity_mismatch_before_lock_or_process_gate(
     )
 
     with pytest.raises(RefreshError, match="source implementation commit mismatch"):
+        run_guarded_refresh_recovery(ctx)
+
+
+def test_recovery_rejects_original_owner_sha_mismatch_before_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    ctx = context(tmp_path)
+    seed_config(ctx)
+    seed_plugins(ctx)
+    snapshot = create_snapshot_set(ctx)
+    write_recovery_marker(ctx, snapshot)
+    owner_path = ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.owner.json"
+    owner = json.loads(owner_path.read_text(encoding="utf-8"))
+    owner["pid"] = 9999
+    write_json(owner_path, owner)
+    monkeypatch.setattr(
+        mutation_module,
+        "acquire_refresh_lock",
+        lambda **kwargs: pytest.fail("recovery lock should not be acquired"),
+    )
+
+    with pytest.raises(RefreshError, match="original run owner SHA256 mismatch"):
         run_guarded_refresh_recovery(ctx)
 
 

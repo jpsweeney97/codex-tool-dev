@@ -220,6 +220,30 @@ def test_retained_run_accepts_failed_summary_as_immutable_forensic_evidence(
     assert published["prior_failed_summary_sha256"] == before
 
 
+def test_retained_run_rejects_certification_surface_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo_root, codex_home, _run_root = write_retained_run(tmp_path)
+    original_write_private_json = retained_run._write_private_json
+
+    def mutating_write_private_json(path: Path, payload: dict[str, object]) -> None:
+        original_write_private_json(path, payload)
+        if path.name == retained_run.RETAINED_NO_MUTATION_PROOF_FILE:
+            (codex_home / "config.toml").write_text("mutated\n", encoding="utf-8")
+
+    monkeypatch.setattr(retained_run, "_write_private_json", mutating_write_private_json)
+
+    with pytest.raises(RefreshError, match="certification mutated installed state"):
+        retained_run.certify_retained_run(
+            run_id="run-1",
+            repo_root=repo_root,
+            codex_home=codex_home,
+            plan_status_collector=lambda: "no-drift",
+            validator_runner=no_op_validator,
+        )
+
+
 def test_retained_run_rejects_second_green_summary_path_state(tmp_path: Path) -> None:
     repo_root, codex_home, _run_root = write_retained_run(tmp_path)
     write_json(repo_root / "plugins/turbo-mode/evidence/refresh/run-1.summary.json", {})

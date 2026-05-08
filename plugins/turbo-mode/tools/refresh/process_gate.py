@@ -146,6 +146,8 @@ def _classify_row(
         return _finding(row, "allowed-child-app-server", False, "recorded-child")
     if _is_exact_shell_wrapper(row.argv, refresh_command):
         return _finding(row, "self-refresh-tool", False, "exact-shell-wrapper")
+    if not row.argv and row.pid == -1:
+        return _finding(row, "uncertain-high-risk", True, "unparsable-row")
     if not row.argv and _contains_high_risk_marker(row.command):
         return _finding(row, "uncertain-high-risk", True, _first_high_risk_marker(row.command))
     if _is_ambiguous_shell_wrapper(row.argv):

@@ -45,6 +45,9 @@ The branch also includes the live Plan 06 evidence:
   `plugins/turbo-mode/evidence/refresh/`.
 - Normalizes Ticket hook manifest serialization so current dry-runs are
   drift-free.
+- Adds a post-review blocker patch for guarded-refresh safety:
+  canonical real Codex home derivation, abort propagation during publication,
+  fail-closed JSON parsing, and focused safety regression tests.
 
 ### Evidence Boundaries
 
@@ -56,6 +59,11 @@ The branch also includes the live Plan 06 evidence:
   `77ee353183325b6d57b4ebfaac10b0a7e8d89ef5`
 - Current no-drift evidence commit:
   `d11b54e3f94e6c5e0bba19af05840ca84fc0798f`
+
+The post-review blocker patch changes refresh tooling source and tests after
+those evidence commits. The prior live mutation and no-drift summaries remain
+the relevant installed-cache proofs, but they should not be read as a fresh
+live mutation proof for the patched source head.
 
 Important evidence files:
 
@@ -77,6 +85,12 @@ Result:
 
 ```text
 439 passed, 1 skipped in 36.65s
+```
+
+Post-review blocker patch verification:
+
+```text
+449 passed, 1 skipped in 36.59s
 ```
 
 Additional checks:
@@ -133,6 +147,8 @@ Review this PR in three layers:
   packaging commits.
 - The current no-drift evidence is bound to `77ee353`, after Ticket hook
   serialization normalization.
+- The post-review blocker patch is source/tooling/test scoped. It does not
+  claim a new live installed-cache mutation.
 - The no-drift boundary is non-mutating by design; rerunning a live guarded
   refresh after no drift would add risk without adding evidence value.
 - Raw local-only transcripts, process listings, smoke logs, and config/cache

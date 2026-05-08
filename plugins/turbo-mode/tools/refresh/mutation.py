@@ -534,7 +534,7 @@ def seed_isolated_rehearsal_home(
     if _is_under_path(normalized_codex_home, REAL_CODEX_HOME):
         fail(
             "seed isolated rehearsal home",
-            "codex home must be outside /Users/jp/.codex",
+            f"codex home must be outside {REAL_CODEX_HOME}",
             str(normalized_codex_home),
         )
 
@@ -1007,7 +1007,7 @@ def run_guarded_refresh_orchestration(
                     ),
                 )
                 phase_log.append("evidence-published")
-            except BaseException as exc:
+            except Exception as exc:
                 return _write_final_status(
                     context,
                     final_status="MUTATION_COMPLETE_EVIDENCE_FAILED",
@@ -2196,8 +2196,12 @@ def _resolve_referenced_artifact_path(
 def _reject_real_home_strings_in_json_artifact(path: Path) -> None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return
+    except json.JSONDecodeError as exc:
+        fail(
+            "validate rehearsal proof",
+            "referenced JSON artifact is invalid",
+            {"artifact": str(path), "error": str(exc)},
+        )
     for value in _strings_in(payload):
         if _contains_real_home_path(value):
             fail(

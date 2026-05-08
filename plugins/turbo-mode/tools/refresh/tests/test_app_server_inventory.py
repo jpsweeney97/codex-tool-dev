@@ -29,6 +29,7 @@ from refresh.app_server_inventory import (
     collect_app_server_launch_authority,
     collect_codex_runtime_identity,
     collect_readonly_runtime_inventory,
+    real_codex_home,
     rewrite_ticket_hook_manifest,
     serialize_authority_record,
     transcript_bytes,
@@ -52,6 +53,16 @@ REAL_HOME_WRONG_TICKET_COMMAND = (
     "python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/"
     "hooks/not_ticket_engine_guard.py"
 )
+
+
+def test_real_codex_home_derives_from_operator_home(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    operator_home = tmp_path / "operator"
+    monkeypatch.setattr(Path, "home", lambda: operator_home)
+
+    assert real_codex_home() == (operator_home / ".codex").resolve(strict=False)
 
 
 def paths(tmp_path: Path) -> RefreshPaths:

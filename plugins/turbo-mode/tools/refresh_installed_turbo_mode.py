@@ -19,6 +19,7 @@ CURRENT_FILE = Path(__file__).resolve()
 REFRESH_PARENT = CURRENT_FILE.parent
 sys.path.insert(0, str(REFRESH_PARENT))
 
+from refresh.app_server_inventory import REAL_CODEX_HOME  # noqa: E402
 from refresh.commit_safe import (  # noqa: E402
     build_commit_safe_summary,
     ensure_relevant_worktree_clean,
@@ -294,10 +295,11 @@ def seed_isolated_rehearsal_home_main(
     parser: argparse.ArgumentParser,
 ) -> int:
     codex_home = args.codex_home.expanduser().resolve(strict=False)
-    real_codex_home = Path("/Users/jp/.codex")
+    real_codex_home = REAL_CODEX_HOME
     if codex_home == real_codex_home or real_codex_home in codex_home.parents:
         parser.error(
-            "--seed-isolated-rehearsal-home requires --codex-home outside /Users/jp/.codex"
+            "--seed-isolated-rehearsal-home requires "
+            f"--codex-home outside {real_codex_home}"
         )
     if args.inventory_check:
         parser.error("--inventory-check is not accepted with --seed-isolated-rehearsal-home")
@@ -490,6 +492,7 @@ def generate_guarded_refresh_approval_candidate(
         expected_marker_path=expected_marker_path,
         expected_summary_path=expected_summary_path,
         expected_failed_summary_path=expected_failed_summary_path,
+        codex_home=REAL_CODEX_HOME,
         source_implementation_commit=source_implementation_commit,
         source_implementation_tree=source_implementation_tree,
         execution_head=source_execution_proof.execution_head,
@@ -545,8 +548,8 @@ def generate_guarded_refresh_approval_candidate(
             "close_active_codex_desktop": True,
             "close_active_codex_cli_sessions": True,
             "do_not_reopen_until_external_command_exits": True,
-            "mutates_installed_cache": "/Users/jp/.codex/plugins/cache/turbo-mode/",
-            "may_temporarily_edit_config": "/Users/jp/.codex/config.toml",
+            "mutates_installed_cache": f"{REAL_CODEX_HOME / 'plugins/cache/turbo-mode'}/",
+            "may_temporarily_edit_config": str(REAL_CODEX_HOME / "config.toml"),
         },
         "rollback_and_recovery_behavior": {
             "rollback_complete_status": "MUTATION_FAILED_ROLLBACK_COMPLETE",
@@ -625,12 +628,14 @@ def generate_guarded_refresh_approval_candidate(
 
 def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     codex_home = args.codex_home.expanduser().resolve(strict=False)
-    real_codex_home = Path("/Users/jp/.codex")
+    real_codex_home = REAL_CODEX_HOME
     is_real_home = codex_home == real_codex_home
     if args.no_record_summary and is_real_home:
         parser.error("--no-record-summary is not allowed for real guarded refresh")
     if args.isolated_rehearsal and is_real_home:
-        parser.error("--isolated-rehearsal requires --codex-home outside /Users/jp/.codex")
+        parser.error(
+            f"--isolated-rehearsal requires --codex-home outside {real_codex_home}"
+        )
     if not is_real_home and not args.isolated_rehearsal:
         parser.error("--guarded-refresh with temporary --codex-home requires --isolated-rehearsal")
     if is_real_home:
@@ -651,8 +656,15 @@ def guarded_refresh_main(args: argparse.Namespace, parser: argparse.ArgumentPars
     try:
         run_id = validate_run_id(run_id)
         if is_real_home:
-            assert args.rehearsal_proof is not None
-            assert args.rehearsal_proof_sha256 is not None
+            if args.rehearsal_proof is None:
+                raise RefreshError(
+                    "run guarded refresh failed: rehearsal proof is required. Got: None"
+                )
+            if args.rehearsal_proof_sha256 is None:
+                raise RefreshError(
+                    "run guarded refresh failed: rehearsal proof SHA256 is required. "
+                    "Got: None"
+                )
             validated_rehearsal_proof = validate_rehearsal_proof_bundle(
                 proof_path=args.rehearsal_proof,
                 expected_sha256=args.rehearsal_proof_sha256,
@@ -993,6 +1005,7 @@ def _build_guarded_refresh_runbook(
     expected_marker_path: Path,
     expected_summary_path: Path,
     expected_failed_summary_path: Path,
+    codex_home: Path,
     source_implementation_commit: str,
     source_implementation_tree: str,
     execution_head: str,
@@ -1241,7 +1254,7 @@ PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache \\
   --smoke standard \\
   --run-id "$APPROVED_RUN_ID" \\
   --repo-root "$EXECUTION_ROOT" \\
-  --codex-home /Users/jp/.codex \\
+  --codex-home {_shell_quote(codex_home)} \\
   --source-implementation-commit "$SOURCE_IMPLEMENTATION_COMMIT" \\
   --source-implementation-tree "$SOURCE_IMPLEMENTATION_TREE" \\
   --rehearsal-proof "$APPROVED_REHEARSAL_PROOF" \\

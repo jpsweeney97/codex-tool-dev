@@ -34,7 +34,13 @@ EXPECTED_HANDOFF_SKILLS = (
 )
 EXPECTED_TICKET_SKILLS = ("ticket:ticket", "ticket:ticket-triage")
 EXPECTED_RESPONSE_IDS = frozenset({0, 1, 2, 3, 4, 5})
-REAL_CODEX_HOME = Path("/Users/jp/.codex")
+
+
+def real_codex_home() -> Path:
+    return (Path.home() / ".codex").expanduser().resolve(strict=False)
+
+
+REAL_CODEX_HOME = real_codex_home()
 APP_SERVER_RESPONSE_SCHEMA_VERSION = ACCEPTED_RESPONSE_SCHEMA_VERSION
 PLUGIN_VERSIONS = {"handoff": "1.6.0", "ticket": "1.4.0"}
 

@@ -98,6 +98,40 @@ def test_parse_ps_output_parses_pid_ppid_command_rows() -> None:
     )
 
 
+def test_unparsable_ps_row_is_uncertain_high_risk() -> None:
+    rows = parse_ps_output("not-a-process-row\n")
+
+    assert rows == (
+        ProcessRow(
+            pid=-1,
+            ppid=-1,
+            command="not-a-process-row",
+            argv=(),
+            executable_basename=None,
+        ),
+    )
+    assert_classification(rows[0], "uncertain-high-risk", blocking=True)
+
+
+def test_capture_process_gate_fails_hard_when_ps_exits_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(2, ["ps"], stderr="ps failed")
+
+    monkeypatch.setattr(process_gate_module.subprocess, "run", fake_run)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        capture_process_gate(
+            label="preflight",
+            local_only_run_root=tmp_path / "run",
+            refresh_pid=REFRESH_PID,
+            refresh_command=REFRESH_COMMAND,
+            recorded_child_app_server_pids=frozenset(),
+        )
+
+
 def test_codex_desktop_is_blocking() -> None:
     assert_classification(
         row(100, "/Applications/Codex.app/Contents/MacOS/Codex"),

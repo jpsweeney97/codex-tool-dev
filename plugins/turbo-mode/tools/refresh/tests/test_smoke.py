@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import stat
 import subprocess
@@ -87,6 +88,43 @@ def test_real_home_smoke_requires_explicit_allow_env(
     assert runner.command_texts == []
 
 
+def test_minimal_subprocess_env_scrubs_real_home_path_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_real_home = tmp_path / "operator-home/.codex"
+    monkeypatch.setattr(smoke_module, "REAL_CODEX_HOME", fake_real_home)
+    monkeypatch.setenv(
+        "PATH",
+        os.pathsep.join(
+            [
+                "/usr/bin",
+                str(fake_real_home / "bin"),
+                f"/opt/bin:{fake_real_home}/plugins/cache/turbo-mode/bin",
+            ]
+        ),
+    )
+
+    env = smoke_module._minimal_subprocess_env()
+
+    assert env["PATH"] == os.pathsep.join(["/usr/bin", "/opt/bin"])
+
+
+def test_defer_smoke_fails_when_stdout_is_not_json(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runner = FakeSmokeRunner(stdout=b"not json\n")
+    monkeypatch.setattr(smoke_module.subprocess, "run", runner.run)
+
+    with pytest.raises(RefreshError, match="defer stdout was not JSON"):
+        run_standard_smoke(
+            local_only_run_root=tmp_path / "home/local-only/turbo-mode-refresh/run-1",
+            codex_home=tmp_path / "home",
+            repo_root=tmp_path / "repo",
+        )
+
+
 def test_ticket_update_payload_uses_only_update_supported_fields(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -109,7 +147,10 @@ def test_raw_outputs_are_private_and_summary_records_only_hashes(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    runner = FakeSmokeRunner(stdout=b"RAW-SECRET-PAYLOAD\n", stderr=b"RAW-SECRET-ERR\n")
+    runner = FakeSmokeRunner(
+        stdout_by_label={"ticket-list-open": b"RAW-SECRET-PAYLOAD\n"},
+        stderr_by_label={"ticket-list-open": b"RAW-SECRET-ERR\n"},
+    )
     monkeypatch.setattr(smoke_module.subprocess, "run", runner.run)
 
     summary = run_standard_smoke(
@@ -191,12 +232,16 @@ class FakeSmokeRunner:
         *,
         stdout: bytes = b'{"status":"ok"}\n',
         stderr: bytes = b"",
+        stdout_by_label: dict[str, bytes] | None = None,
+        stderr_by_label: dict[str, bytes] | None = None,
         fail_labels: set[str] | None = None,
         require_clear_state_path: bool = False,
         warn_clear_state_not_removed: bool = False,
     ) -> None:
         self.stdout = stdout
         self.stderr = stderr
+        self.stdout_by_label = stdout_by_label or {}
+        self.stderr_by_label = stderr_by_label or {}
         self.fail_labels = fail_labels or set()
         self.require_clear_state_path = require_clear_state_path
         self.warn_clear_state_not_removed = warn_clear_state_not_removed
@@ -296,6 +341,10 @@ class FakeSmokeRunner:
             stdout = self.stdout
             stderr = self.stderr
 
+        if label in self.stdout_by_label:
+            stdout = self.stdout_by_label[label]
+        if label in self.stderr_by_label:
+            stderr = self.stderr_by_label[label]
         return subprocess.CompletedProcess(args, 0, stdout, stderr)
 
 

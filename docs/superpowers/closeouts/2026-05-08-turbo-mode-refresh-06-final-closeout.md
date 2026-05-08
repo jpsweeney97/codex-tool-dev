@@ -19,6 +19,11 @@ The branch is `chore/turbo-refresh-plan06-guarded-lane`.
 - Post-certification cleanup commit: `77ee353183325b6d57b4ebfaac10b0a7e8d89ef5`
 - Current no-drift evidence commit: `d11b54e3f94e6c5e0bba19af05840ca84fc0798f`
 
+After review, the branch also includes a source/tooling/test blocker patch for
+guarded-refresh safety. That patch does not claim a new live installed-cache
+mutation; it leaves the live mutation and no-drift evidence boundaries above as
+historical installed-cache proofs.
+
 The live guarded refresh was certified for run
 `plan06-live-guarded-refresh-20260508-154206`.
 The current installed-cache state was then proven no-drift for run
@@ -60,6 +65,9 @@ remaining installed-cache drift to mutate.
 - Published the live certified Plan 06 evidence summary.
 - Normalized Ticket hook manifest serialization and published a current
   no-drift evidence summary.
+- Added post-review blocker fixes for canonical real-home safety, publication
+  abort propagation, fail-closed JSON parsing, process-gate uncertainty, and
+  focused regression coverage.
 
 ## Verification
 
@@ -79,6 +87,11 @@ Fresh verification performed after the final source cleanup:
   - `filesystem_state: no-drift`
   - `selected_mutation_mode: none`
   - `diffs: []`
+- Post-review blocker patch:
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests`
+  - Result: `449 passed, 1 skipped in 36.59s`
+  - `ruff check plugins/turbo-mode/tools/refresh plugins/turbo-mode/tools/refresh_installed_turbo_mode.py`
+  - Result: `All checks passed!`
 
 Commit-safe current-state evidence:
 
@@ -102,6 +115,9 @@ The branch has two important evidence truths:
   `MUTATION_COMPLETE_CERTIFIED`.
 - `d11b54e` records the current installed state after the follow-up source
   cleanup as non-mutating `no-drift`.
+- The post-review blocker patch changes guarded-refresh source/tests after
+  those evidence commits, without changing installed plugin cache contents or
+  claiming fresh live-installed proof.
 
 No additional live mutation is recommended for this branch.
 
@@ -110,8 +126,9 @@ No additional live mutation is recommended for this branch.
 - The post-certification cleanup at `77ee353` intentionally changes only source
   JSON serialization for the Ticket hook manifest. It removes a byte-level
   planner artifact without changing hook semantics.
-- The no-drift summary at `d11b54e` is the current review boundary for source
-  and installed-cache alignment after that cleanup.
+- The no-drift summary at `d11b54e` remains the installed-cache alignment proof
+  after that cleanup, while the post-review blocker patch is reviewed through
+  source diff and test evidence.
 - Any later documentation-only PR packaging commit may advance `HEAD` without
   changing the refresh source or installed-cache boundary. Treat it as PR
   packaging, not a new mutation/evidence requirement.

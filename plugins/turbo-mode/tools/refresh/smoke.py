@@ -624,7 +624,7 @@ def _assert_defer_emitted_envelope(state: _SmokeState, result: SmokeResult) -> N
     try:
         payload = json.loads(stdout)
     except json.JSONDecodeError:
-        payload = {}
+        fail("run handoff defer smoke", "defer stdout was not JSON", stdout)
     if payload.get("status") not in {"ok", None}:
         fail("run handoff defer smoke", "defer status was not ok", payload)
     envelope_root = state.smoke_repo / "docs/tickets/.envelopes"
