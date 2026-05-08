@@ -843,12 +843,8 @@ def run_guarded_refresh_orchestration(
             _raise_if_process_blocked(post_mutation, failed_phase="post-mutation")
             phase_log.append("post-mutation")
 
-            final_status = (
-                "MUTATION_REHEARSAL_COMPLETE_NON_CERTIFIED"
-                if isolated_rehearsal
-                else "MUTATION_COMPLETE_CERTIFIED"
-            )
             if isolated_rehearsal:
+                final_status = "MUTATION_REHEARSAL_COMPLETE_NON_CERTIFIED"
                 rehearsal_proof_path = context.local_only_run_root / "rehearsal-proof.json"
                 smoke_summary_path = context.local_only_run_root / "standard-smoke.summary.json"
                 if not smoke_summary_path.exists():
@@ -975,15 +971,46 @@ def run_guarded_refresh_orchestration(
                     },
                 )
                 rehearsal_proof_sha256 = _write_sha256_companion(rehearsal_proof_path)
+                return _write_final_status(
+                    context,
+                    final_status=final_status,
+                    phase_log=phase_log,
+                    final_status_path=final_status_path,
+                    rehearsal_proof_path=rehearsal_proof_path,
+                    rehearsal_proof_sha256=rehearsal_proof_sha256,
+                )
+            try:
+                publish_guarded_refresh_commit_safe_summary(
+                    context=context,
+                    source_code_root=context.repo_root,
+                    execution_repo_root=context.repo_root,
+                    guarded_evidence=_build_live_guarded_refresh_commit_safe_evidence(
+                        context=context,
+                        launch_authority_sha256=launch_authority_sha256,
+                        launch_authority_proof_path=launch_authority_proof_path,
+                        install_records=install_records,
+                        snapshot=snapshot,
+                        final_inventory=final_inventory,
+                        equality=equality,
+                        smoke_summary=smoke_summary,
+                        post_mutation=post_mutation,
+                    ),
+                )
+                phase_log.append("evidence-published")
+            except BaseException:
+                return _write_final_status(
+                    context,
+                    final_status="MUTATION_COMPLETE_EVIDENCE_FAILED",
+                    phase_log=phase_log,
+                    final_status_path=final_status_path,
+                    rehearsal_proof_path=None,
+                )
             return _write_final_status(
                 context,
-                final_status=final_status,
+                final_status="MUTATION_COMPLETE_CERTIFIED",
                 phase_log=phase_log,
                 final_status_path=final_status_path,
-                rehearsal_proof_path=rehearsal_proof_path,
-                rehearsal_proof_sha256=rehearsal_proof_sha256
-                if isolated_rehearsal
-                else None,
+                rehearsal_proof_path=None,
             )
         finally:
             clear_run_state(local_only_root, context.run_id)
@@ -1095,6 +1122,18 @@ def publish_guarded_refresh_commit_safe_summary(
     normalized_execution_root = execution_repo_root.expanduser().resolve(strict=True)
     tool_path = Path("plugins/turbo-mode/tools/refresh_installed_turbo_mode.py")
     dirty_state = ensure_relevant_worktree_clean(normalized_execution_root)
+    _write_private_json(
+        context.local_only_run_root / "guarded-refresh.summary.json",
+        {
+            "mode": "guarded-refresh",
+            "run_id": context.run_id,
+            "source_implementation_commit": context.source_implementation_commit,
+            "source_implementation_tree": context.source_implementation_tree,
+            "execution_head": context.execution_head,
+            "execution_tree": context.execution_tree,
+            "final_status": guarded_evidence.get("final_status"),
+        },
+    )
     publication_paths = PublicationReplayPaths(
         candidate=context.local_only_run_root / "commit-safe.candidate.summary.json",
         final=context.local_only_run_root / "commit-safe.final.summary.json",
@@ -1156,6 +1195,222 @@ def publish_guarded_refresh_commit_safe_summary(
             validator_runner=validator_runner,
         ),
     )
+
+
+def _build_live_guarded_refresh_commit_safe_evidence(
+    *,
+    context: MutationContext,
+    launch_authority_sha256: str,
+    launch_authority_proof_path: Path,
+    install_records: tuple[dict[str, object], ...],
+    snapshot: SnapshotSet,
+    final_inventory: object,
+    equality: dict[str, str],
+    smoke_summary: dict[str, object],
+    post_mutation: dict[str, object],
+) -> dict[str, Any]:
+    captured_rehearsal = _load_live_captured_rehearsal_proof(context)
+    if len(install_records) != 1:
+        fail(
+            "build live guarded refresh evidence",
+            "install authority record count mismatch",
+            len(install_records),
+        )
+    install_record = install_records[0]
+    pre_install_target_sha256 = install_record.get("pre_install_target_authority_sha256")
+    if not isinstance(pre_install_target_sha256, str) or not pre_install_target_sha256:
+        fail(
+            "build live guarded refresh evidence",
+            "missing pre-install target authority digest",
+            pre_install_target_sha256,
+        )
+    smoke_summary_path = context.local_only_run_root / "standard-smoke.summary.json"
+    if not smoke_summary_path.is_file():
+        fail(
+            "build live guarded refresh evidence",
+            "smoke summary path missing",
+            str(smoke_summary_path),
+        )
+    post_mutation_summary_path = context.local_only_run_root / "process-post-mutation.summary.json"
+    if not post_mutation_summary_path.is_file():
+        fail(
+            "build live guarded refresh evidence",
+            "post-mutation process summary path missing",
+            str(post_mutation_summary_path),
+        )
+    post_refresh_config_path = context.codex_home / "config.toml"
+    if not post_refresh_config_path.is_file():
+        fail(
+            "build live guarded refresh evidence",
+            "post-refresh config path missing",
+            str(post_refresh_config_path),
+        )
+    return {
+        "mode": "guarded-refresh",
+        "source_implementation_commit": context.source_implementation_commit,
+        "source_implementation_tree": context.source_implementation_tree,
+        "execution_head": context.execution_head,
+        "execution_tree": context.execution_tree,
+        "isolated_rehearsal_run_id": captured_rehearsal["rehearsal_run_id"],
+        "rehearsal_proof_sha256": captured_rehearsal["rehearsal_proof_sha256"],
+        "rehearsal_proof_validation_status": "validated-before-live-mutation",
+        "rehearsal_proof_capture_manifest_sha256": captured_rehearsal[
+            "capture_manifest_sha256"
+        ],
+        "source_to_rehearsal_execution_delta_status": captured_rehearsal[
+            "source_to_rehearsal_execution_delta_status"
+        ],
+        "source_to_rehearsal_allowed_delta_proof_sha256": captured_rehearsal[
+            "source_to_rehearsal_allowed_delta_proof_sha256"
+        ],
+        "source_to_rehearsal_changed_paths_sha256": captured_rehearsal[
+            "source_to_rehearsal_changed_paths_sha256"
+        ],
+        "isolated_app_server_authority_proof_sha256": captured_rehearsal[
+            "isolated_app_server_authority_proof_sha256"
+        ],
+        "no_real_home_authority_proof_sha256": captured_rehearsal[
+            "no_real_home_authority_proof_sha256"
+        ],
+        "pre_snapshot_app_server_launch_authority_sha256": launch_authority_sha256,
+        "pre_install_app_server_target_authority_sha256": pre_install_target_sha256,
+        "live_app_server_authority_proof_sha256": _sha256_file(launch_authority_proof_path),
+        "source_manifest_sha256": authority_digest(snapshot.source_manifest_sha256),
+        "pre_refresh_cache_manifest_sha256": authority_digest(
+            snapshot.pre_refresh_cache_manifest_sha256
+        ),
+        "post_refresh_cache_manifest_sha256": authority_digest(
+            _post_refresh_cache_manifest_digests(context)
+        ),
+        "pre_refresh_config_sha256": snapshot.config_sha256,
+        "post_refresh_config_sha256": _sha256_file(post_refresh_config_path),
+        "post_refresh_inventory_sha256": authority_digest(final_inventory),
+        "selected_smoke_tier": "standard",
+        "smoke_summary_sha256": _sha256_file(smoke_summary_path),
+        "post_mutation_process_census_sha256": _sha256_file(post_mutation_summary_path),
+        "exclusivity_status": str(post_mutation.get("exclusivity_status")),
+        "phase_reached": "evidence-published",
+        "final_status": "MUTATION_COMPLETE_CERTIFIED",
+        "rollback_or_restore_status": "not-attempted",
+    }
+
+
+def _load_live_captured_rehearsal_proof(context: MutationContext) -> dict[str, str]:
+    manifest_path = context.local_only_run_root / "rehearsal-proof-capture/capture-manifest.json"
+    manifest = _load_json_object(
+        manifest_path,
+        operation="load live captured rehearsal proof",
+    )
+    _require_field(
+        manifest,
+        "schema_version",
+        REHEARSAL_CAPTURE_SCHEMA_VERSION,
+        operation="load live captured rehearsal proof",
+    )
+    capture_root = Path(str(manifest.get("capture_root")))
+    if capture_root != manifest_path.parent:
+        fail(
+            "load live captured rehearsal proof",
+            "capture root mismatch",
+            {"expected": str(manifest_path.parent), "actual": str(capture_root)},
+        )
+    source_artifact_root = Path(str(manifest.get("source_artifact_root")))
+    source_proof_path = Path(str(manifest.get("rehearsal_proof_path")))
+    try:
+        relative_proof_path = source_proof_path.relative_to(source_artifact_root)
+    except ValueError:
+        fail(
+            "load live captured rehearsal proof",
+            "rehearsal proof path escaped source artifact root",
+            str(source_proof_path),
+        )
+    captured_proof_path = capture_root / relative_proof_path
+    if not captured_proof_path.is_file():
+        fail(
+            "load live captured rehearsal proof",
+            "captured rehearsal proof path missing",
+            str(captured_proof_path),
+        )
+    expected_proof_sha256 = manifest.get("rehearsal_proof_sha256")
+    if not isinstance(expected_proof_sha256, str) or not expected_proof_sha256:
+        fail(
+            "load live captured rehearsal proof",
+            "captured rehearsal proof digest missing",
+            expected_proof_sha256,
+        )
+    actual_proof_sha256 = _sha256_file(captured_proof_path)
+    if actual_proof_sha256 != expected_proof_sha256:
+        fail(
+            "load live captured rehearsal proof",
+            "captured rehearsal proof digest mismatch",
+            {"expected": expected_proof_sha256, "actual": actual_proof_sha256},
+        )
+    proof = _load_json_object(
+        captured_proof_path,
+        operation="load live captured rehearsal proof",
+    )
+    _require_field(
+        proof,
+        "schema_version",
+        REHEARSAL_PROOF_SCHEMA_VERSION,
+        operation="load live captured rehearsal proof",
+    )
+    _require_field(
+        proof,
+        "source_implementation_commit",
+        context.source_implementation_commit,
+        operation="load live captured rehearsal proof",
+    )
+    _require_field(
+        proof,
+        "source_implementation_tree",
+        context.source_implementation_tree,
+        operation="load live captured rehearsal proof",
+    )
+    rehearsal_run_id = proof.get("rehearsal_run_id")
+    if not isinstance(rehearsal_run_id, str) or not rehearsal_run_id:
+        fail(
+            "load live captured rehearsal proof",
+            "rehearsal run id missing",
+            rehearsal_run_id,
+        )
+    fields = {
+        "source_to_rehearsal_execution_delta_status": proof.get(
+            "source_to_rehearsal_execution_delta_status"
+        ),
+        "source_to_rehearsal_allowed_delta_proof_sha256": proof.get(
+            "source_to_rehearsal_allowed_delta_proof_sha256"
+        ),
+        "source_to_rehearsal_changed_paths_sha256": proof.get(
+            "source_to_rehearsal_changed_paths_sha256"
+        ),
+        "isolated_app_server_authority_proof_sha256": proof.get(
+            "app_server_authority_proof_sha256"
+        ),
+        "no_real_home_authority_proof_sha256": proof.get(
+            "no_real_home_authority_proof_sha256"
+        ),
+    }
+    invalid = [key for key, value in fields.items() if not isinstance(value, str) or not value]
+    if invalid:
+        fail(
+            "load live captured rehearsal proof",
+            "captured rehearsal proof field missing",
+            invalid,
+        )
+    return {
+        "rehearsal_run_id": rehearsal_run_id,
+        "rehearsal_proof_sha256": expected_proof_sha256,
+        "capture_manifest_sha256": _sha256_file(manifest_path),
+        **{key: str(value) for key, value in fields.items()},
+    }
+
+
+def _post_refresh_cache_manifest_digests(context: MutationContext) -> dict[str, str]:
+    return {
+        spec.name: authority_digest(build_manifest(spec, root_kind="cache"))
+        for spec in build_plugin_specs(repo_root=context.repo_root, codex_home=context.codex_home)
+    }
 
 
 def create_snapshot_set(context: MutationContext) -> SnapshotSet:
@@ -2308,7 +2563,7 @@ def _run_guarded_refresh_publication_validation(
         "--local-only-root",
         str(context.local_only_run_root),
         "--summary",
-        str(paths.candidate if phase == "candidate" else paths.final),
+        str(paths.candidate if phase == "candidate" else paths.published),
         "--published-summary-path",
         str(paths.published),
     ]
@@ -2328,7 +2583,7 @@ def _run_guarded_refresh_publication_validation(
         "--source",
         "plan-06-cli",
         "--summary",
-        str(paths.candidate if phase == "candidate" else paths.final),
+        str(paths.candidate if phase == "candidate" else paths.published),
         "--local-only-root",
         str(context.local_only_run_root),
         "--published-summary-path",

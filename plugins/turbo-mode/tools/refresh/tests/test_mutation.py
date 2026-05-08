@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 import refresh.lock_state as lock_state_module
 import refresh.mutation as mutation_module
+import refresh.publication as publication_module
 from refresh.app_server_inventory import (
     AppServerInstallAuthority,
     AppServerLaunchAuthority,
@@ -357,7 +358,56 @@ def write_full_rehearsal_bundle(tmp_path: Path) -> tuple[Path, str]:
     return proof_path, proof_sha
 
 
-def commit_safe_guarded_evidence(capture_manifest_sha256: str) -> dict[str, object]:
+def seed_live_rehearsal_capture(ctx: MutationContext) -> Path:
+    capture_root = ctx.local_only_run_root / "rehearsal-proof-capture"
+    source_artifact_root = Path("/tmp/plan06-rehearsal-artifacts")
+    source_proof_path = source_artifact_root / "rehearsal-run/rehearsal-proof.json"
+    captured_proof_path = capture_root / "rehearsal-run/rehearsal-proof.json"
+    write_json(
+        captured_proof_path,
+        {
+            "schema_version": "turbo-mode-refresh-rehearsal-proof-v1",
+            "rehearsal_run_id": "rehearsal-run",
+            "source_implementation_commit": ctx.source_implementation_commit,
+            "source_implementation_tree": ctx.source_implementation_tree,
+            "source_to_rehearsal_execution_delta_status": "identical",
+            "source_to_rehearsal_allowed_delta_proof_sha256": (
+                ctx.source_to_rehearsal_allowed_delta_proof_sha256
+            ),
+            "source_to_rehearsal_changed_paths_sha256": (
+                ctx.source_to_rehearsal_changed_paths_sha256
+            ),
+            "app_server_authority_proof_sha256": "6" * 64,
+            "no_real_home_authority_proof_sha256": "7" * 64,
+        },
+    )
+    proof_sha256 = sha256_file(captured_proof_path)
+    manifest = capture_root / "capture-manifest.json"
+    write_json(
+        manifest,
+        {
+            "schema_version": "turbo-mode-refresh-rehearsal-capture-v1",
+            "rehearsal_proof_path": str(source_proof_path),
+            "rehearsal_proof_sha256": proof_sha256,
+            "source_artifact_root": str(source_artifact_root),
+            "capture_root": str(capture_root),
+            "captured_artifacts": [
+                {
+                    "relative_path": "rehearsal-run/rehearsal-proof.json",
+                    "captured_path": str(captured_proof_path),
+                    "sha256": proof_sha256,
+                }
+            ],
+        },
+    )
+    return manifest
+
+
+def commit_safe_guarded_evidence(
+    *,
+    capture_manifest_sha256: str,
+    rehearsal_proof_sha256: str,
+) -> dict[str, object]:
     return {
         "mode": "guarded-refresh",
         "source_implementation_commit": SOURCE_COMMIT,
@@ -365,7 +415,7 @@ def commit_safe_guarded_evidence(capture_manifest_sha256: str) -> dict[str, obje
         "execution_head": EXECUTION_HEAD,
         "execution_tree": EXECUTION_TREE,
         "isolated_rehearsal_run_id": "rehearsal-run",
-        "rehearsal_proof_sha256": "3" * 64,
+        "rehearsal_proof_sha256": rehearsal_proof_sha256,
         "rehearsal_proof_validation_status": "validated-before-live-mutation",
         "rehearsal_proof_capture_manifest_sha256": capture_manifest_sha256,
         "source_to_rehearsal_execution_delta_status": "identical",
@@ -390,6 +440,23 @@ def commit_safe_guarded_evidence(capture_manifest_sha256: str) -> dict[str, obje
         "final_status": "MUTATION_COMPLETE_CERTIFIED",
         "rollback_or_restore_status": "not-attempted",
     }
+
+
+def seed_publication_repo(repo_root: Path) -> None:
+    source_root = Path(__file__).resolve().parents[5]
+    for rel in (
+        Path("plugins/turbo-mode/tools/refresh_installed_turbo_mode.py"),
+        Path("plugins/turbo-mode/tools/refresh_validate_run_metadata.py"),
+        Path("plugins/turbo-mode/tools/refresh_validate_redaction.py"),
+    ):
+        destination = repo_root / rel
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text((source_root / rel).read_text(encoding="utf-8"), encoding="utf-8")
+    shutil.copytree(
+        source_root / "plugins/turbo-mode/tools/refresh",
+        repo_root / "plugins/turbo-mode/tools/refresh",
+        dirs_exist_ok=True,
+    )
 
 
 def refresh_full_rehearsal_bundle_digests(proof_path: Path) -> str:
@@ -1015,45 +1082,45 @@ def test_publish_guarded_refresh_commit_safe_summary_runs_after_publish_and_repl
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     init_git_repo(repo_root)
-    write_repo_file(
-        repo_root,
-        "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
-        "print('tool')\n",
-    )
-    commit_repo(repo_root, "seed")
+    seed_publication_repo(repo_root)
+    source_commit = commit_repo(repo_root, "seed")
+    source_tree = git(repo_root, "rev-parse", "HEAD^{tree}")
 
     codex_home = tmp_path / ".codex"
     ctx = replace(
         context(tmp_path, codex_home=codex_home),
         repo_root=repo_root,
         local_only_run_root=codex_home / "local-only/turbo-mode-refresh" / RUN_ID,
+        source_implementation_commit=source_commit,
+        source_implementation_tree=source_tree,
+        execution_head=source_commit,
+        execution_tree=source_tree,
+        tool_sha256=sha256_file(
+            repo_root / "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py"
+        ),
     )
     ctx.local_only_run_root.mkdir(parents=True, exist_ok=True)
-    capture_manifest = (
-        ctx.local_only_run_root / "rehearsal-proof-capture/capture-manifest.json"
+    ctx.local_only_run_root.chmod(0o700)
+    capture_manifest = seed_live_rehearsal_capture(ctx)
+    capture_payload = json.loads(capture_manifest.read_text(encoding="utf-8"))
+    evidence = commit_safe_guarded_evidence(
+        capture_manifest_sha256=sha256_file(capture_manifest),
+        rehearsal_proof_sha256=str(capture_payload["rehearsal_proof_sha256"]),
     )
-    write_json(
-        capture_manifest,
+    evidence.update(
         {
-            "schema_version": "turbo-mode-refresh-rehearsal-capture-v1",
-            "run_id": RUN_ID,
-            "rehearsal_proof_sha256": "3" * 64,
-        },
+            "source_implementation_commit": source_commit,
+            "source_implementation_tree": source_tree,
+            "execution_head": source_commit,
+            "execution_tree": source_tree,
+        }
     )
-
-    def validator_runner(phase: str, paths: object) -> None:
-        if phase == "candidate":
-            write_json(paths.metadata, {"status": "passed"})  # type: ignore[attr-defined]
-            write_json(paths.redaction, {"status": "passed"})  # type: ignore[attr-defined]
-        else:
-            write_json(paths.redaction_final, {"status": "passed"})  # type: ignore[attr-defined]
 
     result = publish_guarded_refresh_commit_safe_summary(
         context=ctx,
         source_code_root=repo_root,
         execution_repo_root=repo_root,
-        guarded_evidence=commit_safe_guarded_evidence(sha256_file(capture_manifest)),
-        validator_runner=validator_runner,
+        guarded_evidence=evidence,
     )
 
     published = repo_root / f"plugins/turbo-mode/evidence/refresh/{RUN_ID}.summary.json"
@@ -1067,6 +1134,246 @@ def test_publish_guarded_refresh_commit_safe_summary_runs_after_publish_and_repl
     assert payload["redaction_validation_summary_sha256"] == sha256_file(
         ctx.local_only_run_root / "redaction.summary.json"
     )
+    assert (ctx.local_only_run_root / "redaction-final-scan.summary.json").is_file()
+
+
+def test_publish_guarded_refresh_commit_safe_summary_final_replay_uses_published_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    init_git_repo(repo_root)
+    seed_publication_repo(repo_root)
+    source_commit = commit_repo(repo_root, "seed")
+    source_tree = git(repo_root, "rev-parse", "HEAD^{tree}")
+
+    codex_home = tmp_path / ".codex"
+    ctx = replace(
+        context(tmp_path, codex_home=codex_home),
+        repo_root=repo_root,
+        local_only_run_root=codex_home / "local-only/turbo-mode-refresh" / RUN_ID,
+        source_implementation_commit=source_commit,
+        source_implementation_tree=source_tree,
+        execution_head=source_commit,
+        execution_tree=source_tree,
+        tool_sha256=sha256_file(
+            repo_root / "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py"
+        ),
+    )
+    ctx.local_only_run_root.mkdir(parents=True, exist_ok=True)
+    ctx.local_only_run_root.chmod(0o700)
+    capture_manifest = seed_live_rehearsal_capture(ctx)
+    capture_payload = json.loads(capture_manifest.read_text(encoding="utf-8"))
+    evidence = commit_safe_guarded_evidence(
+        capture_manifest_sha256=sha256_file(capture_manifest),
+        rehearsal_proof_sha256=str(capture_payload["rehearsal_proof_sha256"]),
+    )
+    evidence.update(
+        {
+            "source_implementation_commit": source_commit,
+            "source_implementation_tree": source_tree,
+            "execution_head": source_commit,
+            "execution_tree": source_tree,
+        }
+    )
+
+    original_publish = publication_module.publish_json_0600_crash_safe
+
+    def corrupt_after_publish(
+        *,
+        source_payload_path: Path,
+        final_path: Path,
+        operation: str,
+    ) -> None:
+        original_publish(
+            source_payload_path=source_payload_path,
+            final_path=final_path,
+            operation=operation,
+        )
+        final_path.write_text("not json\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        publication_module,
+        "publish_json_0600_crash_safe",
+        corrupt_after_publish,
+    )
+
+    with pytest.raises(RefreshError, match="validator exited non-zero"):
+        publish_guarded_refresh_commit_safe_summary(
+            context=ctx,
+            source_code_root=repo_root,
+            execution_repo_root=repo_root,
+            guarded_evidence=evidence,
+        )
+
+    published = repo_root / f"plugins/turbo-mode/evidence/refresh/{RUN_ID}.summary.json"
+    failed = repo_root / f"plugins/turbo-mode/evidence/refresh/{RUN_ID}.summary.failed.json"
+    assert not published.exists()
+    assert failed.is_file()
+
+
+def test_live_guarded_orchestration_certifies_only_after_publication(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from contextlib import contextmanager
+
+    ctx = context(tmp_path, codex_home=tmp_path / ".codex")
+    seed_config(ctx)
+    seed_plugins(ctx)
+    seed_live_rehearsal_capture(ctx)
+    launch = launch_authority(ctx)
+    calls: list[str] = []
+
+    @contextmanager
+    def fake_lock(**_kwargs: object):
+        yield {"owner": "test", "run_id": ctx.run_id}
+
+    def fake_process_gate(**kwargs: object) -> dict[str, object]:
+        label = str(kwargs["label"])
+        payload = {
+            "label": label,
+            "blocked_process_count": 0,
+            "exclusivity_status": "exclusive_window_observed_by_process_samples",
+        }
+        write_json(ctx.local_only_run_root / f"process-{label}.summary.json", payload)
+        return payload
+
+    def fake_smoke(**_kwargs: object) -> dict[str, object]:
+        payload = {"final_status": "passed"}
+        write_json(ctx.local_only_run_root / "standard-smoke.summary.json", payload)
+        return payload
+
+    monkeypatch.setattr(mutation_module, "acquire_refresh_lock", fake_lock)
+    monkeypatch.setattr(
+        mutation_module,
+        "capture_process_gate",
+        fake_process_gate,
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "prove_app_server_home_authority",
+        lambda _active_context: launch,
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "install_plugins_via_app_server",
+        lambda *_args, **_kwargs: (
+            {
+                "pre_install_target_authority_sha256": "target-sha",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda _paths: ("inventory", ()),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "run_standard_smoke",
+        fake_smoke,
+    )
+
+    def fake_publish(**kwargs: object) -> object:
+        calls.append("publish")
+        evidence = kwargs["guarded_evidence"]
+        assert evidence["phase_reached"] == "evidence-published"
+        return type("Publication", (), {"published_summary_path": "summary"})()
+
+    monkeypatch.setattr(
+        mutation_module,
+        "publish_guarded_refresh_commit_safe_summary",
+        fake_publish,
+    )
+
+    result = run_guarded_refresh_orchestration(
+        ctx,
+        terminal_plan_status="guarded-refresh-required",
+        plugin_hooks_state="true",
+        isolated_rehearsal=False,
+    )
+
+    assert result.final_status == "MUTATION_COMPLETE_CERTIFIED"
+    assert calls == ["publish"]
+
+
+def test_live_guarded_orchestration_returns_evidence_failed_when_publication_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from contextlib import contextmanager
+
+    ctx = context(tmp_path, codex_home=tmp_path / ".codex")
+    seed_config(ctx)
+    seed_plugins(ctx)
+    seed_live_rehearsal_capture(ctx)
+    launch = launch_authority(ctx)
+
+    @contextmanager
+    def fake_lock(**_kwargs: object):
+        yield {"owner": "test", "run_id": ctx.run_id}
+
+    def fake_process_gate(**kwargs: object) -> dict[str, object]:
+        label = str(kwargs["label"])
+        payload = {
+            "label": label,
+            "blocked_process_count": 0,
+            "exclusivity_status": "exclusive_window_observed_by_process_samples",
+        }
+        write_json(ctx.local_only_run_root / f"process-{label}.summary.json", payload)
+        return payload
+
+    def fake_smoke(**_kwargs: object) -> dict[str, object]:
+        payload = {"final_status": "passed"}
+        write_json(ctx.local_only_run_root / "standard-smoke.summary.json", payload)
+        return payload
+
+    monkeypatch.setattr(mutation_module, "acquire_refresh_lock", fake_lock)
+    monkeypatch.setattr(
+        mutation_module,
+        "capture_process_gate",
+        fake_process_gate,
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "prove_app_server_home_authority",
+        lambda _active_context: launch,
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "install_plugins_via_app_server",
+        lambda *_args, **_kwargs: (
+            {
+                "pre_install_target_authority_sha256": "target-sha",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda _paths: ("inventory", ()),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "run_standard_smoke",
+        fake_smoke,
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "publish_guarded_refresh_commit_safe_summary",
+        lambda **_kwargs: (_ for _ in ()).throw(RefreshError("forced publication failure")),
+    )
+
+    result = run_guarded_refresh_orchestration(
+        ctx,
+        terminal_plan_status="guarded-refresh-required",
+        plugin_hooks_state="true",
+        isolated_rehearsal=False,
+    )
+
+    assert result.final_status == "MUTATION_COMPLETE_EVIDENCE_FAILED"
 
 
 def test_install_plugins_restores_hooks_before_same_child_corroboration(
