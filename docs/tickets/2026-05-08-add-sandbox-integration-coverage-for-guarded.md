@@ -4,7 +4,7 @@
 id: T-20260508-01
 date: "2026-05-08"
 created_at: "2026-05-08T17:11:41Z"
-status: open
+status: done
 priority: medium
 effort: M
 source:
