@@ -4,13 +4,18 @@ import hashlib
 import json
 import shutil
 import stat
+import subprocess
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 import refresh.lock_state as lock_state_module
 import refresh.mutation as mutation_module
+import refresh.process_gate as process_gate_module
 import refresh.publication as publication_module
+import refresh.smoke as smoke_module
 from refresh.app_server_inventory import (
     AppServerInstallAuthority,
     AppServerLaunchAuthority,
@@ -401,6 +406,214 @@ def seed_live_rehearsal_capture(ctx: MutationContext) -> Path:
         },
     )
     return manifest
+
+
+class GuardedRefreshIntegrationSubprocessRunner:
+    def __init__(self, *, fail_smoke_label: str | None = None) -> None:
+        self.fail_smoke_label = fail_smoke_label
+        self.command_texts: list[str] = []
+        self.state_file: Path | None = None
+        self.ticket_id = "T-SMOKE-1"
+
+    def run(
+        self,
+        args: Sequence[str],
+        **kwargs: Any,
+    ) -> subprocess.CompletedProcess[Any]:
+        command = tuple(str(arg) for arg in args)
+        if command[:4] == ("ps", "-ww", "-o", "pid=,ppid=,lstart=,command="):
+            pid = command[-1]
+            return subprocess.CompletedProcess(
+                list(command),
+                0,
+                stdout=(
+                    f"{pid} 1 Fri May  8 22:00:00 2026 "
+                    "python3 refresh_installed_turbo_mode.py --guarded-refresh\n"
+                ),
+                stderr="",
+            )
+        if command == ("ps", "-ww", "-axo", "pid,ppid,command"):
+            pid = mutation_module.os.getpid()
+            return subprocess.CompletedProcess(
+                list(command),
+                0,
+                stdout=(
+                    "  PID  PPID COMMAND\n"
+                    f" {pid}     1 python3 refresh_installed_turbo_mode.py --guarded-refresh\n"
+                ),
+                stderr="",
+            )
+
+        env = kwargs.get("env") or {}
+        label = env.get("TURBO_MODE_SMOKE_LABEL") if isinstance(env, dict) else None
+        if label is not None:
+            return self._run_smoke_command(command, str(label), kwargs)
+        raise AssertionError(f"unexpected subprocess command: {command!r}")
+
+    def _run_smoke_command(
+        self,
+        command: Sequence[str],
+        label: str,
+        kwargs: dict[str, Any],
+    ) -> subprocess.CompletedProcess[bytes]:
+        self.command_texts.append(" ".join(command))
+        if label == self.fail_smoke_label:
+            return subprocess.CompletedProcess(list(command), 2, b"", b"failed\n")
+
+        cwd = Path(str(kwargs.get("cwd") or "."))
+        input_bytes = kwargs.get("input")
+        stdout = b'{"status": "ok"}\n'
+        stderr = b""
+        command_text = " ".join(command)
+
+        if "session_state.py" in command_text and "archive" in command:
+            source = _path_arg_after(command, "--source")
+            archive_dir = _path_arg_after(command, "--archive-dir")
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            archived = archive_dir / source.name
+            archived.write_bytes(source.read_bytes())
+            source.unlink()
+            stdout = f"{archived}\n".encode()
+        elif "session_state.py" in command_text and "write-state" in command:
+            state_dir = _path_arg_after(command, "--state-dir")
+            state_dir.mkdir(parents=True, exist_ok=True)
+            self.state_file = state_dir / "handoff-smoke-repo-token.json"
+            self.state_file.write_text(
+                json.dumps({"archive_path": _str_arg_after(command, "--archive-path")}),
+                encoding="utf-8",
+            )
+            stdout = f"{self.state_file}\n".encode()
+        elif "session_state.py" in command_text and "read-state" in command:
+            assert self.state_file is not None
+            stdout = (
+                json.loads(self.state_file.read_text(encoding="utf-8"))["archive_path"].encode()
+                + b"\n"
+            )
+        elif "session_state.py" in command_text and "clear-state" in command:
+            if "--state-path" in command:
+                state_path = _path_arg_after(command, "--state-path")
+                assert self.state_file == state_path
+                state_path.unlink()
+        elif "defer.py" in command_text:
+            envelope_root = cwd / "docs/tickets/.envelopes"
+            envelope_root.mkdir(parents=True, exist_ok=True)
+            (envelope_root / "smoke.json").write_text("{}", encoding="utf-8")
+        elif "ticket_engine_guard.py" in command_text:
+            assert isinstance(input_bytes, bytes)
+            hook_input = json.loads(input_bytes.decode("utf-8"))
+            payload_path = Path(str(hook_input["tool_input"]["command"]).split()[-1])
+            payload = json.loads(payload_path.read_text(encoding="utf-8"))
+            payload.update(
+                {
+                    "hook_injected": True,
+                    "hook_request_origin": "user",
+                    "session_id": "plan06-smoke",
+                }
+            )
+            payload_path.write_text(json.dumps(payload), encoding="utf-8")
+            stdout = json.dumps(
+                {"hookSpecificOutput": {"permissionDecision": "allow"}}
+            ).encode()
+        elif "ticket_workflow.py" in command_text and "execute" in command:
+            payload = json.loads(Path(command[-1]).read_text(encoding="utf-8"))
+            if payload["action"] == "create":
+                ticket_path = cwd / f"docs/tickets/{self.ticket_id}.md"
+                ticket_path.parent.mkdir(parents=True, exist_ok=True)
+                ticket_path.write_text("# Smoke ticket\n", encoding="utf-8")
+            stdout = json.dumps({"ticket_id": self.ticket_id, "status": "ok"}).encode()
+        elif "ticket_read.py" in command_text:
+            stdout = json.dumps({"ticket_id": self.ticket_id, "status": "ok"}).encode()
+        elif "ticket_audit.py" in command_text:
+            stdout = json.dumps({"status": "ok", "unrecoverable": 0}).encode()
+
+        return subprocess.CompletedProcess(list(command), 0, stdout, stderr)
+
+
+def _path_arg_after(args: Sequence[str], flag: str) -> Path:
+    return Path(_str_arg_after(args, flag))
+
+
+def _str_arg_after(args: Sequence[str], flag: str) -> str:
+    return args[args.index(flag) + 1]
+
+
+def seed_guarded_orchestration_rehearsal_inputs(ctx: MutationContext) -> MutationContext:
+    source_proof = ctx.local_only_run_root / "source-execution.proof.json"
+    write_json(
+        source_proof,
+        {
+            "source_implementation_commit": SOURCE_COMMIT,
+            "source_implementation_tree": SOURCE_TREE,
+            "execution_head": EXECUTION_HEAD,
+            "execution_tree": EXECUTION_TREE,
+            "changed_paths": [],
+            "allowed_delta_status": "none",
+            "untracked_relevant_paths": [],
+        },
+    )
+    source_proof_sha = sha256_file(source_proof)
+    ctx = replace(
+        ctx,
+        source_execution_identity_proof_sha256=source_proof_sha,
+        source_to_rehearsal_allowed_delta_proof_sha256=source_proof_sha,
+    )
+    post_seed_dry_run = (
+        ctx.local_only_run_root.parent
+        / "seed-run-post-seed-dry-run/dry-run.summary.json"
+    )
+    write_json(
+        post_seed_dry_run,
+        {
+            "run_id": "seed-run-post-seed-dry-run",
+            "terminal_plan_status": "guarded-refresh-required",
+            "codex_home": str(ctx.codex_home),
+        },
+    )
+    write_json(
+        ctx.local_only_run_root.parent / "seed-run/seed-manifest.json",
+        {
+            "schema_version": "turbo-mode-refresh-isolated-seed-v1",
+            "run_id": "seed-run",
+            "source_implementation_commit": SOURCE_COMMIT,
+            "source_implementation_tree": SOURCE_TREE,
+            "requested_codex_home": str(ctx.codex_home),
+            "canonical_drift_paths": list(PLAN05_DRIFT_PATHS_FOR_TEST),
+            "canonical_drift_paths_sha256": authority_digest(PLAN05_DRIFT_PATHS_FOR_TEST),
+            "source_manifest_sha256": "source-manifest-sha",
+            "pre_refresh_isolated_cache_manifest_sha256": "pre-cache-sha",
+            "post_seed_dry_run_id": "seed-run-post-seed-dry-run",
+            "post_seed_dry_run_path": str(post_seed_dry_run),
+            "post_seed_dry_run_manifest_sha256": sha256_file(post_seed_dry_run),
+            "post_seed_terminal_status": "guarded-refresh-required",
+            "no_real_home_paths": True,
+        },
+    )
+    return ctx
+
+
+def install_source_plugins_for_test(
+    active_context: MutationContext,
+    **kwargs: Any,
+) -> tuple[dict[str, str]]:
+    restore_config_before_post_install = kwargs["restore_config_before_post_install"]
+    assert callable(restore_config_before_post_install)
+    restore_config_before_post_install()
+    for plugin, version in (("handoff", "1.6.0"), ("ticket", "1.4.0")):
+        source = active_context.repo_root / f"plugins/turbo-mode/{plugin}/{version}"
+        cache = active_context.codex_home / f"plugins/cache/turbo-mode/{plugin}/{version}"
+        if cache.exists():
+            shutil.rmtree(cache)
+        shutil.copytree(source, cache)
+    return ({"pre_install_target_authority_sha256": "target-sha"},)
+
+
+def patch_guarded_refresh_subprocesses(
+    monkeypatch: pytest.MonkeyPatch,
+    runner: GuardedRefreshIntegrationSubprocessRunner,
+) -> None:
+    monkeypatch.setattr(lock_state_module.subprocess, "run", runner.run)
+    monkeypatch.setattr(process_gate_module.subprocess, "run", runner.run)
+    monkeypatch.setattr(smoke_module.subprocess, "run", runner.run)
 
 
 def commit_safe_guarded_evidence(
@@ -1150,6 +1363,133 @@ def test_isolated_guarded_orchestration_runs_core_phases_and_writes_rehearsal_pr
     assert result.rehearsal_proof_sha256 == expected_proof_sha256
     assert result.rehearsal_proof_sha256_path == str(rehearsal_proof_sha256)
     assert not (ctx.local_only_run_root.parent / "run-state" / f"{ctx.run_id}.marker.json").exists()
+
+
+def test_isolated_guarded_orchestration_exercises_real_local_wiring(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    ctx = seed_guarded_orchestration_rehearsal_inputs(context(tmp_path))
+    seed_config(ctx)
+    seed_plugins(ctx, cache_text="stale")
+    runner = GuardedRefreshIntegrationSubprocessRunner()
+    patch_guarded_refresh_subprocesses(monkeypatch, runner)
+    monkeypatch.setattr(
+        mutation_module,
+        "prove_app_server_home_authority",
+        lambda active_context: launch_authority(active_context),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "install_plugins_via_app_server",
+        install_source_plugins_for_test,
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda _paths: ("inventory", ()),
+    )
+
+    result = run_guarded_refresh_orchestration(
+        ctx,
+        terminal_plan_status="guarded-refresh-required",
+        plugin_hooks_state="true",
+        isolated_rehearsal=True,
+    )
+
+    local_only_root = ctx.local_only_run_root.parent
+    assert result.final_status == "MUTATION_REHEARSAL_COMPLETE_NON_CERTIFIED"
+    assert (local_only_root / "refresh.lock").is_file()
+    assert (local_only_root / "run-state" / f"{ctx.run_id}.owner.json").is_file()
+    assert not (local_only_root / "run-state" / f"{ctx.run_id}.marker.json").exists()
+    assert (ctx.local_only_run_root / "snapshots/snapshot-manifest.json").is_file()
+    for label in ("before-snapshot", "after-hook-disable", "before-install", "post-mutation"):
+        summary_path = ctx.local_only_run_root / f"process-{label}.summary.json"
+        raw_path = ctx.local_only_run_root / f"process-{label}.txt"
+        assert summary_path.is_file()
+        assert raw_path.is_file()
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        assert summary["blocked_process_count"] == 0
+        assert summary["exclusivity_status"] == "exclusive_window_observed_by_process_samples"
+    smoke_summary = ctx.local_only_run_root / "standard-smoke.summary.json"
+    rehearsal_proof = ctx.local_only_run_root / "rehearsal-proof.json"
+    rehearsal_proof_sha256 = ctx.local_only_run_root / "rehearsal-proof.json.sha256"
+    final_status_path = ctx.local_only_run_root / "final-status.json"
+    assert smoke_summary.is_file()
+    assert rehearsal_proof.is_file()
+    assert rehearsal_proof_sha256.is_file()
+    assert final_status_path.is_file()
+    assert "plugin_hooks = true" in (ctx.codex_home / "config.toml").read_text(encoding="utf-8")
+    assert (ctx.codex_home / "plugins/cache/turbo-mode/handoff/1.6.0/payload.txt").read_text(
+        encoding="utf-8"
+    ) == "same"
+    assert (ctx.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0/payload.txt").read_text(
+        encoding="utf-8"
+    ) == "same"
+    real_home = str(mutation_module.REAL_CODEX_HOME)
+    assert real_home not in rehearsal_proof.read_text(encoding="utf-8")
+    assert real_home not in smoke_summary.read_text(encoding="utf-8")
+    final_status = json.loads(final_status_path.read_text(encoding="utf-8"))
+    assert final_status["rehearsal_proof_sha256"] == sha256_file(rehearsal_proof)
+    assert final_status["rehearsal_proof_sha256_path"] == str(rehearsal_proof_sha256)
+
+
+def test_guarded_orchestration_smoke_failure_rolls_back_real_snapshot_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    ctx = seed_guarded_orchestration_rehearsal_inputs(
+        context(tmp_path, codex_home=tmp_path / ".codex")
+    )
+    seed_config(ctx)
+    seed_plugins(ctx, cache_text="pre-refresh")
+    runner = GuardedRefreshIntegrationSubprocessRunner(fail_smoke_label="smoke-repo-git-init")
+    patch_guarded_refresh_subprocesses(monkeypatch, runner)
+    monkeypatch.setattr(
+        mutation_module,
+        "prove_app_server_home_authority",
+        lambda active_context: launch_authority(active_context),
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "install_plugins_via_app_server",
+        install_source_plugins_for_test,
+    )
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        lambda _paths: ("inventory", ()),
+    )
+
+    result = run_guarded_refresh_orchestration(
+        ctx,
+        terminal_plan_status="guarded-refresh-required",
+        plugin_hooks_state="true",
+        isolated_rehearsal=False,
+    )
+
+    local_only_root = ctx.local_only_run_root.parent
+    assert result.final_status == "MUTATION_FAILED_ROLLBACK_COMPLETE"
+    assert (ctx.local_only_run_root / "snapshots/snapshot-manifest.json").is_file()
+    for label in ("before-snapshot", "after-hook-disable", "before-install"):
+        assert (ctx.local_only_run_root / f"process-{label}.summary.json").is_file()
+    smoke_summary = json.loads(
+        (ctx.local_only_run_root / "standard-smoke.summary.json").read_text(encoding="utf-8")
+    )
+    assert smoke_summary["final_status"] == "failed"
+    assert smoke_summary["smoke_labels"] == ["smoke-repo-git-init"]
+    final_status = json.loads(Path(result.final_status_path).read_text(encoding="utf-8"))
+    assert final_status["failure_reason"] == (
+        "run standard smoke failed: final status is not passed. Got: 'failed'"
+    )
+    assert "plugin_hooks = true" in (ctx.codex_home / "config.toml").read_text(encoding="utf-8")
+    assert (ctx.codex_home / "plugins/cache/turbo-mode/handoff/1.6.0/payload.txt").read_text(
+        encoding="utf-8"
+    ) == "pre-refresh"
+    assert (ctx.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0/payload.txt").read_text(
+        encoding="utf-8"
+    ) == "pre-refresh"
+    assert not (local_only_root / "run-state" / f"{ctx.run_id}.marker.json").exists()
 
 
 def test_publish_guarded_refresh_commit_safe_summary_runs_after_publish_and_replay(
