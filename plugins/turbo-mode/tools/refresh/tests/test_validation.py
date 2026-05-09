@@ -38,15 +38,15 @@ REDACTION_TOOL = REPO_ROOT / "plugins/turbo-mode/tools/refresh_validate_redactio
 TOOL_REL = Path("plugins/turbo-mode/tools/refresh_installed_turbo_mode.py")
 
 
-def test_validation_plan05_schema_constant() -> None:
+def test_validation_plan06_schema_constant() -> None:
     assert validation.EXPECTED_COMMIT_SAFE_SCHEMA_VERSION == (
-        "turbo-mode-refresh-commit-safe-plan-05"
+        "turbo-mode-refresh-commit-safe-plan-06"
     )
 
 
-def test_commit_safe_accepts_plan05_reason_code_only_under_plan05_schema() -> None:
+def test_commit_safe_accepts_prior_plan_reason_code_under_plan06_schema() -> None:
     payload = {
-        "schema_version": "turbo-mode-refresh-commit-safe-plan-05",
+        "schema_version": "turbo-mode-refresh-commit-safe-plan-06",
         "run_id": "run-1",
         "axes": {
             "filesystem_state": "drift",
@@ -81,9 +81,9 @@ def test_commit_safe_rejects_plan04_schema_with_plan05_reason_code() -> None:
         assert_commit_safe_payload(payload)
 
 
-def test_commit_safe_rejects_stale_plan04_omission_reason_under_plan05_schema() -> None:
+def test_commit_safe_rejects_stale_plan04_omission_reason_under_plan06_schema() -> None:
     payload = {
-        "schema_version": "turbo-mode-refresh-commit-safe-plan-05",
+        "schema_version": "turbo-mode-refresh-commit-safe-plan-06",
         "run_id": "run-1",
         "omission_reasons": {
             "raw_app_server_transcript": "local-only",
@@ -692,6 +692,391 @@ def test_validator_scripts_candidate_and_final_flow(tmp_path: Path) -> None:
     assert final_redaction.returncode == 0, final_redaction.stderr
     assert redaction_summary.stat().st_mtime_ns == candidate_mtime
     assert json.loads(final_scan.read_text(encoding="utf-8"))["status"] == "passed"
+
+
+def guarded_payload(case: dict[str, object]) -> dict[str, object]:
+    source_head = git(case["repo_root"], "rev-parse", "HEAD")
+    source_tree = git(case["repo_root"], "rev-parse", "HEAD^{tree}")
+    rehearsal_proof_sha256 = "3" * 64
+    capture_manifest = case["run_root"] / "rehearsal-proof-capture/capture-manifest.json"
+    capture_manifest.parent.mkdir(parents=True, exist_ok=True)
+    write_json(
+        capture_manifest,
+        {
+            "schema_version": "turbo-mode-refresh-rehearsal-capture-v1",
+            "run_id": "run-1",
+            "rehearsal_proof_sha256": rehearsal_proof_sha256,
+        },
+    )
+    return {
+        "schema_version": "turbo-mode-refresh-commit-safe-plan-06",
+        "run_id": "run-1",
+        "mode": "guarded-refresh",
+        "source_implementation_commit": source_head,
+        "source_implementation_tree": source_tree,
+        "execution_head": source_head,
+        "execution_tree": source_tree,
+        "tool_path": "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
+        "tool_sha256": sha256_file(case["repo_root"] / TOOL_REL),
+        "dirty_state_policy": "fail-relevant-dirty-state",
+        "dirty_state": {
+            "status": "clean-relevant-paths",
+            "relevant_paths_checked": sorted(validation.ALLOWED_DIRTY_RELEVANT_PATHS),
+            "post_commit_binding": False,
+        },
+        "local_only_evidence_root": str(case["run_root"]),
+        "isolated_rehearsal_run_id": "rehearsal-run",
+        "rehearsal_proof_sha256": rehearsal_proof_sha256,
+        "rehearsal_proof_validation_status": "validated-before-live-mutation",
+        "rehearsal_proof_capture_manifest_sha256": sha256_file(capture_manifest),
+        "source_to_rehearsal_execution_delta_status": "identical",
+        "source_to_rehearsal_allowed_delta_proof_sha256": "4" * 64,
+        "source_to_rehearsal_changed_paths_sha256": "5" * 64,
+        "isolated_app_server_authority_proof_sha256": "6" * 64,
+        "no_real_home_authority_proof_sha256": "7" * 64,
+        "pre_snapshot_app_server_launch_authority_sha256": "6" * 64,
+        "pre_install_app_server_target_authority_sha256": "7" * 64,
+        "live_app_server_authority_proof_sha256": "8" * 64,
+        "source_manifest_sha256": "9" * 64,
+        "pre_refresh_cache_manifest_sha256": "a" * 64,
+        "post_refresh_cache_manifest_sha256": "b" * 64,
+        "pre_refresh_config_sha256": "c" * 64,
+        "post_refresh_config_sha256": "d" * 64,
+        "post_refresh_inventory_sha256": "e" * 64,
+        "selected_smoke_tier": "standard",
+        "smoke_summary_sha256": "f" * 64,
+        "post_mutation_process_census_sha256": "0" * 64,
+        "exclusivity_status": "exclusive_window_observed_by_process_samples",
+        "phase_reached": "evidence-published",
+        "final_status": "MUTATION_COMPLETE_CERTIFIED",
+        "rollback_or_restore_status": "not-attempted",
+        "metadata_validation_summary_sha256": None,
+        "redaction_validation_summary_sha256": None,
+    }
+
+
+def guarded_common_args(
+    case: dict[str, object],
+    *,
+    summary: Path,
+    mode: str,
+) -> list[str]:
+    return [
+        "--run-id",
+        "run-1",
+        "--source-code-root",
+        str(case["repo_root"]),
+        "--execution-repo-root",
+        str(case["repo_root"]),
+        "--mode",
+        mode,
+        "--local-only-root",
+        str(case["run_root"]),
+        "--summary",
+        str(summary),
+        "--published-summary-path",
+        str(case["published"]),
+    ]
+
+
+def test_guarded_refresh_validator_requires_split_root_cli(tmp_path: Path) -> None:
+    case = build_candidate_summary(tmp_path)
+    guarded = guarded_payload(case)
+    summary = case["run_root"] / "guarded.summary.json"
+    write_json(summary, guarded)
+    metadata_summary = case["run_root"] / "guarded-metadata.summary.json"
+
+    legacy = run_metadata(
+        [
+            "--run-id",
+            "run-1",
+            "--repo-root",
+            str(case["repo_root"]),
+            "--mode",
+            "candidate",
+            "--local-only-root",
+            str(case["run_root"]),
+            "--summary",
+            str(summary),
+            "--published-summary-path",
+            str(case["published"]),
+            "--summary-output",
+            str(metadata_summary),
+        ]
+    )
+    assert legacy.returncode == 1
+    assert "--source-code-root" in legacy.stderr
+
+    split = run_metadata(
+        [
+            *guarded_common_args(case, summary=summary, mode="candidate"),
+            "--summary-output",
+            str(metadata_summary),
+        ]
+    )
+    assert split.returncode == 0, split.stderr
+    payload = json.loads(metadata_summary.read_text(encoding="utf-8"))
+    assert payload["source_code_root_role"] == "validator-and-source"
+    assert payload["execution_repo_root_role"] == "runtime-and-dirty-state"
+
+
+def test_guarded_refresh_redaction_validator_requires_split_root_cli(
+    tmp_path: Path,
+) -> None:
+    case = build_candidate_summary(tmp_path)
+    guarded = guarded_payload(case)
+    summary = case["run_root"] / "commit-safe.candidate.summary.json"
+    write_json(summary, guarded)
+    write_json(case["run_root"] / "guarded-refresh.summary.json", {"mode": "guarded-refresh"})
+    write_json(case["run_root"] / "metadata-validation.summary.json", {"status": "passed"})
+    redaction_summary = case["run_root"] / "guarded-redaction.summary.json"
+
+    legacy = run_redaction(
+        [
+            "--run-id",
+            "run-1",
+            "--repo-root",
+            str(case["repo_root"]),
+            "--mode",
+            "candidate",
+            "--scope",
+            "commit-safe-summary",
+            "--source",
+            "plan-06-cli",
+            "--summary",
+            str(summary),
+            "--local-only-root",
+            str(case["run_root"]),
+            "--published-summary-path",
+            str(case["published"]),
+            "--summary-output",
+            str(redaction_summary),
+        ]
+    )
+    assert legacy.returncode == 1
+    assert "--source-code-root" in legacy.stderr
+
+    split = run_redaction(
+        [
+            "--run-id",
+            "run-1",
+            "--source-code-root",
+            str(case["repo_root"]),
+            "--execution-repo-root",
+            str(case["repo_root"]),
+            "--mode",
+            "candidate",
+            "--scope",
+            "commit-safe-summary",
+            "--source",
+            "plan-06-cli",
+            "--summary",
+            str(summary),
+            "--local-only-root",
+            str(case["run_root"]),
+            "--published-summary-path",
+            str(case["published"]),
+            "--summary-output",
+            str(redaction_summary),
+        ]
+    )
+    assert split.returncode == 0, split.stderr
+
+
+def test_guarded_final_replay_allows_only_published_summary_dirty_path(
+    tmp_path: Path,
+) -> None:
+    case = build_candidate_summary(tmp_path)
+    guarded = guarded_payload(case)
+    candidate = case["run_root"] / "guarded.candidate.summary.json"
+    write_json(candidate, guarded)
+    metadata_summary = case["run_root"] / "guarded-metadata.summary.json"
+    metadata = run_metadata(
+        [
+            *guarded_common_args(case, summary=candidate, mode="candidate"),
+            "--summary-output",
+            str(metadata_summary),
+        ]
+    )
+    assert metadata.returncode == 0, metadata.stderr
+    final_payload = {
+        **guarded,
+        "metadata_validation_summary_sha256": sha256_file(metadata_summary),
+    }
+    final_summary = case["run_root"] / "guarded.final.summary.json"
+    write_json(final_summary, final_payload)
+    published = case["published"]
+    published.parent.mkdir(parents=True, exist_ok=True)
+    published.write_text("published dirty\n", encoding="utf-8")
+
+    allowed = run_metadata(
+        [
+            *guarded_common_args(case, summary=final_summary, mode="final"),
+            "--candidate-summary",
+            str(candidate),
+            "--existing-validation-summary",
+            str(metadata_summary),
+        ]
+    )
+    assert allowed.returncode == 0, allowed.stderr
+
+    extra_dirty = case["repo_root"] / "plugins/turbo-mode/tools/refresh/extra.py"
+    extra_dirty.write_text("# dirty\n", encoding="utf-8")
+    rejected = run_metadata(
+        [
+            *guarded_common_args(case, summary=final_summary, mode="final"),
+            "--candidate-summary",
+            str(candidate),
+            "--existing-validation-summary",
+            str(metadata_summary),
+        ]
+    )
+    assert rejected.returncode == 1
+    assert "relevant paths dirty" in rejected.stderr
+
+
+def test_guarded_final_replay_rejects_coexisting_failed_summary_path(
+    tmp_path: Path,
+) -> None:
+    case = build_candidate_summary(tmp_path)
+    guarded = guarded_payload(case)
+    candidate = case["run_root"] / "guarded.candidate.summary.json"
+    write_json(candidate, guarded)
+    metadata_summary = case["run_root"] / "guarded-metadata.summary.json"
+    metadata = run_metadata(
+        [
+            *guarded_common_args(case, summary=candidate, mode="candidate"),
+            "--summary-output",
+            str(metadata_summary),
+        ]
+    )
+    assert metadata.returncode == 0, metadata.stderr
+    final_payload = {
+        **guarded,
+        "metadata_validation_summary_sha256": sha256_file(metadata_summary),
+    }
+    final_summary = case["run_root"] / "guarded.final.summary.json"
+    write_json(final_summary, final_payload)
+    published = case["published"]
+    published.parent.mkdir(parents=True, exist_ok=True)
+    published.write_text("published dirty\n", encoding="utf-8")
+    failed = published.with_name("run-1.summary.failed.json")
+    failed.write_text("failed forensic\n", encoding="utf-8")
+
+    rejected = run_metadata(
+        [
+            *guarded_common_args(case, summary=final_summary, mode="final"),
+            "--candidate-summary",
+            str(candidate),
+            "--existing-validation-summary",
+            str(metadata_summary),
+        ]
+    )
+
+    assert rejected.returncode == 1
+    assert "coexist" in rejected.stderr
+
+
+def test_retained_run_metadata_uses_certification_identity_for_split_root(
+    tmp_path: Path,
+) -> None:
+    case = build_candidate_summary(tmp_path)
+    guarded = guarded_payload(case)
+    retained = {
+        **guarded,
+        "certification_mode": "retained-run",
+        "certification_source_commit": guarded["source_implementation_commit"],
+        "certification_source_tree": guarded["source_implementation_tree"],
+        "certification_execution_head": guarded["execution_head"],
+        "certification_execution_tree": guarded["execution_tree"],
+        "retained_summary_path": (
+            "plugins/turbo-mode/evidence/refresh/run-1.retained.summary.json"
+        ),
+        "original_run_final_status": "MUTATION_COMPLETE_EVIDENCE_FAILED",
+        "retained_certification_outcome": "retained-certified",
+        "prior_summary_path_state": "none",
+        "retained_no_mutation_proof_sha256": "1" * 64,
+        "prior_failed_summary_path": None,
+        "prior_failed_summary_sha256": None,
+        "prior_failed_summary_status": None,
+    }
+    retained["source_implementation_commit"] = "0" * 40
+    retained["source_implementation_tree"] = "0" * 40
+    summary = case["run_root"] / "retained.candidate.summary.json"
+    write_json(summary, retained)
+    metadata_summary = case["run_root"] / "retained-metadata.summary.json"
+
+    completed = run_metadata(
+        [
+            *guarded_common_args(case, summary=summary, mode="candidate"),
+            "--summary-output",
+            str(metadata_summary),
+        ]
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(metadata_summary.read_text(encoding="utf-8"))
+    assert payload["certification_mode"] == "retained-run"
+    assert payload["certification_source_commit"] == retained["certification_source_commit"]
+
+
+def test_retained_final_replay_allows_only_retained_summary_dirty_path(
+    tmp_path: Path,
+) -> None:
+    case = build_candidate_summary(tmp_path)
+    retained_published = (
+        case["repo_root"] / "plugins/turbo-mode/evidence/refresh/run-1.retained.summary.json"
+    )
+    case = {**case, "published": retained_published}
+    retained = {
+        **guarded_payload(case),
+        "certification_mode": "retained-run",
+        "certification_source_commit": git(case["repo_root"], "rev-parse", "HEAD"),
+        "certification_source_tree": git(case["repo_root"], "rev-parse", "HEAD^{tree}"),
+        "certification_execution_head": git(case["repo_root"], "rev-parse", "HEAD"),
+        "certification_execution_tree": git(case["repo_root"], "rev-parse", "HEAD^{tree}"),
+        "retained_summary_path": (
+            "plugins/turbo-mode/evidence/refresh/run-1.retained.summary.json"
+        ),
+        "original_run_final_status": "MUTATION_COMPLETE_EVIDENCE_FAILED",
+        "retained_certification_outcome": "retained-certified",
+        "prior_summary_path_state": "none",
+        "retained_no_mutation_proof_sha256": "1" * 64,
+        "prior_failed_summary_path": None,
+        "prior_failed_summary_sha256": None,
+        "prior_failed_summary_status": None,
+    }
+    candidate = case["run_root"] / "retained.candidate.summary.json"
+    write_json(candidate, retained)
+    metadata_summary = case["run_root"] / "retained-metadata.summary.json"
+    metadata = run_metadata(
+        [
+            *guarded_common_args(case, summary=candidate, mode="candidate"),
+            "--summary-output",
+            str(metadata_summary),
+        ]
+    )
+    assert metadata.returncode == 0, metadata.stderr
+    final_payload = {
+        **retained,
+        "metadata_validation_summary_sha256": sha256_file(metadata_summary),
+    }
+    final_summary = case["run_root"] / "retained.final.summary.json"
+    write_json(final_summary, final_payload)
+    retained_published.parent.mkdir(parents=True, exist_ok=True)
+    retained_published.write_text("published dirty\n", encoding="utf-8")
+
+    allowed = run_metadata(
+        [
+            *guarded_common_args(case, summary=final_summary, mode="final"),
+            "--candidate-summary",
+            str(candidate),
+            "--existing-validation-summary",
+            str(metadata_summary),
+        ]
+    )
+
+    assert allowed.returncode == 0, allowed.stderr
 
 
 def test_metadata_validator_rejects_stale_existing_candidate_summary(tmp_path: Path) -> None:

@@ -1,17 +1,31 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import stat
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 TOOL = REPO_ROOT / "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py"
+
+
+def load_cli_module() -> object:
+    spec = importlib.util.spec_from_file_location(
+        "refresh_installed_turbo_mode_under_test",
+        TOOL,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def write_marketplace(path: Path) -> None:
@@ -116,9 +130,64 @@ def write_refresh_tooling_sources(repo_root: Path) -> None:
         target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
 
 
+def write_plan05_seed_sources(repo_root: Path) -> None:
+    fixture = (
+        REPO_ROOT
+        / "plugins/turbo-mode/tools/refresh/tests/fixtures/"
+        "handoff_state_helper_doc_migration.json"
+    )
+    data = json.loads(fixture.read_text(encoding="utf-8"))
+    for rel, record in data.items():
+        source = repo_root / f"plugins/turbo-mode/{rel}"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(record["source_text"], encoding="utf-8")
+    ticket = repo_root / "plugins/turbo-mode/ticket/1.4.0/README.md"
+    ticket.parent.mkdir(parents=True, exist_ok=True)
+    ticket.write_text("ticket source\n", encoding="utf-8")
+    ticket_hook = repo_root / "plugins/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+    ticket_hook.parent.mkdir(parents=True, exist_ok=True)
+    ticket_hook.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": (
+                                        "python3 /Users/jp/.codex/plugins/cache/turbo-mode/"
+                                        "ticket/1.4.0/hooks/ticket_engine_guard.py"
+                                    ),
+                                    "timeout": 10,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    ticket_guard = repo_root / "plugins/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py"
+    ticket_guard.write_text("#!/usr/bin/env python3\nprint('guard')\n", encoding="utf-8")
+
+
 def commit_all(repo_root: Path) -> None:
     subprocess.run(["git", "add", "."], cwd=repo_root, check=True)
     subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repo_root, check=True)
+
+
+def git_output(repo_root: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return completed.stdout.strip()
 
 
 def setup_record_summary_repo(tmp_path: Path) -> tuple[Path, Path]:
@@ -132,6 +201,19 @@ def setup_record_summary_repo(tmp_path: Path) -> tuple[Path, Path]:
     write_refresh_tooling_sources(repo_root)
     commit_all(repo_root)
     return repo_root, codex_home
+
+
+def setup_plan05_seed_repo(tmp_path: Path) -> tuple[Path, str, str]:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    init_git_repo(repo_root)
+    write_valid_marketplace(repo_root)
+    write_plan05_seed_sources(repo_root)
+    write_refresh_tooling_sources(repo_root)
+    commit_all(repo_root)
+    source_commit = git_output(repo_root, "rev-parse", "HEAD")
+    source_tree = git_output(repo_root, "rev-parse", "HEAD^{tree}")
+    return repo_root, source_commit, source_tree
 
 
 def run_tool(
@@ -148,6 +230,52 @@ def run_tool(
     )
 
 
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def write_operator_approval_grant(
+    approval_dir: Path,
+    *,
+    repo_root: Path,
+    codex_home: Path,
+    run_id: str,
+    source_commit: str,
+    source_tree: str,
+    overrides: dict[str, object] | None = None,
+) -> Path:
+    grant_path = approval_dir / "operator-maintenance-approval.json"
+    payload: dict[str, object] = {
+        "schema_version": "turbo-mode-plan06-operator-approval-v1",
+        "approval_status": "approved-for-external-maintenance-window",
+        "run_id": run_id,
+        "execution_root": str(repo_root),
+        "codex_home": str(codex_home),
+        "source_implementation_commit": source_commit,
+        "source_implementation_tree": source_tree,
+        "execution_head": source_commit,
+        "execution_tree": source_tree,
+        "approval_json_sha256": file_sha256(
+            approval_dir / "guarded-refresh-approval.json"
+        ),
+        "runbook_sha256": file_sha256(approval_dir / "guarded-refresh-runbook.sh"),
+        "approved_digests_sha256": file_sha256(
+            approval_dir / "guarded-refresh-approved-digests.json"
+        ),
+        "operator_acknowledgements": {
+            "external_shell": True,
+            "codex_desktop_closed": True,
+            "codex_cli_sessions_closed": True,
+            "maintenance_window_approved": True,
+            "do_not_reopen_until_external_command_exits": True,
+        },
+    }
+    if overrides:
+        payload.update(overrides)
+    grant_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return grant_path
+
+
 def run_system_python_tool(
     args: list[str],
     *,
@@ -160,6 +288,17 @@ def run_system_python_tool(
         check=False,
         env=env,
     )
+
+
+def test_load_cli_module_does_not_write_tools_bytecode() -> None:
+    tools_root = REPO_ROOT / "plugins/turbo-mode/tools"
+    assert not list(tools_root.rglob("__pycache__"))
+    assert not list(tools_root.rglob("*.pyc"))
+
+    load_cli_module()
+
+    assert not list(tools_root.rglob("__pycache__"))
+    assert not list(tools_root.rglob("*.pyc"))
 
 
 def write_fake_codex(bin_dir: Path) -> Path:
@@ -524,19 +663,1316 @@ def test_cli_rejects_mutation_modes_in_plan_02() -> None:
     completed = run_tool(["--refresh"])
 
     assert completed.returncode == 2
-    assert "outside non-mutating refresh planning" in completed.stderr
+    assert "--refresh is outside non-mutating refresh planning" in completed.stderr
 
 
-def test_cli_rejects_exact_future_command_shapes_with_plan_02_message() -> None:
+def test_cli_rejects_refresh_future_command_shape_with_plan_neutral_message() -> None:
     refresh = run_tool(["--refresh", "--smoke", "light"])
-    guarded = run_tool(["--guarded-refresh", "--smoke", "standard"])
 
     assert refresh.returncode == 2
-    assert guarded.returncode == 2
-    assert "outside non-mutating refresh planning" in refresh.stderr
-    assert "outside non-mutating refresh planning" in guarded.stderr
+    assert "--refresh is outside non-mutating refresh planning" in refresh.stderr
     assert "unrecognized arguments" not in refresh.stderr
-    assert "unrecognized arguments" not in guarded.stderr
+
+
+def test_cli_guarded_refresh_requires_source_identity_before_planning(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--isolated-rehearsal",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--source-implementation-commit is required" in completed.stderr
+    assert not (codex_home / "local-only").exists()
+
+
+def test_cli_guarded_refresh_rejects_any_existing_run_state_marker_before_planning(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+    marker_dir = codex_home / "local-only/turbo-mode-refresh/run-state"
+    marker_dir.mkdir(parents=True)
+    marker = marker_dir / "stale.marker.json"
+    marker.write_text("{}\n", encoding="utf-8")
+
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--isolated-rehearsal",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--source-implementation-commit",
+            "source",
+            "--source-implementation-tree",
+            "tree",
+        ]
+    )
+
+    assert completed.returncode == 1
+    assert "active run-state marker exists" in completed.stderr
+
+
+def test_cli_recover_conflicts_with_guarded_refresh() -> None:
+    completed = run_tool(["--guarded-refresh", "--recover", "run-1"])
+
+    assert completed.returncode == 2
+    assert "not allowed with argument" in completed.stderr
+
+
+def test_cli_certify_retained_run_conflicts_with_mutation_modes() -> None:
+    completed = run_tool(["--certify-retained-run", "run-1", "--guarded-refresh"])
+
+    assert completed.returncode == 2
+    assert "not allowed with argument" in completed.stderr
+
+
+def test_cli_certify_retained_run_refuses_missing_local_only_run_root(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+
+    completed = run_tool(
+        [
+            "--certify-retained-run",
+            "run-1",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 1
+    assert "retained run root is missing" in completed.stderr
+    assert not (codex_home / "plugins/cache/turbo-mode").exists()
+
+
+def test_cli_certify_retained_run_rejects_path_shaped_run_id_before_path_construction(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+
+    completed = run_tool(
+        [
+            "--certify-retained-run",
+            "../bad",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 1
+    assert "validate run id failed" in completed.stderr
+    assert not codex_home.exists()
+
+
+def test_cli_recover_requires_source_identity_before_writes(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+
+    completed = run_tool(
+        [
+            "--recover",
+            "run-1",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--source-implementation-commit is required for --recover" in completed.stderr
+    assert not codex_home.exists()
+
+
+def test_cli_recover_rejects_path_shaped_run_id_before_path_construction(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+
+    completed = run_tool(
+        [
+            "--recover",
+            "../bad",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--source-implementation-commit",
+            "source-commit",
+            "--source-implementation-tree",
+            "source-tree",
+        ]
+    )
+
+    assert completed.returncode == 1
+    assert "validate run id failed" in completed.stderr
+    assert not codex_home.exists()
+
+
+def test_cli_isolated_rehearsal_requires_guarded_refresh(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+
+    completed = run_tool(
+        [
+            "--dry-run",
+            "--isolated-rehearsal",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--isolated-rehearsal requires --guarded-refresh" in completed.stderr
+
+
+def test_cli_guarded_refresh_rejects_real_home_no_record_summary_before_writes() -> None:
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--no-record-summary",
+            "--codex-home",
+            "/Users/jp/.codex",
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--no-record-summary is not allowed for real guarded refresh" in completed.stderr
+
+
+def test_cli_guarded_refresh_rejects_real_home_without_rehearsal_proof_before_writes() -> None:
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--record-summary",
+            "--run-id",
+            "plan06-live-guarded-refresh-20260507-204500",
+            "--codex-home",
+            "/Users/jp/.codex",
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--rehearsal-proof is required for real guarded refresh" in completed.stderr
+
+
+def test_cli_guarded_refresh_treats_non_current_home_without_isolated_as_live(
+    tmp_path: Path,
+) -> None:
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--record-summary",
+            "--run-id",
+            "plan06-live-guarded-refresh-20260508-132000",
+            "--codex-home",
+            str(tmp_path / "operator/.codex"),
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--rehearsal-proof is required for real guarded refresh" in completed.stderr
+    assert "temporary --codex-home requires --isolated-rehearsal" not in completed.stderr
+
+
+def test_cli_guarded_refresh_rejects_real_home_isolated_rehearsal_before_writes() -> None:
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--isolated-rehearsal",
+            "--codex-home",
+            "/Users/jp/.codex",
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--isolated-rehearsal requires --codex-home outside /Users/jp/.codex" in (
+        completed.stderr
+    )
+
+
+def test_cli_guarded_refresh_rejects_nested_real_home_isolated_rehearsal() -> None:
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--isolated-rehearsal",
+            "--codex-home",
+            "/Users/jp/.codex/sandbox",
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--isolated-rehearsal requires --codex-home outside /Users/jp/.codex" in (
+        completed.stderr
+    )
+
+
+def test_cli_guarded_refresh_rejects_thin_real_home_rehearsal_proof_before_legacy_block(
+    tmp_path: Path,
+) -> None:
+    proof = tmp_path / "proof.json"
+    proof.write_text("{}\n", encoding="utf-8")
+    proof_sha256 = hashlib.sha256(proof.read_bytes()).hexdigest()
+    proof.with_name(f"{proof.name}.sha256").write_text(
+        f"{proof_sha256}  {proof}\n",
+        encoding="utf-8",
+    )
+
+    completed = run_tool(
+        [
+            "--guarded-refresh",
+            "--record-summary",
+            "--run-id",
+            "plan06-live-guarded-refresh-20260507-204500",
+            "--codex-home",
+            "/Users/jp/.codex",
+            "--rehearsal-proof",
+            str(proof),
+            "--rehearsal-proof-sha256",
+            proof_sha256,
+            "--source-implementation-commit",
+            "source",
+            "--source-implementation-tree",
+            "tree",
+        ]
+    )
+
+    assert completed.returncode == 1
+    assert "missing rehearsal proof field" in completed.stderr
+    assert "real guarded refresh blocked" not in completed.stderr
+
+
+def test_cli_guarded_refresh_captures_real_home_rehearsal_proof_before_marker_check(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text("{}\n", encoding="utf-8")
+    calls: list[str] = []
+    capture_roots: list[Path] = []
+
+    def fake_validate_rehearsal_proof_bundle(**_kwargs: object) -> object:
+        calls.append("validate")
+        return object()
+
+    def fake_capture_rehearsal_proof_bundle(
+        _validated: object,
+        *,
+        live_run_root: Path,
+    ) -> object:
+        calls.append("capture")
+        capture_roots.append(live_run_root)
+        return type(
+            "Capture",
+            (),
+            {"capture_manifest_path": str(tmp_path / "capture-manifest.json")},
+        )()
+
+    def fake_ensure_no_active_run_state_markers(_local_only_root: Path) -> None:
+        calls.append("marker-check")
+
+    def fake_plan_refresh(**_kwargs: object) -> object:
+        calls.append("plan-refresh")
+        raise cli.RefreshError("stop after real-home proof capture")
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        fake_validate_rehearsal_proof_bundle,
+    )
+    monkeypatch.setattr(
+        cli,
+        "capture_rehearsal_proof_bundle",
+        fake_capture_rehearsal_proof_bundle,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "ensure_no_active_run_state_markers",
+        fake_ensure_no_active_run_state_markers,
+    )
+    monkeypatch.setattr(cli, "plan_refresh", fake_plan_refresh)
+
+    args = parser.parse_args(
+        [
+            "--guarded-refresh",
+            "--record-summary",
+            "--run-id",
+            "plan06-live-guarded-refresh-20260507-205500",
+            "--codex-home",
+            "/Users/jp/.codex",
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            "proof-sha",
+            "--source-implementation-commit",
+            "source",
+            "--source-implementation-tree",
+            "tree",
+        ]
+    )
+
+    assert cli.guarded_refresh_main(args, parser) == 1
+    captured = capsys.readouterr()
+
+    assert calls == ["validate", "capture", "marker-check", "plan-refresh"]
+    assert capture_roots == [
+        Path(
+            "/Users/jp/.codex/local-only/turbo-mode-refresh/"
+            "plan06-live-guarded-refresh-20260507-205500"
+        )
+    ]
+    assert "rehearsal proof capture complete" in captured.err
+    assert "validation and capture are not complete" not in captured.err
+
+
+def test_cli_guarded_refresh_real_home_runs_orchestration_after_proof_capture(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "capture_rehearsal_proof_bundle",
+        lambda _validated, *, live_run_root: type(
+            "Capture",
+            (),
+            {"capture_manifest_path": str(live_run_root / "capture-manifest.json")},
+        )(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "ensure_no_active_run_state_markers",
+        lambda _local_only_root: None,
+    )
+    calls: list[str] = []
+
+    paths = type(
+        "Paths",
+        (),
+        {
+            "repo_root": tmp_path / "repo",
+            "codex_home": Path("/Users/jp/.codex"),
+            "local_only_root": tmp_path / "local-only",
+        },
+    )()
+    terminal_status = type("TerminalStatus", (), {"value": "guarded-refresh-required"})()
+    runtime_config = type("RuntimeConfig", (), {"plugin_hooks_state": "true"})()
+
+    def fake_plan_refresh(**_kwargs: object) -> object:
+        calls.append("plan-refresh")
+        return type(
+            "PlanRefresh",
+            (),
+            {
+                "terminal_status": terminal_status,
+                "paths": paths,
+                "runtime_config": runtime_config,
+            },
+        )()
+
+    proof_path = tmp_path / "source-execution-identity.proof.json"
+    proof_path.write_text("{}\n", encoding="utf-8")
+
+    def fake_verify_source_execution_identity(**_kwargs: object) -> object:
+        calls.append("verify-source-execution")
+        return type(
+            "Proof",
+            (),
+            {
+                "proof_path": str(proof_path),
+                "execution_head": "source",
+                "execution_tree": "tree",
+                "changed_paths": [],
+            },
+        )()
+
+    def fake_run_guarded_refresh_orchestration(ctx: object, **kwargs: object) -> object:
+        calls.append("orchestrate")
+        assert ctx.run_id == "plan06-live-guarded-refresh-20260508-101500"
+        assert ctx.codex_home == Path("/Users/jp/.codex")
+        assert ctx.local_only_run_root == (
+            tmp_path
+            / "local-only"
+            / "plan06-live-guarded-refresh-20260508-101500"
+        )
+        assert kwargs["isolated_rehearsal"] is False
+        return type(
+            "Orchestration",
+            (),
+            {
+                "final_status": "MUTATION_COMPLETE_CERTIFIED",
+                "final_status_path": str(tmp_path / "final-status.json"),
+                "rehearsal_proof_path": None,
+                "rehearsal_proof_sha256": None,
+                "rehearsal_proof_sha256_path": None,
+            },
+        )()
+
+    monkeypatch.setattr(cli, "plan_refresh", fake_plan_refresh)
+    monkeypatch.setattr(
+        cli,
+        "verify_source_execution_identity",
+        fake_verify_source_execution_identity,
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_guarded_refresh_orchestration",
+        fake_run_guarded_refresh_orchestration,
+    )
+
+    args = parser.parse_args(
+        [
+            "--guarded-refresh",
+            "--record-summary",
+            "--json",
+            "--run-id",
+            "plan06-live-guarded-refresh-20260508-101500",
+            "--codex-home",
+            "/Users/jp/.codex",
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            "proof-sha",
+            "--source-implementation-commit",
+            "source",
+            "--source-implementation-tree",
+            "tree",
+        ]
+    )
+
+    assert cli.guarded_refresh_main(args, parser) == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["final_status"] == "MUTATION_COMPLETE_CERTIFIED"
+    assert "rehearsal proof capture complete" in captured.err
+    assert "real guarded refresh blocked" not in captured.err
+    assert calls == ["plan-refresh", "verify-source-execution", "orchestrate"]
+
+
+def test_cli_guarded_refresh_non_current_live_home_runs_orchestration(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    live_codex_home = (tmp_path / "operator/.codex").resolve(strict=False)
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text("{}\n", encoding="utf-8")
+    validator_kwargs: dict[str, object] = {}
+    calls: list[str] = []
+
+    def fake_validate_rehearsal_proof_bundle(**kwargs: object) -> object:
+        validator_kwargs.update(kwargs)
+        return object()
+
+    def fake_capture_rehearsal_proof_bundle(
+        _validated: object,
+        *,
+        live_run_root: Path,
+    ) -> object:
+        calls.append("capture")
+        assert live_run_root == (
+            live_codex_home
+            / "local-only/turbo-mode-refresh/"
+            "plan06-live-guarded-refresh-20260508-132500"
+        )
+        return type(
+            "Capture",
+            (),
+            {"capture_manifest_path": str(live_run_root / "capture-manifest.json")},
+        )()
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        fake_validate_rehearsal_proof_bundle,
+    )
+    monkeypatch.setattr(
+        cli,
+        "capture_rehearsal_proof_bundle",
+        fake_capture_rehearsal_proof_bundle,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "ensure_no_active_run_state_markers",
+        lambda _local_only_root: None,
+    )
+
+    paths = type(
+        "Paths",
+        (),
+        {
+            "repo_root": tmp_path / "repo",
+            "codex_home": live_codex_home,
+            "local_only_root": live_codex_home / "local-only/turbo-mode-refresh",
+        },
+    )()
+    terminal_status = type("TerminalStatus", (), {"value": "guarded-refresh-required"})()
+    runtime_config = type("RuntimeConfig", (), {"plugin_hooks_state": "true"})()
+
+    monkeypatch.setattr(
+        cli,
+        "plan_refresh",
+        lambda **_kwargs: type(
+            "PlanRefresh",
+            (),
+            {
+                "terminal_status": terminal_status,
+                "paths": paths,
+                "runtime_config": runtime_config,
+            },
+        )(),
+    )
+    source_proof_path = tmp_path / "source-execution-identity.proof.json"
+    source_proof_path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cli,
+        "verify_source_execution_identity",
+        lambda **_kwargs: type(
+            "Proof",
+            (),
+            {
+                "proof_path": str(source_proof_path),
+                "execution_head": "source",
+                "execution_tree": "tree",
+                "changed_paths": [],
+            },
+        )(),
+    )
+
+    def fake_run_guarded_refresh_orchestration(ctx: object, **kwargs: object) -> object:
+        calls.append("orchestrate")
+        assert ctx.codex_home == live_codex_home
+        assert ctx.live_target is True
+        assert kwargs["isolated_rehearsal"] is False
+        return type(
+            "Orchestration",
+            (),
+            {
+                "final_status": "MUTATION_COMPLETE_CERTIFIED",
+                "final_status_path": str(tmp_path / "final-status.json"),
+                "rehearsal_proof_path": None,
+                "rehearsal_proof_sha256": None,
+                "rehearsal_proof_sha256_path": None,
+            },
+        )()
+
+    monkeypatch.setattr(
+        cli,
+        "run_guarded_refresh_orchestration",
+        fake_run_guarded_refresh_orchestration,
+    )
+
+    args = parser.parse_args(
+        [
+            "--guarded-refresh",
+            "--record-summary",
+            "--json",
+            "--run-id",
+            "plan06-live-guarded-refresh-20260508-132500",
+            "--codex-home",
+            str(live_codex_home),
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            "proof-sha",
+            "--source-implementation-commit",
+            "source",
+            "--source-implementation-tree",
+            "tree",
+        ]
+    )
+
+    assert cli.guarded_refresh_main(args, parser) == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["final_status"] == "MUTATION_COMPLETE_CERTIFIED"
+    assert validator_kwargs["approved_codex_home"] == live_codex_home
+    assert calls == ["capture", "orchestrate"]
+
+
+def test_cli_guarded_refresh_rejects_path_shaped_real_home_run_id_before_capture(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        lambda **_kwargs: pytest.fail("rehearsal proof validation should not run"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "capture_rehearsal_proof_bundle",
+        lambda *_args, **_kwargs: pytest.fail("rehearsal proof capture should not run"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "ensure_no_active_run_state_markers",
+        lambda *_args, **_kwargs: pytest.fail("marker check should not run"),
+    )
+
+    args = parser.parse_args(
+        [
+            "--guarded-refresh",
+            "--record-summary",
+            "--run-id",
+            "../escape",
+            "--codex-home",
+            "/Users/jp/.codex",
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            "proof-sha",
+            "--source-implementation-commit",
+            "source",
+            "--source-implementation-tree",
+            "tree",
+        ]
+    )
+
+    assert cli.guarded_refresh_main(args, parser) == 1
+    captured = capsys.readouterr()
+
+    assert "validate run id failed: run id must be one path segment" in captured.err
+
+
+def test_cli_generate_guarded_refresh_approval_candidate_writes_static_runbook(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    repo_root, _fixture_codex_home = setup_record_summary_repo(tmp_path)
+    source_commit = git_output(repo_root, "rev-parse", "HEAD")
+    source_tree = git_output(repo_root, "rev-parse", "HEAD^{tree}")
+    source_branch = git_output(repo_root, "rev-parse", "--abbrev-ref", "HEAD")
+    codex_home = tmp_path / ".codex"
+    spaced_python_dir = tmp_path / "python with spaces"
+    spaced_python_dir.mkdir()
+    spaced_python = spaced_python_dir / "python bin"
+    spaced_python.symlink_to(Path(sys.executable))
+    monkeypatch.setattr(cli.sys, "executable", str(spaced_python))
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text('{"proof": true}\n', encoding="utf-8")
+    proof_sha256 = hashlib.sha256(proof_path.read_bytes()).hexdigest()
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        lambda **_kwargs: object(),
+    )
+
+    args = parser.parse_args(
+        [
+            "--generate-guarded-refresh-approval",
+            "--json",
+            "--run-id",
+            "plan06-live-guarded-refresh-20260508-120000",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            proof_sha256,
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+        ]
+    )
+
+    assert cli.generate_guarded_refresh_approval_main(args, parser) == 0
+    approval_dir = (
+        codex_home
+        / "local-only/turbo-mode-refresh/approvals/"
+        "plan06-live-guarded-refresh-20260508-120000"
+    )
+    approval = json.loads(
+        (approval_dir / "guarded-refresh-approval.json").read_text(encoding="utf-8")
+    )
+
+    assert approval["approval_status"] == "blocked-before-operator-approval"
+    grant_path = approval_dir / "operator-maintenance-approval.json"
+    assert approval["operator_approval_grant_path"] == str(grant_path)
+    assert approval["branch"] == source_branch
+    assert approval["source_implementation_commit"] == source_commit
+    assert approval["execution_head"] == source_commit
+    assert approval["source_execution_identity_match"] is True
+    assert approval["approved_changed_paths"] == []
+    assert (approval_dir / "approved-source-to-execution-changed-paths.txt").read_text(
+        encoding="utf-8"
+    ) == ""
+    assert approval["python_bin"] == str(spaced_python)
+    assert approval["codex_home"] == str(codex_home)
+    assert approval["operator_requirements"]["mutates_installed_cache"] == (
+        f"{codex_home / 'plugins/cache/turbo-mode'}/"
+    )
+    assert approval["operator_requirements"]["may_temporarily_edit_config"] == str(
+        codex_home / "config.toml"
+    )
+    expected_marker_path = (
+        codex_home
+        / "local-only/turbo-mode-refresh/run-state/"
+        "plan06-live-guarded-refresh-20260508-120000.marker.json"
+    )
+    assert approval["expected_marker_path"] == str(expected_marker_path)
+    runbook = (approval_dir / "guarded-refresh-runbook.sh").read_text(
+        encoding="utf-8"
+    )
+    assert str(expected_marker_path) in runbook
+    assert f"OPERATOR_APPROVAL_GRANT_PATH='{grant_path}'" in runbook
+    assert f"APPROVED_PYTHON_BIN='{spaced_python}'" in runbook
+    assert '"$APPROVED_PYTHON_BIN" - "$APPROVAL_JSON_PATH"' in runbook
+    assert 'ACTUAL_PYTHON_VERSION="$("$APPROVED_PYTHON_BIN" -' in runbook
+    assert f"APPROVED_CODEX_HOME='{codex_home}'" in runbook
+    assert '--codex-home "$APPROVED_CODEX_HOME"' in runbook
+    assert f"--codex-home '{cli.REAL_CODEX_HOME}'" not in runbook
+    packet = (approval_dir / "operator-approval-packet.md").read_text(encoding="utf-8")
+    assert f"- Codex home: `{codex_home}`" in packet
+    assert f"- Operator approval grant: `{grant_path}`" in packet
+    assert '"approval_status": "approved-for-external-maintenance-window"' in packet
+
+    completed = subprocess.run(
+        [
+            str(approval_dir / "guarded-refresh-runbook.sh"),
+            "--static-preflight-only",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert (
+        "guarded refresh static preflight passed for "
+        "plan06-live-guarded-refresh-20260508-120000"
+    ) in completed.stdout
+    assert "approval_status=blocked-before-operator-approval" in completed.stdout
+
+
+def test_cli_generated_runbook_rejects_live_without_operator_grant(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    repo_root, _fixture_codex_home = setup_record_summary_repo(tmp_path)
+    source_commit = git_output(repo_root, "rev-parse", "HEAD")
+    source_tree = git_output(repo_root, "rev-parse", "HEAD^{tree}")
+    codex_home = tmp_path / ".codex"
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text('{"proof": true}\n', encoding="utf-8")
+    proof_sha256 = hashlib.sha256(proof_path.read_bytes()).hexdigest()
+    run_id = "plan06-live-guarded-refresh-20260508-120500"
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        lambda **_kwargs: object(),
+    )
+
+    args = parser.parse_args(
+        [
+            "--generate-guarded-refresh-approval",
+            "--run-id",
+            run_id,
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            proof_sha256,
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+        ]
+    )
+
+    assert cli.generate_guarded_refresh_approval_main(args, parser) == 0
+    approval_dir = codex_home / f"local-only/turbo-mode-refresh/approvals/{run_id}"
+
+    completed = subprocess.run(
+        [str(approval_dir / "guarded-refresh-runbook.sh")],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert "operator approval grant is missing" in completed.stderr
+
+
+def test_cli_generated_runbook_accepts_operator_grant_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    repo_root, _fixture_codex_home = setup_record_summary_repo(tmp_path)
+    source_commit = git_output(repo_root, "rev-parse", "HEAD")
+    source_tree = git_output(repo_root, "rev-parse", "HEAD^{tree}")
+    codex_home = tmp_path / ".codex"
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text('{"proof": true}\n', encoding="utf-8")
+    proof_sha256 = hashlib.sha256(proof_path.read_bytes()).hexdigest()
+    run_id = "plan06-live-guarded-refresh-20260508-121000"
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        lambda **_kwargs: object(),
+    )
+
+    args = parser.parse_args(
+        [
+            "--generate-guarded-refresh-approval",
+            "--run-id",
+            run_id,
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            proof_sha256,
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+        ]
+    )
+
+    assert cli.generate_guarded_refresh_approval_main(args, parser) == 0
+    approval_dir = codex_home / f"local-only/turbo-mode-refresh/approvals/{run_id}"
+    write_operator_approval_grant(
+        approval_dir,
+        repo_root=repo_root,
+        codex_home=codex_home,
+        run_id=run_id,
+        source_commit=source_commit,
+        source_tree=source_tree,
+    )
+
+    completed = subprocess.run(
+        [
+            str(approval_dir / "guarded-refresh-runbook.sh"),
+            "--approval-preflight-only",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert (
+        f"guarded refresh approval preflight passed for {run_id}"
+        in completed.stdout
+    )
+    assert "approval_status=approved-for-external-maintenance-window" in completed.stdout
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected_error"),
+    [
+        (
+            {"run_id": "plan06-live-guarded-refresh-20260508-999999"},
+            "operator approval grant mismatch for run_id",
+        ),
+        (
+            {"approval_json_sha256": "0" * 64},
+            "operator approval grant mismatch for approval_json_sha256",
+        ),
+    ],
+)
+def test_cli_generated_runbook_rejects_operator_grant_mismatches(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    overrides: dict[str, object],
+    expected_error: str,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    repo_root, _fixture_codex_home = setup_record_summary_repo(tmp_path)
+    source_commit = git_output(repo_root, "rev-parse", "HEAD")
+    source_tree = git_output(repo_root, "rev-parse", "HEAD^{tree}")
+    codex_home = tmp_path / ".codex"
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text('{"proof": true}\n', encoding="utf-8")
+    proof_sha256 = hashlib.sha256(proof_path.read_bytes()).hexdigest()
+    run_id = "plan06-live-guarded-refresh-20260508-121500"
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        lambda **_kwargs: object(),
+    )
+
+    args = parser.parse_args(
+        [
+            "--generate-guarded-refresh-approval",
+            "--run-id",
+            run_id,
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            proof_sha256,
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+        ]
+    )
+
+    assert cli.generate_guarded_refresh_approval_main(args, parser) == 0
+    approval_dir = codex_home / f"local-only/turbo-mode-refresh/approvals/{run_id}"
+    write_operator_approval_grant(
+        approval_dir,
+        repo_root=repo_root,
+        codex_home=codex_home,
+        run_id=run_id,
+        source_commit=source_commit,
+        source_tree=source_tree,
+        overrides=overrides,
+    )
+
+    completed = subprocess.run(
+        [
+            str(approval_dir / "guarded-refresh-runbook.sh"),
+            "--approval-preflight-only",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert expected_error in completed.stderr
+
+
+def test_cli_generate_guarded_refresh_approval_rejects_existing_marker_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    repo_root, _fixture_codex_home = setup_record_summary_repo(tmp_path)
+    source_commit = git_output(repo_root, "rev-parse", "HEAD")
+    source_tree = git_output(repo_root, "rev-parse", "HEAD^{tree}")
+    codex_home = tmp_path / ".codex"
+    run_id = "plan06-live-guarded-refresh-20260508-123000"
+    marker_path = (
+        codex_home / f"local-only/turbo-mode-refresh/run-state/{run_id}.marker.json"
+    )
+    marker_path.parent.mkdir(parents=True)
+    marker_path.write_text("{}\n", encoding="utf-8")
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text('{"proof": true}\n', encoding="utf-8")
+    proof_sha256 = hashlib.sha256(proof_path.read_bytes()).hexdigest()
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        lambda **_kwargs: object(),
+    )
+
+    args = parser.parse_args(
+        [
+            "--generate-guarded-refresh-approval",
+            "--run-id",
+            run_id,
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            proof_sha256,
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+        ]
+    )
+
+    assert cli.generate_guarded_refresh_approval_main(args, parser) == 1
+    captured = capsys.readouterr()
+    assert "approved run id already has evidence path" in captured.err
+    approval_dir = codex_home / f"local-only/turbo-mode-refresh/approvals/{run_id}"
+    assert not approval_dir.exists()
+
+
+def test_cli_generate_guarded_refresh_approval_rejects_disallowed_delta_before_writes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cli = load_cli_module()
+    parser = cli.build_parser()
+    repo_root, _fixture_codex_home = setup_record_summary_repo(tmp_path)
+    source_commit = git_output(repo_root, "rev-parse", "HEAD")
+    source_tree = git_output(repo_root, "rev-parse", "HEAD^{tree}")
+    codex_home = tmp_path / ".codex"
+    proof_path = tmp_path / "rehearsal-proof.json"
+    proof_path.write_text('{"proof": true}\n', encoding="utf-8")
+    proof_sha256 = hashlib.sha256(proof_path.read_bytes()).hexdigest()
+    tool_path = repo_root / "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py"
+    tool_path.write_text("print('changed')\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo_root, check=True)
+    subprocess.run(["git", "commit", "-qm", "disallowed delta"], cwd=repo_root, check=True)
+
+    monkeypatch.setattr(
+        cli,
+        "validate_rehearsal_proof_bundle",
+        lambda **_kwargs: object(),
+    )
+
+    args = parser.parse_args(
+        [
+            "--generate-guarded-refresh-approval",
+            "--run-id",
+            "plan06-live-guarded-refresh-20260508-121500",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--rehearsal-proof",
+            str(proof_path),
+            "--rehearsal-proof-sha256",
+            proof_sha256,
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+        ]
+    )
+
+    assert cli.generate_guarded_refresh_approval_main(args, parser) == 1
+    approval_dir = (
+        codex_home
+        / "local-only/turbo-mode-refresh/approvals/"
+        "plan06-live-guarded-refresh-20260508-121500"
+    )
+    assert not approval_dir.exists()
+
+
+def test_cli_seed_isolated_rehearsal_home_rejects_real_home_before_writes(
+    tmp_path: Path,
+) -> None:
+    repo_root, source_commit, source_tree = setup_plan05_seed_repo(tmp_path)
+
+    completed = run_tool(
+        [
+            "--seed-isolated-rehearsal-home",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            "/Users/jp/.codex",
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--seed-isolated-rehearsal-home requires --codex-home outside /Users/jp/.codex" in (
+        completed.stderr
+    )
+
+
+def test_cli_seed_isolated_rehearsal_home_requires_source_identity_before_writes(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+
+    completed = run_tool(
+        [
+            "--seed-isolated-rehearsal-home",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    assert completed.returncode == 2
+    assert "--source-implementation-commit is required for --seed-isolated-rehearsal-home" in (
+        completed.stderr
+    )
+    assert not codex_home.exists()
+
+
+def test_cli_seed_isolated_rehearsal_home_rejects_invalid_run_id_before_writes(
+    tmp_path: Path,
+) -> None:
+    repo_root, source_commit, source_tree = setup_plan05_seed_repo(tmp_path)
+    codex_home = tmp_path / "isolated-home"
+
+    completed = run_tool(
+        [
+            "--seed-isolated-rehearsal-home",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--run-id",
+            "../escape",
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+        ]
+    )
+
+    assert completed.returncode == 1
+    assert "validate run id failed: run id must be one path segment" in completed.stderr
+    assert not codex_home.exists()
+    assert not (tmp_path / "isolated-home/local-only/escape").exists()
+
+
+def test_cli_seed_isolated_rehearsal_home_creates_plan05_drift_and_manifest(
+    tmp_path: Path,
+) -> None:
+    repo_root, source_commit, source_tree = setup_plan05_seed_repo(tmp_path)
+    codex_home = tmp_path / "isolated-home"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_fake_codex(bin_dir)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "FAKE_REPO_ROOT": str(repo_root),
+        "FAKE_CODEX_HOME": str(codex_home),
+    }
+
+    completed = run_tool(
+        [
+            "--seed-isolated-rehearsal-home",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+            "--run-id",
+            "seed-run",
+            "--source-implementation-commit",
+            source_commit,
+            "--source-implementation-tree",
+            source_tree,
+            "--json",
+        ],
+        env=env,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["terminal_plan_status"] == "guarded-refresh-required"
+    seed_manifest = Path(payload["seed_manifest_path"])
+    assert seed_manifest.is_file()
+    assert codex_home in seed_manifest.parents
+    manifest = json.loads(seed_manifest.read_text(encoding="utf-8"))
+    assert manifest["canonical_drift_paths"] == [
+        "handoff/1.6.0/skills/load/SKILL.md",
+        "handoff/1.6.0/skills/quicksave/SKILL.md",
+        "handoff/1.6.0/skills/save/SKILL.md",
+        "handoff/1.6.0/skills/summary/SKILL.md",
+        "handoff/1.6.0/tests/test_session_state.py",
+        "handoff/1.6.0/tests/test_skill_docs.py",
+    ]
+    assert manifest["no_real_home_paths"] is True
+    assert not any("/Users/jp/.codex" in path for path in manifest["generated_paths"])
+    hook_manifest = json.loads(
+        (codex_home / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    hook_command = hook_manifest["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert hook_command == (
+        f"python3 {codex_home}/plugins/cache/turbo-mode/ticket/1.4.0/"
+        "hooks/ticket_engine_guard.py"
+    )
+
+    dry_run = run_tool(
+        [
+            "--dry-run",
+            "--inventory-check",
+            "--repo-root",
+            str(repo_root),
+            "--codex-home",
+            str(codex_home),
+        ],
+        env=env,
+    )
+
+    assert dry_run.returncode == 0, dry_run.stderr
+    dry_run_payload = json.loads(
+        Path(payload["post_seed_dry_run_path"]).read_text(encoding="utf-8")
+    )
+    assert dry_run_payload["terminal_plan_status"] == "guarded-refresh-required"
 
 
 def test_cli_dry_run_does_not_modify_cache_tree_or_config(tmp_path: Path) -> None:
@@ -624,7 +2060,7 @@ def test_cli_record_summary_publishes_after_candidate_and_final_validation(
     candidate_payload = json.loads(candidate.read_text(encoding="utf-8"))
     final_payload = json.loads(final.read_text(encoding="utf-8"))
     published_payload = json.loads(published.read_text(encoding="utf-8"))
-    assert candidate_payload["schema_version"] == "turbo-mode-refresh-commit-safe-plan-05"
+    assert candidate_payload["schema_version"] == "turbo-mode-refresh-commit-safe-plan-06"
     assert candidate_payload["mode"] == "dry-run"
     assert candidate_payload["metadata_validation_summary_sha256"] is None
     assert candidate_payload["redaction_validation_summary_sha256"] is None
@@ -647,6 +2083,44 @@ def test_cli_record_summary_publishes_after_candidate_and_final_validation(
         "plan-04-cli",
     )
     assert payload["published_summary_path"] == str(published)
+
+
+def test_cli_record_summary_rejects_missing_dirty_state_invariant(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = load_cli_module()
+    monkeypatch.setattr(module, "ensure_relevant_worktree_clean", lambda _repo_root: None)
+    monkeypatch.setattr(
+        module,
+        "plan_refresh",
+        lambda **_kwargs: SimpleNamespace(
+            terminal_status=SimpleNamespace(value="filesystem-no-drift"),
+            paths=SimpleNamespace(local_only_root=tmp_path / "local-only"),
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "write_local_evidence",
+        lambda _result, *, run_id: tmp_path / f"{run_id}.summary.json",
+    )
+
+    exit_code = module.main(
+        [
+            "--dry-run",
+            "--record-summary",
+            "--run-id",
+            "run-1",
+            "--repo-root",
+            str(tmp_path / "repo"),
+            "--codex-home",
+            str(tmp_path / "home"),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "dirty state invariant" in capsys.readouterr().err
 
 
 def test_cli_record_summary_plan_refresh_writes_plan_refresh_candidate(

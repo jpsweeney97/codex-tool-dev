@@ -1,0 +1,119 @@
+{
+  "app_server_inventory_failure_reason_code": null,
+  "app_server_inventory_status": "collected",
+  "app_server_inventory_summary_sha256": "5b863387f904a94ae3dcfd45a5eb7463d3402346f3fc01a646e78edaab789b50",
+  "app_server_parser_version": "refresh-app-server-inventory-1",
+  "app_server_protocol_capabilities": {
+    "experimentalApi": null
+  },
+  "app_server_request_methods": [
+    "initialize",
+    "initialized",
+    "plugin/read",
+    "plugin/read",
+    "plugin/list",
+    "skills/list",
+    "hooks/list"
+  ],
+  "app_server_response_schema_version": "app-server-readonly-inventory-v1",
+  "app_server_server_info": {
+    "name": null,
+    "version": null
+  },
+  "axes": {
+    "coverage_state": "not-applicable",
+    "filesystem_state": "no-drift",
+    "preflight_state": "passed",
+    "reason_codes": [],
+    "reason_count": 0,
+    "runtime_config_state": "aligned",
+    "selected_mutation_mode": "none"
+  },
+  "codex_executable_hash_unavailable_reason": null,
+  "codex_executable_path": "/opt/homebrew/bin/codex",
+  "codex_executable_sha256": "ff803d4b5c595af19b99c18db6def26539fdf4da23a035ab30809835631e8e4b",
+  "codex_version": "codex-cli 0.128.0",
+  "current_run_identity": {
+    "app_server_inventory_freshness": "recomputed-readonly-inventory",
+    "app_server_inventory_summary_sha256": "5b863387f904a94ae3dcfd45a5eb7463d3402346f3fc01a646e78edaab789b50",
+    "installed_cache_manifest_sha256": "7efea898b6459128c71bf4fb045afcdebcb23337ed8c770eb1c341990a40be14",
+    "installed_cache_manifest_unavailable_reason": null,
+    "local_config_metadata_sha256": "ad3dbefca69e2e3d852d95a1e29e52350e264cfac2766166fcc9b99c99f32385",
+    "local_config_metadata_unavailable_reason": null,
+    "local_summary_mode": "dry-run",
+    "local_summary_run_id": "plan06-post-normalization-no-drift-20260508-155500",
+    "local_summary_schema_version": "turbo-mode-refresh-plan-03",
+    "repo_marketplace_sha256": "56131cfd05b96e67fd917da93ff69950a33b463eac9bfa8ace18b96eea734e06",
+    "repo_marketplace_unavailable_reason": null,
+    "runtime_config_projection_sha256": "bcafbd8ebab75f4c9cdab15fa8a1510d0f9e764ce86666aabcae5e4f7a4c10bd",
+    "runtime_config_projection_unavailable_reason": null,
+    "runtime_identity": {
+      "app_server_parser_version": "refresh-app-server-inventory-1",
+      "app_server_protocol_capabilities": {
+        "experimentalApi": null
+      },
+      "app_server_response_schema_version": "app-server-readonly-inventory-v1",
+      "app_server_server_info": {
+        "name": null,
+        "version": null
+      },
+      "codex_executable_hash_unavailable_reason": null,
+      "codex_executable_path": "/opt/homebrew/bin/codex",
+      "codex_executable_sha256": "ff803d4b5c595af19b99c18db6def26539fdf4da23a035ab30809835631e8e4b",
+      "codex_version": "codex-cli 0.128.0"
+    },
+    "runtime_identity_freshness": "recomputed-readonly-inventory",
+    "source_manifest_sha256": "7efea898b6459128c71bf4fb045afcdebcb23337ed8c770eb1c341990a40be14",
+    "source_manifest_unavailable_reason": null
+  },
+  "diff_classification": [],
+  "dirty_state": {
+    "post_commit_binding": false,
+    "relevant_paths_checked": [
+      ".agents/plugins/marketplace.json",
+      "plugins/turbo-mode/handoff/1.6.0",
+      "plugins/turbo-mode/ticket/1.4.0",
+      "plugins/turbo-mode/tools/refresh",
+      "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
+      "plugins/turbo-mode/tools/refresh_validate_redaction.py",
+      "plugins/turbo-mode/tools/refresh_validate_run_metadata.py"
+    ],
+    "status": "clean-relevant-paths"
+  },
+  "dirty_state_policy": "fail-relevant-dirty-state",
+  "final_status": "no-drift",
+  "local_only_evidence_root": "/Users/jp/.codex/local-only/turbo-mode-refresh/plan06-post-normalization-no-drift-20260508-155500",
+  "local_only_summary_sha256": "3f35ebf81409d2d6644eeb8c6861ed797ec3e54ccd31a32cf60313aa3a2cdd18",
+  "metadata_validation_summary_sha256": "462054b97f5b3b6c531d0bac49fd2ecca76b2211c6487b3100a9ea9b4e7b2e0a",
+  "mode": "dry-run",
+  "omission_reasons": {
+    "exclusivity_status": "outside-non-mutating-refresh-plan",
+    "post_refresh_cache_manifest": "outside-non-mutating-refresh-plan",
+    "post_refresh_config_sha256": "outside-non-mutating-refresh-plan",
+    "pre_refresh_config_sha256": "outside-non-mutating-refresh-plan",
+    "process_gate": "outside-non-mutating-refresh-plan",
+    "raw_app_server_transcript": "local-only",
+    "rollback_or_restore_status": "outside-non-mutating-refresh-plan",
+    "smoke_summary": "outside-non-mutating-refresh-plan"
+  },
+  "redaction_validation_summary_sha256": "f04c16281122f33d64d4fb8552eaf76141ad05f372c13c12e3bb3114af9fc5ee",
+  "repo_head": "77ee353183325b6d57b4ebfaac10b0a7e8d89ef5",
+  "repo_tree": "9a8388a7b2efb593daeef6a63b367558494cd2e8",
+  "run_id": "plan06-post-normalization-no-drift-20260508-155500",
+  "runtime_config": {
+    "marketplace_state": "aligned",
+    "plugin_enablement_state": {
+      "handoff@turbo-mode": "enabled",
+      "ticket@turbo-mode": "enabled"
+    },
+    "plugin_hooks_state": "true",
+    "reason_codes": [],
+    "reason_count": 0,
+    "state": "aligned"
+  },
+  "schema_version": "turbo-mode-refresh-commit-safe-plan-06",
+  "source_local_summary_schema_version": "turbo-mode-refresh-plan-03",
+  "terminal_plan_status": "no-drift",
+  "tool_path": "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
+  "tool_sha256": "a2bb7d1a9800709f935b89d7895f1713657b3a9f3ba5b9ad36042d801f95e23e"
+}

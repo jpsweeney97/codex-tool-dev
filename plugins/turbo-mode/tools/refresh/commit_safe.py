@@ -21,7 +21,7 @@ from .planner import (
 )
 from .validation import _json_safe, load_json_object
 
-COMMIT_SAFE_SCHEMA_VERSION = "turbo-mode-refresh-commit-safe-plan-05"
+COMMIT_SAFE_SCHEMA_VERSION = "turbo-mode-refresh-commit-safe-plan-06"
 DIRTY_STATE_POLICY = "fail-relevant-dirty-state"
 RELEVANT_DIRTY_PATHS = (
     ".agents/plugins/marketplace.json",
@@ -94,6 +94,55 @@ CURRENT_IDENTITY_UNAVAILABLE_REASONS = {
     "permission-denied",
     "unavailable",
     "hash-unavailable",
+}
+
+GUARDED_REFRESH_REQUIRED_FIELDS = {
+    "source_implementation_commit",
+    "source_implementation_tree",
+    "execution_head",
+    "execution_tree",
+    "isolated_rehearsal_run_id",
+    "rehearsal_proof_sha256",
+    "rehearsal_proof_validation_status",
+    "rehearsal_proof_capture_manifest_sha256",
+    "source_to_rehearsal_execution_delta_status",
+    "source_to_rehearsal_allowed_delta_proof_sha256",
+    "source_to_rehearsal_changed_paths_sha256",
+    "isolated_app_server_authority_proof_sha256",
+    "no_real_home_authority_proof_sha256",
+    "pre_snapshot_app_server_launch_authority_sha256",
+    "pre_install_app_server_target_authority_sha256",
+    "live_app_server_authority_proof_sha256",
+    "source_manifest_sha256",
+    "pre_refresh_cache_manifest_sha256",
+    "post_refresh_cache_manifest_sha256",
+    "pre_refresh_config_sha256",
+    "post_refresh_config_sha256",
+    "post_refresh_inventory_sha256",
+    "selected_smoke_tier",
+    "smoke_summary_sha256",
+    "post_mutation_process_census_sha256",
+    "exclusivity_status",
+    "phase_reached",
+    "final_status",
+    "rollback_or_restore_status",
+}
+
+RETAINED_RUN_REQUIRED_FIELDS = {
+    "certification_mode",
+    "certification_source_commit",
+    "certification_source_tree",
+    "certification_execution_head",
+    "certification_execution_tree",
+    "retained_summary_path",
+    "original_run_final_status",
+    "retained_certification_outcome",
+    "prior_summary_path_state",
+    "retained_no_mutation_proof_sha256",
+    "rehearsal_proof_capture_manifest_sha256",
+    "prior_failed_summary_path",
+    "prior_failed_summary_sha256",
+    "prior_failed_summary_status",
 }
 
 
@@ -223,6 +272,199 @@ def build_commit_safe_summary(
         "redaction_validation_summary_sha256": redaction_validation_summary_sha256,
         "omission_reasons": _commit_safe_omission_reasons(),
     }
+
+
+def build_guarded_refresh_commit_safe_summary(
+    evidence: dict[str, Any],
+    *,
+    run_id: str,
+    local_only_evidence_root: Path,
+    tool_path: Path,
+    tool_sha256: str,
+    dirty_state: dict[str, Any],
+    metadata_validation_summary_sha256: str | None,
+    redaction_validation_summary_sha256: str | None,
+) -> dict[str, Any]:
+    _validate_guarded_refresh_evidence(evidence)
+    projected = {key: evidence[key] for key in sorted(GUARDED_REFRESH_REQUIRED_FIELDS)}
+    return {
+        "schema_version": COMMIT_SAFE_SCHEMA_VERSION,
+        "run_id": run_id,
+        "mode": "guarded-refresh",
+        "tool_path": tool_path.as_posix(),
+        "tool_sha256": tool_sha256,
+        "dirty_state_policy": DIRTY_STATE_POLICY,
+        "dirty_state": dirty_state,
+        "local_only_evidence_root": str(local_only_evidence_root),
+        **projected,
+        "metadata_validation_summary_sha256": metadata_validation_summary_sha256,
+        "redaction_validation_summary_sha256": redaction_validation_summary_sha256,
+    }
+
+
+def build_retained_run_commit_safe_summary(
+    evidence: dict[str, Any],
+    *,
+    run_id: str,
+    local_only_evidence_root: Path,
+    tool_path: Path,
+    tool_sha256: str,
+    dirty_state: dict[str, Any],
+    metadata_validation_summary_sha256: str | None,
+    redaction_validation_summary_sha256: str | None,
+    certification_source_commit: str,
+    certification_source_tree: str,
+    certification_execution_head: str,
+    certification_execution_tree: str,
+    retained_summary_path: str,
+    original_run_final_status: str,
+    retained_certification_outcome: str,
+    prior_summary_path_state: str,
+    retained_no_mutation_proof_sha256: str,
+    rehearsal_proof_capture_manifest_sha256: str,
+    prior_failed_summary_path: str | None,
+    prior_failed_summary_sha256: str | None,
+    prior_failed_summary_status: str | None,
+) -> dict[str, Any]:
+    retained_fields = {
+        "certification_mode": "retained-run",
+        "certification_source_commit": certification_source_commit,
+        "certification_source_tree": certification_source_tree,
+        "certification_execution_head": certification_execution_head,
+        "certification_execution_tree": certification_execution_tree,
+        "retained_summary_path": retained_summary_path,
+        "original_run_final_status": original_run_final_status,
+        "retained_certification_outcome": retained_certification_outcome,
+        "prior_summary_path_state": prior_summary_path_state,
+        "retained_no_mutation_proof_sha256": retained_no_mutation_proof_sha256,
+        "rehearsal_proof_capture_manifest_sha256": rehearsal_proof_capture_manifest_sha256,
+        "prior_failed_summary_path": prior_failed_summary_path,
+        "prior_failed_summary_sha256": prior_failed_summary_sha256,
+        "prior_failed_summary_status": prior_failed_summary_status,
+    }
+    _validate_retained_run_fields(retained_fields)
+    payload = build_guarded_refresh_commit_safe_summary(
+        evidence,
+        run_id=run_id,
+        local_only_evidence_root=local_only_evidence_root,
+        tool_path=tool_path,
+        tool_sha256=tool_sha256,
+        dirty_state=dirty_state,
+        metadata_validation_summary_sha256=metadata_validation_summary_sha256,
+        redaction_validation_summary_sha256=redaction_validation_summary_sha256,
+    )
+    payload.update(retained_fields)
+    return payload
+
+
+def _validate_guarded_refresh_evidence(evidence: dict[str, Any]) -> None:
+    missing = sorted(GUARDED_REFRESH_REQUIRED_FIELDS - set(evidence))
+    if missing:
+        raise ValueError(
+            "build guarded refresh commit-safe summary failed: missing field. "
+            f"Got: {missing!r:.100}"
+        )
+    if evidence.get("mode") != "guarded-refresh":
+        raise ValueError(
+            "build guarded refresh commit-safe summary failed: invalid mode. "
+            f"Got: {evidence.get('mode')!r:.100}"
+        )
+    if evidence.get("rehearsal_proof_validation_status") != "validated-before-live-mutation":
+        raise ValueError(
+            "build guarded refresh commit-safe summary failed: invalid rehearsal proof "
+            f"validation status. Got: {evidence.get('rehearsal_proof_validation_status')!r:.100}"
+        )
+    if evidence.get("source_to_rehearsal_execution_delta_status") not in {
+        "identical",
+        "approved-docs-evidence-only",
+    }:
+        raise ValueError(
+            "build guarded refresh commit-safe summary failed: invalid source-to-rehearsal "
+            "delta status. "
+            f"Got: {evidence.get('source_to_rehearsal_execution_delta_status')!r:.100}"
+        )
+    if evidence.get("final_status") == "MUTATION_COMPLETE_CERTIFIED" and evidence.get(
+        "rollback_or_restore_status"
+    ) != "not-attempted":
+        raise ValueError(
+            "build guarded refresh commit-safe summary failed: invalid rollback status. "
+            f"Got: {evidence.get('rollback_or_restore_status')!r:.100}"
+        )
+    if evidence.get("exclusivity_status") == "exclusive_window_observed_by_process_samples":
+        if not evidence.get("post_mutation_process_census_sha256"):
+            raise ValueError(
+                "build guarded refresh commit-safe summary failed: missing process census. "
+                "Got: post_mutation_process_census_sha256"
+            )
+    if not evidence.get("rehearsal_proof_capture_manifest_sha256"):
+        raise ValueError(
+            "build guarded refresh commit-safe summary failed: missing rehearsal proof "
+            "capture manifest digest. Got: rehearsal_proof_capture_manifest_sha256"
+        )
+
+
+def _validate_retained_run_fields(fields: dict[str, Any]) -> None:
+    missing = sorted(RETAINED_RUN_REQUIRED_FIELDS - set(fields))
+    if missing:
+        raise ValueError(
+            "build retained-run commit-safe summary failed: missing field. "
+            f"Got: {missing!r:.100}"
+        )
+    if fields.get("certification_mode") != "retained-run":
+        raise ValueError(
+            "build retained-run commit-safe summary failed: invalid certification mode. "
+            f"Got: {fields.get('certification_mode')!r:.100}"
+        )
+    if fields.get("retained_certification_outcome") not in {
+        "retained-certified",
+        "retained-uncertified",
+        "manual-rollback-required",
+        "manual-adjudication-required",
+    }:
+        raise ValueError(
+            "build retained-run commit-safe summary failed: invalid retained outcome. "
+            f"Got: {fields.get('retained_certification_outcome')!r:.100}"
+        )
+    if fields.get("original_run_final_status") not in {
+        "MUTATION_COMPLETE_EVIDENCE_FAILED",
+        "MUTATION_COMPLETE_EXCLUSIVITY_UNPROVEN",
+    }:
+        raise ValueError(
+            "build retained-run commit-safe summary failed: invalid original final status. "
+            f"Got: {fields.get('original_run_final_status')!r:.100}"
+        )
+    if fields.get("prior_summary_path_state") not in {
+        "none",
+        "forensic-demotion-retained",
+    }:
+        raise ValueError(
+            "build retained-run commit-safe summary failed: invalid prior summary path state. "
+            f"Got: {fields.get('prior_summary_path_state')!r:.100}"
+        )
+    if fields.get("prior_summary_path_state") == "forensic-demotion-retained":
+        if not fields.get("prior_failed_summary_path") or not fields.get(
+            "prior_failed_summary_sha256"
+        ):
+            raise ValueError(
+                "build retained-run commit-safe summary failed: missing prior failed summary "
+                "digest. Got: prior_failed_summary_sha256"
+            )
+        if fields.get("prior_failed_summary_status") != "forensic-demotion-retained":
+            raise ValueError(
+                "build retained-run commit-safe summary failed: invalid prior failed summary "
+                f"status. Got: {fields.get('prior_failed_summary_status')!r:.100}"
+            )
+    else:
+        for key in (
+            "prior_failed_summary_path",
+            "prior_failed_summary_sha256",
+            "prior_failed_summary_status",
+        ):
+            if fields.get(key) is not None:
+                raise ValueError(
+                    "build retained-run commit-safe summary failed: unexpected prior failed "
+                    f"summary field. Got: {key!r:.100}"
+                )
 
 
 def build_current_run_identity(

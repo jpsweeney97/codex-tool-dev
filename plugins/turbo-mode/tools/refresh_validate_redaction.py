@@ -32,7 +32,9 @@ FINAL_SCAN_SCHEMA_VERSION = "turbo-mode-refresh-redaction-final-scan-plan-04"
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Validate Turbo Mode refresh redaction.")
     parser.add_argument("--run-id", required=True)
-    parser.add_argument("--repo-root", type=Path, required=True)
+    parser.add_argument("--repo-root", type=Path)
+    parser.add_argument("--source-code-root", type=Path)
+    parser.add_argument("--execution-repo-root", type=Path)
     parser.add_argument("--mode", choices=("candidate", "final"), required=True)
     parser.add_argument("--scope", required=True)
     parser.add_argument("--source", required=True)
@@ -50,6 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
 def validate_candidate(args: argparse.Namespace) -> int:
     payload = load_json_object(args.summary)
     assert_commit_safe_payload(payload)
+    _assert_root_contract(args, payload)
     sensitivity = scan_local_only_artifacts(
         args.local_only_root,
         phase="candidate",
@@ -83,6 +86,7 @@ def validate_candidate(args: argparse.Namespace) -> int:
 def validate_final(args: argparse.Namespace) -> int:
     payload = load_json_object(args.summary)
     assert_commit_safe_payload(payload)
+    _assert_root_contract(args, payload)
     if args.existing_validation_summary is None:
         raise ValueError(
             "validate redaction failed: existing validation summary is required "
@@ -152,6 +156,23 @@ def validate_final(args: argparse.Namespace) -> int:
     assert_no_sensitive_values(final_scan)
     write_summary(args.final_scan_output, final_scan)
     return 0
+
+
+def _assert_root_contract(args: argparse.Namespace, payload: dict[str, object]) -> None:
+    if payload.get("mode") == "guarded-refresh":
+        if args.source_code_root is None or args.execution_repo_root is None:
+            raise ValueError(
+                "validate redaction failed: guarded-refresh validation requires "
+                "--source-code-root and --execution-repo-root. Got: split-root-args"
+            )
+        if args.repo_root is not None:
+            raise ValueError(
+                "validate redaction failed: --repo-root is legacy-only for guarded-refresh. "
+                "Got: --source-code-root"
+            )
+        return
+    if args.repo_root is None:
+        raise ValueError("validate redaction failed: --repo-root is required. Got: None")
 
 
 def scan_local_only_artifacts(root: Path, *, phase: str, mode: str) -> dict[str, object]:
