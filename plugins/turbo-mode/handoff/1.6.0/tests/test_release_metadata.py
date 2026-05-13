@@ -14,6 +14,11 @@ POLICY_DOCS = [
     PLUGIN_ROOT / "skills" / "quicksave" / "SKILL.md",
     PLUGIN_ROOT / "skills" / "summary" / "SKILL.md",
 ]
+CURRENT_STORAGE_DOCS = [
+    PLUGIN_ROOT / "README.md",
+    PLUGIN_ROOT / "references" / "handoff-contract.md",
+    PLUGIN_ROOT / "references" / "format-reference.md",
+]
 CHAIN_WRITER_DOCS = [
     PLUGIN_ROOT / "skills" / "save" / "SKILL.md",
     PLUGIN_ROOT / "skills" / "quicksave" / "SKILL.md",
@@ -61,6 +66,27 @@ def test_chain_writer_docs_use_active_writer_state_bridge() -> None:
         assert "write-active-handoff" in text
         assert "resumed_from_path" in text
         assert "handoff-<project>-<resume_token>.json" not in text
+
+
+def test_current_storage_docs_name_codex_handoffs_as_primary_storage() -> None:
+    for path in CURRENT_STORAGE_DOCS:
+        text = path.read_text(encoding="utf-8")
+        assert "<project_root>/.codex/handoffs/" in text
+        assert "<project_root>/docs/handoffs/" not in text
+        assert "local-only working memory" not in text
+
+
+def test_changelog_records_handoff_storage_reversal() -> None:
+    text = (PLUGIN_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert (
+        "Handoff storage moved from `<project_root>/docs/handoffs/` "
+        "to `<project_root>/.codex/handoffs/`"
+    ) in text
+    assert (
+        "Handoff storage moved from `<project_root>/.codex/handoffs/` "
+        "to `<project_root>/docs/handoffs/`"
+    ) not in text
+    assert "local-only working memory" not in text
 
 
 def test_internal_comments_do_not_assert_gitignored_or_local_only_policy() -> None:

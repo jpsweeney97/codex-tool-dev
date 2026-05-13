@@ -35,7 +35,7 @@ codex plugin install ./packages/plugins/handoff
 
 | Skill | Trigger Phrases | Purpose |
 |-------|----------------|---------|
-| **save** | `/save`, "wrap this up", "new session", "handoff" | Full session report (13 sections, 400+ lines). Writes to `<project_root>/docs/handoffs/`. |
+| **save** | `/save`, "wrap this up", "new session", "handoff" | Full session report (13 sections, 400+ lines). Writes to `<project_root>/.codex/handoffs/`. |
 | **load** | `/load`, "continue from where we left off" | Resume from a previous handoff. Archives the source file, writes a state file for chain linking. |
 | **quicksave** | `/quicksave`, "checkpoint", "save state" | Lightweight checkpoint (22-55 lines, 5 sections). Warns on 3rd consecutive checkpoint. |
 | **defer** | `/defer`, "track these for later", "create tickets" | Extract deferred work items from conversation into ticket files in `docs/tickets/`. |
@@ -70,14 +70,14 @@ Core logic lives in `scripts/`. Skills handle UX and judgment; scripts handle de
 
 | Location | Contents | Retention |
 |----------|----------|-----------|
-| `<project_root>/docs/handoffs/` | Active handoffs and checkpoints | No auto-prune |
-| `<project_root>/docs/handoffs/archive/` | Archived handoffs (moved by `/load`) | No auto-prune |
-| `<project_root>/docs/handoffs/.session-state/handoff-<project>-<resume_token>.json` | Chain protocol state files | 24 hours |
+| `<project_root>/.codex/handoffs/` | Active handoffs and checkpoints | No auto-prune |
+| `<project_root>/.codex/handoffs/archive/` | Archived handoffs (moved by `/load`) | No auto-prune |
+| `<project_root>/.codex/handoffs/.session-state/handoff-<project>-<resume_token>.json` | Chain protocol state files | 24 hours |
 | `docs/tickets/` | Deferred work tickets | Permanent |
 | `docs/learnings/learnings.md` | Distilled knowledge entries | Permanent |
 
 The plugin writes filesystem artifacts only. It does not add gitignore rules, stage files, or auto-commit files.
-Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
+Whether `.codex/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
 
 ### Handoff Frontmatter
 
@@ -118,7 +118,7 @@ Tickets created by `/defer` include:
 ```
 Session 1:
   /save                              → Creates handoff document
-                                        (<project_root>/docs/handoffs/2026-03-09_14-30_feature-work.md)
+                                        (<project_root>/.codex/handoffs/2026-03-09_14-30_feature-work.md)
 
 Session 2:
   /load                              → Loads most recent handoff, archives it
@@ -181,9 +181,9 @@ Session 2:
 ├─ Hook-Compatible Helpers (Deferred) ───────────────┤
 │  cleanup, quality_check (not manifest-wired in 1.6)│
 ├─ Storage ─────────────────────────────────────────┤
-│  Active:  <project_root>/docs/handoffs/         │
-│  Archive: <project_root>/docs/handoffs/archive/  │
-│  State:   docs/handoffs/.session-state/handoff-<UUID>│
+│  Active:  <project_root>/.codex/handoffs/         │
+│  Archive: <project_root>/.codex/handoffs/archive/ │
+│  State:   .codex/handoffs/.session-state/      │
 └─ References ──────────────────────────────────────┘
    handoff-contract.md  format-reference.md
    synthesis-guide.md
@@ -195,16 +195,16 @@ The chain protocol links sessions together via state files:
 
 ```
 Session A (/save)
-  └─ Writes handoff → cleans up state file
+  └─ Writes handoff with active-writer reservation
 
 Session B (/load)
-  └─ Archives handoff → writes state file (points to archive)
+  └─ Archives handoff under .codex/handoffs/archive/ → writes JSON state file
 
 Session C (/save, resumed from B)
-  └─ Reads state file → sets resumed_from → writes new handoff → cleans up state file
+  └─ Reads JSON state → sets resumed_from → writes new handoff → clears consumed state
 ```
 
-State files are plain text containing a single path. Created by `/load`, consumed by `/save` and `/quicksave`, cleaned up after use. 24-hour TTL handles orphaned state files from crashed sessions.
+State files are JSON records under `.codex/handoffs/.session-state/handoff-<project>-<resume_token>.json`. Created by `/load`, consumed by `/save`, `/quicksave`, and `/summary`, then cleared after use. Active writers can bridge one valid legacy state file when needed and mark that source consumed without modifying legacy bytes. A 24-hour TTL handles orphaned state files from crashed sessions.
 
 ### Design Principles
 

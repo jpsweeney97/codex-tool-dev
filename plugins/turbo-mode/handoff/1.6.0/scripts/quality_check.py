@@ -6,7 +6,7 @@ plugin manifest. This module still accepts PostToolUse-shaped JSON so it can be
 tested and reused by a future documented hook launcher architecture.
 
 Reads PostToolUse JSON from stdin. If the written file is a handoff,
-checkpoint, or summary (path under <project_root>/docs/handoffs/), validates:
+checkpoint, or summary (path under <project_root>/.codex/handoffs/), validates:
 - Required frontmatter fields present, non-blank, and valid
 - Required sections present (13 for handoffs, 8 for summaries, 5 for checkpoints)
 - Line count within range (400+ for handoffs, 120-250 for summaries, 20-80 for checkpoints)
@@ -394,8 +394,8 @@ def validate(content: str) -> list[Issue]:
 def is_handoff_path(file_path: str) -> bool:
     """Check if file is a handoff/checkpoint (active or archived).
 
-    Valid: <root>/docs/handoffs/<file>.md, <root>/docs/handoffs/archive/<file>.md
-    Invalid: non-.md, deeper nesting, no docs parent, handoffs-variant directories.
+    Valid: <root>/.codex/handoffs/<file>.md, <root>/.codex/handoffs/archive/<file>.md
+    Invalid: non-.md, deeper nesting, no .codex parent, handoffs-variant directories.
     """
     path = Path(file_path)
 
@@ -404,7 +404,7 @@ def is_handoff_path(file_path: str) -> bool:
 
     parts = path.parts
     for i in range(len(parts) - 1):
-        if parts[i] == "docs" and parts[i + 1] == "handoffs":
+        if parts[i] == ".codex" and parts[i + 1] == "handoffs":
             remaining = parts[i + 2:]
             # Direct child of handoffs/
             if len(remaining) == 1:
