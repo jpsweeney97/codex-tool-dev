@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 import scripts.active_writes as active_writes
 import scripts.session_state as session_state
+from scripts.storage_authority import chain_state_recovery_inventory, read_chain_state
 
 
 @pytest.mark.parametrize(
@@ -60,6 +61,88 @@ def test_active_writer_flow_cli_runs_begin_generate_write_protocol(
     )
     assert state["status"] == "committed"
     assert active_path.read_text(encoding="utf-8").startswith("---\n")
+
+
+@pytest.mark.parametrize(
+    ("operation", "expected_slug"),
+    [
+        ("save", "handoff"),
+        ("summary", "summary"),
+        ("quicksave", "checkpoint"),
+    ],
+)
+def test_active_writer_flow_cli_bridges_legacy_state_and_marks_source_consumed(
+    tmp_path: Path,
+    operation: str,
+    expected_slug: str,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    archive = tmp_path / "docs" / "handoffs" / "archive" / "previous.md"
+    archive.parent.mkdir(parents=True)
+    archive.write_text("---\ntitle: Previous\n---\n", encoding="utf-8")
+    legacy_state = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    legacy_state.parent.mkdir(parents=True)
+    legacy_payload = {
+        "state_path": str(legacy_state),
+        "project": "demo",
+        "resume_token": "token-b",
+        "archive_path": str(archive),
+        "created_at": "2026-05-13T16:00:00Z",
+    }
+    legacy_state.write_text(json.dumps(legacy_payload, indent=2), encoding="utf-8")
+    legacy_bytes = legacy_state.read_bytes()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "active-writer-flow",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--operation",
+            operation,
+            "--run-id",
+            f"{operation}-bridge-flow",
+            "--created-at",
+            "2026-05-13T16:45:00Z",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    operation_state_path = Path(payload["operation_state_path"])
+    operation_state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    primary_state = (
+        tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    )
+    inventory = chain_state_recovery_inventory(tmp_path, project_name="demo")
+    by_path = {
+        candidate["project_relative_state_path"]: candidate
+        for candidate in inventory["candidates"]
+    }
+
+    assert Path(payload["active_path"]) == (
+        tmp_path
+        / ".codex"
+        / "handoffs"
+        / f"2026-05-13_16-45_{operation}-{expected_slug}.md"
+    )
+    assert operation_state["resumed_from_path"] == str(archive)
+    assert operation_state["resumed_from_hash"] == hashlib.sha256(archive.read_bytes()).hexdigest()
+    assert operation_state["state_cleanup_action"] == "cleared-primary-state"
+    assert operation_state["state_cleanup_path"] == str(primary_state)
+    assert primary_state.exists() is False
+    assert legacy_state.read_bytes() == legacy_bytes
+    assert (
+        by_path["docs/handoffs/.session-state/handoff-demo-token-b.json"]["marker_status"]
+        == "consumed"
+    )
+    assert read_chain_state(tmp_path, project_name="demo")["status"] == "absent"
 
 
 def test_active_writer_flow_cli_reuses_same_run_retry(

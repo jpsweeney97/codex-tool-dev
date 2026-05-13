@@ -14,10 +14,20 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 try:
-    from scripts.storage_authority import get_storage_layout
+    from scripts.storage_authority import (
+        ChainStateDiagnosticError,
+        continue_chain_state,
+        get_storage_layout,
+        read_chain_state,
+    )
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from scripts.storage_authority import get_storage_layout  # type: ignore[no-redef]
+    from scripts.storage_authority import (  # type: ignore[no-redef]
+        ChainStateDiagnosticError,
+        continue_chain_state,
+        get_storage_layout,
+        read_chain_state,
+    )
 
 
 class ActiveWriteError(RuntimeError):
@@ -124,6 +134,7 @@ def begin_active_write(
     lock_path = layout.primary_state_dir / "locks" / "active-write.lock"
     _acquire_lock(lock_path, project=project, operation=operation, transaction_id=transaction_id)
     try:
+        _continue_legacy_chain_state_if_unambiguous(layout.project_root, project=project)
         (
             state_snapshot_id,
             state_snapshot_hash,
@@ -203,6 +214,38 @@ def begin_active_write(
         return reservation
     finally:
         _release_lock(lock_path)
+
+
+def _continue_legacy_chain_state_if_unambiguous(project_root: Path, *, project: str) -> None:
+    try:
+        chain_state = read_chain_state(project_root, project_name=project)
+    except ChainStateDiagnosticError as exc:
+        raise _chain_state_active_write_error(exc) from exc
+    if chain_state.get("status") != "legacy-bridge-required":
+        return
+    candidate = chain_state.get("state")
+    if not isinstance(candidate, dict):
+        raise ActiveWriteError(
+            "begin-active-write failed: legacy chain-state candidate was invalid. Got: None"
+        )
+    try:
+        continue_chain_state(
+            project_root,
+            project_name=project,
+            state_path=str(candidate["project_relative_state_path"]),
+            expected_payload_sha256=str(candidate["payload_sha256"]),
+        )
+    except ChainStateDiagnosticError as exc:
+        raise _chain_state_active_write_error(exc) from exc
+
+
+def _chain_state_active_write_error(exc: ChainStateDiagnosticError) -> ActiveWriteError:
+    error = exc.payload.get("error", {})
+    code = error.get("code") if isinstance(error, dict) else "unknown"
+    return ActiveWriteError(
+        "begin-active-write failed: chain-state recovery required. "
+        f"Got: {code!r:.100}"
+    )
 
 
 def _existing_reservation(
