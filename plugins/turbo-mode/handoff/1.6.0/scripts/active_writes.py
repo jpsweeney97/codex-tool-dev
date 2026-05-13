@@ -518,6 +518,7 @@ def recover_active_write_transaction(
             return state
         if state.get("status") == "abandoned":
             return state
+        recovered_from_status = str(state.get("status", ""))
         active_path = Path(str(state.get("active_path") or state["allocated_active_path"]))
         content_hash = str(state.get("content_hash") or state.get("output_sha256") or "")
         if not content_hash:
@@ -560,6 +561,7 @@ def recover_active_write_transaction(
             "active_path": str(active_path),
             "content_hash": content_hash,
             "output_sha256": content_hash,
+            "recovered_from_status": recovered_from_status,
             "state_cleanup_action": cleanup_action,
             "state_cleanup_path": cleanup_path,
             "updated_at": updated_at,

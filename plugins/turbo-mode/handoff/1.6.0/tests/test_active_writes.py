@@ -625,7 +625,7 @@ def test_active_write_transaction_recover_commits_verified_written_output(
     content = "---\ntitle: Recover\n---\n\n# Written\n"
     active_path.write_text(content, encoding="utf-8")
     content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-    state["status"] = "write-pending"
+    state["status"] = "written_not_confirmed"
     state["content_hash"] = content_hash
     state["output_sha256"] = content_hash
     operation_state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
@@ -653,8 +653,10 @@ def test_active_write_transaction_recover_commits_verified_written_output(
     transaction = json.loads(Path(updated["transaction_path"]).read_text(encoding="utf-8"))
     assert updated["status"] == "committed"
     assert updated["active_path"] == str(active_path)
+    assert updated["recovered_from_status"] == "written_not_confirmed"
     assert transaction["status"] == "completed"
     assert transaction["active_path"] == str(active_path)
+    assert transaction["recovered_from_status"] == "written_not_confirmed"
 
 
 def test_active_write_transaction_recover_records_content_mismatch(
