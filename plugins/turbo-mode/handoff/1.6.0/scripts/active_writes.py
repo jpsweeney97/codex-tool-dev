@@ -389,6 +389,23 @@ def write_active_handoff(
                 f"Got: {content_sha256!r:.100}"
             )
         active_path = Path(str(state["allocated_active_path"]))
+        transaction_path = Path(str(state["transaction_path"]))
+        if state.get("status") != "committed":
+            generated_at = datetime.now(UTC).isoformat()
+            state.update({
+                "status": "content-generated",
+                "content_hash": content_sha256,
+                "output_sha256": content_sha256,
+                "updated_at": generated_at,
+            })
+            _write_json_atomic(operation_state_path, state)
+            _write_json_atomic(
+                transaction_path,
+                {
+                    **state,
+                    "status": "content-generated",
+                },
+            )
         temp_active_path: str | None = None
         if active_path.exists():
             existing_hash = _sha256_path(active_path)
@@ -402,10 +419,16 @@ def write_active_handoff(
                     f"Got: {str(active_path)!r:.100}"
                 )
         else:
-            active_path.parent.mkdir(parents=True, exist_ok=True)
-            temp_path = active_path.with_name(f".{active_path.name}.{uuid.uuid4().hex}.tmp")
-            temp_active_path = str(temp_path)
-            temp_path.write_text(content, encoding="utf-8")
+            try:
+                active_path.parent.mkdir(parents=True, exist_ok=True)
+                temp_path = active_path.with_name(f".{active_path.name}.{uuid.uuid4().hex}.tmp")
+                temp_active_path = str(temp_path)
+                temp_path.write_text(content, encoding="utf-8")
+            except OSError as exc:
+                raise ActiveWriteError(
+                    "write-active-handoff failed: active output write failed. "
+                    f"Got: {str(active_path)!r:.100}"
+                ) from exc
             temp_hash = _sha256_path(temp_path)
             if temp_hash != content_sha256:
                 try:
@@ -427,7 +450,6 @@ def write_active_handoff(
             "updated_at": updated_at,
         })
         _write_json_atomic(operation_state_path, state)
-        transaction_path = Path(str(state["transaction_path"]))
         _write_json_atomic(
             transaction_path,
             {

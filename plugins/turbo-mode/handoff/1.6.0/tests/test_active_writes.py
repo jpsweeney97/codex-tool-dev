@@ -542,6 +542,44 @@ def test_write_active_handoff_changed_content_retry_preserves_committed_state(
     assert Path(state["active_path"]).read_text(encoding="utf-8") == original
 
 
+def test_write_active_handoff_records_content_generated_before_output_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reservation = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="save",
+        slug="generated-before-write",
+        created_at="2026-05-13T16:45:00Z",
+    )
+    content = "---\ntitle: Generated before write\n---\n\n# Handoff\n"
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    original_write_text = Path.write_text
+
+    def fail_active_temp_write(path: Path, *args: object, **kwargs: object) -> int:
+        if path.parent == reservation.allocated_active_path.parent and path.name.startswith("."):
+            raise OSError("active temp write failed")
+        return original_write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_active_temp_write)
+
+    with pytest.raises(active_writes.ActiveWriteError, match="active output write failed"):
+        active_writes.write_active_handoff(
+            tmp_path,
+            operation_state_path=reservation.operation_state_path,
+            content=content,
+            content_sha256=content_hash,
+        )
+
+    state = json.loads(reservation.operation_state_path.read_text(encoding="utf-8"))
+    transaction = json.loads(reservation.transaction_path.read_text(encoding="utf-8"))
+    assert state["status"] == "content-generated"
+    assert state["content_hash"] == content_hash
+    assert transaction["status"] == "content-generated"
+    assert transaction["content_hash"] == content_hash
+
+
 def test_abandon_active_write_marks_operation_and_transaction_without_deleting_output(
     tmp_path: Path,
 ) -> None:
