@@ -390,3 +390,79 @@ def test_active_write_transaction_recover_commits_verified_written_output(
     assert updated["active_path"] == str(active_path)
     assert transaction["status"] == "completed"
     assert transaction["active_path"] == str(active_path)
+
+
+def test_write_active_handoff_clears_snapshotted_primary_state_after_output_write(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    archive = tmp_path / ".codex" / "handoffs" / "archive" / "previous.md"
+    archive.parent.mkdir(parents=True)
+    archive.write_text("---\ntitle: Previous\n---\n", encoding="utf-8")
+    state_dir = tmp_path / ".codex" / "handoffs" / ".session-state"
+    state_dir.mkdir(parents=True)
+    state_path = state_dir / "handoff-demo-resume.json"
+    state_path.write_text(
+        json.dumps({
+            "state_path": str(state_path),
+            "project": "demo",
+            "resume_token": "resume",
+            "archive_path": str(archive),
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+    begin = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "begin-active-write",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--operation",
+            "save",
+            "--slug",
+            "clears-state",
+            "--created-at",
+            "2026-05-13T16:45:00Z",
+            "--field",
+            "operation_state_path",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    operation_state_path = Path(begin.stdout.strip())
+    content = "---\ntitle: Clears state\nresumed_from: previous.md\n---\n\n# Handoff\n"
+    content_path = tmp_path / "content.md"
+    content_path.write_text(content, encoding="utf-8")
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+    write = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "write-active-handoff",
+            "--project-root",
+            str(tmp_path),
+            "--operation-state-path",
+            str(operation_state_path),
+            "--content-file",
+            str(content_path),
+            "--content-sha256",
+            content_hash,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert write.returncode == 0, write.stderr
+    assert not state_path.exists()
+    state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    transaction = json.loads(Path(state["transaction_path"]).read_text(encoding="utf-8"))
+    assert state["state_cleanup_action"] == "cleared-primary-state"
+    assert state["state_cleanup_path"] == str(state_path)
+    assert transaction["state_cleanup_action"] == "cleared-primary-state"

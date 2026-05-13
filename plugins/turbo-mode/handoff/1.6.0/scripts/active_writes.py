@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import socket
+import subprocess
 import sys
 import uuid
 from dataclasses import dataclass
@@ -35,6 +36,7 @@ class ActiveWriteReservation:
     allocated_active_path: Path
     state_snapshot_id: str
     state_snapshot_hash: str
+    state_snapshot_paths: list[str]
     resumed_from_path: str | None
     resumed_from_hash: str | None
     bound_slug: str
@@ -61,6 +63,7 @@ class ActiveWriteReservation:
             "allocated_active_path": str(self.allocated_active_path),
             "state_snapshot_id": self.state_snapshot_id,
             "state_snapshot_hash": self.state_snapshot_hash,
+            "state_snapshot_paths": self.state_snapshot_paths,
             "resumed_from_path": self.resumed_from_path,
             "resumed_from_hash": self.resumed_from_hash,
             "bound_slug": self.bound_slug,
@@ -100,7 +103,13 @@ def begin_active_write(
     lock_path = layout.primary_state_dir / "locks" / "active-write.lock"
     _acquire_lock(lock_path, project=project, operation=operation, transaction_id=transaction_id)
     try:
-        state_snapshot_id, state_snapshot_hash, resumed_path, resumed_hash = _state_snapshot(
+        (
+            state_snapshot_id,
+            state_snapshot_hash,
+            state_snapshot_paths,
+            resumed_path,
+            resumed_hash,
+        ) = _state_snapshot(
             layout.primary_state_dir,
             project,
         )
@@ -142,6 +151,7 @@ def begin_active_write(
             allocated_active_path=active_path,
             state_snapshot_id=state_snapshot_id,
             state_snapshot_hash=state_snapshot_hash,
+            state_snapshot_paths=state_snapshot_paths,
             resumed_from_path=resumed_path,
             resumed_from_hash=resumed_hash,
             bound_slug=slug,
@@ -218,11 +228,14 @@ def write_active_handoff(
                 )
             os.replace(temp_path, active_path)
         updated_at = datetime.now(UTC).isoformat()
+        cleanup_action, cleanup_path = _clear_snapshotted_primary_state(state)
         state.update({
             "status": "committed",
             "active_path": str(active_path),
             "content_hash": content_sha256,
             "output_sha256": content_sha256,
+            "state_cleanup_action": cleanup_action,
+            "state_cleanup_path": cleanup_path,
             "updated_at": updated_at,
         })
         _write_json_atomic(operation_state_path, state)
@@ -334,11 +347,14 @@ def recover_active_write_transaction(
                 f"Got: {str(active_path)!r:.100}"
             )
         updated_at = datetime.now(UTC).isoformat()
+        cleanup_action, cleanup_path = _clear_snapshotted_primary_state(state)
         state.update({
             "status": "committed",
             "active_path": str(active_path),
             "content_hash": content_hash,
             "output_sha256": content_hash,
+            "state_cleanup_action": cleanup_action,
+            "state_cleanup_path": cleanup_path,
             "updated_at": updated_at,
         })
         _write_json_atomic(operation_state_path, state)
@@ -369,22 +385,53 @@ def _allocate_active_path(active_dir: Path, slug: str, created_at: datetime) -> 
     )
 
 
-def _state_snapshot(state_dir: Path, project: str) -> tuple[str, str, str | None, str | None]:
+def _state_snapshot(
+    state_dir: Path,
+    project: str,
+) -> tuple[str, str, list[str], str | None, str | None]:
     states = sorted(state_dir.glob(f"handoff-{project}-*.json"))
     if not states:
-        return "no-state", _stable_hash(["no-state"]), None, None
+        return "no-state", _stable_hash(["no-state"]), [], None, None
     payload_parts: list[str] = []
+    state_paths: list[str] = []
     resumed_path: str | None = None
     for path in states:
         data = path.read_text(encoding="utf-8")
         payload_parts.extend([path.name, data])
+        state_paths.append(str(path))
         if resumed_path is None:
             try:
                 resumed_path = str(json.loads(data).get("archive_path", ""))
             except json.JSONDecodeError:
                 resumed_path = None
     resumed_hash = _sha256_path(Path(resumed_path)) if resumed_path else None
-    return "primary-state", _stable_hash(payload_parts), resumed_path, resumed_hash
+    return "primary-state", _stable_hash(payload_parts), state_paths, resumed_path, resumed_hash
+
+
+def _clear_snapshotted_primary_state(state: dict[str, object]) -> tuple[str, str | None]:
+    paths = [Path(str(path)) for path in state.get("state_snapshot_paths", [])]
+    if not paths:
+        return "none", None
+    if len(paths) > 1:
+        raise ActiveWriteError(
+            f"write-active-handoff failed: ambiguous state cleanup. Got: {len(paths)!r:.100}"
+        )
+    path = paths[0]
+    if not path.exists():
+        return "already-cleared-primary-state", str(path)
+    try:
+        subprocess.run(["trash", str(path)], capture_output=True, text=True, timeout=5, check=True)
+    except (
+        OSError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        FileNotFoundError,
+    ) as exc:
+        raise ActiveWriteError(
+            "write-active-handoff failed: state cleanup failed. "
+            f"Got: {str(path)!r:.100}"
+        ) from exc
+    return "cleared-primary-state", str(path)
 
 
 def _transaction_watermark(state_dir: Path) -> str:
