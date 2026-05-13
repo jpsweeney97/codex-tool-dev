@@ -171,6 +171,22 @@ def abandon_active_write(
     )
 
 
+def recover_active_write_transaction(
+    project_root: Path,
+    *,
+    operation_state_path: Path,
+) -> dict[str, object]:
+    """Recover an active write transaction through the storage facade."""
+    from scripts.active_writes import (
+        recover_active_write_transaction as _recover_active_write_transaction,
+    )
+
+    return _recover_active_write_transaction(
+        project_root,
+        operation_state_path=operation_state_path,
+    )
+
+
 def discover_handoff_inventory(
     project_root: Path,
     *,

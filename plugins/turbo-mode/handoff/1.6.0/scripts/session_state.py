@@ -287,6 +287,23 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
     )
 
+    recover_active_parser = subparsers.add_parser("active-write-transaction-recover")
+    recover_active_parser.add_argument("--project-root", required=True)
+    recover_active_parser.add_argument("--operation-state-path", required=True)
+    recover_active_parser.add_argument(
+        "--field",
+        choices=(
+            "status",
+            "active_path",
+            "operation_state_path",
+            "transaction_id",
+            "transaction_path",
+            "content_hash",
+            "output_sha256",
+        ),
+        default=None,
+    )
+
     args = parser.parse_args(argv)
     if args.command == "archive":
         source = Path(args.source)
@@ -368,6 +385,19 @@ def main(argv: list[str] | None = None) -> int:
                 Path(args.project_root),
                 operation_state_path=Path(args.operation_state_path),
                 reason=args.reason,
+            )
+        except ActiveWriteError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        return _emit(payload, args.field)
+    if args.command == "active-write-transaction-recover":
+        from scripts.active_writes import ActiveWriteError
+        from scripts.storage_authority import recover_active_write_transaction
+
+        try:
+            payload = recover_active_write_transaction(
+                Path(args.project_root),
+                operation_state_path=Path(args.operation_state_path),
             )
         except ActiveWriteError as exc:
             print(exc, file=sys.stderr)

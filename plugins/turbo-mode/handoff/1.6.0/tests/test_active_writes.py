@@ -326,3 +326,67 @@ def test_abandon_active_write_marks_operation_and_transaction_without_deleting_o
     assert updated["abandon_reason"] == "operator selected a new save"
     assert transaction["status"] == "abandoned"
     assert reserved_output.read_text(encoding="utf-8") == "operator-owned bytes\n"
+
+
+def test_active_write_transaction_recover_commits_verified_written_output(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    begin = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "begin-active-write",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--operation",
+            "summary",
+            "--slug",
+            "recover-written",
+            "--created-at",
+            "2026-05-13T16:45:00Z",
+            "--field",
+            "operation_state_path",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    operation_state_path = Path(begin.stdout.strip())
+    state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    active_path = Path(state["allocated_active_path"])
+    content = "---\ntitle: Recover\n---\n\n# Written\n"
+    active_path.write_text(content, encoding="utf-8")
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    state["status"] = "write-pending"
+    state["content_hash"] = content_hash
+    state["output_sha256"] = content_hash
+    operation_state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+    recovered = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "active-write-transaction-recover",
+            "--project-root",
+            str(tmp_path),
+            "--operation-state-path",
+            str(operation_state_path),
+            "--field",
+            "status",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert recovered.returncode == 0, recovered.stderr
+    assert recovered.stdout.strip() == "committed"
+    updated = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    transaction = json.loads(Path(updated["transaction_path"]).read_text(encoding="utf-8"))
+    assert updated["status"] == "committed"
+    assert updated["active_path"] == str(active_path)
+    assert transaction["status"] == "completed"
+    assert transaction["active_path"] == str(active_path)

@@ -298,6 +298,62 @@ def abandon_active_write(
         _release_lock(lock_path)
 
 
+def recover_active_write_transaction(
+    project_root: Path,
+    *,
+    operation_state_path: Path,
+) -> dict[str, object]:
+    """Recover a verifiable active-write transaction without regenerating content."""
+    layout = get_storage_layout(project_root)
+    state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    project = str(state.get("project", layout.project_root.name))
+    operation = str(state.get("operation", ""))
+    transaction_id = str(state.get("transaction_id", ""))
+    lock_path = layout.primary_state_dir / "locks" / "active-write.lock"
+    _acquire_lock(lock_path, project=project, operation=operation, transaction_id=transaction_id)
+    try:
+        if state.get("status") == "committed":
+            return state
+        if state.get("status") == "abandoned":
+            return state
+        active_path = Path(str(state.get("active_path") or state["allocated_active_path"]))
+        content_hash = str(state.get("content_hash") or state.get("output_sha256") or "")
+        if not content_hash:
+            return state
+        if not active_path.exists():
+            state["status"] = "pending_before_write"
+            state["updated_at"] = datetime.now(UTC).isoformat()
+            _write_json_atomic(operation_state_path, state)
+            return state
+        if _sha256_path(active_path) != content_hash:
+            state["status"] = "content_mismatch"
+            state["updated_at"] = datetime.now(UTC).isoformat()
+            _write_json_atomic(operation_state_path, state)
+            raise ActiveWriteError(
+                "active-write-transaction-recover failed: active output content mismatch. "
+                f"Got: {str(active_path)!r:.100}"
+            )
+        updated_at = datetime.now(UTC).isoformat()
+        state.update({
+            "status": "committed",
+            "active_path": str(active_path),
+            "content_hash": content_hash,
+            "output_sha256": content_hash,
+            "updated_at": updated_at,
+        })
+        _write_json_atomic(operation_state_path, state)
+        transaction_path = Path(str(state["transaction_path"]))
+        transaction = {
+            **state,
+            "status": "completed",
+            "active_path": str(active_path),
+        }
+        _write_json_atomic(transaction_path, transaction)
+        return state
+    finally:
+        _release_lock(lock_path)
+
+
 def _allocate_active_path(active_dir: Path, slug: str, created_at: datetime) -> Path:
     active_dir.mkdir(parents=True, exist_ok=True)
     prefix = created_at.strftime("%Y-%m-%d_%H-%M")
