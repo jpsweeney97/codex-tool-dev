@@ -361,6 +361,104 @@ def mark_chain_state_consumed(
     }
 
 
+def continue_chain_state(
+    project_root: Path,
+    *,
+    project_name: str,
+    state_path: str,
+    expected_payload_sha256: str,
+) -> dict[str, object]:
+    """Continue from one exact legacy/state-like candidate into primary state."""
+    layout = get_storage_layout(project_root)
+    inventory = chain_state_recovery_inventory(layout.project_root, project_name=project_name)
+    candidate = _select_chain_state_candidate(inventory, selector=state_path)
+    if candidate["storage_location"] == StorageLocation.PRIMARY_STATE:
+        return {
+            "status": "continued",
+            "state_path": candidate["resolved_path"],
+            "transaction_path": None,
+            "marker_path": None,
+        }
+    if candidate["validation_status"] != "valid":
+        raise ChainStateDiagnosticError(
+            _operator_error(
+                code="chain-state-candidate-invalid",
+                message="continue-chain-state requires a valid chain-state candidate.",
+                candidate=candidate,
+            )
+        )
+    if candidate["payload_sha256"] != expected_payload_sha256:
+        raise ChainStateDiagnosticError(
+            _operator_error(
+                code="chain-state-payload-hash-mismatch",
+                message="Selected chain-state payload hash does not match expected hash.",
+                candidate=candidate,
+            )
+        )
+    resume_token = str(candidate["resume_token"] or uuid.uuid4().hex)
+    primary_state_path = layout.primary_state_dir / f"handoff-{project_name}-{resume_token}.json"
+    marker_path = layout.primary_state_dir / "markers" / "chain-state-consumed.json"
+    transaction_id = uuid.uuid4().hex
+    transaction_path = layout.primary_state_dir / "transactions" / f"{transaction_id}.json"
+    now = datetime.now(UTC).isoformat()
+    stable_key = _chain_state_stable_key(candidate)
+    primary_payload = {
+        "state_path": str(primary_state_path),
+        "project": project_name,
+        "resume_token": resume_token,
+        "archive_path": candidate["archive_path"],
+        "created_at": now,
+        "resumed_from": {
+            **stable_key,
+            "lexical_path": candidate["lexical_path"],
+            "resolved_path": candidate["resolved_path"],
+        },
+    }
+    marker = _read_json_object(marker_path)
+    entries = marker.get("entries")
+    if not isinstance(entries, list):
+        entries = []
+    if not any(
+        isinstance(entry, dict) and entry.get("stable_key") == stable_key
+        for entry in entries
+    ):
+        entries.append({
+            "stable_key": stable_key,
+            "reason": "continued into primary chain state",
+            "marked_at": now,
+            "transaction_id": transaction_id,
+            "lexical_path": candidate["lexical_path"],
+            "resolved_path": candidate["resolved_path"],
+        })
+    marker = {
+        "schema_version": 1,
+        "entries": entries,
+    }
+    transaction = {
+        "schema_version": 1,
+        "transaction_id": transaction_id,
+        "operation": "continue-chain-state",
+        "status": "completed",
+        "project": project_name,
+        "state_path": str(primary_state_path),
+        "stable_key": stable_key,
+        "marker_path": str(marker_path),
+        "created_at": now,
+        "completed_at": now,
+    }
+    _write_json_atomic(primary_state_path, primary_payload)
+    _write_json_atomic(marker_path, marker)
+    _write_json_atomic(transaction_path, transaction)
+    return {
+        "status": "continued",
+        "state_path": str(primary_state_path),
+        "marker_path": str(marker_path),
+        "transaction_path": str(transaction_path),
+        "transaction_id": transaction_id,
+        "stable_key": stable_key,
+    }
+
+
 def read_chain_state(
     project_root: Path,
     *,

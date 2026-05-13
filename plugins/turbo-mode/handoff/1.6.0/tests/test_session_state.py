@@ -621,6 +621,84 @@ def test_mark_chain_state_consumed_suppresses_unresolved_legacy_state(
     assert legacy_row["marker_status"] == "consumed"
 
 
+def test_continue_chain_state_from_legacy_writes_primary_and_marks_source_consumed(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    legacy = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy_payload = {
+        "state_path": str(legacy),
+        "project": "demo",
+        "resume_token": "token-b",
+        "archive_path": "/tmp/legacy.md",
+        "created_at": "2026-05-13T16:01:00Z",
+    }
+    legacy_bytes = json.dumps(legacy_payload)
+    legacy.write_text(legacy_bytes, encoding="utf-8")
+    legacy_hash = hashlib.sha256(legacy_bytes.encode("utf-8")).hexdigest()
+
+    continued = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "continue-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--state-path",
+            "docs/handoffs/.session-state/handoff-demo-token-b.json",
+            "--expected-payload-sha256",
+            legacy_hash,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert continued.returncode == 0, continued.stderr
+    payload = json.loads(continued.stdout)
+    primary_state_path = Path(payload["state_path"])
+    transaction_path = Path(payload["transaction_path"])
+    marker_path = Path(payload["marker_path"])
+    assert primary_state_path == (
+        tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    )
+    assert transaction_path.exists()
+    assert marker_path.exists()
+    primary_payload = json.loads(primary_state_path.read_text(encoding="utf-8"))
+    assert primary_payload["project"] == "demo"
+    assert primary_payload["resume_token"] == "token-b"
+    assert primary_payload["archive_path"] == "/tmp/legacy.md"
+    assert primary_payload["resumed_from"]["storage_location"] == "legacy_state"
+    assert primary_payload["resumed_from"]["payload_sha256"] == legacy_hash
+    assert json.loads(transaction_path.read_text(encoding="utf-8"))["operation"] == (
+        "continue-chain-state"
+    )
+    assert legacy.read_text(encoding="utf-8") == legacy_bytes
+
+    read_after = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+    assert read_after.returncode == 0, read_after.stderr
+    read_payload = json.loads(read_after.stdout)
+    assert read_payload["status"] == "found"
+    assert read_payload["source"] == "primary"
+    assert read_payload["state"]["resume_token"] == "token-b"
+
+
 def test_read_chain_state_cli_reads_single_primary_state(tmp_path: Path) -> None:
     script = Path(__file__).parent.parent / "scripts" / "session_state.py"
     primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
