@@ -4,6 +4,7 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 import scripts.load_transactions as load_transactions
@@ -249,7 +250,7 @@ def test_tracked_primary_active_load_fails_before_mutation(tmp_path: Path) -> No
 
 def test_load_lock_blocks_concurrent_attempt_before_mutation(tmp_path: Path) -> None:
     source = _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_locked.md")
-    lock = tmp_path / ".codex" / "handoffs" / ".session-state" / "load.lock"
+    lock = tmp_path / ".codex" / "handoffs" / ".session-state" / "locks" / "load.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
     lock.write_text("busy", encoding="utf-8")
 
@@ -258,6 +259,52 @@ def test_load_lock_blocks_concurrent_attempt_before_mutation(tmp_path: Path) -> 
 
     assert source.exists()
     assert not (tmp_path / ".codex" / "handoffs" / "archive").exists()
+
+
+def test_load_lock_metadata_exists_during_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_locked.md")
+    observed: dict[str, Any] = {}
+
+    def inspect_lock(
+        project_root: Path,
+        *,
+        candidate: object,
+        project_name: str | None,
+        resume_token: str | None,
+        transaction_id: str,
+    ) -> load_transactions.LoadResult:
+        lock = (
+            tmp_path
+            / ".codex"
+            / "handoffs"
+            / ".session-state"
+            / "locks"
+            / "load.lock"
+        )
+        observed["lock_exists"] = lock.exists()
+        observed["metadata"] = json.loads(lock.read_text(encoding="utf-8"))
+        raise RuntimeError("stop after lock inspection")
+
+    monkeypatch.setattr(load_transactions, "_load_handoff_locked", inspect_lock)
+
+    with pytest.raises(RuntimeError, match="stop after lock inspection"):
+        load_transactions.load_handoff(tmp_path, project_name="demo", resume_token="lock")
+
+    assert observed["lock_exists"] is True
+    assert observed["metadata"]["project"] == "demo"
+    assert observed["metadata"]["operation"] == "load"
+    assert observed["metadata"]["transaction_id"]
+    assert observed["metadata"]["transaction_id"] == observed["metadata"]["lock_id"]
+    assert observed["metadata"]["pid"] > 0
+    assert observed["metadata"]["hostname"]
+    assert observed["metadata"]["created_at"]
+    assert observed["metadata"]["timeout_seconds"] == 1800
+    assert not (
+        tmp_path / ".codex" / "handoffs" / ".session-state" / "locks" / "load.lock"
+    ).exists()
 
 
 def test_read_only_recovery_inventory_reports_pending_transactions(tmp_path: Path) -> None:

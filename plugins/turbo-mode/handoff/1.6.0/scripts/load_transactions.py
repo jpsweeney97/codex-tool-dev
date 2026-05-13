@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import socket
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -50,14 +51,22 @@ def load_handoff(
     layout = get_storage_layout(project_root)
     candidate = _select_candidate(layout.project_root, explicit_path=explicit_path)
     _ensure_loadable(candidate)
-    lock_path = layout.primary_state_dir / "load.lock"
-    _acquire_lock(lock_path)
+    transaction_id = uuid.uuid4().hex
+    project = project_name or layout.project_root.name
+    lock_path = layout.primary_state_dir / "locks" / "load.lock"
+    _acquire_lock(
+        lock_path,
+        project=project,
+        operation="load",
+        transaction_id=transaction_id,
+    )
     try:
         return _load_handoff_locked(
             layout.project_root,
             candidate=candidate,
             project_name=project_name,
             resume_token=resume_token,
+            transaction_id=transaction_id,
         )
     finally:
         _release_lock(lock_path)
@@ -69,9 +78,9 @@ def _load_handoff_locked(
     candidate: HandoffCandidate,
     project_name: str | None,
     resume_token: str | None,
+    transaction_id: str,
 ) -> LoadResult:
     layout = get_storage_layout(project_root)
-    transaction_id = uuid.uuid4().hex
     transaction_path = layout.primary_state_dir / "transactions" / f"{transaction_id}.json"
     project = project_name or layout.project_root.name
     _write_transaction(
@@ -170,7 +179,13 @@ def list_load_recovery_records(project_root: Path) -> list[dict[str, object]]:
     return records
 
 
-def _acquire_lock(path: Path) -> None:
+def _acquire_lock(
+    path: Path,
+    *,
+    project: str,
+    operation: str,
+    transaction_id: str,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -178,8 +193,18 @@ def _acquire_lock(path: Path) -> None:
         raise LoadTransactionError(
             f"load-handoff failed: project load lock is already held. Got: {str(path)!r:.100}"
         ) from exc
+    metadata = {
+        "project": project,
+        "operation": operation,
+        "transaction_id": transaction_id,
+        "lock_id": transaction_id,
+        "pid": os.getpid(),
+        "hostname": socket.gethostname(),
+        "created_at": datetime.now(UTC).isoformat(),
+        "timeout_seconds": 1800,
+    }
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(f"{os.getpid()}\n")
+        json.dump(metadata, handle, indent=2)
 
 
 def _release_lock(path: Path) -> None:
