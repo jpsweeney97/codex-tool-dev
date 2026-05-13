@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -826,6 +827,89 @@ def test_read_chain_state_cli_rejects_expired_legacy_state_with_inventory(
     assert len(payload["candidates"]) == 1
     assert payload["candidates"][0]["validation_status"] == "expired"
     assert payload["candidates"][0]["validation_error"] == "chain state TTL expired"
+
+
+def test_consumed_legacy_state_marker_survives_copied_project_root(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    source_root = tmp_path / "source"
+    copied_root = tmp_path / "copied"
+    legacy = source_root / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy_payload = {
+        "state_path": str(legacy),
+        "project": "demo",
+        "resume_token": "token-b",
+        "archive_path": "/tmp/legacy.md",
+        "created_at": "2026-05-13T16:01:00Z",
+    }
+    legacy_bytes = json.dumps(legacy_payload)
+    legacy.write_text(legacy_bytes, encoding="utf-8")
+    legacy_hash = hashlib.sha256(legacy_bytes.encode("utf-8")).hexdigest()
+
+    marked = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "mark-chain-state-consumed",
+            "--project-root",
+            str(source_root),
+            "--project",
+            "demo",
+            "--state-path",
+            "docs/handoffs/.session-state/handoff-demo-token-b.json",
+            "--expected-payload-sha256",
+            legacy_hash,
+            "--reason",
+            "stale duplicate",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(source_root),
+    )
+    assert marked.returncode == 0, marked.stderr
+
+    shutil.copytree(source_root, copied_root)
+
+    read_after_copy = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(copied_root),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(copied_root),
+    )
+    assert read_after_copy.returncode == 1
+
+    inventory_after_copy = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "list-chain-state",
+            "--project-root",
+            str(copied_root),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(copied_root),
+    )
+    assert inventory_after_copy.returncode == 0, inventory_after_copy.stderr
+    inventory = json.loads(inventory_after_copy.stdout)
+    legacy_row = inventory["candidates"][0]
+    assert legacy_row["project_relative_state_path"] == (
+        "docs/handoffs/.session-state/handoff-demo-token-b.json"
+    )
+    assert legacy_row["marker_status"] == "consumed"
+    assert legacy_row["payload_sha256"] == legacy_hash
 
 
 def test_read_chain_state_cli_reads_single_primary_state(tmp_path: Path) -> None:
