@@ -912,6 +912,73 @@ def test_consumed_legacy_state_marker_survives_copied_project_root(
     assert legacy_row["payload_sha256"] == legacy_hash
 
 
+def test_continue_chain_state_from_state_like_residue_mints_primary_token(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    residue = tmp_path / "docs" / "handoffs" / "handoff-demo"
+    residue.parent.mkdir(parents=True, exist_ok=True)
+    residue_bytes = "/tmp/legacy-archive.md"
+    residue.write_text(residue_bytes, encoding="utf-8")
+    residue_hash = hashlib.sha256(residue_bytes.encode("utf-8")).hexdigest()
+
+    continued = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "continue-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--state-path",
+            "docs/handoffs/handoff-demo",
+            "--expected-payload-sha256",
+            residue_hash,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert continued.returncode == 0, continued.stderr
+    payload = json.loads(continued.stdout)
+    primary_state_path = Path(payload["state_path"])
+    assert primary_state_path.parent == tmp_path / ".codex" / "handoffs" / ".session-state"
+    assert primary_state_path.name.startswith("handoff-demo-")
+    assert primary_state_path.suffix == ".json"
+    primary_payload = json.loads(primary_state_path.read_text(encoding="utf-8"))
+    assert primary_payload["project"] == "demo"
+    assert primary_payload["resume_token"]
+    assert primary_payload["archive_path"] == residue_bytes
+    assert primary_payload["resumed_from"]["storage_location"] == "state_like_residue"
+    assert primary_payload["resumed_from"]["detected_format"] == "plain-state"
+    assert primary_payload["resumed_from"]["payload_sha256"] == residue_hash
+    assert residue.read_text(encoding="utf-8") == residue_bytes
+
+    inventory_after = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "list-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+    inventory_payload = json.loads(inventory_after.stdout)
+    residue_row = next(
+        candidate
+        for candidate in inventory_payload["candidates"]
+        if candidate["storage_location"] == "state_like_residue"
+    )
+    assert residue_row["marker_status"] == "consumed"
+
+
 def test_read_chain_state_cli_reads_single_primary_state(tmp_path: Path) -> None:
     script = Path(__file__).parent.parent / "scripts" / "session_state.py"
     primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
