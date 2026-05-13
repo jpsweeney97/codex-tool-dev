@@ -102,7 +102,7 @@ def begin_active_write(
     *,
     project_name: str | None,
     operation: str,
-    slug: str,
+    slug: str | None = None,
     run_id: str | None = None,
     created_at: str | None = None,
     lease_seconds: int = 1800,

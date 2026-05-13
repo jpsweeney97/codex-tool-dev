@@ -235,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
         choices=("save", "summary", "quicksave"),
         required=True,
     )
-    begin_active_parser.add_argument("--slug", required=True)
+    begin_active_parser.add_argument("--slug", default=None)
     begin_active_parser.add_argument("--run-id", default=None)
     begin_active_parser.add_argument("--created-at", default=None)
     begin_active_parser.add_argument(
@@ -246,6 +246,8 @@ def main(argv: list[str] | None = None) -> int:
             "transaction_id",
             "transaction_path",
             "allocated_active_path",
+            "bound_slug",
+            "slug_source",
             "state_snapshot_hash",
             "idempotency_key",
         ),

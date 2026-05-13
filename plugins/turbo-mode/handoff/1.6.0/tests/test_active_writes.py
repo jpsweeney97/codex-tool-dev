@@ -47,10 +47,11 @@ def test_begin_active_write_persists_operation_state_before_content_generation(
     assert payload["operation"] == "save"
     assert payload["status"] == "begun"
     assert payload["run_id"]
+    assert operation_state_path.name == f"{payload['run_id']}.json"
     assert payload["transaction_id"]
     assert payload["idempotency_key"]
     assert payload["bound_slug"] == "next-step"
-    assert payload["slug_source"] == "caller"
+    assert payload["slug_source"] == "caller-predeclared"
     assert payload["allocated_active_path"] == str(
         tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_next-step.md"
     )
@@ -68,6 +69,40 @@ def test_begin_active_write_persists_operation_state_before_content_generation(
     assert not (
         tmp_path / ".codex" / "handoffs" / ".session-state" / "locks" / "active-write.lock"
     ).exists()
+
+
+def test_begin_active_write_mints_helper_default_slug_before_content_generation(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "begin-active-write",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--operation",
+            "summary",
+            "--created-at",
+            "2026-05-13T16:45:00Z",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["bound_slug"] == "summary"
+    assert payload["slug_source"] == "helper-default"
+    assert payload["allocated_active_path"] == str(
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_summary.md"
+    )
+    assert not Path(payload["allocated_active_path"]).exists()
 
 
 def test_allocate_active_path_cli_returns_collision_safe_primary_path(tmp_path: Path) -> None:

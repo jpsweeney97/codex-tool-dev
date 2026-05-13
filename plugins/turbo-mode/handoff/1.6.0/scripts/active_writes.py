@@ -24,6 +24,13 @@ class ActiveWriteError(RuntimeError):
     pass
 
 
+DEFAULT_SLUGS = {
+    "save": "handoff",
+    "summary": "summary",
+    "quicksave": "checkpoint",
+}
+
+
 @dataclass(frozen=True)
 class ActiveWriteReservation:
     schema_version: int
@@ -84,7 +91,7 @@ def begin_active_write(
     *,
     project_name: str | None,
     operation: str,
-    slug: str,
+    slug: str | None = None,
     run_id: str | None = None,
     created_at: str | None = None,
     lease_seconds: int = 1800,
@@ -94,8 +101,7 @@ def begin_active_write(
         raise ActiveWriteError(
             f"begin-active-write failed: unsupported operation. Got: {operation!r:.100}"
         )
-    if not slug:
-        raise ActiveWriteError("begin-active-write failed: slug must be non-empty. Got: ''")
+    bound_slug, slug_source = _bind_slug(operation, slug)
 
     layout = get_storage_layout(project_root)
     project = project_name or layout.project_root.name
@@ -107,7 +113,11 @@ def begin_active_write(
         / f"{active_run_id}.json"
     )
     if run_id is not None and operation_state_path.exists():
-        return _existing_reservation(operation_state_path, operation=operation, slug=slug)
+        return _existing_reservation(
+            operation_state_path,
+            operation=operation,
+            slug=slug,
+        )
     transaction_id = uuid.uuid4().hex
     lock_path = layout.primary_state_dir / "locks" / "active-write.lock"
     _acquire_lock(lock_path, project=project, operation=operation, transaction_id=transaction_id)
@@ -132,8 +142,7 @@ def begin_active_write(
         )
         transaction_watermark = _transaction_watermark(layout.primary_state_dir)
         timestamp = _parse_created_at(created_at)
-        active_path = _allocate_active_path(layout.primary_active_dir, slug, timestamp)
-        active_run_id = run_id or uuid.uuid4().hex
+        active_path = _allocate_active_path(layout.primary_active_dir, bound_slug, timestamp)
         lease_id = uuid.uuid4().hex
         acquired_at = now.isoformat()
         expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
@@ -147,7 +156,7 @@ def begin_active_write(
             state_snapshot_hash,
             resumed_path or "",
             resumed_hash or "",
-            slug,
+            bound_slug,
             str(active_path),
         ])
         reservation = ActiveWriteReservation(
@@ -164,8 +173,8 @@ def begin_active_write(
             state_snapshot_paths=state_snapshot_paths,
             resumed_from_path=resumed_path,
             resumed_from_hash=resumed_hash,
-            bound_slug=slug,
-            slug_source="caller",
+            bound_slug=bound_slug,
+            slug_source=slug_source,
             operation_state_path=operation_state_path,
             lease_id=lease_id,
             lease_acquired_at=acquired_at,
@@ -192,7 +201,7 @@ def _existing_reservation(
     operation_state_path: Path,
     *,
     operation: str,
-    slug: str,
+    slug: str | None,
 ) -> ActiveWriteReservation:
     payload = json.loads(operation_state_path.read_text(encoding="utf-8"))
     if payload.get("operation") != operation:
@@ -200,12 +209,20 @@ def _existing_reservation(
             "begin-active-write failed: run id belongs to another operation. "
             f"Got: {payload.get('operation')!r:.100}"
         )
-    if payload.get("bound_slug") != slug:
+    if slug is not None and payload.get("bound_slug") != slug:
         raise ActiveWriteError(
             "begin-active-write failed: run id is already bound to another slug. "
             f"Got: {payload.get('bound_slug')!r:.100}"
         )
     return _reservation_from_payload(payload)
+
+
+def _bind_slug(operation: str, slug: str | None) -> tuple[str, str]:
+    if slug is None:
+        return DEFAULT_SLUGS[operation], "helper-default"
+    if not slug:
+        raise ActiveWriteError("begin-active-write failed: slug must be non-empty. Got: ''")
+    return slug, "caller-predeclared"
 
 
 def _reservation_from_payload(payload: dict[str, object]) -> ActiveWriteReservation:
