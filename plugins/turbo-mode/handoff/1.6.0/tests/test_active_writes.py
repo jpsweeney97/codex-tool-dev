@@ -541,3 +541,38 @@ def test_write_active_handoff_cleanup_failure_remains_recoverable(
     assert committed_state["state_cleanup_action"] == "cleared-primary-state"
     assert committed_transaction["status"] == "completed"
     assert not state_path.exists()
+
+
+def test_write_active_handoff_rejects_expired_reservation_before_output_write(
+    tmp_path: Path,
+) -> None:
+    reservation = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="summary",
+        slug="expired",
+        created_at="2026-05-13T16:45:00Z",
+    )
+    operation_state = json.loads(reservation.operation_state_path.read_text(encoding="utf-8"))
+    operation_state["lease_expires_at"] = "2000-01-01T00:00:00+00:00"
+    reservation.operation_state_path.write_text(
+        json.dumps(operation_state, indent=2),
+        encoding="utf-8",
+    )
+    content = "---\ntitle: Expired\n---\n\n# Handoff\n"
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+    with pytest.raises(active_writes.ActiveWriteError, match="reservation expired"):
+        active_writes.write_active_handoff(
+            tmp_path,
+            operation_state_path=reservation.operation_state_path,
+            content=content,
+            content_sha256=content_hash,
+        )
+
+    updated = json.loads(reservation.operation_state_path.read_text(encoding="utf-8"))
+    active_path = Path(updated["allocated_active_path"])
+    transaction = json.loads(Path(updated["transaction_path"]).read_text(encoding="utf-8"))
+    assert updated["status"] == "reservation_expired"
+    assert transaction["status"] == "reservation_expired"
+    assert not active_path.exists()

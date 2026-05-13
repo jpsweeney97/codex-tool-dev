@@ -194,6 +194,7 @@ def write_active_handoff(
     lock_path = layout.primary_state_dir / "locks" / "active-write.lock"
     _acquire_lock(lock_path, project=project, operation=operation, transaction_id=transaction_id)
     try:
+        _ensure_reservation_is_fresh(state, operation_state_path)
         expected_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         if expected_hash != content_sha256:
             raise ActiveWriteError(
@@ -464,6 +465,38 @@ def _clear_snapshotted_primary_state(state: dict[str, object]) -> tuple[str, str
             f"Got: {str(path)!r:.100}"
         ) from exc
     return "cleared-primary-state", str(path)
+
+
+def _ensure_reservation_is_fresh(
+    state: dict[str, object],
+    operation_state_path: Path,
+) -> None:
+    if state.get("status") in {"committed", "abandoned"}:
+        return
+    expires_at = str(state.get("lease_expires_at", ""))
+    if not expires_at:
+        return
+    expires = _parse_created_at(expires_at)
+    if expires >= datetime.now(UTC):
+        return
+    updated_at = datetime.now(UTC).isoformat()
+    state.update({
+        "status": "reservation_expired",
+        "updated_at": updated_at,
+    })
+    _write_json_atomic(operation_state_path, state)
+    transaction_path = Path(str(state["transaction_path"]))
+    _write_json_atomic(
+        transaction_path,
+        {
+            **state,
+            "status": "reservation_expired",
+        },
+    )
+    raise ActiveWriteError(
+        "write-active-handoff failed: reservation expired. "
+        f"Got: {expires_at!r:.100}"
+    )
 
 
 def _first_state_cleanup_path(state: dict[str, object]) -> str | None:
