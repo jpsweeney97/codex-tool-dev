@@ -475,6 +475,37 @@ def test_read_only_recovery_inventory_reports_pending_transactions(tmp_path: Pat
     assert completed.exists()
 
 
+def test_load_transactions_cli_load_outputs_requested_field(tmp_path: Path) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "load_transactions.py"
+    source = _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_cli.md")
+    archive = tmp_path / ".codex" / "handoffs" / "archive" / source.name
+
+    result = subprocess.run(
+        [
+            "python",
+            str(script),
+            "load",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--resume-token",
+            "cli",
+            "--field",
+            "archive_path",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(archive)
+    assert archive.exists()
+    state_path = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-cli.json"
+    assert json.loads(state_path.read_text(encoding="utf-8"))["archive_path"] == str(archive)
+
+
 def test_read_only_recovery_inventory_reports_archive_after_state_write_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

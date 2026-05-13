@@ -6,20 +6,37 @@ import json
 import os
 import shutil
 import socket
+import sys
 import uuid
+from argparse import ArgumentParser
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from scripts.session_state import allocate_archive_path, write_resume_state
-from scripts.storage_authority import (
-    HandoffCandidate,
-    SelectionEligibility,
-    StorageLocation,
-    discover_handoff_inventory,
-    eligible_active_candidates,
-    get_storage_layout,
-)
+try:
+    from scripts.session_state import allocate_archive_path, write_resume_state
+    from scripts.storage_authority import (
+        HandoffCandidate,
+        SelectionEligibility,
+        StorageLocation,
+        discover_handoff_inventory,
+        eligible_active_candidates,
+        get_storage_layout,
+    )
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.session_state import (  # type: ignore[no-redef]
+        allocate_archive_path,
+        write_resume_state,
+    )
+    from scripts.storage_authority import (  # type: ignore[no-redef]
+        HandoffCandidate,
+        SelectionEligibility,
+        StorageLocation,
+        discover_handoff_inventory,
+        eligible_active_candidates,
+        get_storage_layout,
+    )
 
 
 class LoadTransactionError(RuntimeError):
@@ -196,6 +213,67 @@ def list_load_recovery_records(project_root: Path) -> list[dict[str, object]]:
         if data.get("status") != "completed":
             records.append(data)
     return records
+
+
+def _load_result_payload(result: LoadResult) -> dict[str, object]:
+    return {
+        "transaction_id": result.transaction_id,
+        "transaction_path": result.transaction_path,
+        "source_path": str(result.source_path),
+        "archive_path": str(result.archive_path),
+        "state_path": str(result.state_path),
+        "storage_location": result.storage_location,
+    }
+
+
+def _emit(payload: dict[str, object], field: str | None) -> int:
+    if field is None:
+        json.dump(payload, sys.stdout, indent=2)
+        print()
+        return 0
+    value = payload.get(field)
+    if value is None:
+        return 1
+    print(value)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = ArgumentParser(description="Run handoff load transactions")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    load_parser = subparsers.add_parser("load")
+    load_parser.add_argument("--project-root", type=Path, required=True)
+    load_parser.add_argument("--project", default=None)
+    load_parser.add_argument("--explicit-path", type=Path, default=None)
+    load_parser.add_argument("--resume-token", default=None)
+    load_parser.add_argument(
+        "--field",
+        choices=(
+            "transaction_id",
+            "transaction_path",
+            "source_path",
+            "archive_path",
+            "state_path",
+            "storage_location",
+        ),
+        default=None,
+    )
+
+    args = parser.parse_args(argv)
+    if args.command == "load":
+        try:
+            result = load_handoff(
+                args.project_root.resolve(),
+                project_name=args.project,
+                explicit_path=args.explicit_path,
+                resume_token=args.resume_token,
+            )
+        except LoadTransactionError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        return _emit(_load_result_payload(result), args.field)
+    return 1
 
 
 def _recover_pending_load(layout) -> LoadResult | None:
@@ -703,3 +781,7 @@ def _write_transaction(
         "updated_at": datetime.now(UTC).isoformat(),
     }
     _write_json_atomic(path, payload)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
