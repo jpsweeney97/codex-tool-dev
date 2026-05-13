@@ -405,3 +405,57 @@ def test_load_retry_recovers_primary_active_after_state_write_failure(
     transaction = json.loads(Path(result.transaction_path).read_text(encoding="utf-8"))
     assert transaction["status"] == "completed"
     assert list_load_recovery_records(tmp_path) == []
+
+
+def test_load_retry_recovers_legacy_active_after_consumed_registry_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy = _handoff(tmp_path / "docs" / "handoffs" / "2026-05-13_12-00_legacy.md")
+    legacy_hash = _sha256(legacy)
+    _write_legacy_active_opt_in(tmp_path, legacy)
+    archive = tmp_path / ".codex" / "handoffs" / "archive" / legacy.name
+    state_path = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-retry.json"
+    original_consume = load_transactions._consume_legacy_active
+
+    def fail_consume(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("consumed registry failed")
+
+    monkeypatch.setattr(load_transactions, "_consume_legacy_active", fail_consume)
+    with pytest.raises(RuntimeError, match="consumed registry failed"):
+        load_transactions.load_handoff(tmp_path, project_name="demo", resume_token="retry")
+
+    assert legacy.exists()
+    assert archive.exists()
+    assert state_path.exists()
+    assert not (
+        tmp_path
+        / ".codex"
+        / "handoffs"
+        / ".session-state"
+        / "consumed-legacy-active.json"
+    ).exists()
+
+    monkeypatch.setattr(load_transactions, "_consume_legacy_active", original_consume)
+
+    result = load_transactions.load_handoff(tmp_path, project_name="demo", resume_token="retry")
+
+    assert result.source_path == legacy
+    assert result.archive_path == archive
+    assert result.state_path == state_path
+    registry = json.loads(
+        (
+            tmp_path
+            / ".codex"
+            / "handoffs"
+            / ".session-state"
+            / "consumed-legacy-active.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert len(registry["entries"]) == 1
+    assert registry["entries"][0]["project_relative_source_path"] == legacy.relative_to(
+        tmp_path
+    ).as_posix()
+    assert registry["entries"][0]["source_content_sha256"] == legacy_hash
+    assert registry["entries"][0]["copied_primary_archive_path"] == str(archive)
+    assert list_load_recovery_records(tmp_path) == []

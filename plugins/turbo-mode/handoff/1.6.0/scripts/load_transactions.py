@@ -204,12 +204,13 @@ def _recover_pending_load(layout) -> LoadResult | None:
         if record.get("operation") != "load" or record.get("status") != "pending":
             continue
         if record.get("storage_location") != StorageLocation.PRIMARY_ACTIVE:
-            continue
-        return _recover_primary_active_load(layout, transaction_path, record)
+            if record.get("storage_location") != StorageLocation.LEGACY_ACTIVE:
+                continue
+        return _recover_load_transaction(layout, transaction_path, record)
     return None
 
 
-def _recover_primary_active_load(
+def _recover_load_transaction(
     layout,
     transaction_path: Path,
     record: dict[str, object],
@@ -242,6 +243,9 @@ def _recover_primary_active_load(
                 "load-handoff failed: recovered state path mismatch. "
                 f"Got: {str(written_state)!r:.100}"
             )
+    storage_location = StorageLocation(str(record.get("storage_location", "")))
+    if storage_location == StorageLocation.LEGACY_ACTIVE:
+        _recover_consumed_legacy_active(layout, record, archive_path=archive_path)
     record["status"] = "completed"
     record["state_path"] = str(state_path)
     record["updated_at"] = datetime.now(UTC).isoformat()
@@ -252,8 +256,56 @@ def _recover_primary_active_load(
         source_path=source_path,
         archive_path=archive_path,
         state_path=state_path,
-        storage_location=StorageLocation.PRIMARY_ACTIVE,
+        storage_location=storage_location,
     )
+
+
+def _recover_consumed_legacy_active(
+    layout,
+    record: dict[str, object],
+    *,
+    archive_path: Path,
+) -> None:
+    source_path = Path(str(record.get("source_path", "")))
+    source_hash = str(record.get("source_content_sha256", ""))
+    copied_hash = _sha256_file(archive_path)
+    if copied_hash != source_hash:
+        raise LoadTransactionError(
+            "load-handoff failed: recovered legacy active archive hash mismatch. "
+            f"Got: {str(archive_path)!r:.100}"
+        )
+    registry_path = layout.primary_state_dir / "consumed-legacy-active.json"
+    registry = _read_registry(registry_path)
+    key = {
+        "source_root": "project_root",
+        "project_relative_source_path": source_path.relative_to(layout.project_root).as_posix(),
+        "storage_location": StorageLocation.LEGACY_ACTIVE,
+        "source_content_sha256": source_hash,
+    }
+    for entry in registry["entries"]:
+        if _registry_key(entry) != key:
+            continue
+        if (
+            Path(str(entry["copied_primary_archive_path"])).exists()
+            and str(entry["copied_primary_archive_path"]) == str(archive_path)
+            and str(entry.get("copied_content_sha256", "")) == copied_hash
+        ):
+            return
+        raise LoadTransactionError(
+            "load-handoff failed: consumed legacy active registry entry is stale. "
+            f"Got: {entry.get('copied_primary_archive_path')!r:.100}"
+        )
+    registry["entries"].append({
+        **key,
+        "source_absolute_path": str(source_path),
+        "source_resolved_path": str(source_path.resolve()),
+        "copied_primary_archive_path": str(archive_path),
+        "copied_content_sha256": copied_hash,
+        "operation": "legacy-load",
+        "transaction_id": str(record.get("transaction_id", "")),
+        "consumed_at": datetime.now(UTC).isoformat(),
+    })
+    _write_json_atomic(registry_path, registry)
 
 
 def _acquire_lock(
