@@ -64,6 +64,7 @@ LEGACY_ACTIVE_OPT_IN_MANIFEST = (
     / "2026-05-13-handoff-storage-legacy-active-opt-ins.md"
 )
 LEGACY_CONSUMED_PREFIX = "MIGRATED:"
+CHAIN_STATE_TTL_SECONDS = 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -297,11 +298,13 @@ def mark_chain_state_consumed(
                 candidate=candidate,
             )
         )
-    if candidate["validation_status"] != "valid":
+    if candidate["validation_status"] not in {"valid", "expired"}:
         raise ChainStateDiagnosticError(
             _operator_error(
                 code="chain-state-candidate-invalid",
-                message="mark-chain-state-consumed requires a valid chain-state candidate.",
+                message=(
+                    "mark-chain-state-consumed requires a valid or expired chain-state candidate."
+                ),
                 candidate=candidate,
             )
         )
@@ -379,11 +382,11 @@ def continue_chain_state(
             "transaction_path": None,
             "marker_path": None,
         }
-    if candidate["validation_status"] != "valid":
+    if candidate["validation_status"] not in {"valid", "expired"}:
         raise ChainStateDiagnosticError(
             _operator_error(
                 code="chain-state-candidate-invalid",
-                message="continue-chain-state requires a valid chain-state candidate.",
+                message="continue-chain-state requires a valid or expired chain-state candidate.",
                 candidate=candidate,
             )
         )
@@ -538,6 +541,12 @@ def read_chain_state(
     inventory = chain_state_recovery_inventory(project_root, project_name=project_name)
     candidates = list(inventory["candidates"])
     valid = [candidate for candidate in candidates if candidate["validation_status"] == "valid"]
+    expired = [
+        candidate
+        for candidate in candidates
+        if candidate["validation_status"] == "expired"
+        and candidate["marker_status"] != "consumed"
+    ]
     primary = [
         candidate
         for candidate in valid
@@ -606,6 +615,20 @@ def read_chain_state(
             "source": "legacy",
             "state": legacy[0],
         }
+    if expired:
+        raise ChainStateDiagnosticError(
+            _chain_state_diagnostic(
+                code="expired-chain-state",
+                message="Expired chain state requires explicit operator recovery.",
+                inventory=inventory,
+                candidates=expired,
+                recovery_choices=[
+                    "continue-chain-state",
+                    "mark-chain-state-consumed",
+                    "abort",
+                ],
+            )
+        )
     return {
         "status": "absent",
         "source": None,
@@ -712,6 +735,12 @@ def _chain_state_record(
 ) -> dict[str, object]:
     detected_format = _chain_state_format(path)
     parsed = _parse_chain_state(path, project_name=project_name, detected_format=detected_format)
+    age_seconds = _age_seconds(path)
+    parsed = _apply_chain_state_ttl(
+        parsed,
+        age_seconds=age_seconds,
+        storage_location=storage_location,
+    )
     record = {
         "source_root": source_root,
         "storage_location": str(storage_location),
@@ -723,7 +752,7 @@ def _chain_state_record(
         "detected_format": detected_format,
         "archive_path": parsed["archive_path"],
         "created_at": parsed["created_at"],
-        "age_seconds": _age_seconds(path),
+        "age_seconds": age_seconds,
         "payload_sha256": _content_sha256(path),
         "validation_status": parsed["validation_status"],
         "validation_error": parsed["validation_error"],
@@ -740,7 +769,7 @@ def _chain_state_marker_status(
     layout: StorageLayout,
     candidate: dict[str, object],
 ) -> str:
-    if candidate["validation_status"] != "valid":
+    if candidate["validation_status"] not in {"valid", "expired"}:
         return "unmarked"
     marker_path = layout.primary_state_dir / "markers" / "chain-state-consumed.json"
     marker = _read_json_object(marker_path)
@@ -783,6 +812,25 @@ def _parse_chain_state(
     if detected_format == "tokenized-json":
         return _parse_tokenized_chain_state(path, project_name=project_name)
     return _parse_plain_chain_state(path, project_name=project_name)
+
+
+def _apply_chain_state_ttl(
+    parsed: dict[str, object],
+    *,
+    age_seconds: int | None,
+    storage_location: StorageLocation,
+) -> dict[str, object]:
+    if parsed["validation_status"] != "valid":
+        return parsed
+    if storage_location == StorageLocation.PRIMARY_STATE:
+        return parsed
+    if age_seconds is None or age_seconds <= CHAIN_STATE_TTL_SECONDS:
+        return parsed
+    return {
+        **parsed,
+        "validation_status": "expired",
+        "validation_error": "chain state TTL expired",
+    }
 
 
 def _parse_tokenized_chain_state(path: Path, *, project_name: str) -> dict[str, object]:

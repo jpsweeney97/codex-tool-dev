@@ -781,6 +781,53 @@ def test_abandon_primary_chain_state_moves_exact_primary_and_unblocks_legacy(
     assert read_payload["state"]["resume_token"] == "token-b"
 
 
+def test_read_chain_state_cli_rejects_expired_legacy_state_with_inventory(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    legacy = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(
+        json.dumps({
+            "state_path": str(legacy),
+            "project": "demo",
+            "resume_token": "token-b",
+            "archive_path": "/tmp/legacy.md",
+            "created_at": "2026-05-13T16:01:00Z",
+        }),
+        encoding="utf-8",
+    )
+    old = legacy.stat().st_mtime - (25 * 60 * 60)
+    os.utime(legacy, (old, old))
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert result.returncode == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "expired-chain-state"
+    assert payload["error"]["recovery_choices"] == [
+        "continue-chain-state",
+        "mark-chain-state-consumed",
+        "abort",
+    ]
+    assert len(payload["candidates"]) == 1
+    assert payload["candidates"][0]["validation_status"] == "expired"
+    assert payload["candidates"][0]["validation_error"] == "chain state TTL expired"
+
+
 def test_read_chain_state_cli_reads_single_primary_state(tmp_path: Path) -> None:
     script = Path(__file__).parent.parent / "scripts" / "session_state.py"
     primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
