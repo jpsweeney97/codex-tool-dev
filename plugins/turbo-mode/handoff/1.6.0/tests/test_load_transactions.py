@@ -180,6 +180,66 @@ def test_legacy_archive_state_write_failure_does_not_record_copied_registry(
     ).exists()
 
 
+def test_load_retry_recovers_legacy_archive_after_copied_registry_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy = _handoff(
+        tmp_path / "docs" / "handoffs" / "archive" / "2026-05-13_12-00_legacy.md"
+    )
+    legacy_hash = _sha256(legacy)
+    archive = tmp_path / ".codex" / "handoffs" / "archive" / legacy.name
+    state_path = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-retry.json"
+    original_record = load_transactions._record_copied_legacy_archive
+
+    def fail_record(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("copied registry failed")
+
+    monkeypatch.setattr(load_transactions, "_record_copied_legacy_archive", fail_record)
+    with pytest.raises(RuntimeError, match="copied registry failed"):
+        load_transactions.load_handoff(
+            tmp_path,
+            project_name="demo",
+            explicit_path=legacy,
+            resume_token="retry",
+        )
+
+    assert legacy.exists()
+    assert archive.exists()
+    assert state_path.exists()
+    assert not (
+        tmp_path
+        / ".codex"
+        / "handoffs"
+        / ".session-state"
+        / "copied-legacy-archives.json"
+    ).exists()
+
+    monkeypatch.setattr(load_transactions, "_record_copied_legacy_archive", original_record)
+
+    result = load_transactions.load_handoff(tmp_path, project_name="demo", resume_token="retry")
+
+    assert result.source_path == legacy
+    assert result.archive_path == archive
+    assert result.state_path == state_path
+    registry = json.loads(
+        (
+            tmp_path
+            / ".codex"
+            / "handoffs"
+            / ".session-state"
+            / "copied-legacy-archives.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert len(registry["entries"]) == 1
+    assert registry["entries"][0]["project_relative_source_path"] == legacy.relative_to(
+        tmp_path
+    ).as_posix()
+    assert registry["entries"][0]["source_content_sha256"] == legacy_hash
+    assert registry["entries"][0]["copied_primary_archive_path"] == str(archive)
+    assert list_load_recovery_records(tmp_path) == []
+
+
 def test_explicit_previous_primary_hidden_archive_uses_copy_registry(tmp_path: Path) -> None:
     hidden = _handoff(
         tmp_path / ".codex" / "handoffs" / ".archive" / "2026-05-13_12-00_hidden.md"
