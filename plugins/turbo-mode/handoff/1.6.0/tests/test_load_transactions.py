@@ -372,3 +372,36 @@ def test_read_only_recovery_inventory_reports_archive_after_state_write_failure(
         tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token.json"
     )
     assert not Path(str(records[0]["state_path"])).exists()
+
+
+def test_load_retry_recovers_primary_active_after_state_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_recover.md")
+    archive = tmp_path / ".codex" / "handoffs" / "archive" / source.name
+    original_write_resume_state = load_transactions.write_resume_state
+
+    def fail_write_resume_state(*args: object, **kwargs: object) -> Path:
+        raise RuntimeError("state write failed")
+
+    monkeypatch.setattr(load_transactions, "write_resume_state", fail_write_resume_state)
+    with pytest.raises(RuntimeError, match="state write failed"):
+        load_transactions.load_handoff(tmp_path, project_name="demo", resume_token="retry")
+
+    monkeypatch.setattr(load_transactions, "write_resume_state", original_write_resume_state)
+
+    result = load_transactions.load_handoff(tmp_path, project_name="demo", resume_token="retry")
+
+    assert result.source_path == source
+    assert result.archive_path == archive
+    assert result.state_path == (
+        tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-retry.json"
+    )
+    assert result.state_path.exists()
+    recovered_state = json.loads(result.state_path.read_text(encoding="utf-8"))
+    assert recovered_state["archive_path"] == str(archive)
+
+    transaction = json.loads(Path(result.transaction_path).read_text(encoding="utf-8"))
+    assert transaction["status"] == "completed"
+    assert list_load_recovery_records(tmp_path) == []

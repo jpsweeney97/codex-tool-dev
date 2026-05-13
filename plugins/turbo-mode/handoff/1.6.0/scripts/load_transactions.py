@@ -49,8 +49,6 @@ def load_handoff(
 ) -> LoadResult:
     """Load a primary handoff source into archive/state under a transaction record."""
     layout = get_storage_layout(project_root)
-    candidate = _select_candidate(layout.project_root, explicit_path=explicit_path)
-    _ensure_loadable(candidate)
     transaction_id = uuid.uuid4().hex
     project = project_name or layout.project_root.name
     lock_path = layout.primary_state_dir / "locks" / "load.lock"
@@ -61,6 +59,11 @@ def load_handoff(
         transaction_id=transaction_id,
     )
     try:
+        recovered = _recover_pending_load(layout)
+        if recovered is not None:
+            return recovered
+        candidate = _select_candidate(layout.project_root, explicit_path=explicit_path)
+        _ensure_loadable(candidate)
         return _load_handoff_locked(
             layout.project_root,
             candidate=candidate,
@@ -92,6 +95,8 @@ def _load_handoff_locked(
         candidate=candidate,
         archive_path=None,
         state_path=intended_state_path,
+        project=project,
+        resume_token=state_token,
     )
 
     if candidate.storage_location == StorageLocation.PRIMARY_ACTIVE:
@@ -123,6 +128,8 @@ def _load_handoff_locked(
         candidate=candidate,
         archive_path=archive_path,
         state_path=intended_state_path,
+        project=project,
+        resume_token=state_token,
     )
 
     state_path = write_resume_state(
@@ -138,6 +145,8 @@ def _load_handoff_locked(
         candidate=candidate,
         archive_path=archive_path,
         state_path=state_path,
+        project=project,
+        resume_token=state_token,
     )
     if candidate.storage_location == StorageLocation.LEGACY_ACTIVE:
         _consume_legacy_active(
@@ -153,6 +162,8 @@ def _load_handoff_locked(
         candidate=candidate,
         archive_path=archive_path,
         state_path=state_path,
+        project=project,
+        resume_token=state_token,
     )
     return LoadResult(
         transaction_id=transaction_id,
@@ -179,6 +190,70 @@ def list_load_recovery_records(project_root: Path) -> list[dict[str, object]]:
         if data.get("status") != "completed":
             records.append(data)
     return records
+
+
+def _recover_pending_load(layout) -> LoadResult | None:
+    transactions_dir = layout.primary_state_dir / "transactions"
+    if not transactions_dir.exists():
+        return None
+    for transaction_path in sorted(transactions_dir.glob("*.json")):
+        try:
+            record = json.loads(transaction_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if record.get("operation") != "load" or record.get("status") != "pending":
+            continue
+        if record.get("storage_location") != StorageLocation.PRIMARY_ACTIVE:
+            continue
+        return _recover_primary_active_load(layout, transaction_path, record)
+    return None
+
+
+def _recover_primary_active_load(
+    layout,
+    transaction_path: Path,
+    record: dict[str, object],
+) -> LoadResult:
+    transaction_id = str(record.get("transaction_id", ""))
+    source_path = Path(str(record.get("source_path", "")))
+    archive_path = Path(str(record.get("archive_path", "")))
+    state_path = Path(str(record.get("state_path", "")))
+    project = str(record.get("project", ""))
+    resume_token = str(record.get("resume_token", ""))
+    if not transaction_id or not project or not resume_token:
+        raise LoadTransactionError(
+            "load-handoff failed: pending transaction lacks recovery metadata. "
+            f"Got: {str(transaction_path)!r:.100}"
+        )
+    if not archive_path.exists():
+        raise LoadTransactionError(
+            "load-handoff failed: pending transaction archive is missing. "
+            f"Got: {str(archive_path)!r:.100}"
+        )
+    if not state_path.exists():
+        written_state = write_resume_state(
+            layout.primary_state_dir,
+            project,
+            str(archive_path),
+            resume_token,
+        )
+        if written_state != state_path:
+            raise LoadTransactionError(
+                "load-handoff failed: recovered state path mismatch. "
+                f"Got: {str(written_state)!r:.100}"
+            )
+    record["status"] = "completed"
+    record["state_path"] = str(state_path)
+    record["updated_at"] = datetime.now(UTC).isoformat()
+    _write_json_atomic(transaction_path, record)
+    return LoadResult(
+        transaction_id=transaction_id,
+        transaction_path=str(transaction_path),
+        source_path=source_path,
+        archive_path=archive_path,
+        state_path=state_path,
+        storage_location=StorageLocation.PRIMARY_ACTIVE,
+    )
 
 
 def _acquire_lock(
@@ -213,7 +288,12 @@ def _release_lock(path: Path) -> None:
     try:
         path.unlink()
     except FileNotFoundError:
-        return
+        pass
+    for directory in (path.parent, path.parent.parent):
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
 
 
 def _select_candidate(project_root: Path, *, explicit_path: Path | None) -> HandoffCandidate:
@@ -463,12 +543,16 @@ def _write_transaction(
     candidate: HandoffCandidate,
     archive_path: Path | None,
     state_path: Path | None,
+    project: str,
+    resume_token: str,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "transaction_id": transaction_id,
         "operation": "load",
         "status": status,
+        "project": project,
+        "resume_token": resume_token,
         "source_path": str(candidate.path),
         "storage_location": candidate.storage_location,
         "source_git_visibility": candidate.source_git_visibility,
