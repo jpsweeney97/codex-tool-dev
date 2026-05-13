@@ -692,6 +692,33 @@ def test_active_write_transaction_recover_records_content_mismatch(
     assert transaction["active_path"] == str(reservation.allocated_active_path)
 
 
+def test_active_write_transaction_recover_records_pending_before_write(
+    tmp_path: Path,
+) -> None:
+    reservation = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="summary",
+        slug="pending",
+        created_at="2026-05-13T16:45:00Z",
+    )
+    state = json.loads(reservation.operation_state_path.read_text(encoding="utf-8"))
+    state["status"] = "written_not_confirmed"
+    state["content_hash"] = hashlib.sha256(b"missing output").hexdigest()
+    state["output_sha256"] = state["content_hash"]
+    reservation.operation_state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+    recovered = active_writes.recover_active_write_transaction(
+        tmp_path,
+        operation_state_path=reservation.operation_state_path,
+    )
+
+    transaction = json.loads(reservation.transaction_path.read_text(encoding="utf-8"))
+    assert recovered["status"] == "pending_before_write"
+    assert transaction["status"] == "pending_before_write"
+    assert transaction["active_path"] == str(reservation.allocated_active_path)
+
+
 def test_write_active_handoff_clears_snapshotted_primary_state_after_output_write(
     tmp_path: Path,
 ) -> None:

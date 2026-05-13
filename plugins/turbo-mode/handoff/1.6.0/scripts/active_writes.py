@@ -526,6 +526,15 @@ def recover_active_write_transaction(
             state["status"] = "pending_before_write"
             state["updated_at"] = datetime.now(UTC).isoformat()
             _write_json_atomic(operation_state_path, state)
+            transaction_path = Path(str(state["transaction_path"]))
+            _write_json_atomic(
+                transaction_path,
+                {
+                    **state,
+                    "status": "pending_before_write",
+                    "active_path": str(active_path),
+                },
+            )
             return state
         if _sha256_path(active_path) != content_hash:
             state["status"] = "content_mismatch"
