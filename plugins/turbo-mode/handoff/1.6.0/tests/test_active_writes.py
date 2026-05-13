@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 import scripts.active_writes as active_writes
+import scripts.session_state as session_state
 
 
 @pytest.mark.parametrize(
@@ -251,6 +252,87 @@ def test_active_writer_flow_cli_fails_on_ambiguous_pending_inventory(
     assert "Traceback" not in resumed.stderr
     assert first.allocated_active_path.exists() is False
     assert second.allocated_active_path.exists() is False
+
+
+def test_active_writer_flow_cli_cleanup_failure_remains_recoverable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    archive = tmp_path / ".codex" / "handoffs" / "archive" / "previous.md"
+    archive.parent.mkdir(parents=True)
+    archive.write_text("---\ntitle: Previous\n---\n", encoding="utf-8")
+    state_dir = tmp_path / ".codex" / "handoffs" / ".session-state"
+    state_dir.mkdir(parents=True)
+    state_path = state_dir / "handoff-demo-resume.json"
+    state_path.write_text(
+        json.dumps({
+            "state_path": str(state_path),
+            "project": "demo",
+            "resume_token": "resume",
+            "archive_path": str(archive),
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+    original_subprocess_run = active_writes.subprocess.run
+
+    def fail_trash(*args: object, **kwargs: object) -> object:
+        if not args or not isinstance(args[0], list) or args[0][:1] != ["trash"]:
+            return original_subprocess_run(*args, **kwargs)
+        raise subprocess.CalledProcessError(1, ["trash"], stderr="trash failed")
+
+    monkeypatch.setattr(active_writes.subprocess, "run", fail_trash)
+
+    result = session_state.main([
+        "active-writer-flow",
+        "--project-root",
+        str(tmp_path),
+        "--project",
+        "demo",
+        "--operation",
+        "save",
+        "--run-id",
+        "flow-cleanup-failure",
+        "--created-at",
+        "2026-05-13T16:45:00Z",
+    ])
+
+    captured = capsys.readouterr()
+    assert result == 1
+    assert "state cleanup failed" in captured.err
+    assert "Traceback" not in captured.err
+    operation_state_path = (
+        tmp_path
+        / ".codex"
+        / "handoffs"
+        / ".session-state"
+        / "active-writes"
+        / "demo"
+        / "flow-cleanup-failure.json"
+    )
+    operation_state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    active_path = Path(operation_state["active_path"])
+    transaction = json.loads(Path(operation_state["transaction_path"]).read_text(encoding="utf-8"))
+    assert active_path.exists()
+    assert state_path.exists()
+    assert operation_state["status"] == "cleanup_failed"
+    assert operation_state["state_cleanup_action"] == "cleanup_failed"
+    assert transaction["status"] == "cleanup_failed"
+
+    monkeypatch.setattr(active_writes.subprocess, "run", original_subprocess_run)
+
+    recovered = active_writes.recover_active_write_transaction(
+        tmp_path,
+        operation_state_path=operation_state_path,
+    )
+
+    committed_state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    assert recovered["status"] == "committed"
+    assert committed_state["status"] == "committed"
+    assert committed_state["recovered_from_status"] == "cleanup_failed"
+    assert committed_state["state_cleanup_action"] == "cleared-primary-state"
+    assert not state_path.exists()
 
 
 def test_begin_active_write_persists_operation_state_before_content_generation(
