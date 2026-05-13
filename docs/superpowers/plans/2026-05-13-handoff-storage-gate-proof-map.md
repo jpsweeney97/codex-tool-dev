@@ -5,13 +5,13 @@ Normalize rule: collapse all whitespace in each source requirement before hashin
 
 ## Gate Row Counts
 
-- `gate-1a-discovery-read-only-slice`: 50 rows
+- `gate-1a-discovery-read-only-slice`: 53 rows
 - `gate-1b-reader-history-slice`: 26 rows
 - `gate-1c-load-transaction-slice`: 31 rows
 - `gate-1d-active-writer-operation-state-slice`: 24 rows
 - `gate-1e-state-bridge-and-recovery-slice`: 21 rows
 - `gate-1f-installed-host-harness-slice`: 1 rows
-- `gate-2-skill-docs-release-docs`: 1 rows
+- `gate-2-skill-docs-release-docs`: 3 rows
 - `gate-3-refresh-and-stale-text`: 7 rows
 - `gate-4-source-closeout`: 35 rows
 - `gate-5-installed-certification`: 15 rows
@@ -230,4 +230,9 @@ Normalize rule: collapse all whitespace in each source requirement before hashin
 | CL-030 | API And CLI Compatibility Ledger | b22f44f8915489a9b1364f2be1981922bcef92854166166e9d73ae74a7e79b0e | gate-1a-discovery-read-only-slice | storage-discovery | storage discovery pytest selector | Gate 1a split trigger from capacity model | pending |
 | CL-031 | API And CLI Compatibility Ledger | 5324837bd22435ca6167df5f415977cf1bd77ea4c0eeb507215c6f1b1f8db3f1 | gate-1c-load-transaction-slice | load-transaction | load transaction pytest selector | Gate 1c split trigger from capacity model | pending |
 | CL-032 | API And CLI Compatibility Ledger | 9642c40333168f3067630f9fd6ce7940d32fb93af5d3bf668be5efd94a766165 | gate-3-refresh-and-stale-text | refresh | refresh and stale-text checks | Gate 3 split trigger from capacity model | pending |
-| ST-BOOTSTRAP | Generated Stale-Text Gate | ede5a5a7173a1980cff0e8bf6ef1aa1b4a8f976b766acd368ce6358f740ed860 | gate-3-refresh-and-stale-text | refresh | refresh and stale-text checks | Gate 3 split trigger from capacity model | pending |
+| ST-001 | Generated Stale-Text Gate | 3cab91afafa4601e2663990159787e10c81d0fac035871a49e1c3912092b86fa | gate-2-skill-docs-release-docs | skill-docs | skill-doc and release-doc tests | Gate 2 split trigger from capacity model | pending |
+| ST-002 | Generated Stale-Text Gate | 02c7703b0f8500fde23c365afd520c8ab491cfc58f1581e049de1ffd0dedc078 | gate-2-skill-docs-release-docs | skill-docs | skill-doc and release-doc tests | Gate 2 split trigger from capacity model | pending |
+| ST-003 | Generated Stale-Text Gate | 1d1fcdd1b6a0e6b89d6e9f35f5811228796b8bd806755d84cb6795ded16b4e72 | gate-1a-discovery-read-only-slice | storage-discovery | storage discovery pytest selector | Gate 1a split trigger from capacity model | pending |
+| ST-004 | Generated Stale-Text Gate | 436b4e8bd28cea0ef44ba4f731676247a63749009920acefb8aab79f50d0d6c6 | gate-1a-discovery-read-only-slice | storage-discovery | storage discovery pytest selector | Gate 1a split trigger from capacity model | pending |
+| ST-005 | Generated Stale-Text Gate | a7795cfdae1d6aace37592b4f906b2d2bcc1763598354b01444de3ecde2c2154 | gate-1a-discovery-read-only-slice | storage-discovery | storage discovery pytest selector | Gate 1a split trigger from capacity model | pending |
+| ST-006 | Generated Stale-Text Gate | a1a5070094b4826fd89febb16af3cd637122c00041693463113d346290bfcb1c | gate-3-refresh-and-stale-text | refresh | refresh and stale-text checks | Gate 3 split trigger from capacity model | pending |

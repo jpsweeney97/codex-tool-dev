@@ -159,6 +159,8 @@ def _build_smoke_plan(
     ticket_workflow = state.ticket_plugin / "scripts/ticket_workflow.py"
     ticket_read = state.ticket_plugin / "scripts/ticket_read.py"
     ticket_audit = state.ticket_plugin / "scripts/ticket_audit.py"
+    handoff_archive_dir = state.smoke_repo / ".codex/handoffs/archive"
+    handoff_state_dir = state.smoke_repo / ".codex/handoffs/.session-state"
     commands: list[SmokeCommand] = [
         SmokeCommand(
             label="smoke-repo-git-init",
@@ -175,14 +177,14 @@ def _build_smoke_plan(
                 "--source",
                 str(_handoff_source_path(state)),
                 "--archive-dir",
-                str(state.smoke_repo / "docs/handoffs/archive"),
+                str(handoff_archive_dir),
                 "--field",
                 "archived_path",
             ),
             command_string=(
                 "PYTHONDONTWRITEBYTECODE=1 python3 "
                 f"{handoff_script} archive --source {_handoff_source_path(state)} "
-                f"--archive-dir {state.smoke_repo / 'docs/handoffs/archive'} "
+                f"--archive-dir {handoff_archive_dir} "
                 "--field archived_path"
             ),
             env={"PYTHONDONTWRITEBYTECODE": "1"},
@@ -196,7 +198,7 @@ def _build_smoke_plan(
                 str(handoff_script),
                 "write-state",
                 "--state-dir",
-                str(state.smoke_repo / "docs/handoffs/.session-state"),
+                str(handoff_state_dir),
                 "--project",
                 "smoke-repo",
                 "--archive-path",
@@ -207,7 +209,7 @@ def _build_smoke_plan(
             command_string=(
                 "PYTHONDONTWRITEBYTECODE=1 python3 "
                 f"{handoff_script} write-state "
-                f"--state-dir {state.smoke_repo / 'docs/handoffs/.session-state'} "
+                f"--state-dir {handoff_state_dir} "
                 "--project smoke-repo --archive-path {archived_handoff_path} "
                 "--field state_path"
             ),
@@ -221,7 +223,7 @@ def _build_smoke_plan(
                 str(handoff_script),
                 "read-state",
                 "--state-dir",
-                str(state.smoke_repo / "docs/handoffs/.session-state"),
+                str(handoff_state_dir),
                 "--project",
                 "smoke-repo",
                 "--field",
@@ -230,7 +232,7 @@ def _build_smoke_plan(
             command_string=(
                 "PYTHONDONTWRITEBYTECODE=1 python3 "
                 f"{handoff_script} read-state "
-                f"--state-dir {state.smoke_repo / 'docs/handoffs/.session-state'} "
+                f"--state-dir {handoff_state_dir} "
                 "--project smoke-repo --field archive_path"
             ),
             env={"PYTHONDONTWRITEBYTECODE": "1"},
@@ -243,14 +245,14 @@ def _build_smoke_plan(
                 str(handoff_script),
                 "clear-state",
                 "--state-dir",
-                str(state.smoke_repo / "docs/handoffs/.session-state"),
+                str(handoff_state_dir),
                 "--state-path",
                 "{session_state_path}",
             ),
             command_string=(
                 "PYTHONDONTWRITEBYTECODE=1 python3 "
                 f"{handoff_script} clear-state "
-                f"--state-dir {state.smoke_repo / 'docs/handoffs/.session-state'} "
+                f"--state-dir {handoff_state_dir} "
                 "--state-path {session_state_path}"
             ),
             env={"PYTHONDONTWRITEBYTECODE": "1"},
@@ -551,7 +553,7 @@ Smoke handoff.
 
 
 def _handoff_source_path(state: _SmokeState) -> Path:
-    return state.smoke_repo / "docs/handoffs/2026-05-06_00-00_smoke.md"
+    return state.smoke_repo / ".codex/handoffs/2026-05-06_00-00_smoke.md"
 
 
 def _record_archived_handoff(state: _SmokeState, result: SmokeResult) -> None:
