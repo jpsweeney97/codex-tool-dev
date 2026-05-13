@@ -534,7 +534,7 @@ The implementation must provide documented helper entrypoints for at least:
 - `read-chain-state`: read primary state or the one-time legacy bridge state
 - `list-chain-state`: list same-project primary, legacy, and state-like residue candidates for ambiguity diagnostics and operator recovery
 - `continue-chain-state`: continue from one explicit state candidate and write or repair primary chain state under a transaction
-- `mark-chain-state-consumed`: mark exact legacy or state-like chain candidates consumed or stale by path plus hash
+- `mark-chain-state-consumed`: mark exact legacy or state-like chain candidates consumed or stale by stable state-candidate identity plus expected payload hash; path or resume token may be accepted only as selectors
 - `abandon-primary-chain-state`: abandon one exact primary state path by path plus hash before an explicit legacy continuation
 - `chain-state-recovery-inventory`: emit read-only chain-state recovery inventory without side effects
 - `write-chain-state`: write only primary state
