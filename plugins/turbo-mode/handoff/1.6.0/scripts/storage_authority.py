@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -22,6 +23,7 @@ class StorageLocation(StrEnum):
     LEGACY_ACTIVE = "legacy_active"
     LEGACY_ARCHIVE = "legacy_archive"
     LEGACY_STATE = "legacy_state"
+    STATE_LIKE_RESIDUE = "state_like_residue"
     PREVIOUS_PRIMARY_HIDDEN_ARCHIVE = "previous_primary_hidden_archive"
     UNKNOWN = "unknown"
 
@@ -45,6 +47,7 @@ LEGACY_ACTIVE_OPT_IN_MANIFEST = (
     / "plans"
     / "2026-05-13-handoff-storage-legacy-active-opt-ins.md"
 )
+LEGACY_CONSUMED_PREFIX = "MIGRATED:"
 
 
 @dataclass(frozen=True)
@@ -205,6 +208,238 @@ def recover_active_write_transaction(
     )
 
 
+def chain_state_recovery_inventory(
+    project_root: Path,
+    *,
+    project_name: str,
+) -> dict[str, object]:
+    """Return read-only chain-state recovery inventory for one project."""
+    layout = get_storage_layout(project_root)
+    candidates = [
+        *[
+            _chain_state_record(
+                layout=layout,
+                path=path,
+                storage_location=StorageLocation.PRIMARY_STATE,
+                source_root="primary",
+                project_name=project_name,
+            )
+            for path in _state_candidate_paths(layout.primary_state_dir, project_name)
+        ],
+        *[
+            _chain_state_record(
+                layout=layout,
+                path=path,
+                storage_location=StorageLocation.LEGACY_STATE,
+                source_root="legacy",
+                project_name=project_name,
+            )
+            for path in _state_candidate_paths(layout.legacy_state_dir, project_name)
+        ],
+        *[
+            _chain_state_record(
+                layout=layout,
+                path=path,
+                storage_location=StorageLocation.STATE_LIKE_RESIDUE,
+                source_root="legacy",
+                project_name=project_name,
+            )
+            for path in _state_like_residue_paths(layout.legacy_active_dir, project_name)
+        ],
+    ]
+    return {
+        "project_root": str(layout.project_root),
+        "project": project_name,
+        "total": len(candidates),
+        "candidates": sorted(
+            candidates,
+            key=lambda candidate: str(candidate["project_relative_state_path"]),
+        ),
+    }
+
+
+def _state_candidate_paths(root: Path, project_name: str) -> list[Path]:
+    if not root.exists() or not root.is_dir():
+        return []
+    paths = [root / f"handoff-{project_name}"]
+    paths.extend(sorted(root.glob(f"handoff-{project_name}-*.json")))
+    return [path for path in paths if path.is_file()]
+
+
+def _state_like_residue_paths(root: Path, project_name: str) -> list[Path]:
+    if not root.exists() or not root.is_dir():
+        return []
+    paths = [root / f"handoff-{project_name}"]
+    paths.extend(sorted(root.glob(f"handoff-{project_name}-*.json")))
+    return [path for path in paths if path.is_file()]
+
+
+def _chain_state_record(
+    *,
+    layout: StorageLayout,
+    path: Path,
+    storage_location: StorageLocation,
+    source_root: str,
+    project_name: str,
+) -> dict[str, object]:
+    detected_format = _chain_state_format(path)
+    parsed = _parse_chain_state(path, project_name=project_name, detected_format=detected_format)
+    return {
+        "source_root": source_root,
+        "storage_location": str(storage_location),
+        "project_relative_state_path": _project_relative_path(layout.project_root, path),
+        "lexical_path": str(path),
+        "resolved_path": str(path.resolve()),
+        "project": parsed["project"],
+        "resume_token": parsed["resume_token"],
+        "detected_format": detected_format,
+        "archive_path": parsed["archive_path"],
+        "created_at": parsed["created_at"],
+        "age_seconds": _age_seconds(path),
+        "payload_sha256": _content_sha256(path),
+        "validation_status": parsed["validation_status"],
+        "validation_error": parsed["validation_error"],
+        "source_git_visibility": _git_visibility(layout.project_root, path),
+        "source_fs_status": _fs_status(path),
+        "marker_status": "unmarked",
+        "transaction_status": "none",
+    }
+
+
+def _chain_state_format(path: Path) -> str:
+    if path.suffix == ".json":
+        return "tokenized-json"
+    return "plain-state"
+
+
+def _parse_chain_state(
+    path: Path,
+    *,
+    project_name: str,
+    detected_format: str,
+) -> dict[str, object]:
+    if detected_format == "tokenized-json":
+        return _parse_tokenized_chain_state(path, project_name=project_name)
+    return _parse_plain_chain_state(path, project_name=project_name)
+
+
+def _parse_tokenized_chain_state(path: Path, *, project_name: str) -> dict[str, object]:
+    token = _resume_token_from_state_filename(path, project_name)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return _invalid_chain_state(
+            project=project_name,
+            resume_token=token,
+            validation_error=f"invalid tokenized JSON: {exc}",
+        )
+    if not isinstance(payload, dict):
+        return _invalid_chain_state(
+            project=project_name,
+            resume_token=token,
+            validation_error="tokenized state payload is not an object",
+        )
+    payload_project = str(payload.get("project", ""))
+    payload_token = str(payload.get("resume_token", ""))
+    if payload_project != project_name:
+        return _invalid_chain_state(
+            project=payload_project,
+            resume_token=payload_token or token,
+            archive_path=str(payload.get("archive_path", "")),
+            created_at=str(payload.get("created_at", "")),
+            validation_error="payload project does not match filename project",
+        )
+    if payload_token != token:
+        return _invalid_chain_state(
+            project=payload_project,
+            resume_token=payload_token,
+            archive_path=str(payload.get("archive_path", "")),
+            created_at=str(payload.get("created_at", "")),
+            validation_error="payload resume token does not match filename token",
+        )
+    return {
+        "project": payload_project,
+        "resume_token": payload_token,
+        "archive_path": str(payload.get("archive_path", "")),
+        "created_at": str(payload.get("created_at", "")),
+        "validation_status": "valid",
+        "validation_error": None,
+    }
+
+
+def _parse_plain_chain_state(path: Path, *, project_name: str) -> dict[str, object]:
+    try:
+        archive_path = path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        return _invalid_chain_state(
+            project=project_name,
+            resume_token=None,
+            validation_error=f"plain state unreadable: {exc}",
+        )
+    if not archive_path:
+        return _invalid_chain_state(
+            project=project_name,
+            resume_token=None,
+            validation_error="plain state is empty",
+        )
+    if archive_path.startswith(LEGACY_CONSUMED_PREFIX):
+        return {
+            "project": project_name,
+            "resume_token": None,
+            "archive_path": None,
+            "created_at": None,
+            "validation_status": "consumed",
+            "validation_error": None,
+        }
+    return {
+        "project": project_name,
+        "resume_token": None,
+        "archive_path": archive_path,
+        "created_at": None,
+        "validation_status": "valid",
+        "validation_error": None,
+    }
+
+
+def _invalid_chain_state(
+    *,
+    project: str,
+    resume_token: str | None,
+    validation_error: str,
+    archive_path: str | None = None,
+    created_at: str | None = None,
+) -> dict[str, object]:
+    return {
+        "project": project,
+        "resume_token": resume_token,
+        "archive_path": archive_path,
+        "created_at": created_at,
+        "validation_status": "invalid",
+        "validation_error": validation_error,
+    }
+
+
+def _resume_token_from_state_filename(path: Path, project_name: str) -> str:
+    prefix = f"handoff-{project_name}-"
+    if not path.name.startswith(prefix) or path.suffix != ".json":
+        return ""
+    return path.name.removeprefix(prefix).removesuffix(".json")
+
+
+def _project_relative_path(project_root: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(project_root.resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _age_seconds(path: Path) -> int | None:
+    try:
+        return max(0, int(time.time() - path.stat().st_mtime))
+    except OSError:
+        return None
+
+
 def discover_handoff_inventory(
     project_root: Path,
     *,
@@ -344,6 +579,7 @@ def _candidate_specificity(candidate: HandoffCandidate) -> int:
     location_specificity = {
         StorageLocation.PRIMARY_STATE: 60,
         StorageLocation.LEGACY_STATE: 60,
+        StorageLocation.STATE_LIKE_RESIDUE: 60,
         StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE: 50,
         StorageLocation.PRIMARY_ARCHIVE: 45,
         StorageLocation.LEGACY_ARCHIVE: 45,
@@ -537,6 +773,8 @@ def root_for_location(project_root: Path, location: StorageLocation) -> Path:
         return layout.legacy_archive_dir
     if location == StorageLocation.LEGACY_STATE:
         return layout.legacy_state_dir
+    if location == StorageLocation.STATE_LIKE_RESIDUE:
+        return layout.legacy_active_dir
     if location == StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE:
         return layout.previous_primary_hidden_archive_dir
     return layout.project_root
@@ -585,6 +823,8 @@ def _artifact_class(*, location: StorageLocation, path: Path, git_visibility: st
         return "primary-state-artifact"
     if location == StorageLocation.LEGACY_STATE:
         return "legacy-state-artifact"
+    if location == StorageLocation.STATE_LIKE_RESIDUE:
+        return "state-like-residue"
     if location == StorageLocation.LEGACY_ACTIVE:
         if git_visibility in {"ignored", "untracked"} and _looks_like_current_contract(path):
             return "policy-conflict-artifact"

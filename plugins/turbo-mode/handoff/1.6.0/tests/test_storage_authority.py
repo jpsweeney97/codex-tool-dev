@@ -8,6 +8,7 @@ from pathlib import Path
 from scripts.storage_authority import (
     SelectionEligibility,
     StorageLocation,
+    chain_state_recovery_inventory,
     discover_handoff_inventory,
     eligible_active_candidates,
     eligible_history_candidates,
@@ -365,3 +366,30 @@ def test_state_bridge_reports_primary_and_legacy_state_without_mutation(
     assert by_path[legacy].storage_location == StorageLocation.LEGACY_STATE
     assert by_path[legacy].artifact_class == "legacy-state-artifact"
     assert by_path[legacy].selection_eligibility == SelectionEligibility.ELIGIBLE
+
+
+def test_chain_state_recovery_inventory_reports_token_mismatch_as_invalid(
+    tmp_path: Path,
+) -> None:
+    state = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(
+        json.dumps({
+            "state_path": str(state),
+            "project": "demo",
+            "resume_token": "different-token",
+            "archive_path": "/tmp/archive.md",
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    inventory = chain_state_recovery_inventory(tmp_path, project_name="demo")
+
+    candidate = inventory["candidates"][0]
+    assert candidate["project_relative_state_path"] == (
+        ".codex/handoffs/.session-state/handoff-demo-token-a.json"
+    )
+    assert candidate["detected_format"] == "tokenized-json"
+    assert candidate["validation_status"] == "invalid"
+    assert candidate["validation_error"] == "payload resume token does not match filename token"

@@ -283,6 +283,80 @@ def test_read_state_returns_1_when_absent(tmp_path: Path) -> None:
     assert read_state.returncode == 1
 
 
+def test_chain_state_recovery_inventory_cli_reports_state_identity_without_mutation(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    legacy = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    residue = tmp_path / "docs" / "handoffs" / "handoff-demo"
+    archive = tmp_path / ".codex" / "handoffs" / "archive" / "previous.md"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    residue.parent.mkdir(parents=True, exist_ok=True)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    archive.write_text("---\ntitle: Previous\n---\n", encoding="utf-8")
+    primary.write_text(
+        json.dumps({
+            "state_path": str(primary),
+            "project": "demo",
+            "resume_token": "token-a",
+            "archive_path": str(archive),
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+    legacy_payload = {
+        "state_path": str(legacy),
+        "project": "demo",
+        "resume_token": "token-b",
+        "archive_path": str(archive),
+        "created_at": "2026-05-13T16:01:00Z",
+    }
+    legacy.write_text(json.dumps(legacy_payload), encoding="utf-8")
+    residue.write_text(str(archive), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "chain-state-recovery-inventory",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["project"] == "demo"
+    by_path = {
+        candidate["project_relative_state_path"]: candidate
+        for candidate in payload["candidates"]
+    }
+    primary_row = by_path[".codex/handoffs/.session-state/handoff-demo-token-a.json"]
+    legacy_row = by_path["docs/handoffs/.session-state/handoff-demo-token-b.json"]
+    residue_row = by_path["docs/handoffs/handoff-demo"]
+    assert primary_row["source_root"] == "primary"
+    assert primary_row["storage_location"] == "primary_state"
+    assert primary_row["project"] == "demo"
+    assert primary_row["resume_token"] == "token-a"
+    assert primary_row["detected_format"] == "tokenized-json"
+    assert primary_row["validation_status"] == "valid"
+    assert legacy_row["source_root"] == "legacy"
+    assert legacy_row["storage_location"] == "legacy_state"
+    assert legacy_row["resume_token"] == "token-b"
+    assert residue_row["storage_location"] == "state_like_residue"
+    assert residue_row["detected_format"] == "plain-state"
+    assert residue_row["archive_path"] == str(archive)
+    assert legacy.read_text(encoding="utf-8") == json.dumps(legacy_payload)
+    assert not (tmp_path / ".codex" / "handoffs" / ".session-state" / "markers").exists()
+
+
 def _residue_snapshot(root: Path, patterns: list[str]) -> set[str]:
     return {
         str(match.relative_to(root))

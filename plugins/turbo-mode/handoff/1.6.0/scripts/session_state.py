@@ -218,6 +218,10 @@ def main(argv: list[str] | None = None) -> int:
     prune_parser.add_argument("--state-dir", required=True)
     prune_parser.add_argument("--max-age-hours", type=int, default=24)
 
+    chain_inventory_parser = subparsers.add_parser("chain-state-recovery-inventory")
+    chain_inventory_parser.add_argument("--project-root", required=True)
+    chain_inventory_parser.add_argument("--project", required=True)
+
     allocate_active_parser = subparsers.add_parser("allocate-active-path")
     allocate_active_parser.add_argument("--project-root", required=True)
     allocate_active_parser.add_argument(
@@ -376,6 +380,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "prune-state":
         deleted = prune_old_state_files(args.max_age_hours, state_dir=Path(args.state_dir))
         json.dump({"deleted": [str(path) for path in deleted]}, sys.stdout)
+        return 0
+
+    if args.command == "chain-state-recovery-inventory":
+        from scripts.storage_authority import chain_state_recovery_inventory
+
+        payload = chain_state_recovery_inventory(
+            Path(args.project_root),
+            project_name=args.project,
+        )
+        json.dump(payload, sys.stdout, indent=2)
+        print()
         return 0
 
     if args.command == "allocate-active-path":
