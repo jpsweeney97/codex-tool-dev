@@ -219,6 +219,11 @@ def main(argv: list[str] | None = None) -> int:
 
     allocate_active_parser = subparsers.add_parser("allocate-active-path")
     allocate_active_parser.add_argument("--project-root", required=True)
+    allocate_active_parser.add_argument(
+        "--operation",
+        choices=("save", "summary", "quicksave"),
+        required=True,
+    )
     allocate_active_parser.add_argument("--slug", required=True)
     allocate_active_parser.add_argument("--created-at", default=None)
     allocate_active_parser.add_argument(
@@ -352,6 +357,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             active_path = allocate_active_path(
                 Path(args.project_root),
+                operation=args.operation,
                 slug=args.slug,
                 created_at=args.created_at,
             )

@@ -124,6 +124,7 @@ def begin_active_write(
 def allocate_active_path(
     project_root: Path,
     *,
+    operation: str,
     slug: str,
     created_at: str | None = None,
 ) -> Path:
@@ -132,6 +133,7 @@ def allocate_active_path(
 
     return _allocate_active_path(
         project_root,
+        operation=operation,
         slug=slug,
         created_at=created_at,
     )

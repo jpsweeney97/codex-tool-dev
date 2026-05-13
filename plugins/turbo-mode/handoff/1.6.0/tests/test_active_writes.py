@@ -53,7 +53,7 @@ def test_begin_active_write_persists_operation_state_before_content_generation(
     assert payload["bound_slug"] == "next-step"
     assert payload["slug_source"] == "caller-predeclared"
     assert payload["allocated_active_path"] == str(
-        tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_next-step.md"
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_save-next-step.md"
     )
     assert payload["operation_state_path"] == str(operation_state_path)
     assert payload["lease_id"]
@@ -100,14 +100,14 @@ def test_begin_active_write_mints_helper_default_slug_before_content_generation(
     assert payload["bound_slug"] == "summary"
     assert payload["slug_source"] == "helper-default"
     assert payload["allocated_active_path"] == str(
-        tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_summary.md"
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_summary-summary.md"
     )
     assert not Path(payload["allocated_active_path"]).exists()
 
 
 def test_allocate_active_path_cli_returns_collision_safe_primary_path(tmp_path: Path) -> None:
     script = Path(__file__).parent.parent / "scripts" / "session_state.py"
-    existing = tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_repeat.md"
+    existing = tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_save-repeat.md"
     existing.parent.mkdir(parents=True)
     existing.write_text("existing\n", encoding="utf-8")
 
@@ -118,6 +118,8 @@ def test_allocate_active_path_cli_returns_collision_safe_primary_path(tmp_path: 
             "allocate-active-path",
             "--project-root",
             str(tmp_path),
+            "--operation",
+            "save",
             "--slug",
             "repeat",
             "--created-at",
@@ -132,23 +134,24 @@ def test_allocate_active_path_cli_returns_collision_safe_primary_path(tmp_path: 
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == str(
-        tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_repeat-01.md"
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_save-repeat-01.md"
     )
     assert existing.read_text(encoding="utf-8") == "existing\n"
 
 
 def test_allocate_active_path_treats_dangling_symlink_as_occupied(tmp_path: Path) -> None:
-    existing = tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_repeat.md"
+    existing = tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_save-repeat.md"
     existing.parent.mkdir(parents=True)
     existing.symlink_to(tmp_path / "missing-target.md")
 
     active_path = active_writes.allocate_active_path(
         tmp_path,
+        operation="save",
         slug="repeat",
         created_at="2026-05-13T16:45:00Z",
     )
 
-    assert active_path == tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_repeat-01.md"
+    assert active_path == tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_save-repeat-01.md"
 
 
 def test_begin_active_write_reuses_existing_run_id_reservation(tmp_path: Path) -> None:
@@ -233,7 +236,7 @@ def test_begin_active_write_rejects_second_live_reservation_for_same_state(
         (tmp_path / ".codex" / "handoffs" / ".session-state" / "transactions").glob("*.json")
     )
     assert transactions == [first.transaction_path]
-    assert not (tmp_path / ".codex" / "handoffs" / "2026-05-13_16-46_second.md").exists()
+    assert not (tmp_path / ".codex" / "handoffs" / "2026-05-13_16-46_save-second.md").exists()
 
 
 def test_begin_active_write_rejects_expired_reservation_until_abandoned(
@@ -275,7 +278,7 @@ def test_begin_active_write_rejects_expired_reservation_until_abandoned(
     )
     assert set(transactions) == {first.transaction_path, replacement.transaction_path}
     assert replacement.allocated_active_path == (
-        tmp_path / ".codex" / "handoffs" / "2026-05-13_16-46_replacement.md"
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_16-46_save-replacement.md"
     )
 
 
@@ -332,7 +335,7 @@ def test_write_active_handoff_commits_reserved_output(tmp_path: Path) -> None:
 
     assert write.returncode == 0, write.stderr
     active_path = Path(write.stdout.strip())
-    assert active_path == tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_write-phase.md"
+    assert active_path == tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_save-write-phase.md"
     assert active_path.read_text(encoding="utf-8") == content
     state = json.loads(operation_state_path.read_text(encoding="utf-8"))
     assert state["status"] == "committed"
