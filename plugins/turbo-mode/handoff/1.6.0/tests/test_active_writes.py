@@ -137,6 +137,20 @@ def test_allocate_active_path_cli_returns_collision_safe_primary_path(tmp_path: 
     assert existing.read_text(encoding="utf-8") == "existing\n"
 
 
+def test_allocate_active_path_treats_dangling_symlink_as_occupied(tmp_path: Path) -> None:
+    existing = tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_repeat.md"
+    existing.parent.mkdir(parents=True)
+    existing.symlink_to(tmp_path / "missing-target.md")
+
+    active_path = active_writes.allocate_active_path(
+        tmp_path,
+        slug="repeat",
+        created_at="2026-05-13T16:45:00Z",
+    )
+
+    assert active_path == tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_repeat-01.md"
+
+
 def test_begin_active_write_reuses_existing_run_id_reservation(tmp_path: Path) -> None:
     first = active_writes.begin_active_write(
         tmp_path,

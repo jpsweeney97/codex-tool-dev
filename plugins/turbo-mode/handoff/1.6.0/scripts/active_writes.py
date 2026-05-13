@@ -534,15 +534,19 @@ def _allocate_active_path(active_dir: Path, slug: str, created_at: datetime) -> 
     active_dir.mkdir(parents=True, exist_ok=True)
     prefix = created_at.strftime("%Y-%m-%d_%H-%M")
     candidate = active_dir / f"{prefix}_{slug}.md"
-    if not candidate.exists():
+    if not _active_path_occupied(candidate):
         return candidate
     for index in range(1, 100):
         candidate = active_dir / f"{prefix}_{slug}-{index:02d}.md"
-        if not candidate.exists():
+        if not _active_path_occupied(candidate):
             return candidate
     raise ActiveWriteError(
         f"allocate-active-path failed: collision budget exhausted. Got: {slug!r:.100}"
     )
+
+
+def _active_path_occupied(path: Path) -> bool:
+    return path.exists() or path.is_symlink()
 
 
 def _state_snapshot(
