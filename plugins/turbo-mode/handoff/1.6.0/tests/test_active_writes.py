@@ -188,6 +188,18 @@ def test_allocate_active_path_rejects_path_like_slug(tmp_path: Path) -> None:
         )
 
 
+def test_allocate_active_path_reports_parent_file_conflict(tmp_path: Path) -> None:
+    (tmp_path / ".codex").write_text("not a directory\n", encoding="utf-8")
+
+    with pytest.raises(active_writes.ActiveWriteError, match="parent path conflict"):
+        active_writes.allocate_active_path(
+            tmp_path,
+            operation="save",
+            slug="conflict",
+            created_at="2026-05-13T16:45:00Z",
+        )
+
+
 def test_begin_active_write_reuses_existing_run_id_reservation(tmp_path: Path) -> None:
     first = active_writes.begin_active_write(
         tmp_path,

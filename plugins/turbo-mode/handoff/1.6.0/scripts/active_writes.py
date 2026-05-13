@@ -566,7 +566,13 @@ def _allocate_active_path(
     slug: str,
     created_at: datetime,
 ) -> Path:
-    active_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        active_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ActiveWriteError(
+            "allocate-active-path failed: parent path conflict. "
+            f"Got: {str(active_dir)!r:.100}"
+        ) from exc
     prefix = created_at.strftime("%Y-%m-%d_%H-%M")
     stem = f"{operation}-{slug}"
     candidate = active_dir / f"{prefix}_{stem}.md"
