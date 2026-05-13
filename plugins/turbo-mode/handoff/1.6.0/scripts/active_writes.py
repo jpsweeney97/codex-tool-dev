@@ -331,6 +331,7 @@ def _ensure_no_compatible_reservation(
     active_writes_dir = state_dir / "active-writes" / project
     if not active_writes_dir.exists():
         return
+    now = datetime.now(UTC)
     for path in sorted(active_writes_dir.glob("*.json")):
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
@@ -340,12 +341,40 @@ def _ensure_no_compatible_reservation(
             continue
         if record.get("state_snapshot_hash") != state_snapshot_hash:
             continue
-        if record.get("status") in {"committed", "abandoned"}:
+        if record.get("status") in {"committed", "abandoned", "reservation_expired"}:
+            continue
+        if _auto_expire_pre_output_reservation(record, path, now=now):
             continue
         raise ActiveWriteError(
             "begin-active-write failed: active write already reserved. "
             f"Got: {str(path)!r:.100}"
-    )
+        )
+
+
+def _auto_expire_pre_output_reservation(
+    record: dict[str, object],
+    operation_state_path: Path,
+    *,
+    now: datetime,
+) -> bool:
+    if record.get("status") != "begun":
+        return False
+    if record.get("content_hash") or record.get("output_sha256"):
+        return False
+    expires_at = str(record.get("lease_expires_at") or "")
+    transaction_path_value = record.get("transaction_path")
+    if not expires_at or not transaction_path_value:
+        return False
+    try:
+        expires = _parse_created_at(expires_at)
+    except ValueError:
+        return False
+    if expires >= now:
+        return False
+    updated = {**record, "status": "reservation_expired", "updated_at": now.isoformat()}
+    _write_json_atomic(operation_state_path, updated)
+    _write_json_atomic(Path(str(transaction_path_value)), {**updated, "status": "reservation_expired"})
+    return True
 
 
 def _recovery_commands(project_root: Path, operation_state_path: Path) -> dict[str, object]:

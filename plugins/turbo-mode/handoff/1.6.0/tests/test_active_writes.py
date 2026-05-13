@@ -816,7 +816,7 @@ def test_begin_active_write_rejects_second_live_reservation_for_same_state(
     assert not (tmp_path / ".codex" / "handoffs" / "2026-05-13_16-46_save-second.md").exists()
 
 
-def test_begin_active_write_rejects_expired_reservation_until_abandoned(
+def test_begin_active_write_auto_expires_stale_pre_output_reservation(
     tmp_path: Path,
 ) -> None:
     first = active_writes.begin_active_write(
@@ -828,20 +828,6 @@ def test_begin_active_write_rejects_expired_reservation_until_abandoned(
         lease_seconds=-1,
     )
 
-    with pytest.raises(active_writes.ActiveWriteError, match="active write already reserved"):
-        active_writes.begin_active_write(
-            tmp_path,
-            project_name="demo",
-            operation="save",
-            slug="replacement",
-            created_at="2026-05-13T16:46:00Z",
-        )
-
-    active_writes.abandon_active_write(
-        tmp_path,
-        operation_state_path=first.operation_state_path,
-        reason="operator abandoned expired reservation",
-    )
     replacement = active_writes.begin_active_write(
         tmp_path,
         project_name="demo",
@@ -850,13 +836,49 @@ def test_begin_active_write_rejects_expired_reservation_until_abandoned(
         created_at="2026-05-13T16:46:00Z",
     )
 
+    expired_operation_state = json.loads(
+        first.operation_state_path.read_text(encoding="utf-8")
+    )
+    expired_transaction = json.loads(first.transaction_path.read_text(encoding="utf-8"))
+    assert expired_operation_state["status"] == "reservation_expired"
+    assert expired_transaction["status"] == "reservation_expired"
+    assert replacement.transaction_id != first.transaction_id
+    assert replacement.allocated_active_path == (
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_16-46_save-replacement.md"
+    )
+
     transactions = sorted(
         (tmp_path / ".codex" / "handoffs" / ".session-state" / "transactions").glob("*.json")
     )
     assert set(transactions) == {first.transaction_path, replacement.transaction_path}
-    assert replacement.allocated_active_path == (
-        tmp_path / ".codex" / "handoffs" / "2026-05-13_16-46_save-replacement.md"
+
+
+def test_begin_active_write_does_not_auto_expire_after_content_hash_exists(
+    tmp_path: Path,
+) -> None:
+    first = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="save",
+        slug="post-content",
+        created_at="2026-05-13T16:45:00Z",
+        lease_seconds=-1,
     )
+
+    operation_state = json.loads(first.operation_state_path.read_text(encoding="utf-8"))
+    operation_state["content_hash"] = "a" * 64
+    first.operation_state_path.write_text(
+        json.dumps(operation_state, indent=2), encoding="utf-8"
+    )
+
+    with pytest.raises(active_writes.ActiveWriteError, match="active write already reserved"):
+        active_writes.begin_active_write(
+            tmp_path,
+            project_name="demo",
+            operation="save",
+            slug="replacement",
+            created_at="2026-05-13T16:46:00Z",
+        )
 
 
 def test_write_active_handoff_commits_reserved_output(tmp_path: Path) -> None:

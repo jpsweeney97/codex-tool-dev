@@ -210,7 +210,7 @@ def list_load_recovery_records(project_root: Path) -> list[dict[str, object]]:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if data.get("status") != "completed":
+        if data.get("operation") == "load" and data.get("status") == "pending":
             records.append(data)
     return records
 
@@ -295,7 +295,9 @@ def _recover_pending_load(layout) -> LoadResult | None:
             StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE,
         }:
             continue
-        return _recover_load_transaction(layout, transaction_path, record)
+        recovered = _recover_load_transaction(layout, transaction_path, record)
+        if recovered is not None:
+            return recovered
     return None
 
 
@@ -303,23 +305,21 @@ def _recover_load_transaction(
     layout,
     transaction_path: Path,
     record: dict[str, object],
-) -> LoadResult:
+) -> LoadResult | None:
     transaction_id = str(record.get("transaction_id", ""))
     source_path = Path(str(record.get("source_path", "")))
-    archive_path = Path(str(record.get("archive_path", "")))
-    state_path = Path(str(record.get("state_path", "")))
     project = str(record.get("project", ""))
     resume_token = str(record.get("resume_token", ""))
-    if not transaction_id or not project or not resume_token:
+    state_path_value = str(record.get("state_path") or "")
+    if not transaction_id or not project or not resume_token or not state_path_value:
         raise LoadTransactionError(
             "load-handoff failed: pending transaction lacks recovery metadata. "
             f"Got: {str(transaction_path)!r:.100}"
         )
-    if not archive_path.exists():
-        raise LoadTransactionError(
-            "load-handoff failed: pending transaction archive is missing. "
-            f"Got: {str(archive_path)!r:.100}"
-        )
+    state_path = Path(state_path_value)
+    archive_path = _resolve_pending_archive_path(layout, transaction_path, record)
+    if archive_path is None:
+        return None
     if not state_path.exists():
         written_state = write_resume_state(
             layout.primary_state_dir,
@@ -341,6 +341,7 @@ def _recover_load_transaction(
     }:
         _recover_copied_legacy_archive(layout, record, archive_path=archive_path)
     record["status"] = "completed"
+    record["archive_path"] = str(archive_path)
     record["state_path"] = str(state_path)
     record["updated_at"] = datetime.now(UTC).isoformat()
     _write_json_atomic(transaction_path, record)
@@ -352,6 +353,192 @@ def _recover_load_transaction(
         state_path=state_path,
         storage_location=storage_location,
     )
+
+
+def _resolve_pending_archive_path(
+    layout,
+    transaction_path: Path,
+    record: dict[str, object],
+) -> Path | None:
+    storage_location = StorageLocation(str(record.get("storage_location", "")))
+    source_path = Path(str(record.get("source_path", "")))
+    source_hash = str(record.get("source_content_sha256") or "")
+    archive_value = record.get("archive_path")
+    if archive_value:
+        archive_path = Path(str(archive_value))
+        if not archive_path.exists():
+            raise LoadTransactionError(
+                "load-handoff failed: pending transaction archive is missing. "
+                f"Got: {str(archive_path)!r:.100}"
+            )
+        if storage_location == StorageLocation.PRIMARY_ACTIVE and source_hash:
+            if _sha256_file(archive_path) != source_hash:
+                raise LoadTransactionError(
+                    "load-handoff failed: pending primary active archive hash mismatch. "
+                    f"Got: {str(archive_path)!r:.100}"
+                )
+        return archive_path
+    if storage_location == StorageLocation.PRIMARY_ARCHIVE:
+        if source_path.exists():
+            record["archive_path"] = str(source_path)
+            record["updated_at"] = datetime.now(UTC).isoformat()
+            _write_json_atomic(transaction_path, record)
+            return source_path
+        raise LoadTransactionError(
+            "load-handoff failed: pending primary archive source is missing. "
+            f"Got: {str(source_path)!r:.100}"
+        )
+    if storage_location == StorageLocation.PRIMARY_ACTIVE:
+        if source_path.exists():
+            _abandon_pending_load_for_retry(
+                transaction_path,
+                record,
+                retry_reason="primary-active-replace-not-started",
+            )
+            return None
+        return _adopt_primary_active_archive_by_hash(layout, transaction_path, record)
+    if storage_location == StorageLocation.LEGACY_ACTIVE:
+        archive_path = _registry_archive_for_pending_legacy_active(layout, record)
+        if archive_path is None:
+            _abandon_pending_load_for_retry(
+                transaction_path,
+                record,
+                retry_reason="legacy-active-copy-not-recorded",
+            )
+            return None
+        return archive_path
+    if storage_location in {
+        StorageLocation.LEGACY_ARCHIVE,
+        StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE,
+    }:
+        archive_path = _registry_archive_for_pending_legacy_archive(layout, record)
+        if archive_path is None:
+            _abandon_pending_load_for_retry(
+                transaction_path,
+                record,
+                retry_reason="legacy-archive-copy-not-recorded",
+            )
+            return None
+        return archive_path
+    raise LoadTransactionError(
+        "load-handoff failed: unsupported pending transaction storage location. "
+        f"Got: {storage_location!r:.100}"
+    )
+
+
+def _adopt_primary_active_archive_by_hash(
+    layout,
+    transaction_path: Path,
+    record: dict[str, object],
+) -> Path:
+    source_hash = str(record.get("source_content_sha256") or "")
+    if not source_hash:
+        raise LoadTransactionError(
+            "load-handoff failed: pending primary active transaction lacks source hash. "
+            f"Got: {str(transaction_path)!r:.100}"
+        )
+    if not layout.primary_archive_dir.exists():
+        raise LoadTransactionError(
+            "load-handoff failed: pending primary active archive is unrecoverable; "
+            "source was moved but no archive directory exists. "
+            f"Got: {str(transaction_path)!r:.100}"
+        )
+    matches = [
+        path
+        for path in sorted(layout.primary_archive_dir.glob("*.md"))
+        if path.is_file() and _sha256_file(path) == source_hash
+    ]
+    if len(matches) == 1:
+        archive_path = matches[0]
+        record["archive_path"] = str(archive_path)
+        record["updated_at"] = datetime.now(UTC).isoformat()
+        _write_json_atomic(transaction_path, record)
+        return archive_path
+    if not matches:
+        raise LoadTransactionError(
+            "load-handoff failed: pending primary active archive is unrecoverable; "
+            "source was moved but no archive matched recorded source hash. "
+            f"Got: {str(transaction_path)!r:.100}"
+        )
+    raise LoadTransactionError(
+        "load-handoff failed: pending primary active archive is ambiguous. "
+        f"Got: {[str(path) for path in matches]!r:.1000}"
+    )
+
+
+def _abandon_pending_load_for_retry(
+    transaction_path: Path,
+    record: dict[str, object],
+    *,
+    retry_reason: str,
+) -> None:
+    now = datetime.now(UTC).isoformat()
+    record["status"] = "abandoned"
+    record["retry_reason"] = retry_reason
+    record["abandoned_by"] = "load-recovery"
+    record["abandoned_at"] = now
+    record["updated_at"] = now
+    _write_json_atomic(transaction_path, record)
+
+
+def _registry_archive_for_pending_legacy_active(
+    layout,
+    record: dict[str, object],
+) -> Path | None:
+    return _lookup_pending_legacy_archive(
+        layout,
+        record,
+        registry_path=layout.primary_state_dir / "consumed-legacy-active.json",
+        source_root_value="project_root",
+    )
+
+
+def _registry_archive_for_pending_legacy_archive(
+    layout,
+    record: dict[str, object],
+) -> Path | None:
+    return _lookup_pending_legacy_archive(
+        layout,
+        record,
+        registry_path=layout.primary_state_dir / "copied-legacy-archives.json",
+        source_root_value=str(layout.project_root),
+    )
+
+
+def _lookup_pending_legacy_archive(
+    layout,
+    record: dict[str, object],
+    *,
+    registry_path: Path,
+    source_root_value: str,
+) -> Path | None:
+    if not registry_path.exists():
+        return None
+    source_path = Path(str(record.get("source_path", "")))
+    source_hash = str(record.get("source_content_sha256") or "")
+    if not source_hash:
+        return None
+    try:
+        relative = source_path.relative_to(layout.project_root).as_posix()
+    except ValueError:
+        return None
+    registry = _read_registry(registry_path)
+    target_key = {
+        "source_root": source_root_value,
+        "project_relative_source_path": relative,
+        "storage_location": str(record.get("storage_location", "")),
+        "source_content_sha256": source_hash,
+    }
+    for entry in registry["entries"]:
+        if _registry_key(entry) != target_key:
+            continue
+        archive_path = Path(str(entry.get("copied_primary_archive_path", "")))
+        if not archive_path.exists():
+            return None
+        if _sha256_file(archive_path) != source_hash:
+            return None
+        return archive_path
+    return None
 
 
 def _recover_consumed_legacy_active(

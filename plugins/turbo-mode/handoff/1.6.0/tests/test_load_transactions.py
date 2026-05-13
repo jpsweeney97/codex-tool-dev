@@ -465,12 +465,25 @@ def test_read_only_recovery_inventory_reports_pending_transactions(tmp_path: Pat
     transactions.mkdir(parents=True)
     pending = transactions / "pending.json"
     completed = transactions / "completed.json"
-    pending.write_text('{"transaction_id": "a", "status": "pending"}', encoding="utf-8")
-    completed.write_text('{"transaction_id": "b", "status": "completed"}', encoding="utf-8")
+    pending.write_text(
+        '{"transaction_id": "a", "operation": "load", "status": "pending"}',
+        encoding="utf-8",
+    )
+    completed.write_text(
+        '{"transaction_id": "b", "operation": "load", "status": "completed"}',
+        encoding="utf-8",
+    )
+    abandoned = transactions / "abandoned.json"
+    abandoned.write_text(
+        '{"transaction_id": "c", "operation": "load", "status": "abandoned"}',
+        encoding="utf-8",
+    )
 
     records = list_load_recovery_records(tmp_path)
 
-    assert records == [{"transaction_id": "a", "status": "pending"}]
+    assert records == [
+        {"transaction_id": "a", "operation": "load", "status": "pending"}
+    ]
     assert pending.exists()
     assert completed.exists()
 
@@ -618,4 +631,257 @@ def test_load_retry_recovers_legacy_active_after_consumed_registry_failure(
     ).as_posix()
     assert registry["entries"][0]["source_content_sha256"] == legacy_hash
     assert registry["entries"][0]["copied_primary_archive_path"] == str(archive)
+    assert list_load_recovery_records(tmp_path) == []
+
+
+def _seed_pending_load_transaction(
+    tmp_path: Path,
+    *,
+    transaction_id: str,
+    source_path: Path,
+    storage_location: str,
+    source_content_sha256: str,
+    resume_token: str = "retry",
+    project: str = "demo",
+) -> Path:
+    transactions_dir = (
+        tmp_path / ".codex" / "handoffs" / ".session-state" / "transactions"
+    )
+    transactions_dir.mkdir(parents=True, exist_ok=True)
+    transaction_path = transactions_dir / f"{transaction_id}.json"
+    state_path = (
+        tmp_path
+        / ".codex"
+        / "handoffs"
+        / ".session-state"
+        / f"handoff-{project}-{resume_token}.json"
+    )
+    payload = {
+        "transaction_id": transaction_id,
+        "operation": "load",
+        "status": "pending",
+        "project": project,
+        "resume_token": resume_token,
+        "source_path": str(source_path),
+        "storage_location": storage_location,
+        "source_git_visibility": "untracked",
+        "source_fs_status": "present",
+        "source_content_sha256": source_content_sha256,
+        "archive_path": None,
+        "state_path": str(state_path),
+        "updated_at": "2026-05-13T12:00:00+00:00",
+    }
+    transaction_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return transaction_path
+
+
+def test_load_retry_recovers_primary_archive_with_archive_path_none(
+    tmp_path: Path,
+) -> None:
+    archive = _handoff(
+        tmp_path / ".codex" / "handoffs" / "archive" / "2026-05-13_12-00_archived.md"
+    )
+    transaction_path = _seed_pending_load_transaction(
+        tmp_path,
+        transaction_id="primary-archive-pending",
+        source_path=archive,
+        storage_location="primary_archive",
+        source_content_sha256=_sha256(archive),
+    )
+
+    result = load_handoff(tmp_path, project_name="demo", resume_token="retry")
+
+    assert result.archive_path == archive
+    assert result.transaction_path == str(transaction_path)
+    assert result.state_path.exists()
+    transaction = json.loads(transaction_path.read_text(encoding="utf-8"))
+    assert transaction["status"] == "completed"
+    assert transaction["archive_path"] == str(archive)
+    assert list_load_recovery_records(tmp_path) == []
+
+
+def test_load_retry_abandons_primary_active_when_source_exists(
+    tmp_path: Path,
+) -> None:
+    source = _handoff(
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_abandon.md"
+    )
+    pending_path = _seed_pending_load_transaction(
+        tmp_path,
+        transaction_id="primary-active-abandon",
+        source_path=source,
+        storage_location="primary_active",
+        source_content_sha256=_sha256(source),
+        resume_token="abandoned-attempt",
+    )
+
+    result = load_handoff(tmp_path, project_name="demo", resume_token="retry")
+
+    abandoned = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert abandoned["status"] == "abandoned"
+    assert abandoned["retry_reason"] == "primary-active-replace-not-started"
+    assert abandoned["abandoned_by"] == "load-recovery"
+
+    archive = tmp_path / ".codex" / "handoffs" / "archive" / source.name
+    assert result.archive_path == archive
+    assert result.transaction_path != str(pending_path)
+    assert not source.exists()
+    completed = json.loads(Path(result.transaction_path).read_text(encoding="utf-8"))
+    assert completed["status"] == "completed"
+    assert list_load_recovery_records(tmp_path) == []
+
+
+def test_load_retry_adopts_primary_active_archive_by_hash_when_source_gone(
+    tmp_path: Path,
+) -> None:
+    intended_source = (
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_adopted.md"
+    )
+    archive_dir = tmp_path / ".codex" / "handoffs" / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    adopted_archive = archive_dir / "2026-05-13_12-00_adopted.md"
+    _handoff(adopted_archive, title="Adopted")
+    source_hash = _sha256(adopted_archive)
+    pending_path = _seed_pending_load_transaction(
+        tmp_path,
+        transaction_id="primary-active-adopt",
+        source_path=intended_source,
+        storage_location="primary_active",
+        source_content_sha256=source_hash,
+    )
+
+    result = load_handoff(tmp_path, project_name="demo", resume_token="retry")
+
+    assert result.archive_path == adopted_archive
+    assert result.transaction_path == str(pending_path)
+    completed = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert completed["status"] == "completed"
+    assert completed["archive_path"] == str(adopted_archive)
+    assert list_load_recovery_records(tmp_path) == []
+
+
+def test_load_retry_raises_unrecoverable_for_primary_active_when_source_gone_and_no_match(
+    tmp_path: Path,
+) -> None:
+    intended_source = (
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_missing.md"
+    )
+    pending_path = _seed_pending_load_transaction(
+        tmp_path,
+        transaction_id="primary-active-missing",
+        source_path=intended_source,
+        storage_location="primary_active",
+        source_content_sha256="a" * 64,
+    )
+
+    with pytest.raises(LoadTransactionError, match="unrecoverable"):
+        load_handoff(tmp_path, project_name="demo", resume_token="retry")
+
+    record = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert record["status"] == "pending"
+
+
+def test_load_retry_raises_ambiguous_for_primary_active_with_multiple_hash_matches(
+    tmp_path: Path,
+) -> None:
+    intended_source = (
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_ambiguous.md"
+    )
+    archive_dir = tmp_path / ".codex" / "handoffs" / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    first = _handoff(archive_dir / "2026-05-13_12-00_ambiguous.md", title="Ambiguous")
+    second = archive_dir / "2026-05-13_12-00_ambiguous-01.md"
+    second.write_bytes(first.read_bytes())
+    source_hash = _sha256(first)
+    _seed_pending_load_transaction(
+        tmp_path,
+        transaction_id="primary-active-ambiguous",
+        source_path=intended_source,
+        storage_location="primary_active",
+        source_content_sha256=source_hash,
+    )
+
+    with pytest.raises(LoadTransactionError, match="ambiguous") as excinfo:
+        load_handoff(tmp_path, project_name="demo", resume_token="retry")
+
+    message = str(excinfo.value)
+    assert str(first) in message
+    assert str(second) in message
+
+
+def test_load_retry_abandons_legacy_active_without_registry_entry(
+    tmp_path: Path,
+) -> None:
+    legacy = _handoff(tmp_path / "docs" / "handoffs" / "2026-05-13_12-00_legacy.md")
+    _write_legacy_active_opt_in(tmp_path, legacy)
+    pending_path = _seed_pending_load_transaction(
+        tmp_path,
+        transaction_id="legacy-active-abandon",
+        source_path=legacy,
+        storage_location="legacy_active",
+        source_content_sha256=_sha256(legacy),
+        resume_token="abandoned-attempt",
+    )
+
+    result = load_handoff(tmp_path, project_name="demo", resume_token="retry")
+
+    abandoned = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert abandoned["status"] == "abandoned"
+    assert abandoned["retry_reason"] == "legacy-active-copy-not-recorded"
+    assert abandoned["abandoned_by"] == "load-recovery"
+
+    archive = tmp_path / ".codex" / "handoffs" / "archive" / legacy.name
+    assert result.archive_path == archive
+    assert result.transaction_path != str(pending_path)
+    completed = json.loads(Path(result.transaction_path).read_text(encoding="utf-8"))
+    assert completed["status"] == "completed"
+    registry_path = (
+        tmp_path
+        / ".codex"
+        / "handoffs"
+        / ".session-state"
+        / "consumed-legacy-active.json"
+    )
+    assert registry_path.exists()
+    assert list_load_recovery_records(tmp_path) == []
+
+
+def test_load_retry_abandons_legacy_archive_without_registry_entry(
+    tmp_path: Path,
+) -> None:
+    legacy_archive = _handoff(
+        tmp_path / "docs" / "handoffs" / "archive" / "2026-05-13_12-00_legacy.md"
+    )
+    pending_path = _seed_pending_load_transaction(
+        tmp_path,
+        transaction_id="legacy-archive-abandon",
+        source_path=legacy_archive,
+        storage_location="legacy_archive",
+        source_content_sha256=_sha256(legacy_archive),
+        resume_token="abandoned-attempt",
+    )
+
+    result = load_handoff(
+        tmp_path,
+        project_name="demo",
+        explicit_path=legacy_archive,
+        resume_token="retry",
+    )
+
+    abandoned = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert abandoned["status"] == "abandoned"
+    assert abandoned["retry_reason"] == "legacy-archive-copy-not-recorded"
+    assert abandoned["abandoned_by"] == "load-recovery"
+
+    archive = tmp_path / ".codex" / "handoffs" / "archive" / legacy_archive.name
+    assert result.archive_path == archive
+    assert result.transaction_path != str(pending_path)
+    registry_path = (
+        tmp_path
+        / ".codex"
+        / "handoffs"
+        / ".session-state"
+        / "copied-legacy-archives.json"
+    )
+    assert registry_path.exists()
     assert list_load_recovery_records(tmp_path) == []
