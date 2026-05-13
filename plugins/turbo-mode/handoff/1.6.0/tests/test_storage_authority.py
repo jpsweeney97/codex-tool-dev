@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import subprocess
 from pathlib import Path
 
@@ -44,6 +46,36 @@ def _invalid_handoff(path: Path) -> Path:
     return path
 
 
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_legacy_active_opt_in(
+    project_root: Path,
+    source: Path,
+    *,
+    sha256: str | None = None,
+) -> Path:
+    rel_path = source.relative_to(project_root).as_posix()
+    manifest = (
+        project_root
+        / "docs"
+        / "superpowers"
+        / "plans"
+        / "2026-05-13-handoff-storage-legacy-active-opt-ins.md"
+    )
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        "| project_relative_path | raw_byte_sha256 | source_root | storage_location | "
+        "reviewer | reason |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        f"| `{rel_path}` | `{sha256 or _sha256(source)}` | `project_root` | "
+        "`legacy_active` | `test-reviewer` | reviewed runtime migration input |\n",
+        encoding="utf-8",
+    )
+    return manifest
+
+
 def test_storage_layout_uses_codex_handoffs_as_primary(tmp_path: Path) -> None:
     layout = get_storage_layout(tmp_path)
 
@@ -80,6 +112,74 @@ def test_active_selection_blocks_unproven_legacy_active_markdown(tmp_path: Path)
         by_path[legacy_archive].selection_eligibility
         == SelectionEligibility.NOT_ACTIVE_SELECTION_INPUT
     )
+
+
+def test_active_selection_accepts_exact_reviewed_legacy_active_opt_in(tmp_path: Path) -> None:
+    legacy = _handoff(tmp_path / "docs" / "handoffs" / "2026-05-13_12-01_legacy.md", "Legacy")
+    _write_legacy_active_opt_in(tmp_path, legacy)
+
+    inventory = discover_handoff_inventory(tmp_path, scan_mode="active-selection")
+
+    candidate = next(candidate for candidate in inventory.candidates if candidate.path == legacy)
+    assert candidate.storage_location == StorageLocation.LEGACY_ACTIVE
+    assert candidate.artifact_class == "reviewed-runtime-migration-opt-in"
+    assert candidate.selection_eligibility == SelectionEligibility.ELIGIBLE
+    assert eligible_active_candidates(inventory) == [candidate]
+
+
+def test_active_selection_blocks_legacy_active_opt_in_hash_mismatch(tmp_path: Path) -> None:
+    legacy = _handoff(tmp_path / "docs" / "handoffs" / "2026-05-13_12-01_legacy.md", "Legacy")
+    _write_legacy_active_opt_in(tmp_path, legacy, sha256="0" * 64)
+
+    inventory = discover_handoff_inventory(tmp_path, scan_mode="active-selection")
+
+    candidate = next(candidate for candidate in inventory.candidates if candidate.path == legacy)
+    assert candidate.artifact_class == "policy-conflict-artifact"
+    assert candidate.selection_eligibility == SelectionEligibility.BLOCKED_POLICY_CONFLICT
+    assert eligible_active_candidates(inventory) == []
+
+
+def test_active_selection_suppresses_consumed_legacy_active_by_stable_hash(
+    tmp_path: Path,
+) -> None:
+    legacy = _handoff(tmp_path / "docs" / "handoffs" / "2026-05-13_12-01_legacy.md", "Legacy")
+    _write_legacy_active_opt_in(tmp_path, legacy)
+    consumed = tmp_path / ".codex" / "handoffs" / ".session-state" / "consumed-legacy-active.json"
+    consumed.parent.mkdir(parents=True, exist_ok=True)
+    consumed.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "source_root": "project_root",
+                        "project_relative_source_path": legacy.relative_to(tmp_path).as_posix(),
+                        "storage_location": "legacy_active",
+                        "source_content_sha256": _sha256(legacy),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    suppressed = discover_handoff_inventory(tmp_path, scan_mode="active-selection")
+    suppressed_candidate = next(
+        candidate for candidate in suppressed.candidates if candidate.path == legacy
+    )
+    assert suppressed_candidate.artifact_class == "consumed-legacy-active"
+    assert (
+        suppressed_candidate.selection_eligibility
+        == SelectionEligibility.NOT_ACTIVE_SELECTION_INPUT
+    )
+    assert eligible_active_candidates(suppressed) == []
+
+    legacy.write_text(legacy.read_text(encoding="utf-8") + "\nChanged bytes.\n", encoding="utf-8")
+    changed = discover_handoff_inventory(tmp_path, scan_mode="active-selection")
+    changed_candidate = next(
+        candidate for candidate in changed.candidates if candidate.path == legacy
+    )
+    assert changed_candidate.artifact_class == "policy-conflict-artifact"
+    assert changed_candidate.selection_eligibility == SelectionEligibility.BLOCKED_POLICY_CONFLICT
 
 
 def test_history_search_includes_archive_tiers_but_not_state(tmp_path: Path) -> None:

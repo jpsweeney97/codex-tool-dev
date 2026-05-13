@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -35,6 +36,31 @@ def _handoff(path: Path, title: str = "Test") -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_legacy_active_opt_in(project_root: Path, source: Path) -> Path:
+    rel_path = source.relative_to(project_root).as_posix()
+    manifest = (
+        project_root
+        / "docs"
+        / "superpowers"
+        / "plans"
+        / "2026-05-13-handoff-storage-legacy-active-opt-ins.md"
+    )
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        "| project_relative_path | raw_byte_sha256 | source_root | storage_location | "
+        "reviewer | reason |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        f"| `{rel_path}` | `{_sha256(source)}` | `project_root` | "
+        "`legacy_active` | `test-reviewer` | reviewed runtime migration input |\n",
+        encoding="utf-8",
+    )
+    return manifest
 
 
 def test_primary_active_load_archives_source_and_writes_primary_state(tmp_path: Path) -> None:
@@ -132,6 +158,45 @@ def test_explicit_previous_primary_hidden_archive_uses_copy_registry(tmp_path: P
         ).read_text(encoding="utf-8")
     )
     assert registry["entries"][0]["storage_location"] == "previous_primary_hidden_archive"
+
+
+def test_legacy_active_load_copies_to_primary_archive_writes_state_and_consumes_source(
+    tmp_path: Path,
+) -> None:
+    legacy = _handoff(tmp_path / "docs" / "handoffs" / "2026-05-13_12-00_legacy.md")
+    legacy_hash = _sha256(legacy)
+    _write_legacy_active_opt_in(tmp_path, legacy)
+
+    result = load_handoff(tmp_path, project_name="demo", resume_token="legacy")
+
+    archive_path = tmp_path / ".codex" / "handoffs" / "archive" / legacy.name
+    assert legacy.exists()
+    assert result.source_path == legacy
+    assert result.archive_path == archive_path
+    assert archive_path.read_bytes() == legacy.read_bytes()
+    state = json.loads(Path(result.state_path).read_text(encoding="utf-8"))
+    assert state["archive_path"] == str(archive_path)
+
+    registry = json.loads(
+        (
+            tmp_path
+            / ".codex"
+            / "handoffs"
+            / ".session-state"
+            / "consumed-legacy-active.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert len(registry["entries"]) == 1
+    entry = registry["entries"][0]
+    assert entry["source_root"] == "project_root"
+    assert entry["project_relative_source_path"] == legacy.relative_to(tmp_path).as_posix()
+    assert entry["storage_location"] == "legacy_active"
+    assert entry["source_content_sha256"] == legacy_hash
+    assert entry["copied_primary_archive_path"] == str(archive_path)
+    assert entry["operation"] == "legacy-load"
+
+    with pytest.raises(LoadTransactionError, match="no active handoff candidates"):
+        load_handoff(tmp_path, project_name="demo", resume_token="legacy-again")
 
 
 def test_tracked_primary_active_load_fails_before_mutation(tmp_path: Path) -> None:

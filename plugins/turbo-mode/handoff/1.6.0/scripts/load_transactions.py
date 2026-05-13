@@ -98,6 +98,8 @@ def _load_handoff_locked(
             candidate,
             transaction_id=transaction_id,
         )
+    elif candidate.storage_location == StorageLocation.LEGACY_ACTIVE:
+        archive_path = _copy_legacy_active(layout, candidate)
     else:
         raise LoadTransactionError(
             "load-handoff failed: storage location not implemented. "
@@ -110,6 +112,13 @@ def _load_handoff_locked(
         str(archive_path),
         resume_token,
     )
+    if candidate.storage_location == StorageLocation.LEGACY_ACTIVE:
+        _consume_legacy_active(
+            layout,
+            candidate,
+            copied_archive_path=archive_path,
+            transaction_id=transaction_id,
+        )
     _write_transaction(
         transaction_path,
         transaction_id=transaction_id,
@@ -204,6 +213,13 @@ def _ensure_loadable(candidate: HandoffCandidate) -> None:
         StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE,
     }:
         return
+    if candidate.storage_location == StorageLocation.LEGACY_ACTIVE:
+        if candidate.artifact_class != "reviewed-runtime-migration-opt-in":
+            raise LoadTransactionError(
+                "load-handoff failed: legacy active source lacks accepted runtime provenance. "
+                f"Got: {candidate.artifact_class!r:.100}"
+            )
+        return
     raise LoadTransactionError(
         "load-handoff failed: unsupported storage location. "
         f"Got: {candidate.storage_location!r:.100}"
@@ -247,6 +263,56 @@ def _copy_legacy_archive(
     return archive_path
 
 
+def _copy_legacy_active(layout, candidate: HandoffCandidate) -> Path:
+    layout.primary_archive_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = allocate_archive_path(candidate.path, layout.primary_archive_dir)
+    shutil.copy2(candidate.path, archive_path)
+    copied_hash = _sha256_file(archive_path)
+    if copied_hash != candidate.content_sha256:
+        raise LoadTransactionError(
+            "load-handoff failed: copied legacy active hash mismatch. "
+            f"Got: {str(archive_path)!r:.100}"
+        )
+    return archive_path
+
+
+def _consume_legacy_active(
+    layout,
+    candidate: HandoffCandidate,
+    *,
+    copied_archive_path: Path,
+    transaction_id: str,
+) -> None:
+    registry_path = layout.primary_state_dir / "consumed-legacy-active.json"
+    registry = _read_registry(registry_path)
+    key = _legacy_active_key(layout.project_root, candidate)
+    copied_hash = _sha256_file(copied_archive_path)
+    for entry in registry["entries"]:
+        if _registry_key(entry) != key:
+            continue
+        if (
+            Path(str(entry["copied_primary_archive_path"])).exists()
+            and str(entry["copied_primary_archive_path"]) == str(copied_archive_path)
+            and str(entry.get("copied_content_sha256", "")) == copied_hash
+        ):
+            return
+        raise LoadTransactionError(
+            "load-handoff failed: consumed legacy active registry entry is stale. "
+            f"Got: {entry.get('copied_primary_archive_path')!r:.100}"
+        )
+    registry["entries"].append({
+        **key,
+        "source_absolute_path": str(candidate.path),
+        "source_resolved_path": str(candidate.path.resolve()),
+        "copied_primary_archive_path": str(copied_archive_path),
+        "copied_content_sha256": copied_hash,
+        "operation": "legacy-load",
+        "transaction_id": transaction_id,
+        "consumed_at": datetime.now(UTC).isoformat(),
+    })
+    _write_json_atomic(registry_path, registry)
+
+
 def _read_registry(path: Path) -> dict[str, object]:
     if not path.exists():
         return {"entries": []}
@@ -262,6 +328,15 @@ def _read_registry(path: Path) -> dict[str, object]:
 def _legacy_archive_key(project_root: Path, candidate: HandoffCandidate) -> dict[str, str]:
     return {
         "source_root": str(project_root),
+        "project_relative_source_path": candidate.path.relative_to(project_root).as_posix(),
+        "storage_location": candidate.storage_location,
+        "source_content_sha256": candidate.content_sha256 or "",
+    }
+
+
+def _legacy_active_key(project_root: Path, candidate: HandoffCandidate) -> dict[str, str]:
+    return {
+        "source_root": "project_root",
         "project_relative_source_path": candidate.path.relative_to(project_root).as_posix(),
         "storage_location": candidate.storage_location,
         "source_content_sha256": candidate.content_sha256 or "",

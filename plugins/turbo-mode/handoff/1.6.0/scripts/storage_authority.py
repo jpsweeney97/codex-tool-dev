@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import subprocess
 from dataclasses import dataclass
@@ -34,6 +35,12 @@ class SelectionEligibility(StrEnum):
 
 
 FILENAME_TIMESTAMP_RE = re.compile(r"^(?P<timestamp>\d{4}-\d{2}-\d{2}_\d{2}-\d{2})_.+\.md$")
+LEGACY_ACTIVE_OPT_IN_MANIFEST = (
+    Path("docs")
+    / "superpowers"
+    / "plans"
+    / "2026-05-13-handoff-storage-legacy-active-opt-ins.md"
+)
 
 
 @dataclass(frozen=True)
@@ -318,6 +325,30 @@ def _candidate_for_path(
             skip_reason=invalid_reason,
         )
     artifact_class = _artifact_class(location=location, path=path, git_visibility=git_visibility)
+    if (
+        scan_mode == "active-selection"
+        and location == StorageLocation.LEGACY_ACTIVE
+        and content_sha256 is not None
+        and _consumed_legacy_active_matches(project_root, path, content_sha256)
+    ):
+        return HandoffCandidate(
+            path=path.resolve(),
+            storage_location=location,
+            artifact_class="consumed-legacy-active",
+            selection_eligibility=SelectionEligibility.NOT_ACTIVE_SELECTION_INPUT,
+            source_git_visibility=git_visibility,
+            source_fs_status=fs_status,
+            filename_timestamp=filename_timestamp,
+            content_sha256=content_sha256,
+            document_profile=document_profile,
+            skip_reason="legacy active source already consumed",
+        )
+    if (
+        location == StorageLocation.LEGACY_ACTIVE
+        and content_sha256 is not None
+        and _reviewed_legacy_active_opt_in_matches(project_root, path, content_sha256)
+    ):
+        artifact_class = "reviewed-runtime-migration-opt-in"
     eligibility, reason = _eligibility(
         location=location,
         artifact_class=artifact_class,
@@ -509,6 +540,8 @@ def _eligibility(
             )
         return SelectionEligibility.ELIGIBLE, None
     if location == StorageLocation.LEGACY_ACTIVE:
+        if artifact_class == "reviewed-runtime-migration-opt-in":
+            return SelectionEligibility.ELIGIBLE, None
         return (
             SelectionEligibility.BLOCKED_POLICY_CONFLICT,
             "legacy active markdown lacks accepted external origin proof",
@@ -685,6 +718,94 @@ def _git_visibility(project_root: Path, path: Path) -> str:
     if ignored.returncode == 0:
         return "ignored"
     return "untracked"
+
+
+def _reviewed_legacy_active_opt_in_matches(
+    project_root: Path,
+    path: Path,
+    content_sha256: str,
+) -> bool:
+    manifest = project_root / LEGACY_ACTIVE_OPT_IN_MANIFEST
+    for row in _read_markdown_table(manifest):
+        if _row_cell(row, "project_relative_path") != path.relative_to(project_root).as_posix():
+            continue
+        if _row_cell(row, "raw_byte_sha256") != content_sha256:
+            continue
+        if _row_cell(row, "source_root") != "project_root":
+            continue
+        if _row_cell(row, "storage_location") != StorageLocation.LEGACY_ACTIVE:
+            continue
+        if not _row_cell(row, "reviewer") or not _row_cell(row, "reason"):
+            continue
+        return True
+    return False
+
+
+def _consumed_legacy_active_matches(
+    project_root: Path,
+    path: Path,
+    content_sha256: str,
+) -> bool:
+    registry_path = (
+        get_storage_layout(project_root).primary_state_dir / "consumed-legacy-active.json"
+    )
+    try:
+        payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        return False
+    expected = {
+        "source_root": "project_root",
+        "project_relative_source_path": path.relative_to(project_root).as_posix(),
+        "storage_location": StorageLocation.LEGACY_ACTIVE,
+        "source_content_sha256": content_sha256,
+    }
+    return any(_registry_key(entry) == expected for entry in entries if isinstance(entry, dict))
+
+
+def _read_markdown_table(path: Path) -> list[dict[str, str]]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    rows: list[dict[str, str]] = []
+    headers: list[str] | None = None
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith("|") or not stripped.endswith("|"):
+            continue
+        cells = [_clean_table_cell(cell) for cell in stripped.strip("|").split("|")]
+        if headers is None:
+            headers = cells
+            continue
+        if all(set(cell) <= {"-", ":"} for cell in cells):
+            continue
+        if len(cells) != len(headers):
+            continue
+        rows.append(dict(zip(headers, cells, strict=True)))
+    return rows
+
+
+def _clean_table_cell(value: str) -> str:
+    stripped = value.strip()
+    if len(stripped) >= 2 and stripped[0] == "`" and stripped[-1] == "`":
+        return stripped[1:-1]
+    return stripped
+
+
+def _row_cell(row: dict[str, str], key: str) -> str:
+    return row.get(key, "").strip()
+
+
+def _registry_key(entry: dict[str, object]) -> dict[str, str]:
+    return {
+        "source_root": str(entry.get("source_root", "")),
+        "project_relative_source_path": str(entry.get("project_relative_source_path", "")),
+        "storage_location": str(entry.get("storage_location", "")),
+        "source_content_sha256": str(entry.get("source_content_sha256", "")),
+    }
 
 
 def _inside_git_worktree(project_root: Path) -> bool:
