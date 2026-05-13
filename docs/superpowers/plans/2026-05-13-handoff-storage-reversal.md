@@ -256,7 +256,7 @@ State precedence is deterministic:
 - If no valid primary state exists, exactly one valid legacy state or state-like residue candidate may bridge.
 - If no valid primary state exists and more than one valid legacy candidate exists, fail with `AmbiguousResumeStateError` or an equivalent typed diagnostic.
 
-Ambiguous state diagnostics must include a concrete operator recovery workflow. The helper surface must provide a read-only state inventory mode, for example `list-chain-state`, that emits every same-project state candidate with lexical path, resolved path, project, resume token when available, archive path, age, source root, payload hash, and validation status. The diagnostic must tell the operator to choose one of these explicit outcomes:
+Ambiguous state diagnostics must include a concrete operator recovery workflow. The helper surface must provide a read-only state inventory mode, for example `list-chain-state`, that emits every same-project state candidate with source root, storage location, project-root-relative state path, lexical path, resolved path, project, resume token when derivable, detected format, archive path, age, payload hash, and validation status. The diagnostic must tell the operator to choose one of these explicit outcomes:
 
 - continue from exactly one candidate by explicit state path or resume token, then write primary state under `.codex/handoffs/.session-state/`
 - mark one or more stale candidates consumed with a durable marker and post-marker proof
@@ -264,10 +264,21 @@ Ambiguous state diagnostics must include a concrete operator recovery workflow. 
 
 No helper may guess among multiple valid same-project state candidates. A recovery command that marks stale state consumed must run under the project lock, record a transaction, and preserve enough metadata for later audit. Tests must cover the ambiguous diagnostic payload and at least one explicit recovery path.
 
+Legacy and state-like bridge candidates use the same stable identity standard as legacy handoff registries. A state-consumption marker key must include:
+
+- source root enum and storage location
+- project-root-relative state path
+- project
+- resume token when derivable
+- detected format: `tokenized-json`, `plain-state`, or `state-like-residue`
+- raw-byte SHA256 payload hash
+
+Absolute lexical and resolved paths are marker evidence only. They must not be the only key used for bridge suppression, marker lookup, or consumed-state recovery. Moving or copying a clone must not make a previously consumed same-relative-path same-hash legacy state usable again.
+
 These recovery outcomes map to concrete helper entrypoints. Implementation must not leave operator recovery as prose-only behavior:
 
-- `continue-chain-state`: continue from exactly one explicit primary, legacy, or state-like candidate selected by path or resume token plus expected source hash. It must validate the candidate, run under the project lock, write or repair primary chain state under `.codex/handoffs/.session-state/`, record the transaction, and preserve `resumed_from` identity when the source is legacy.
-- `mark-chain-state-consumed`: mark one or more exact legacy or state-like candidates stale, consumed, duplicate, or abandoned by lexical path plus expected source hash. It must write a durable marker under `.codex/handoffs/.session-state/markers/` or an equivalent primary-state marker root, record the transaction, and prove the marked candidate no longer participates in bridge lookup.
+- `continue-chain-state`: continue from exactly one explicit primary, legacy, or state-like candidate selected by path or resume token plus expected payload hash. It must validate the candidate's full stable identity, run under the project lock, write or repair primary chain state under `.codex/handoffs/.session-state/`, record the transaction, and preserve `resumed_from` identity when the source is legacy.
+- `mark-chain-state-consumed`: mark one or more exact legacy or state-like candidates stale, consumed, duplicate, or abandoned by stable state-candidate identity plus expected payload hash. Lexical path or resume token may be accepted only as a lookup selector; the helper must resolve the selector, validate the full identity, and write a durable marker under `.codex/handoffs/.session-state/markers/` or an equivalent primary-state marker root. It must record the transaction and prove the marked candidate no longer participates in bridge lookup.
 - `abandon-primary-chain-state`: abandon or clear one exact primary state path by lexical path plus expected state hash before choosing an explicit legacy candidate. It must run under the project lock, record the reason, preserve enough metadata for audit, and never infer that unrelated legacy candidates are stale.
 - `chain-state-recovery-inventory`: emit the read-only inventory used by ambiguity diagnostics, including transaction and marker status, without completing, rolling back, marking, clearing, copying, or writing any artifact.
 
@@ -285,12 +296,12 @@ Local-preflight evidence rows with `disposition=bridge-once` are not exempt from
 
 - `bridge-once-fresh`: valid project state inside the 24-hour TTL at the refreshed preflight timestamp
 - `expired-bridge-rejected`: expired state that must not bridge and must produce the documented expired-state diagnostic
-- `operator-recovery-only`: expired or ambiguous state that can be used only through an explicit recovery command naming path and hash
+- `operator-recovery-only`: expired or ambiguous state that can be used only through an explicit recovery command naming a selector and expected payload hash, then validating the full stable identity
 - `consumed-or-abandoned`: already handled by a durable marker or explicit operator disposition
 
 The current canonical-checkout evidence row created at `2026-05-11T02:46:58.895416+00:00` cannot remain plain `bridge-once` for a `2026-05-13` Gate 1 start unless the preflight is regenerated and proves it is still inside the effective TTL, or the plan adds and verifies an expired-state recovery path.
 
-A successful bridged save/summary/quicksave must preserve the `resumed_from` link, write new output and any new chain state only under `.codex/handoffs/`, and durably suppress the consumed legacy state through a primary-state marker. Legacy `docs/handoffs/.session-state/**` bytes are not modified, deleted, or trashed by normal bridge cleanup. Cleanup is resurrection-proof only if a durable consumed marker is written using the existing consumed-marker pattern or a successor with equivalent semantics, and a post-marker bridge lookup proves the legacy state no longer returns usable state. Malformed, expired, ambiguous, multiply matching, unsuppressed, or unmarkable legacy state must fail with an actionable diagnostic that names the state path or conflict; it must not silently break or resurrect the chain.
+A successful bridged save/summary/quicksave must preserve the `resumed_from` link, write new output and any new chain state only under `.codex/handoffs/`, and durably suppress the consumed legacy state through a primary-state marker keyed by stable state-candidate identity. Legacy `docs/handoffs/.session-state/**` bytes are not modified, deleted, or trashed by normal bridge cleanup. Cleanup is resurrection-proof only if a durable consumed marker is written using the identity contract above, and a post-marker bridge lookup proves the legacy state no longer returns usable state. Malformed, expired, ambiguous, multiply matching, unsuppressed, or unmarkable legacy state must fail with an actionable diagnostic that names the state path or conflict; it must not silently break or resurrect the chain.
 
 Explicit loads from `docs/handoffs/.session-state/` remain rejected. Legacy state is bridge input only for the save/summary/quicksave chain writer.
 
@@ -942,6 +953,8 @@ Minimum source-repair coverage:
 - search/triage provenance output visibly selecting primary over legacy
 - pre-upgrade legacy state plus post-upgrade save/summary/quicksave preserves `resumed_from`, writes only under `.codex/handoffs/`, and suppresses the consumed legacy state through a primary-state marker without modifying legacy bytes
 - bridged legacy state cleanup proves a second bridge lookup returns no usable state after durable consumed marking
+- bridged legacy state suppression markers use source root, storage location, project-root-relative state path, project, resume token when derivable, detected format, and raw-byte payload hash as the stable key, with absolute paths as evidence only
+- bridge lookup suppression survives a clone move or copied project root when the legacy state has the same project-relative path and payload hash
 - project-scoped state bridge lookup succeeds without caller-provided resume token when exactly one valid project state exists
 - valid primary state plus unresolved same-project legacy state fails before active output creation and requires explicit operator-selected recovery
 - multiple valid primary state candidates for the same project fail with an ambiguity diagnostic
@@ -980,6 +993,7 @@ Installed-host certification coverage is separate from `source repaired`. These 
 - installed-host smoke for tracked `.codex/skills/**` with narrow handoff ignore proves `.codex/skills/<sample>` remains tracked or trackable
 - installed-host smoke for tracked `.codex/handoffs/<candidate>.md` treats the path as occupied and avoids overwrite
 - installed-host smoke for tracked `.codex/handoffs/<active-source>.md` selected for load fails closed before moving the source
+- installed-host smoke asserts `target_fs_status` and `source_fs_status` alongside `target_git_visibility` and `source_git_visibility` for no-ignore writes, tracked collision, tracked active source, non-git roots, and at least one directory or symlink collision
 - installed-host smoke asserts installed helper and skill-doc realpaths are outside the source checkout before any behavior assertion counts as installed proof
 
 ## Required Verification Commands
@@ -1194,9 +1208,10 @@ Stop implementation and repair the contract before continuing if any of these oc
 - A state bridge requires a caller-provided resume token rather than preserving current project-scoped pending-state semantics.
 - Ambiguous same-project state failure omits a candidate inventory or provides no explicit operator recovery path.
 - A primary state winning rule silently consumes, clears, or marks unresolved same-project legacy state candidates without explicit operator-selected recovery.
+- A legacy-state or state-like-residue suppression marker uses absolute lexical path as the only stable key instead of source root, storage location, project-root-relative state path, project, resume token when derivable, detected format, and raw-byte payload hash.
 - State-like residue under `docs/handoffs/handoff-*` is ignored silently instead of being classified.
 - State-like residue is diagnostically rejected but left without local-preflight disposition, quarantine plan, consumed marker, or named blocker.
-- A bridged legacy state can be read again after a supposedly successful cleanup.
+- A bridged legacy state can be read again after a supposedly successful cleanup, including after the project root is moved or copied with the same project-relative state path and payload hash.
 - Source-repo `.codex/handoffs/` runtime files appear as ordinary untracked commit material during source repair closeout. This does not forbid expected installed-host `target_git_visibility=untracked` results in no-ignore host repos.
 - Source-repo locks, transactions, markers, temp files, consumed registries, or recovery records under `.codex/handoffs/.session-state/**` appear as ordinary untracked commit material during source repair closeout. This does not forbid expected installed-host `target_git_visibility=untracked` results in no-ignore host repos.
 - Existing `docs/handoffs/` runtime files stop being ignored without an explicit tracking-policy decision.
