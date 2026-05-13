@@ -102,6 +102,64 @@ def test_allocate_active_path_cli_returns_collision_safe_primary_path(tmp_path: 
     assert existing.read_text(encoding="utf-8") == "existing\n"
 
 
+def test_begin_active_write_reuses_existing_run_id_reservation(tmp_path: Path) -> None:
+    first = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="save",
+        slug="same-run",
+        run_id="stable-run",
+        created_at="2026-05-13T16:45:00Z",
+    )
+
+    second = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="save",
+        slug="same-run",
+        run_id="stable-run",
+        created_at="2026-05-13T17:00:00Z",
+    )
+
+    assert second.run_id == first.run_id
+    assert second.transaction_id == first.transaction_id
+    assert second.operation_state_path == first.operation_state_path
+    assert second.allocated_active_path == first.allocated_active_path
+    transactions = sorted(
+        (tmp_path / ".codex" / "handoffs" / ".session-state" / "transactions").glob("*.json")
+    )
+    assert transactions == [first.transaction_path]
+
+
+def test_begin_active_write_rejects_slug_change_for_existing_run_id(tmp_path: Path) -> None:
+    first = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="save",
+        slug="first-slug",
+        run_id="stable-run",
+        created_at="2026-05-13T16:45:00Z",
+    )
+    before = json.loads(first.operation_state_path.read_text(encoding="utf-8"))
+
+    with pytest.raises(active_writes.ActiveWriteError, match="another slug"):
+        active_writes.begin_active_write(
+            tmp_path,
+            project_name="demo",
+            operation="save",
+            slug="changed-slug",
+            run_id="stable-run",
+            created_at="2026-05-13T17:00:00Z",
+        )
+
+    after = json.loads(first.operation_state_path.read_text(encoding="utf-8"))
+    transactions = sorted(
+        (tmp_path / ".codex" / "handoffs" / ".session-state" / "transactions").glob("*.json")
+    )
+    assert after == before
+    assert transactions == [first.transaction_path]
+
+
 def test_write_active_handoff_commits_reserved_output(tmp_path: Path) -> None:
     script = Path(__file__).parent.parent / "scripts" / "session_state.py"
     begin = subprocess.run(

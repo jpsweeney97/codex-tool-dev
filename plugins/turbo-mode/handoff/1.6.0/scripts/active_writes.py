@@ -99,6 +99,15 @@ def begin_active_write(
 
     layout = get_storage_layout(project_root)
     project = project_name or layout.project_root.name
+    active_run_id = run_id or uuid.uuid4().hex
+    operation_state_path = (
+        layout.primary_state_dir
+        / "active-writes"
+        / project
+        / f"{active_run_id}.json"
+    )
+    if run_id is not None and operation_state_path.exists():
+        return _existing_reservation(operation_state_path, operation=operation, slug=slug)
     transaction_id = uuid.uuid4().hex
     lock_path = layout.primary_state_dir / "locks" / "active-write.lock"
     _acquire_lock(lock_path, project=project, operation=operation, transaction_id=transaction_id)
@@ -123,12 +132,6 @@ def begin_active_write(
         expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
         transaction_path = (
             layout.primary_state_dir / "transactions" / f"{transaction_id}.json"
-        )
-        operation_state_path = (
-            layout.primary_state_dir
-            / "active-writes"
-            / project
-            / f"{active_run_id}.json"
         )
         idempotency_key = _stable_hash([
             project,
@@ -176,6 +179,62 @@ def begin_active_write(
         return reservation
     finally:
         _release_lock(lock_path)
+
+
+def _existing_reservation(
+    operation_state_path: Path,
+    *,
+    operation: str,
+    slug: str,
+) -> ActiveWriteReservation:
+    payload = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    if payload.get("operation") != operation:
+        raise ActiveWriteError(
+            "begin-active-write failed: run id belongs to another operation. "
+            f"Got: {payload.get('operation')!r:.100}"
+        )
+    if payload.get("bound_slug") != slug:
+        raise ActiveWriteError(
+            "begin-active-write failed: run id is already bound to another slug. "
+            f"Got: {payload.get('bound_slug')!r:.100}"
+        )
+    return _reservation_from_payload(payload)
+
+
+def _reservation_from_payload(payload: dict[str, object]) -> ActiveWriteReservation:
+    return ActiveWriteReservation(
+        schema_version=int(payload["schema_version"]),
+        project=str(payload["project"]),
+        operation=str(payload["operation"]),
+        run_id=str(payload["run_id"]),
+        transaction_id=str(payload["transaction_id"]),
+        transaction_path=Path(str(payload["transaction_path"])),
+        idempotency_key=str(payload["idempotency_key"]),
+        allocated_active_path=Path(str(payload["allocated_active_path"])),
+        state_snapshot_id=str(payload["state_snapshot_id"]),
+        state_snapshot_hash=str(payload["state_snapshot_hash"]),
+        state_snapshot_paths=[str(path) for path in payload.get("state_snapshot_paths", [])],
+        resumed_from_path=(
+            str(payload["resumed_from_path"])
+            if payload.get("resumed_from_path") is not None
+            else None
+        ),
+        resumed_from_hash=(
+            str(payload["resumed_from_hash"])
+            if payload.get("resumed_from_hash") is not None
+            else None
+        ),
+        bound_slug=str(payload["bound_slug"]),
+        slug_source=str(payload["slug_source"]),
+        operation_state_path=Path(str(payload["operation_state_path"])),
+        lease_id=str(payload["lease_id"]),
+        lease_acquired_at=str(payload["lease_acquired_at"]),
+        lease_expires_at=str(payload["lease_expires_at"]),
+        transaction_watermark=str(payload["transaction_watermark"]),
+        status=str(payload["status"]),
+        created_at=str(payload["created_at"]),
+        updated_at=str(payload["updated_at"]),
+    )
 
 
 def allocate_active_path(
