@@ -6,6 +6,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+import scripts.active_writes as active_writes
+
 
 def test_begin_active_write_persists_operation_state_before_content_generation(
     tmp_path: Path,
@@ -466,3 +469,75 @@ def test_write_active_handoff_clears_snapshotted_primary_state_after_output_writ
     assert state["state_cleanup_action"] == "cleared-primary-state"
     assert state["state_cleanup_path"] == str(state_path)
     assert transaction["state_cleanup_action"] == "cleared-primary-state"
+
+
+def test_write_active_handoff_cleanup_failure_remains_recoverable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = tmp_path / ".codex" / "handoffs" / "archive" / "previous.md"
+    archive.parent.mkdir(parents=True)
+    archive.write_text("---\ntitle: Previous\n---\n", encoding="utf-8")
+    state_dir = tmp_path / ".codex" / "handoffs" / ".session-state"
+    state_dir.mkdir(parents=True)
+    state_path = state_dir / "handoff-demo-resume.json"
+    state_path.write_text(
+        json.dumps({
+            "state_path": str(state_path),
+            "project": "demo",
+            "resume_token": "resume",
+            "archive_path": str(archive),
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+    reservation = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="save",
+        slug="cleanup-failure",
+        created_at="2026-05-13T16:45:00Z",
+    )
+    content = "---\ntitle: Cleanup failure\n---\n\n# Handoff\n"
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    original_subprocess_run = active_writes.subprocess.run
+
+    def fail_trash(*args: object, **kwargs: object) -> object:
+        raise subprocess.CalledProcessError(1, ["trash"], stderr="trash failed")
+
+    monkeypatch.setattr(active_writes.subprocess, "run", fail_trash)
+
+    with pytest.raises(active_writes.ActiveWriteError, match="state cleanup failed"):
+        active_writes.write_active_handoff(
+            tmp_path,
+            operation_state_path=reservation.operation_state_path,
+            content=content,
+            content_sha256=content_hash,
+        )
+
+    operation_state = json.loads(reservation.operation_state_path.read_text(encoding="utf-8"))
+    active_path = Path(operation_state["active_path"])
+    transaction = json.loads(Path(operation_state["transaction_path"]).read_text(encoding="utf-8"))
+    assert active_path.read_text(encoding="utf-8") == content
+    assert state_path.exists()
+    assert operation_state["status"] == "cleanup_failed"
+    assert operation_state["content_hash"] == content_hash
+    assert operation_state["state_cleanup_action"] == "cleanup_failed"
+    assert transaction["status"] == "cleanup_failed"
+
+    monkeypatch.setattr(active_writes.subprocess, "run", original_subprocess_run)
+
+    recovered = active_writes.recover_active_write_transaction(
+        tmp_path,
+        operation_state_path=reservation.operation_state_path,
+    )
+
+    committed_state = json.loads(reservation.operation_state_path.read_text(encoding="utf-8"))
+    committed_transaction = json.loads(
+        Path(committed_state["transaction_path"]).read_text(encoding="utf-8")
+    )
+    assert recovered["status"] == "committed"
+    assert committed_state["status"] == "committed"
+    assert committed_state["state_cleanup_action"] == "cleared-primary-state"
+    assert committed_transaction["status"] == "completed"
+    assert not state_path.exists()

@@ -228,18 +228,50 @@ def write_active_handoff(
                 )
             os.replace(temp_path, active_path)
         updated_at = datetime.now(UTC).isoformat()
-        cleanup_action, cleanup_path = _clear_snapshotted_primary_state(state)
         state.update({
-            "status": "committed",
+            "status": "write-pending",
             "active_path": str(active_path),
             "content_hash": content_sha256,
             "output_sha256": content_sha256,
-            "state_cleanup_action": cleanup_action,
-            "state_cleanup_path": cleanup_path,
             "updated_at": updated_at,
         })
         _write_json_atomic(operation_state_path, state)
         transaction_path = Path(str(state["transaction_path"]))
+        _write_json_atomic(
+            transaction_path,
+            {
+                **state,
+                "status": "write-pending",
+                "active_path": str(active_path),
+            },
+        )
+        try:
+            cleanup_action, cleanup_path = _clear_snapshotted_primary_state(state)
+        except ActiveWriteError:
+            failed_at = datetime.now(UTC).isoformat()
+            state.update({
+                "status": "cleanup_failed",
+                "state_cleanup_action": "cleanup_failed",
+                "state_cleanup_path": _first_state_cleanup_path(state),
+                "updated_at": failed_at,
+            })
+            _write_json_atomic(operation_state_path, state)
+            _write_json_atomic(
+                transaction_path,
+                {
+                    **state,
+                    "status": "cleanup_failed",
+                    "active_path": str(active_path),
+                },
+            )
+            raise
+        state.update({
+            "status": "committed",
+            "state_cleanup_action": cleanup_action,
+            "state_cleanup_path": cleanup_path,
+            "updated_at": datetime.now(UTC).isoformat(),
+        })
+        _write_json_atomic(operation_state_path, state)
         transaction = {
             **state,
             "status": "completed",
@@ -432,6 +464,13 @@ def _clear_snapshotted_primary_state(state: dict[str, object]) -> tuple[str, str
             f"Got: {str(path)!r:.100}"
         ) from exc
     return "cleared-primary-state", str(path)
+
+
+def _first_state_cleanup_path(state: dict[str, object]) -> str | None:
+    paths = [str(path) for path in state.get("state_snapshot_paths", [])]
+    if not paths:
+        return None
+    return paths[0]
 
 
 def _transaction_watermark(state_dir: Path) -> str:
