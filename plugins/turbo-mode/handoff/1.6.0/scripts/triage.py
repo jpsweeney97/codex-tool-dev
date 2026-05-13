@@ -17,13 +17,20 @@ try:
     from scripts.ticket_parsing import parse_ticket
     from scripts.provenance import read_provenance, session_matches
     from scripts.handoff_parsing import parse_frontmatter, parse_sections, section_name
-    from scripts.project_paths import get_handoffs_dir, get_legacy_handoffs_dir
+    from scripts.project_paths import get_handoffs_dir, get_legacy_handoffs_dir, get_project_root
+    from scripts.storage_authority import (
+        HandoffCandidate,
+        StorageLocation,
+        discover_handoff_inventory,
+        eligible_history_candidates,
+    )
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from scripts.ticket_parsing import parse_ticket  # type: ignore[no-redef]
     from scripts.provenance import read_provenance, session_matches  # type: ignore[no-redef]
     from scripts.handoff_parsing import parse_frontmatter, parse_sections, section_name  # type: ignore[no-redef]
-    from scripts.project_paths import get_handoffs_dir, get_legacy_handoffs_dir  # type: ignore[no-redef]
+    from scripts.project_paths import get_handoffs_dir, get_legacy_handoffs_dir, get_project_root  # type: ignore[no-redef]
+    from scripts.storage_authority import HandoffCandidate, StorageLocation, discover_handoff_inventory, eligible_history_candidates  # type: ignore[no-redef]
 
 
 class OpenTicket(TypedDict):
@@ -349,28 +356,101 @@ def generate_report(
     }
 
 
+def generate_project_report(tickets_dir: Path, project_root: Path) -> TriageReport:
+    """Generate triage report from storage-authority history candidates."""
+    open_tickets = read_open_tickets(tickets_dir)
+    tickets_for_matching = _load_tickets_for_matching(tickets_dir)
+
+    inventory = discover_handoff_inventory(project_root, scan_mode="history-search")
+    all_items: list[dict[str, Any]] = []
+    total_skipped_prose = 0
+    legacy_found = False
+    for candidate in eligible_history_candidates(inventory):
+        if not _within_lookback(candidate.path):
+            continue
+        try:
+            text = candidate.path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            warnings.warn(f"Cannot read handoff file {candidate.path}: {exc}", stacklevel=2)
+            continue
+        items, skipped = extract_handoff_items(text, candidate.path.name)
+        for item in items:
+            item.update(_candidate_provenance(candidate))
+        if items and candidate.storage_location in {
+            StorageLocation.LEGACY_ACTIVE,
+            StorageLocation.LEGACY_ARCHIVE,
+        }:
+            legacy_found = True
+        all_items.extend(items)
+        total_skipped_prose += skipped
+
+    orphaned: list[MatchResult] = []
+    matched: list[MatchResult] = []
+    counts = {"uid_match": 0, "id_ref": 0, "manual_review": 0}
+    for item in all_items:
+        result = match_orphan_item(item, tickets_for_matching)
+        counts[result["match_type"]] += 1
+        if result["match_type"] == "manual_review":
+            orphaned.append(result)
+        else:
+            matched.append(result)
+
+    legacy_warning = None
+    if legacy_found:
+        legacy_warning = (
+            "Found handoffs at legacy location `docs/handoffs/`. "
+            "Post-cutover writes use `.codex/handoffs/`; legacy matches are "
+            "read-only compatibility input."
+        )
+
+    return {
+        "open_tickets": open_tickets,
+        "orphaned_items": orphaned,
+        "matched_items": matched,
+        "match_counts": counts,
+        "skipped_prose_count": total_skipped_prose,
+        "legacy_warning": legacy_warning,
+    }
+
+
+def _within_lookback(path: Path) -> bool:
+    try:
+        return path.stat().st_mtime >= time.time() - (_LOOKBACK_DAYS * 86400)
+    except OSError as exc:
+        warnings.warn(f"Cannot stat handoff file {path}: {exc}", stacklevel=2)
+        return False
+
+
+def _candidate_provenance(candidate: HandoffCandidate) -> dict[str, Any]:
+    return {
+        "source_path": str(candidate.path),
+        "storage_location": candidate.storage_location,
+        "artifact_class": candidate.artifact_class,
+        "source_git_visibility": candidate.source_git_visibility,
+        "source_fs_status": candidate.source_fs_status,
+        "document_profile": candidate.document_profile,
+        "content_sha256": candidate.content_sha256,
+        "dedup_winner": True,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Outputs JSON triage report to stdout."""
     parser = argparse.ArgumentParser(description="Triage open tickets and orphaned items")
     parser.add_argument("--tickets-dir", type=Path, default=Path("docs/tickets"))
     parser.add_argument("--handoffs-dir", type=Path, default=None)
+    parser.add_argument("--project-root", type=Path, default=None)
     args = parser.parse_args(argv)
 
     if args.handoffs_dir is None:
-        try:
-            args.handoffs_dir = get_handoffs_dir()
-        except OSError as exc:
-            json.dump({
-                "open_tickets": [],
-                "orphaned_items": [],
-                "matched_items": [],
-                "match_counts": {"uid_match": 0, "id_ref": 0, "manual_review": 0},
-                "skipped_prose_count": 0,
-                "error": f"Cannot determine handoffs directory: {exc}",
-            }, sys.stdout)
-            return 1
-
-    report = generate_report(args.tickets_dir, args.handoffs_dir)
+        project_root = (
+            args.project_root.resolve()
+            if args.project_root is not None
+            else get_project_root()[0]
+        )
+        report = generate_project_report(args.tickets_dir, project_root)
+    else:
+        report = generate_report(args.tickets_dir, args.handoffs_dir)
     json.dump(report, sys.stdout, indent=2)
     print()  # trailing newline
     return 0

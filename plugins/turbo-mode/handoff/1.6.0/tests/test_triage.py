@@ -226,6 +226,24 @@ session_id: ffff-0000-1111-2222-333344445555
 Clean session.
 """
 
+
+def _current_handoff(title: str = "Current handoff") -> str:
+    return f"""\
+---
+title: {title}
+date: 2026-02-28
+created_at: "2026-02-28T00:00:00Z"
+session_id: aaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+project: test-project
+type: handoff
+---
+
+## Open Questions
+
+- Should we refactor the parser?
+"""
+
+
 TICKET_WITH_PROVENANCE = """\
 # T-20260228-03: Ticket with provenance
 
@@ -560,6 +578,46 @@ class TestGenerateReport:
         assert len(report["orphaned_items"]) > 0
         assert any("Cannot read handoff file" in str(x.message) for x in w)
 
+    def test_project_report_uses_storage_authority_history_provenance(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from scripts.triage import generate_project_report
+
+        tickets_dir = tmp_path / "tickets"
+        tickets_dir.mkdir()
+        legacy_archive = tmp_path / "docs" / "handoffs" / "archive"
+        legacy_archive.mkdir(parents=True)
+        (legacy_archive / "2026-02-28_00-00_legacy.md").write_text(_current_handoff())
+
+        report = generate_project_report(tickets_dir, tmp_path)
+
+        assert len(report["orphaned_items"]) == 1
+        item = report["orphaned_items"][0]["item"]
+        assert item["storage_location"] == "legacy_archive"
+        assert item["document_profile"] == "current_contract"
+        assert item["dedup_winner"] is True
+        assert "docs/handoffs" in report["legacy_warning"]
+
+    def test_project_report_dedups_duplicate_history_content_by_winner(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from scripts.triage import generate_project_report
+
+        tickets_dir = tmp_path / "tickets"
+        tickets_dir.mkdir()
+        primary = tmp_path / ".codex" / "handoffs"
+        primary_archive = primary / "archive"
+        primary_archive.mkdir(parents=True)
+        (primary / "2026-02-28_00-00_same.md").write_text(_current_handoff("Same"))
+        (primary_archive / "2026-02-28_00-00_same.md").write_text(_current_handoff("Same"))
+
+        report = generate_project_report(tickets_dir, tmp_path)
+
+        assert len(report["orphaned_items"]) == 1
+        assert report["orphaned_items"][0]["item"]["storage_location"] == "primary_active"
+
 
 class TestMain:
     def test_json_output(self, tmp_path: Path, capsys) -> None:
@@ -576,6 +634,22 @@ class TestMain:
         output = capsys.readouterr().out
         report = json.loads(output)
         assert report["open_tickets"][0]["id"] == "T-20260228-01"
+
+    def test_project_root_output_uses_storage_authority(self, tmp_path: Path, capsys) -> None:
+        from scripts.triage import main
+
+        tickets_dir = tmp_path / "tickets"
+        tickets_dir.mkdir()
+        primary = tmp_path / ".codex" / "handoffs"
+        primary.mkdir(parents=True)
+        (primary / "2026-02-28_00-00_current.md").write_text(_current_handoff())
+
+        main(["--tickets-dir", str(tickets_dir), "--project-root", str(tmp_path)])
+        output = capsys.readouterr().out
+        report = json.loads(output)
+
+        assert len(report["orphaned_items"]) == 1
+        assert report["orphaned_items"][0]["item"]["storage_location"] == "primary_active"
 
 
 class TestEndToEnd:
