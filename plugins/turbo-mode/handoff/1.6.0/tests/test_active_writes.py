@@ -368,6 +368,10 @@ def test_write_active_handoff_commits_reserved_output(tmp_path: Path) -> None:
     transaction = json.loads(Path(state["transaction_path"]).read_text(encoding="utf-8"))
     assert transaction["status"] == "completed"
     assert transaction["active_path"] == str(active_path)
+    assert transaction["temp_active_path"].startswith(
+        str(active_path.parent / f".{active_path.name}.")
+    )
+    assert transaction["temp_active_path"].endswith(".tmp")
     assert not (
         tmp_path / ".codex" / "handoffs" / ".session-state" / "locks" / "active-write.lock"
     ).exists()

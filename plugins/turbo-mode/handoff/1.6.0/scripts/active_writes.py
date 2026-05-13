@@ -346,6 +346,7 @@ def write_active_handoff(
                 f"Got: {content_sha256!r:.100}"
             )
         active_path = Path(str(state["allocated_active_path"]))
+        temp_active_path: str | None = None
         if active_path.exists():
             existing_hash = _sha256_path(active_path)
             if existing_hash != content_sha256:
@@ -360,6 +361,7 @@ def write_active_handoff(
         else:
             active_path.parent.mkdir(parents=True, exist_ok=True)
             temp_path = active_path.with_name(f".{active_path.name}.{uuid.uuid4().hex}.tmp")
+            temp_active_path = str(temp_path)
             temp_path.write_text(content, encoding="utf-8")
             temp_hash = _sha256_path(temp_path)
             if temp_hash != content_sha256:
@@ -376,6 +378,7 @@ def write_active_handoff(
         state.update({
             "status": "write-pending",
             "active_path": str(active_path),
+            "temp_active_path": temp_active_path,
             "content_hash": content_sha256,
             "output_sha256": content_sha256,
             "updated_at": updated_at,
