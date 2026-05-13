@@ -2,13 +2,13 @@
 
 ## Status
 
-Gate 0A/0B prep is committed on `feature/handoff-storage-reversal-main` at `bf83762`, but this file has post-commit review revisions. Until those revisions are committed and the Gate 0 branch/residue preflight is rerun, the dirty plan is review material, not execution authority. Source implementation remains blocked.
+Gate 0A/0B prep is committed on `feature/handoff-storage-reversal-main` at `bf83762`. The post-review plan reanchor is committed at `4b5f6fc`; the latest clean committed version of this document on this branch is the plan authority. Gate 0r remains open for branch/residue preflight refresh, TTL-sensitive residue reclassification, and hard-stop matrix creation. Source implementation remains blocked until Gate 0r passes.
 
 This document is the implementation contract for reversing Handoff storage authority from the live source's current `docs/handoffs/` primary policy to `.codex/handoffs/` as the post-cutover write/read target. Until the implementation commit lands, `.codex/handoffs/` is target authority, not current repo truth.
 
 Done means all writers, readers, skill docs, helper scripts, tests, dormant validation helpers or live hooks, refresh classifier logic, refresh smoke, release docs, ignore policy, and stale-text gates move together. A partial reader-only migration is not closeout.
 
-The `bf83762` commit recorded Gate 0A/0B prep evidence for the then-committed contract by tracking this control document and the repo-authority residue ledger, patching source-repo ignore policy, and recording canonical-checkout local preflight evidence for current top-level `docs/handoffs/handoff-*` residue paths. That evidence authorizes only the committed contract. Any post-`bf83762` change must either be committed as a new authority boundary or explicitly reverted before Gate 1. Source implementation may start only after `gate-0r-review-reanchor-and-preflight-refresh` below passes. Source repair closeout remains blocked until active writer creation is covered by helper APIs and transaction tests. Installed-host certification remains blocked until the host-repo policy matrix below is covered by source-proof installed-plugin smoke.
+The `bf83762` commit recorded Gate 0A/0B prep evidence for the then-committed contract by tracking this control document and the repo-authority residue ledger, patching source-repo ignore policy, and recording canonical-checkout local preflight evidence for current top-level `docs/handoffs/handoff-*` residue paths. The `4b5f6fc` commit records the post-review plan authority boundary. That boundary does not complete Gate 0r; Gate 0r remains open only for branch/residue preflight refresh, TTL-sensitive local residue reclassification, and hard-stop matrix creation. Source implementation may start only after `gate-0r-review-reanchor-and-preflight-refresh` passes. Source repair closeout remains blocked until active writer creation is covered by helper APIs and transaction tests. Installed-host certification remains blocked until the host-repo policy matrix below is covered by source-proof installed-plugin smoke.
 
 ## Policy Authority Override
 
@@ -123,7 +123,7 @@ Installed-host certification requires a first-class harness before any installed
 - Create disposable host repos for each row in the Installed Host Repo Policy Matrix, then run helpers from the installed plugin root with the source checkout removed from `PYTHONPATH` and import resolution.
 - Record cleanup policy and artifact roots. Temporary host repos may be removed after the summary is written, but the summary must retain enough path, manifest, command, and SHA256 evidence to reproduce the proof. Local-only raw output belongs under the refresh local-only evidence root, not in tracked source docs.
 
-Gate 1f may add this harness in source-test form without mutating an installed cache. Gate 5 is the earliest point where an installed-host or installed-cache certification label may be claimed.
+Gate 1f must add this harness in source-test form without mutating an installed cache. Gate 5 is the earliest point where an installed-host or installed-cache certification label may be claimed.
 
 ### Residue Disposition Artifacts
 
@@ -293,6 +293,8 @@ Mutable operations must use same-filesystem temporary files plus atomic rename f
 
 Every mutating load, active writer, or state operation must be transactional and idempotent, including implicit primary active load, explicit primary active load, explicit primary archive load, implicit legacy active load, explicit legacy active load, explicit legacy archive load, save active write, summary active write, quicksave active write, state write, and state clear.
 
+For load and explicit state operations, the transaction runs in one lock window. For active writers, the sequence below describes the write phase only; `begin-active-write` uses the two-phase reservation protocol in Active Writer Creation Contract and must release the project lock before content generation.
+
 1. Acquire the project lock.
 2. Recompute and validate the selected source path, storage location, and raw-byte hash for source-backed operations; for generated active writes, validate the generated output metadata, allocated active path, and output hash.
 3. Write a pending transaction record under `.codex/handoffs/.session-state/transactions/` containing the operation, source path, source hash when applicable, allocated active or archive path when applicable, intended state path when applicable, consumed-registry or copied-source-registry entry when applicable, active output hash when applicable, and operation-specific postconditions.
@@ -334,6 +336,9 @@ Transaction records must be JSON and include at least:
 - `temp_active_path`, when the transaction writes temporary active output
 - `output_sha256`, when the transaction writes active or archive output
 - `active_writer_idempotency_key`, when the transaction writes generated active output
+- `active_writer_lease_id`, when the transaction reserves generated active output
+- `active_writer_lease_expires_at`, when the transaction reserves generated active output
+- `active_writer_transaction_watermark`, when the transaction reserves generated active output
 - `state_snapshot_sha256`, when an active writer reads chain state before output
 - `resume_source_path`, when an active writer preserves `resumed_from`
 - `resume_source_sha256`, when an active writer preserves `resumed_from`
@@ -354,9 +359,9 @@ Transaction records must be JSON and include at least:
 
 The implementation must provide:
 
-- `begin-active-write`: start a save/summary/quicksave transaction before generated content is accepted. It must run mutating recovery, read primary or bridged chain state, mint or accept a caller-provided run id, allocate and bind the active path, persist the idempotency key and pending transaction record, and return the `run_id`, transaction id, allocated path, state snapshot id, and resumed-from identity to the caller.
+- `begin-active-write`: reserve a save/summary/quicksave transaction before generated content is accepted. It must acquire the project lock, run mutating recovery, read primary or bridged chain state, mint or accept a caller-provided run id, allocate and bind the active path, persist the idempotency key, pending transaction record, operation-state record, reservation lease, state snapshot, and transaction watermark, then release the lock before content generation. It must return the `run_id`, transaction id, allocated path, state snapshot id, resumed-from identity, operation-state path, lease id, and lease expiry to the caller.
 - `allocate-active-path`: allocate a collision-safe primary active path under `.codex/handoffs/` from an operation kind, timestamp, and slug. Allocation must use filename timestamp format `YYYY-MM-DD_HH-MM_<kind>-<slug>.md`, treat existing files, directories, symlinks, and tracked exact-path conflicts as occupied, and support at least base, `-01`, and `-02` suffixes before returning collision-budget exhaustion.
-- `write-active-handoff`: accept only content tied to a previously returned `run_id`, transaction id, allocated path, state snapshot id, and idempotency key; write active handoff markdown under `.codex/handoffs/` via same-directory temp file and atomic rename, verify the raw-byte hash, preserve `resumed_from` from primary or bridged legacy state, and clear or durably mark consumed chain state only after the active file is proven present.
+- `write-active-handoff`: acquire the project lock and accept only content tied to a previously returned `run_id`, transaction id, allocated path, state snapshot id, lease id, and idempotency key. It must validate reservation freshness, state snapshot identity, transaction watermark, and no conflicting chain mutation before writing. It writes active handoff markdown under `.codex/handoffs/` via same-directory temp file and atomic rename, verifies the raw-byte hash, preserves `resumed_from` from primary or bridged legacy state, and clears or durably marks consumed chain state only after the active file is proven present.
 - `active-write-transaction-recover`: recover or fail pending save/summary/quicksave transactions before any new mutating active write or state bridge lookup. Read-only selection uses `read-only-recovery-inventory` instead.
 
 Generated active writes use an active-writer idempotency key, not a source hash. The key is stable retry identity; it must not include `transaction_id` or generated content hash. Those are transaction fields used to audit and compare attempts, not key components.
@@ -402,6 +407,10 @@ The active-writer operation-state record must include at least:
 - state snapshot id and hash
 - resumed-from path and hash when present
 - operation-state path
+- lease id
+- lease acquired timestamp
+- lease expiry timestamp
+- transaction watermark at reservation time
 - status: `begun`, `content-generated`, `write-pending`, `committed`, `abandoned`, or `recovery-required`
 - content hash once generation is accepted
 - created and updated timestamps
@@ -409,17 +418,26 @@ The active-writer operation-state record must include at least:
 
 Skill docs must copy the helper-returned operation identity into the visible workflow before final content generation. After context compaction, retry, interruption, or a regenerated answer, the skill must first call `active-write-transaction-recover` or `list-active-writes` for the project and operation. If exactly one compatible pending operation exists, the skill may continue only by passing the persisted `run_id`, transaction id, state snapshot id, allocated path, and content hash. If no compatible operation exists, it may start a new `begin-active-write`. If more than one compatible operation exists, it must fail closed and show the recovery inventory. If generated bytes differ for the same idempotency key, the helper must require explicit `abandon-active-write` or equivalent operator-selected recovery before a new handoff can be created.
 
+The project lock must not be held across LLM or local content generation. Active writers use a two-phase reservation protocol:
+
+1. `begin-active-write` acquires the project lock.
+2. It runs mutating recovery and refuses to reserve a new active write while another non-expired compatible reservation exists for the same project and chain state.
+3. It reads chain state, records the state snapshot hash, transaction watermark, resumed-from identity, allocated active path, idempotency key, operation-state path, lease id, and lease expiry.
+4. It writes the pending transaction and operation-state reservation, then releases the project lock before content generation.
+5. The caller generates content without holding the project lock.
+6. `write-active-handoff` reacquires the project lock.
+7. It reruns mutating recovery, reloads the operation-state record, validates the lease, and proves the recorded state snapshot and transaction watermark have not been invalidated by a conflicting load, save, summary, quicksave, explicit state recovery, or cleanup mutation.
+8. If the reservation is fresh and no conflicting mutation exists, it writes output, performs state cleanup, commits the transaction, and marks the operation-state committed.
+9. If the lease expired, the state snapshot changed, the transaction watermark changed in a conflicting way, or another operation already committed against the same chain state, it fails closed with `ActiveWriteReservationConflictError` or an equivalent typed diagnostic before accepting or writing regenerated content.
+
+The default reservation lease is 30 minutes. A helper may support explicit lease renewal only while holding the project lock and only when the state snapshot and transaction watermark still match. Expired reservations are recoverable inventory, not permission to allocate a second active path silently. Operator recovery may abandon an expired reservation or continue it only after the helper proves no conflicting mutation has committed since the reservation watermark.
+
 `abandon-active-write` must run under the project lock, mark the operation-state and transaction record abandoned with path and hash evidence, and leave already-written active output untouched unless a separate reviewed recovery command proves removal is safe. Abandonment must not clear or mark chain state unless the transaction's recorded postconditions prove the active output was never written or the state cleanup already completed.
 
-The save/summary/quicksave transaction boundary is:
+The save/summary/quicksave transaction boundary is split into reservation and write phases:
 
-1. Acquire the project lock.
-2. Run mutating recovery for the project.
-3. Read primary state or the one-time legacy state bridge.
-4. Allocate the primary active output path.
-5. Write and verify the active handoff file.
-6. Clear primary state and consume or mark any bridged legacy state with post-clear proof.
-7. Commit the transaction only after the active file exists, the content hash matches, and state cleanup cannot resurrect.
+1. Reservation phase: acquire the project lock, run mutating recovery for the project, read primary state or the one-time legacy state bridge, allocate the primary active output path, persist the transaction and operation-state reservation, and release the lock before content generation.
+2. Write phase: reacquire the project lock, validate lease freshness, state snapshot, transaction watermark, idempotency key, and content hash, write and verify the active handoff file, clear primary state and consume or mark any bridged legacy state with post-clear proof, then commit the transaction only after the active file exists, the content hash matches, and state cleanup cannot resurrect.
 
 A save/summary/quicksave operation is not successful if state cleanup fails after the active file write. In that case the transaction must remain recoverable or fail with a diagnostic that names the active path and state path; it must not report a clean save while leaving ambiguous chain state behind.
 
@@ -683,7 +701,14 @@ Without an explicit archive mode, archived handoffs are loadable only by explici
 
 ### Search And Triage
 
-`/search` and `/triage` use Scan Mode `history_search` and always scan readable primary, legacy, and previous-primary hidden archive roots within their documented scope.
+`/search` and `/triage` use Scan Mode `history_search` and always scan readable primary, legacy, and previous-primary hidden archive roots within their documented scope, except when a command is explicitly in single-root diagnostic mode.
+
+Single-root diagnostic mode is allowed only for deprecated compatibility surfaces such as `/triage --handoffs-dir <path>`. In that mode the command scans exactly the named root and its archive child, must not infer or combine primary, legacy, or previous-primary roots, and must emit:
+
+- `override_mode=explicit_handoffs_root`
+- `roots_scanned`
+- `roots_intentionally_skipped`
+- a diagnostic pointing operators to `--project-root` for normal split-root discovery
 
 If triage keeps the 30-day cutoff, the contract is: scan primary, legacy, and previous-primary hidden archive roots within the triage lookback window. Tests must prove all history-search roots are subject to the same cutoff.
 
@@ -739,7 +764,8 @@ The reversal is not done unless all of these are reconciled:
 - `.gitignore`
 - `docs/superpowers/plans/2026-05-13-handoff-storage-residue-ledger.md`
 - Handoff tests, including release metadata and CLI command tests
-- installed-host storage smoke tests for the host-repo policy matrix
+- isolated installed-host harness source tests for source-proof installed realpath and cache-isolation behavior
+- installed-host storage smoke tests for the host-repo policy matrix, required only before `installed host matrix certified` or `installed cache certified`
 - Refresh classifier source, fixtures, inventory tests, and smoke tests, including `plugins/turbo-mode/tools/refresh/smoke.py`
 
 `/save`, `/summary`, `/quicksave`, state cleanup, and dormant validation helpers or live quality hooks are explicitly in scope. If `.codex/handoffs/` is primary, these must stop writing or validating `docs/handoffs/` as the current target.
@@ -779,7 +805,7 @@ These compatibility decisions are fixed for implementation. Closeout must includ
 | `session_state.py clear-state` CLI | wrapper-preserved | Preserve exit contract; clear or durably consume only the state path selected by the current chain under the project lock. |
 | `session_state.py prune-state` CLI | wrapper-preserved | Preserve pruning behavior, but target only primary state unless an explicit recovery command names legacy state. |
 | `session_state.py allocate_archive_path` Python API | wrapper-preserved | Delegate to `storage_authority.py`; preserve collision suffix behavior for primary archive allocation. |
-| New active writer helpers | added | Add `begin-active-write`, `allocate-active-path`, `write-active-handoff`, and `active-write-transaction-recover` as functions in `storage_authority.py` and CLI subcommands in `session_state.py`. |
+| New active writer helpers | added | Add `begin-active-write`, `allocate-active-path`, `write-active-handoff`, `list-active-writes`, `active-write-transaction-recover`, and `abandon-active-write` as functions in `storage_authority.py` and CLI subcommands in `session_state.py`. |
 | New legacy copy helpers | added | Add `copy-legacy-active-to-primary-archive` and `copy-legacy-archive-to-primary-archive` as functions in `storage_authority.py` and CLI subcommands in `session_state.py`. |
 | New chain inventory helpers | added | Add `list-chain-state` as a function in `storage_authority.py` and a CLI subcommand in `session_state.py`. |
 | Existing `session_state.py` public Python helpers used by tests | wrapper-preserved | Keep importable names or provide explicit wrapper functions with the same names and documented diagnostics when old semantics are unsafe. |
@@ -899,6 +925,8 @@ Minimum source-repair coverage:
 - active-writer idempotency keys exclude `transaction_id` and generated content hash, while transaction records keep those values as separate fields
 - active-writer retry with the same idempotency key and changed generated bytes fails with a typed diagnostic instead of creating a second active handoff
 - active-writer recovery covers `pending_before_write`, `written_not_confirmed`, `cleanup_failed`, and `content_mismatch`
+- active-writer tests prove the project lock is released during content generation and reacquired by `write-active-handoff`
+- active-writer tests cover reservation lease expiry, lease renewal if implemented, conflicting state mutation after reservation, transaction watermark mismatch, and abandonment of expired reservations
 - ambiguous same-project state emits a candidate inventory and supports an explicit operator recovery path without guessing
 - `.codex/handoffs/*.md`, `.codex/handoffs/archive/*.md`, and `.codex/handoffs/.session-state/*.json` are ignored
 - `.codex/handoffs/.session-state/**`, including locks, transactions, markers, temp files, and recovery records, is ignored
@@ -908,6 +936,7 @@ Minimum source-repair coverage:
 - load/list/distill/save/summary/quicksave docs call helper entrypoints and do not retain stale shell-only path logic
 - chain-state helper docs preserve direct-Python launcher class and do not regress to dependency-bearing `uv run`
 - compatibility ledger tests cover preserved, wrapper-preserved, and deprecated script APIs/CLI subcommands
+- `/triage --handoffs-dir` tests cover explicit single-root diagnostic mode, including `override_mode`, `roots_scanned`, `roots_intentionally_skipped`, and the diagnostic pointing operators to `--project-root`
 - discovery/search/triage tests fail on broad exception swallowing that drops path-specific skip reasons
 - dormant validation helper closeout does not claim live hook behavior, or live hook closeout includes installed-config proof
 
@@ -1018,7 +1047,7 @@ The smoke must also assert that the helper and skill-doc realpaths under test ar
 
 Closeout must use exactly one label:
 
-- `source repaired`: source, docs, source-repo ignore policy, generated stale-text gate, helper tests, skill-doc surface tests, refresh classifier tests, active-writer transaction tests, hard-stop matrix proof, and source refresh smoke tests pass; installed-host matrix behavior smoke, installed cache, and live hook behavior are not claimed current.
+- `source repaired`: source, docs, source-repo ignore policy, generated stale-text gate, helper tests, skill-doc surface tests, refresh classifier tests, active-writer transaction tests, hard-stop matrix proof, isolated installed-host harness/source-proof path tests, and source refresh smoke tests pass; installed-host matrix behavior smoke, installed cache, and live hook behavior are not claimed current.
 - `refresh-ready but not mutated`: all `source repaired` gates pass, plus refresh evidence says mutation is ready, but live installed-cache mutation was not run.
 - `installed host matrix certified`: all `source repaired` gates pass, installed plugin/helper smoke covers the host-repo policy matrix, and no broader installed-cache certification or live hook claim is made beyond that matrix.
 - `installed cache certified`: source/cache equality or approved divergence proof exists, installed cache was refreshed or verified current, installed-host matrix smoke passes, installed-cache smoke passes, the installed skill docs are the docs under test, and any live hook claim has installed-config proof.
@@ -1029,13 +1058,13 @@ Use named vertical commit gates so the implementation does not become one long u
 
 1. `gate-0a-control-authority-and-ignore-policy` - historical prep at `bf83762`: Created `feature/handoff-storage-reversal-main` from current `main`, recorded this control document and the repo-authority residue ledger, and patched the narrow source-repo `.codex/handoffs/**` ignore policy.
 2. `gate-0b-local-preflight-evidence` - historical prep at `bf83762`: Generated ignored canonical-checkout local-preflight evidence at `.codex/handoffs/.session-state/preflight/handoff-storage-residue-local-preflight.json`; evidence hash was `335e8b2fc615167d92168c7afb011da58753c3c2c010da5e0a5f3f37b7c85e12`.
-3. `gate-0r-review-reanchor-and-preflight-refresh`: Commit this post-review plan revision or explicitly revert it, confirm `git status --short` contains only expected ignored local runtime evidence, rerun branch/residue preflight, refresh or reclassify TTL-sensitive `bridge-once` evidence, and create or update the hard-stop closeout matrix. Source code implementation remains blocked until this gate is green.
+3. `gate-0r-review-reanchor-and-preflight-refresh`: Confirm `git status --short --untracked-files=all` is clean except reviewed tracked plan/ledger edits, separately verify expected ignored local runtime evidence with `git status --short --ignored --untracked-files=all <paths>`, rerun branch/residue preflight, refresh or reclassify TTL-sensitive `bridge-once` evidence, and create or update the hard-stop closeout matrix. Source code implementation remains blocked until this gate is green.
 4. `gate-1a-discovery-read-only-slice`: Add the `storage_authority.py` facade plus internal path/discovery/git modules needed for read-only inventory. Add and pass tests for cutover inventory, scan-mode separation, artifact-class filtering, git visibility filtering, candidate validation, skip reasons, dedup, ordering, source-repo ignore policy, and the ban on broad exception swallowing in search/triage discovery. Rewire only read-only discovery call sites that this gate can leave green.
 5. `gate-1b-reader-history-slice`: Rewire `/list-handoffs`, default and explicit `/distill`, `/search`, and `/triage` history search to the shared read-only discovery facade. Add and pass provenance, dedup-winner, historical-archive, `--project-root`, deprecated `--handoffs-dir`, and no-side-effect recovery-inventory tests. This gate must not add mutating load behavior.
 6. `gate-1c-load-transaction-slice`: Add transaction, registry, lock, atomic archive copy/move, and recovery primitives needed for load. Add and pass tests for primary active/archive load, tracked primary active source fail-closed behavior, legacy active/archive load, consumed legacy-active registry, copied legacy-archive registry, read-only recovery inventory, mutating recovery, explicit load idempotency, interruption, and concurrent retry. Rewire `/load` only after these tests pass.
 7. `gate-1d-active-writer-operation-state-slice`: Add active-writer operation-state persistence, `begin-active-write`, `allocate-active-path`, `write-active-handoff`, `list-active-writes`, `active-write-transaction-recover`, and `abandon-active-write`. Add and pass tests for helper-minted run id persistence, visible operation identity, context-compaction/retry recovery, active allocation, atomic write, idempotency key, changed-content retry failure, partial write recovery, and state cleanup. Rewire `/save`, `/summary`, and `/quicksave` only after the operation-state contract is green.
 8. `gate-1e-state-bridge-and-recovery-slice`: Add project-scoped legacy-state bridge and operator recovery commands. Add and pass tests for state-like residue handling, TTL expiry diagnostics, ambiguous state diagnostics, primary-state-plus-unresolved-legacy fail-closed behavior, bridge cleanup proof, `continue-chain-state`, `mark-chain-state-consumed`, `abandon-primary-chain-state`, and `chain-state-recovery-inventory`.
-9. `gate-1f-installed-host-harness-slice`: Add the isolated installed-host harness and source-proof orchestration tests that resolve installed plugin realpaths outside the source checkout. This gate may pass as harness/source-test coverage without claiming installed-host certification; it is mandatory before Gate 5.
+9. `gate-1f-installed-host-harness-slice`: Add the isolated installed-host harness and source-proof orchestration tests that resolve installed plugin realpaths outside the source checkout. This gate is part of source repair before Gate 4 and may pass as harness/source-test coverage without claiming installed-host matrix behavior or installed-cache certification.
 10. `gate-2-skill-docs-release-docs`: Reconcile skill docs, dormant validation helpers or live hooks, README, changelog, contract docs, release metadata, and helper launcher-class assertions with `.codex/handoffs/` as primary.
 11. `gate-3-refresh-and-stale-text`: Reconcile refresh classifier source, fixtures, inventory tests, `plugins/turbo-mode/tools/refresh/smoke.py`, the generated stale-text gate, storage authority inventory artifacts, and separate `--write`/`--check` inventory commands.
 12. `gate-4-source-closeout`: Run source verification, prove every hard-stop matrix row, and assign exactly one evidence status gate.
@@ -1047,7 +1076,8 @@ Preferred PR split:
 - Load/archive transaction PR: Gate 1c.
 - Active writers/state recovery PR: Gates 1d and 1e, unless Gate 1d is large enough to split alone.
 - Docs/refresh/stale-text PR: Gates 2 and 3.
-- Installed-host certification PR or maintenance run: Gates 1f and 5 if real installed-cache mutation is in scope.
+- Installed-host harness source PR: Gate 1f, with no real installed-cache mutation claim.
+- Installed-host certification maintenance run: Gate 5 only if installed-host behavior certification or real installed-cache mutation is in scope.
 
 WIP cap: keep at most one non-green implementation gate open on a branch. If a gate starts pulling in the next slice to pass, stop and split or patch this implementation order before continuing.
 
@@ -1077,6 +1107,8 @@ Stop implementation and repair the contract before continuing if any of these oc
 - Save, summary, or quicksave constructs active output paths outside `allocate-active-path` or writes active markdown outside `write-active-handoff`.
 - Save, summary, or quicksave reports success after writing active output while chain-state cleanup remains failed, ambiguous, or recoverable-only.
 - Save, summary, or quicksave generates final content before `begin-active-write` has persisted a stable run id, state snapshot, and allocated path.
+- `begin-active-write` holds the project lock across LLM or local content generation instead of releasing it after durable reservation.
+- `write-active-handoff` proceeds after an expired lease, conflicting chain mutation, state snapshot mismatch, transaction watermark mismatch, or ambiguous reservation match.
 - Active-writer idempotency key includes `transaction_id` or generated content hash.
 - Active-writer retry after partial write can create a second active handoff for the same idempotency key.
 - Active-writer retry with the same idempotency key but changed generated bytes proceeds without an explicit `ActiveWriteContentChangedError` or equivalent diagnostic.
@@ -1136,7 +1168,7 @@ Closeout cannot claim `source repaired` unless every hard-stop row is `proved` o
 
 Gate 0A/0B prep commit: `bf83762 chore: prepare handoff storage reversal gate 0a`
 
-Post-review plan authority commit: TBD after Gate 0r.
+Post-review plan authority commit: `4b5f6fc docs: reanchor handoff storage reversal plan`. Later plan-only correction commits supersede this boundary only after they are committed on this branch with a clean worktree; do not try to self-name a commit hash inside the commit that creates it.
 
 Final source implementation commit: filled during `gate-4-source-closeout` after source repair verification passes.
 
@@ -1170,8 +1202,8 @@ Historical Gate 0A/0B verification run before `bf83762`:
 - `git check-ignore -v .codex/handoffs/example.md` and the preflight evidence path were positive.
 - `git check-ignore -v .codex/skills/adversarial-review/SKILL.md` returned the expected non-match.
 
-Current post-review revision verification is not complete until Gate 0r reruns branch hygiene, residue preflight, TTL classification, and the hard-stop matrix check from the dirty worktree state.
+Gate 0r verification remains open until branch hygiene, ignored-evidence visibility, residue preflight, TTL classification, and the hard-stop matrix check are rerun from the current committed plan boundary.
 
 ### Evidence Status
 
-Gate 0A/0B prep exists historically at `bf83762`, but the current dirty revision is not execution authority. No `source repaired`, `refresh-ready but not mutated`, `installed host matrix certified`, or `installed cache certified` claim exists until the corresponding later gates run and record fresh verification.
+Gate 0A/0B prep exists historically at `bf83762`, and the post-review plan reanchor exists at `4b5f6fc`. No `source repaired`, `refresh-ready but not mutated`, `installed host matrix certified`, or `installed cache certified` claim exists until the corresponding later gates run and record fresh verification.
