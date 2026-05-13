@@ -105,12 +105,28 @@ def _load_handoff_locked(
             "load-handoff failed: storage location not implemented. "
             f"Got: {candidate.storage_location!r:.100}"
         )
+    _write_transaction(
+        transaction_path,
+        transaction_id=transaction_id,
+        status="pending",
+        candidate=candidate,
+        archive_path=archive_path,
+        state_path=None,
+    )
 
     state_path = write_resume_state(
         layout.primary_state_dir,
         project,
         str(archive_path),
         resume_token,
+    )
+    _write_transaction(
+        transaction_path,
+        transaction_id=transaction_id,
+        status="pending",
+        candidate=candidate,
+        archive_path=archive_path,
+        state_path=state_path,
     )
     if candidate.storage_location == StorageLocation.LEGACY_ACTIVE:
         _consume_legacy_active(
