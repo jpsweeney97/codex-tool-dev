@@ -222,6 +222,49 @@ def test_begin_active_write_rejects_second_live_reservation_for_same_state(
     assert not (tmp_path / ".codex" / "handoffs" / "2026-05-13_16-46_second.md").exists()
 
 
+def test_begin_active_write_rejects_expired_reservation_until_abandoned(
+    tmp_path: Path,
+) -> None:
+    first = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="save",
+        slug="expired",
+        created_at="2026-05-13T16:45:00Z",
+        lease_seconds=-1,
+    )
+
+    with pytest.raises(active_writes.ActiveWriteError, match="active write already reserved"):
+        active_writes.begin_active_write(
+            tmp_path,
+            project_name="demo",
+            operation="save",
+            slug="replacement",
+            created_at="2026-05-13T16:46:00Z",
+        )
+
+    active_writes.abandon_active_write(
+        tmp_path,
+        operation_state_path=first.operation_state_path,
+        reason="operator abandoned expired reservation",
+    )
+    replacement = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="save",
+        slug="replacement",
+        created_at="2026-05-13T16:46:00Z",
+    )
+
+    transactions = sorted(
+        (tmp_path / ".codex" / "handoffs" / ".session-state" / "transactions").glob("*.json")
+    )
+    assert set(transactions) == {first.transaction_path, replacement.transaction_path}
+    assert replacement.allocated_active_path == (
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_16-46_replacement.md"
+    )
+
+
 def test_write_active_handoff_commits_reserved_output(tmp_path: Path) -> None:
     script = Path(__file__).parent.parent / "scripts" / "session_state.py"
     begin = subprocess.run(

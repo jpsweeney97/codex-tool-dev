@@ -133,12 +133,11 @@ def begin_active_write(
             project,
         )
         now = datetime.now(UTC)
-        _ensure_no_compatible_live_reservation(
+        _ensure_no_compatible_reservation(
             layout.primary_state_dir,
             project=project,
             operation=operation,
             state_snapshot_hash=state_snapshot_hash,
-            now=now,
         )
         transaction_watermark = _transaction_watermark(layout.primary_state_dir)
         timestamp = _parse_created_at(created_at)
@@ -261,13 +260,12 @@ def _reservation_from_payload(payload: dict[str, object]) -> ActiveWriteReservat
     )
 
 
-def _ensure_no_compatible_live_reservation(
+def _ensure_no_compatible_reservation(
     state_dir: Path,
     *,
     project: str,
     operation: str,
     state_snapshot_hash: str,
-    now: datetime,
 ) -> None:
     active_writes_dir = state_dir / "active-writes" / project
     if not active_writes_dir.exists():
@@ -281,10 +279,7 @@ def _ensure_no_compatible_live_reservation(
             continue
         if record.get("state_snapshot_hash") != state_snapshot_hash:
             continue
-        if record.get("status") in {"committed", "abandoned", "reservation_expired"}:
-            continue
-        expires_at = str(record.get("lease_expires_at", ""))
-        if expires_at and _parse_created_at(expires_at) < now:
+        if record.get("status") in {"committed", "abandoned"}:
             continue
         raise ActiveWriteError(
             "begin-active-write failed: active write already reserved. "
