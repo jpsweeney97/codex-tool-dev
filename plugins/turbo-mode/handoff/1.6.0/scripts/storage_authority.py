@@ -459,6 +459,76 @@ def continue_chain_state(
     }
 
 
+def abandon_primary_chain_state(
+    project_root: Path,
+    *,
+    project_name: str,
+    state_path: str,
+    expected_payload_sha256: str,
+    reason: str,
+) -> dict[str, object]:
+    """Move one exact primary chain-state file out of active primary lookup."""
+    layout = get_storage_layout(project_root)
+    inventory = chain_state_recovery_inventory(layout.project_root, project_name=project_name)
+    candidate = _select_chain_state_candidate(inventory, selector=state_path)
+    if candidate["storage_location"] != StorageLocation.PRIMARY_STATE:
+        raise ChainStateDiagnosticError(
+            _operator_error(
+                code="chain-state-candidate-not-primary",
+                message="abandon-primary-chain-state requires a primary state candidate.",
+                candidate=candidate,
+            )
+        )
+    if candidate["validation_status"] != "valid":
+        raise ChainStateDiagnosticError(
+            _operator_error(
+                code="chain-state-candidate-invalid",
+                message="abandon-primary-chain-state requires a valid primary candidate.",
+                candidate=candidate,
+            )
+        )
+    if candidate["payload_sha256"] != expected_payload_sha256:
+        raise ChainStateDiagnosticError(
+            _operator_error(
+                code="chain-state-payload-hash-mismatch",
+                message="Selected primary chain-state payload hash does not match expected hash.",
+                candidate=candidate,
+            )
+        )
+    source_path = Path(str(candidate["resolved_path"]))
+    transaction_id = uuid.uuid4().hex
+    now = datetime.now(UTC).isoformat()
+    abandoned_path = (
+        layout.primary_state_dir
+        / "abandoned"
+        / f"{source_path.name}.{expected_payload_sha256[:12]}.json"
+    )
+    transaction_path = layout.primary_state_dir / "transactions" / f"{transaction_id}.json"
+    abandoned_path.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(source_path, abandoned_path)
+    transaction = {
+        "schema_version": 1,
+        "transaction_id": transaction_id,
+        "operation": "abandon-primary-chain-state",
+        "status": "completed",
+        "project": project_name,
+        "source_state_path": str(source_path),
+        "abandoned_path": str(abandoned_path),
+        "source_state_sha256": expected_payload_sha256,
+        "reason": reason,
+        "created_at": now,
+        "completed_at": now,
+    }
+    _write_json_atomic(transaction_path, transaction)
+    return {
+        "status": "abandoned",
+        "state_path": str(source_path),
+        "abandoned_path": str(abandoned_path),
+        "transaction_path": str(transaction_path),
+        "transaction_id": transaction_id,
+    }
+
+
 def read_chain_state(
     project_root: Path,
     *,

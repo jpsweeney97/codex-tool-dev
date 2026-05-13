@@ -258,6 +258,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
     )
 
+    abandon_chain_parser = subparsers.add_parser("abandon-primary-chain-state")
+    abandon_chain_parser.add_argument("--project-root", required=True)
+    abandon_chain_parser.add_argument("--project", required=True)
+    abandon_chain_parser.add_argument("--state-path", required=True)
+    abandon_chain_parser.add_argument("--expected-payload-sha256", required=True)
+    abandon_chain_parser.add_argument("--reason", required=True)
+    abandon_chain_parser.add_argument(
+        "--field",
+        choices=("status", "state_path", "abandoned_path", "transaction_path", "transaction_id"),
+        default=None,
+    )
+
     allocate_active_parser = subparsers.add_parser("allocate-active-path")
     allocate_active_parser.add_argument("--project-root", required=True)
     allocate_active_parser.add_argument(
@@ -474,6 +486,26 @@ def main(argv: list[str] | None = None) -> int:
                 project_name=args.project,
                 state_path=args.state_path,
                 expected_payload_sha256=args.expected_payload_sha256,
+            )
+        except ChainStateDiagnosticError as exc:
+            json.dump(exc.payload, sys.stdout, indent=2)
+            print()
+            return 2
+        return _emit(payload, args.field)
+
+    if args.command == "abandon-primary-chain-state":
+        from scripts.storage_authority import (
+            ChainStateDiagnosticError,
+            abandon_primary_chain_state,
+        )
+
+        try:
+            payload = abandon_primary_chain_state(
+                Path(args.project_root),
+                project_name=args.project,
+                state_path=args.state_path,
+                expected_payload_sha256=args.expected_payload_sha256,
+                reason=args.reason,
             )
         except ChainStateDiagnosticError as exc:
             json.dump(exc.payload, sys.stdout, indent=2)

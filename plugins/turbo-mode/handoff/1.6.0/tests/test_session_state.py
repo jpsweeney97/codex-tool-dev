@@ -699,6 +699,88 @@ def test_continue_chain_state_from_legacy_writes_primary_and_marks_source_consum
     assert read_payload["state"]["resume_token"] == "token-b"
 
 
+def test_abandon_primary_chain_state_moves_exact_primary_and_unblocks_legacy(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    legacy = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    primary_payload = {
+        "state_path": str(primary),
+        "project": "demo",
+        "resume_token": "token-a",
+        "archive_path": "/tmp/primary.md",
+        "created_at": "2026-05-13T16:00:00Z",
+    }
+    legacy_payload = {
+        "state_path": str(legacy),
+        "project": "demo",
+        "resume_token": "token-b",
+        "archive_path": "/tmp/legacy.md",
+        "created_at": "2026-05-13T16:01:00Z",
+    }
+    primary_bytes = json.dumps(primary_payload)
+    legacy_bytes = json.dumps(legacy_payload)
+    primary.write_text(primary_bytes, encoding="utf-8")
+    legacy.write_text(legacy_bytes, encoding="utf-8")
+    primary_hash = hashlib.sha256(primary_bytes.encode("utf-8")).hexdigest()
+
+    abandoned = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "abandon-primary-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--state-path",
+            ".codex/handoffs/.session-state/handoff-demo-token-a.json",
+            "--expected-payload-sha256",
+            primary_hash,
+            "--reason",
+            "continue from legacy",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert abandoned.returncode == 0, abandoned.stderr
+    payload = json.loads(abandoned.stdout)
+    abandoned_path = Path(payload["abandoned_path"])
+    transaction_path = Path(payload["transaction_path"])
+    assert not primary.exists()
+    assert abandoned_path.exists()
+    assert abandoned_path.read_text(encoding="utf-8") == primary_bytes
+    assert legacy.read_text(encoding="utf-8") == legacy_bytes
+    transaction = json.loads(transaction_path.read_text(encoding="utf-8"))
+    assert transaction["operation"] == "abandon-primary-chain-state"
+    assert transaction["source_state_sha256"] == primary_hash
+
+    read_after = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+    assert read_after.returncode == 0, read_after.stderr
+    read_payload = json.loads(read_after.stdout)
+    assert read_payload["status"] == "legacy-bridge-required"
+    assert read_payload["source"] == "legacy"
+    assert read_payload["state"]["resume_token"] == "token-b"
+
+
 def test_read_chain_state_cli_reads_single_primary_state(tmp_path: Path) -> None:
     script = Path(__file__).parent.parent / "scripts" / "session_state.py"
     primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
