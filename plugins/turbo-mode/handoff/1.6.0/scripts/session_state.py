@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -88,7 +89,9 @@ def write_resume_state(state_dir: Path, project: str, archive_path: str, resume_
         archive_path=archive_path,
         created_at=datetime.now(timezone.utc).isoformat(),
     )
-    state_path.write_text(json.dumps(asdict(payload), indent=2), encoding="utf-8")
+    temp_path = state_path.with_name(f".{state_path.name}.{uuid.uuid4().hex}.tmp")
+    temp_path.write_text(json.dumps(asdict(payload), indent=2), encoding="utf-8")
+    os.replace(temp_path, state_path)
     return state_path
 
 

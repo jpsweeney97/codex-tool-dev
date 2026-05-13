@@ -28,6 +28,29 @@ def test_allocate_archive_path_avoids_overwrite(tmp_path: Path) -> None:
     assert path.name == "2026-05-02_05-26_summary-test-01.md"
 
 
+def test_write_resume_state_uses_temp_file_before_final_rename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writes: list[Path] = []
+    original_write_text = Path.write_text
+
+    def write_spy(path: Path, *args: object, **kwargs: object) -> int:
+        if path.parent == tmp_path:
+            writes.append(path)
+        return original_write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", write_spy)
+
+    state_path = write_resume_state(tmp_path, "demo", "/tmp/archive.md", "token-a")
+
+    assert writes
+    assert writes[0] != state_path
+    assert writes[0].parent == state_path.parent
+    assert not writes[0].exists()
+    assert json.loads(state_path.read_text(encoding="utf-8"))["archive_path"] == "/tmp/archive.md"
+
+
 def test_load_resume_state_rejects_multiple_pending_states(tmp_path: Path) -> None:
     state_dir = tmp_path / ".session-state"
     state_dir.mkdir()
