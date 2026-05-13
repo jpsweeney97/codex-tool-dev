@@ -195,6 +195,7 @@ def write_active_handoff(
     _acquire_lock(lock_path, project=project, operation=operation, transaction_id=transaction_id)
     try:
         _ensure_reservation_is_fresh(state, operation_state_path)
+        _ensure_state_snapshot_is_current(layout.primary_state_dir, state, operation_state_path)
         expected_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         if expected_hash != content_sha256:
             raise ActiveWriteError(
@@ -496,6 +497,45 @@ def _ensure_reservation_is_fresh(
     raise ActiveWriteError(
         "write-active-handoff failed: reservation expired. "
         f"Got: {expires_at!r:.100}"
+    )
+
+
+def _ensure_state_snapshot_is_current(
+    state_dir: Path,
+    state: dict[str, object],
+    operation_state_path: Path,
+) -> None:
+    if state.get("status") in {"committed", "abandoned"}:
+        return
+    snapshot_id, snapshot_hash, _, _, _ = _state_snapshot(
+        state_dir,
+        str(state.get("project", "")),
+    )
+    if (
+        snapshot_id == str(state.get("state_snapshot_id", ""))
+        and snapshot_hash == str(state.get("state_snapshot_hash", ""))
+    ):
+        return
+    updated_at = datetime.now(UTC).isoformat()
+    state.update({
+        "status": "reservation_conflict",
+        "conflict_reason": "state_snapshot_changed",
+        "current_state_snapshot_id": snapshot_id,
+        "current_state_snapshot_hash": snapshot_hash,
+        "updated_at": updated_at,
+    })
+    _write_json_atomic(operation_state_path, state)
+    transaction_path = Path(str(state["transaction_path"]))
+    _write_json_atomic(
+        transaction_path,
+        {
+            **state,
+            "status": "reservation_conflict",
+        },
+    )
+    raise ActiveWriteError(
+        "write-active-handoff failed: state snapshot changed. "
+        f"Got: {snapshot_hash!r:.100}"
     )
 
 

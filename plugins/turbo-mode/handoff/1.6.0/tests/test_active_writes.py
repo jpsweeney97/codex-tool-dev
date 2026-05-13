@@ -576,3 +576,45 @@ def test_write_active_handoff_rejects_expired_reservation_before_output_write(
     assert updated["status"] == "reservation_expired"
     assert transaction["status"] == "reservation_expired"
     assert not active_path.exists()
+
+
+def test_write_active_handoff_rejects_changed_state_snapshot_before_output_write(
+    tmp_path: Path,
+) -> None:
+    reservation = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="save",
+        slug="state-conflict",
+        created_at="2026-05-13T16:45:00Z",
+    )
+    state_dir = tmp_path / ".codex" / "handoffs" / ".session-state"
+    conflicting_state = state_dir / "handoff-demo-conflict.json"
+    conflicting_state.write_text(
+        json.dumps({
+            "state_path": str(conflicting_state),
+            "project": "demo",
+            "resume_token": "conflict",
+            "archive_path": "/tmp/other.md",
+            "created_at": "2026-05-13T16:01:00Z",
+        }),
+        encoding="utf-8",
+    )
+    content = "---\ntitle: State conflict\n---\n\n# Handoff\n"
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+    with pytest.raises(active_writes.ActiveWriteError, match="state snapshot changed"):
+        active_writes.write_active_handoff(
+            tmp_path,
+            operation_state_path=reservation.operation_state_path,
+            content=content,
+            content_sha256=content_hash,
+        )
+
+    updated = json.loads(reservation.operation_state_path.read_text(encoding="utf-8"))
+    active_path = Path(updated["allocated_active_path"])
+    transaction = json.loads(Path(updated["transaction_path"]).read_text(encoding="utf-8"))
+    assert updated["status"] == "reservation_conflict"
+    assert updated["conflict_reason"] == "state_snapshot_changed"
+    assert transaction["status"] == "reservation_conflict"
+    assert not active_path.exists()
