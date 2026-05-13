@@ -264,6 +264,9 @@ def _copy_legacy_archive(
 
 
 def _copy_legacy_active(layout, candidate: HandoffCandidate) -> Path:
+    consumed_archive_path = _verified_consumed_legacy_active_archive(layout, candidate)
+    if consumed_archive_path is not None:
+        return consumed_archive_path
     layout.primary_archive_dir.mkdir(parents=True, exist_ok=True)
     archive_path = allocate_archive_path(candidate.path, layout.primary_archive_dir)
     shutil.copy2(candidate.path, archive_path)
@@ -274,6 +277,31 @@ def _copy_legacy_active(layout, candidate: HandoffCandidate) -> Path:
             f"Got: {str(archive_path)!r:.100}"
         )
     return archive_path
+
+
+def _verified_consumed_legacy_active_archive(
+    layout,
+    candidate: HandoffCandidate,
+) -> Path | None:
+    registry_path = layout.primary_state_dir / "consumed-legacy-active.json"
+    registry = _read_registry(registry_path)
+    key = _legacy_active_key(layout.project_root, candidate)
+    for entry in registry["entries"]:
+        if _registry_key(entry) != key:
+            continue
+        copied_path = Path(str(entry["copied_primary_archive_path"]))
+        copied_hash = str(entry.get("copied_content_sha256", ""))
+        if (
+            copied_path.exists()
+            and copied_hash == (candidate.content_sha256 or "")
+            and _sha256_file(copied_path) == copied_hash
+        ):
+            return copied_path
+        raise LoadTransactionError(
+            "load-handoff failed: consumed legacy active registry entry is stale. "
+            f"Got: {str(copied_path)!r:.100}"
+        )
+    return None
 
 
 def _consume_legacy_active(

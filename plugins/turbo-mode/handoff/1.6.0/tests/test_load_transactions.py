@@ -199,6 +199,38 @@ def test_legacy_active_load_copies_to_primary_archive_writes_state_and_consumes_
         load_handoff(tmp_path, project_name="demo", resume_token="legacy-again")
 
 
+def test_explicit_consumed_legacy_active_load_reuses_primary_archive(
+    tmp_path: Path,
+) -> None:
+    legacy = _handoff(tmp_path / "docs" / "handoffs" / "2026-05-13_12-00_legacy.md")
+    _write_legacy_active_opt_in(tmp_path, legacy)
+
+    first = load_handoff(tmp_path, project_name="demo", resume_token="one")
+    second = load_handoff(
+        tmp_path,
+        project_name="demo",
+        explicit_path=legacy,
+        resume_token="two",
+    )
+
+    assert second.archive_path == first.archive_path
+    second_state = json.loads(Path(second.state_path).read_text(encoding="utf-8"))
+    assert second_state["archive_path"] == str(first.archive_path)
+    archives = sorted((tmp_path / ".codex" / "handoffs" / "archive").glob("*.md"))
+    assert archives == [first.archive_path]
+
+    registry = json.loads(
+        (
+            tmp_path
+            / ".codex"
+            / "handoffs"
+            / ".session-state"
+            / "consumed-legacy-active.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert len(registry["entries"]) == 1
+
+
 def test_tracked_primary_active_load_fails_before_mutation(tmp_path: Path) -> None:
     _git_init(tmp_path)
     source = _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_tracked.md")
