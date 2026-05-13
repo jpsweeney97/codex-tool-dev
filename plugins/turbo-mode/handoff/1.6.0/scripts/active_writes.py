@@ -196,6 +196,11 @@ def write_active_handoff(
     try:
         _ensure_reservation_is_fresh(state, operation_state_path)
         _ensure_state_snapshot_is_current(layout.primary_state_dir, state, operation_state_path)
+        _ensure_transaction_watermark_is_current(
+            layout.primary_state_dir,
+            state,
+            operation_state_path,
+        )
         expected_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         if expected_hash != content_sha256:
             raise ActiveWriteError(
@@ -546,12 +551,46 @@ def _first_state_cleanup_path(state: dict[str, object]) -> str | None:
     return paths[0]
 
 
-def _transaction_watermark(state_dir: Path) -> str:
+def _ensure_transaction_watermark_is_current(
+    state_dir: Path,
+    state: dict[str, object],
+    operation_state_path: Path,
+) -> None:
+    if state.get("status") in {"committed", "abandoned"}:
+        return
+    transaction_path = Path(str(state["transaction_path"]))
+    watermark = _transaction_watermark(state_dir, exclude_path=transaction_path)
+    if watermark == str(state.get("transaction_watermark", "")):
+        return
+    updated_at = datetime.now(UTC).isoformat()
+    state.update({
+        "status": "reservation_conflict",
+        "conflict_reason": "transaction_watermark_changed",
+        "current_transaction_watermark": watermark,
+        "updated_at": updated_at,
+    })
+    _write_json_atomic(operation_state_path, state)
+    _write_json_atomic(
+        transaction_path,
+        {
+            **state,
+            "status": "reservation_conflict",
+        },
+    )
+    raise ActiveWriteError(
+        "write-active-handoff failed: transaction watermark changed. "
+        f"Got: {watermark!r:.100}"
+    )
+
+
+def _transaction_watermark(state_dir: Path, *, exclude_path: Path | None = None) -> str:
     transactions_dir = state_dir / "transactions"
     if not transactions_dir.exists():
         return _stable_hash(["no-transactions"])
     parts: list[str] = []
     for path in sorted(transactions_dir.glob("*.json")):
+        if exclude_path is not None and path == exclude_path:
+            continue
         parts.extend([path.name, path.read_text(encoding="utf-8")])
     return _stable_hash(parts or ["no-transactions"])
 

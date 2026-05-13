@@ -618,3 +618,49 @@ def test_write_active_handoff_rejects_changed_state_snapshot_before_output_write
     assert updated["conflict_reason"] == "state_snapshot_changed"
     assert transaction["status"] == "reservation_conflict"
     assert not active_path.exists()
+
+
+def test_write_active_handoff_rejects_changed_transaction_watermark_before_output_write(
+    tmp_path: Path,
+) -> None:
+    reservation = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="save",
+        slug="transaction-conflict",
+        created_at="2026-05-13T16:45:00Z",
+    )
+    conflict_transaction = (
+        tmp_path
+        / ".codex"
+        / "handoffs"
+        / ".session-state"
+        / "transactions"
+        / "external-conflict.json"
+    )
+    conflict_transaction.write_text(
+        json.dumps({
+            "transaction_id": "external-conflict",
+            "operation": "load",
+            "status": "completed",
+        }),
+        encoding="utf-8",
+    )
+    content = "---\ntitle: Transaction conflict\n---\n\n# Handoff\n"
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+    with pytest.raises(active_writes.ActiveWriteError, match="transaction watermark changed"):
+        active_writes.write_active_handoff(
+            tmp_path,
+            operation_state_path=reservation.operation_state_path,
+            content=content,
+            content_sha256=content_hash,
+        )
+
+    updated = json.loads(reservation.operation_state_path.read_text(encoding="utf-8"))
+    active_path = Path(updated["allocated_active_path"])
+    transaction = json.loads(Path(updated["transaction_path"]).read_text(encoding="utf-8"))
+    assert updated["status"] == "reservation_conflict"
+    assert updated["conflict_reason"] == "transaction_watermark_changed"
+    assert transaction["status"] == "reservation_conflict"
+    assert not active_path.exists()
