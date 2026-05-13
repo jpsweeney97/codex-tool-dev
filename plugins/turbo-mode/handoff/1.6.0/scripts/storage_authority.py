@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass
 from enum import StrEnum
@@ -23,8 +24,13 @@ class SelectionEligibility(StrEnum):
     ELIGIBLE = "eligible"
     BLOCKED_POLICY_CONFLICT = "blocked-policy-conflict"
     BLOCKED_TRACKED_SOURCE = "blocked-tracked-source"
+    INVALID = "invalid"
+    SKIPPED = "skipped"
     NOT_ACTIVE_SELECTION_INPUT = "not-active-selection-input"
     NOT_HISTORY_SEARCH_INPUT = "not-history-search-input"
+
+
+FILENAME_TIMESTAMP_RE = re.compile(r"^(?P<timestamp>\d{4}-\d{2}-\d{2}_\d{2}-\d{2})_.+\.md$")
 
 
 @dataclass(frozen=True)
@@ -47,6 +53,7 @@ class HandoffCandidate:
     selection_eligibility: SelectionEligibility
     source_git_visibility: str
     source_fs_status: str
+    filename_timestamp: str | None = None
     skip_reason: str | None = None
 
 
@@ -117,6 +124,27 @@ def discover_handoff_inventory(project_root: Path, *, scan_mode: str) -> Handoff
     )
 
 
+def eligible_active_candidates(inventory: HandoffInventory) -> list[HandoffCandidate]:
+    """Return active-selection candidates in implicit load/list/distill order."""
+    candidates = [
+        candidate
+        for candidate in inventory.candidates
+        if candidate.selection_eligibility == SelectionEligibility.ELIGIBLE
+        and candidate.filename_timestamp is not None
+    ]
+    ordered = sorted(candidates, key=lambda candidate: _absolute_path_key(candidate.path))
+    ordered = sorted(
+        ordered,
+        key=lambda candidate: _source_precedence(candidate.storage_location),
+        reverse=True,
+    )
+    return sorted(
+        ordered,
+        key=lambda candidate: candidate.filename_timestamp or "",
+        reverse=True,
+    )
+
+
 def _discover_markdown(
     *,
     project_root: Path,
@@ -133,8 +161,7 @@ def _discover_markdown(
             location=location,
             scan_mode=scan_mode,
         )
-        for path in sorted(root.glob("*.md"))
-        if path.is_file() and not path.name.startswith(".")
+        for path in sorted(root.rglob("*.md"))
     ]
 
 
@@ -147,6 +174,31 @@ def _candidate_for_path(
 ) -> HandoffCandidate:
     git_visibility = _git_visibility(project_root, path)
     fs_status = _fs_status(path)
+    filename_timestamp = _filename_timestamp(path)
+    skip_reason = _skip_reason(root_for_location(project_root, location), path, location)
+    if skip_reason is not None:
+        return HandoffCandidate(
+            path=path.resolve(),
+            storage_location=location,
+            artifact_class="skipped-handoff-artifact",
+            selection_eligibility=SelectionEligibility.SKIPPED,
+            source_git_visibility=git_visibility,
+            source_fs_status=fs_status,
+            filename_timestamp=filename_timestamp,
+            skip_reason=skip_reason,
+        )
+    invalid_reason = _invalid_reason(path=path, location=location, scan_mode=scan_mode)
+    if invalid_reason is not None:
+        return HandoffCandidate(
+            path=path.resolve(),
+            storage_location=location,
+            artifact_class="invalid-handoff-artifact",
+            selection_eligibility=SelectionEligibility.INVALID,
+            source_git_visibility=git_visibility,
+            source_fs_status=fs_status,
+            filename_timestamp=filename_timestamp,
+            skip_reason=invalid_reason,
+        )
     artifact_class = _artifact_class(location=location, path=path, git_visibility=git_visibility)
     eligibility, reason = _eligibility(
         location=location,
@@ -161,8 +213,24 @@ def _candidate_for_path(
         selection_eligibility=eligibility,
         source_git_visibility=git_visibility,
         source_fs_status=fs_status,
+        filename_timestamp=filename_timestamp,
         skip_reason=reason,
     )
+
+
+def root_for_location(project_root: Path, location: StorageLocation) -> Path:
+    layout = get_storage_layout(project_root)
+    if location == StorageLocation.PRIMARY_ACTIVE:
+        return layout.primary_active_dir
+    if location == StorageLocation.PRIMARY_ARCHIVE:
+        return layout.primary_archive_dir
+    if location == StorageLocation.LEGACY_ACTIVE:
+        return layout.legacy_active_dir
+    if location == StorageLocation.LEGACY_ARCHIVE:
+        return layout.legacy_archive_dir
+    if location == StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE:
+        return layout.previous_primary_hidden_archive_dir
+    return layout.primary_active_dir
 
 
 def _artifact_class(*, location: StorageLocation, path: Path, git_visibility: str) -> str:
@@ -242,6 +310,63 @@ def _looks_like_current_contract(path: Path) -> bool:
         if ":" in line and not line.startswith((" ", "\t")):
             keys.add(line.split(":", 1)[0].strip())
     return {"project", "created_at", "session_id", "type"} <= keys
+
+
+def _skip_reason(root: Path, path: Path, location: StorageLocation) -> str | None:
+    if path.name.startswith("."):
+        return "hidden_basename"
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return "path_escape"
+    if ".session-state" in relative.parts:
+        return "state_directory"
+    if path.is_symlink():
+        return "symlink"
+    if path.parent != root:
+        return "nested_file"
+    if location == StorageLocation.LEGACY_ARCHIVE:
+        return None
+    if location == StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE:
+        return None
+    return None
+
+
+def _invalid_reason(*, path: Path, location: StorageLocation, scan_mode: str) -> str | None:
+    if scan_mode == "active-selection" and _filename_timestamp(path) is None:
+        return "invalid_filename_timestamp"
+    if scan_mode == "history-search" and _archive_history_location(location):
+        return None
+    if not _looks_like_current_contract(path):
+        return "invalid_document"
+    return None
+
+
+def _archive_history_location(location: StorageLocation) -> bool:
+    return location in {
+        StorageLocation.PRIMARY_ARCHIVE,
+        StorageLocation.LEGACY_ARCHIVE,
+        StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE,
+    }
+
+
+def _filename_timestamp(path: Path) -> str | None:
+    match = FILENAME_TIMESTAMP_RE.match(path.name)
+    if match is None:
+        return None
+    return match.group("timestamp")
+
+
+def _source_precedence(location: StorageLocation) -> int:
+    if location == StorageLocation.PRIMARY_ACTIVE:
+        return 2
+    if location == StorageLocation.LEGACY_ACTIVE:
+        return 1
+    return 0
+
+
+def _absolute_path_key(path: Path) -> str:
+    return str(path.resolve())
 
 
 def _fs_status(path: Path) -> str:

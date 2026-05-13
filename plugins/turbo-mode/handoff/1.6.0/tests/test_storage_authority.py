@@ -7,6 +7,7 @@ from scripts.storage_authority import (
     SelectionEligibility,
     StorageLocation,
     discover_handoff_inventory,
+    eligible_active_candidates,
     get_storage_layout,
 )
 
@@ -33,6 +34,12 @@ def _handoff(path: Path, title: str = "Test") -> Path:
         "Test storage authority.\n",
         encoding="utf-8",
     )
+    return path
+
+
+def _invalid_handoff(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("## Goal\n\nMissing required frontmatter.\n", encoding="utf-8")
     return path
 
 
@@ -116,3 +123,51 @@ def test_tracked_primary_active_source_is_blocked(tmp_path: Path) -> None:
     candidate = next(candidate for candidate in inventory.candidates if candidate.path == primary)
     assert candidate.source_git_visibility == "tracked-conflict"
     assert candidate.selection_eligibility == SelectionEligibility.BLOCKED_TRACKED_SOURCE
+
+
+def test_active_selection_orders_by_filename_timestamp_then_lexical_path(tmp_path: Path) -> None:
+    older = _handoff(
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_10-00_older.md",
+        "Older",
+    )
+    later_b = _handoff(
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_b.md",
+        "Later B",
+    )
+    later_a = _handoff(
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_a.md",
+        "Later A",
+    )
+
+    inventory = discover_handoff_inventory(tmp_path, scan_mode="active-selection")
+
+    assert [candidate.path for candidate in eligible_active_candidates(inventory)] == [
+        later_a,
+        later_b,
+        older,
+    ]
+
+
+def test_active_selection_reports_invalid_hidden_nested_and_state_diagnostics(
+    tmp_path: Path,
+) -> None:
+    invalid = _invalid_handoff(
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_invalid.md"
+    )
+    hidden = _handoff(tmp_path / ".codex" / "handoffs" / ".hidden.md")
+    nested = _handoff(tmp_path / ".codex" / "handoffs" / "nested" / "2026-05-13_12-00_nested.md")
+    state_doc = _handoff(
+        tmp_path / ".codex" / "handoffs" / ".session-state" / "2026-05-13_12-00_state.md"
+    )
+
+    inventory = discover_handoff_inventory(tmp_path, scan_mode="active-selection")
+    by_path = {candidate.path: candidate for candidate in inventory.candidates}
+
+    assert by_path[invalid].selection_eligibility == SelectionEligibility.INVALID
+    assert by_path[invalid].skip_reason == "invalid_document"
+    assert by_path[hidden].selection_eligibility == SelectionEligibility.SKIPPED
+    assert by_path[hidden].skip_reason == "hidden_basename"
+    assert by_path[nested].selection_eligibility == SelectionEligibility.SKIPPED
+    assert by_path[nested].skip_reason == "nested_file"
+    assert by_path[state_doc].selection_eligibility == SelectionEligibility.SKIPPED
+    assert by_path[state_doc].skip_reason == "state_directory"
