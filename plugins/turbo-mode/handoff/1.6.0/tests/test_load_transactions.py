@@ -359,7 +359,7 @@ def test_read_only_recovery_inventory_reports_archive_after_state_write_failure(
     monkeypatch.setattr(load_transactions, "write_resume_state", fail_write_resume_state)
 
     with pytest.raises(RuntimeError, match="state write failed"):
-        load_transactions.load_handoff(tmp_path, project_name="demo")
+        load_transactions.load_handoff(tmp_path, project_name="demo", resume_token="token")
 
     assert not source.exists()
     assert archive.exists()
@@ -368,4 +368,7 @@ def test_read_only_recovery_inventory_reports_archive_after_state_write_failure(
     assert records[0]["status"] == "pending"
     assert records[0]["source_path"] == str(source)
     assert records[0]["archive_path"] == str(archive)
-    assert records[0]["state_path"] is None
+    assert records[0]["state_path"] == str(
+        tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token.json"
+    )
+    assert not Path(str(records[0]["state_path"])).exists()

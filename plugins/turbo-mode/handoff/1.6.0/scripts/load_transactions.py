@@ -83,13 +83,15 @@ def _load_handoff_locked(
     layout = get_storage_layout(project_root)
     transaction_path = layout.primary_state_dir / "transactions" / f"{transaction_id}.json"
     project = project_name or layout.project_root.name
+    state_token = resume_token or uuid.uuid4().hex
+    intended_state_path = layout.primary_state_dir / f"handoff-{project}-{state_token}.json"
     _write_transaction(
         transaction_path,
         transaction_id=transaction_id,
         status="pending",
         candidate=candidate,
         archive_path=None,
-        state_path=None,
+        state_path=intended_state_path,
     )
 
     if candidate.storage_location == StorageLocation.PRIMARY_ACTIVE:
@@ -120,14 +122,14 @@ def _load_handoff_locked(
         status="pending",
         candidate=candidate,
         archive_path=archive_path,
-        state_path=None,
+        state_path=intended_state_path,
     )
 
     state_path = write_resume_state(
         layout.primary_state_dir,
         project,
         str(archive_path),
-        resume_token,
+        state_token,
     )
     _write_transaction(
         transaction_path,
