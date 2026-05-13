@@ -289,8 +289,11 @@ def _copy_legacy_archive(
 
     layout.primary_archive_dir.mkdir(parents=True, exist_ok=True)
     archive_path = allocate_archive_path(candidate.path, layout.primary_archive_dir)
-    shutil.copy2(candidate.path, archive_path)
-    copied_hash = _sha256_file(archive_path)
+    copied_hash = _copy_to_archive_atomic(
+        candidate.path,
+        archive_path,
+        expected_hash=candidate.content_sha256,
+    )
     registry["entries"].append({
         **key,
         "source_absolute_path": str(candidate.path),
@@ -310,14 +313,30 @@ def _copy_legacy_active(layout, candidate: HandoffCandidate) -> Path:
         return consumed_archive_path
     layout.primary_archive_dir.mkdir(parents=True, exist_ok=True)
     archive_path = allocate_archive_path(candidate.path, layout.primary_archive_dir)
-    shutil.copy2(candidate.path, archive_path)
-    copied_hash = _sha256_file(archive_path)
-    if copied_hash != candidate.content_sha256:
+    _copy_to_archive_atomic(candidate.path, archive_path, expected_hash=candidate.content_sha256)
+    return archive_path
+
+
+def _copy_to_archive_atomic(
+    source_path: Path,
+    archive_path: Path,
+    *,
+    expected_hash: str | None,
+) -> str:
+    temp_path = archive_path.with_name(f".{archive_path.name}.{uuid.uuid4().hex}.tmp")
+    shutil.copy2(source_path, temp_path)
+    copied_hash = _sha256_file(temp_path)
+    if expected_hash is not None and copied_hash != expected_hash:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
         raise LoadTransactionError(
-            "load-handoff failed: copied legacy active hash mismatch. "
+            "load-handoff failed: copied archive hash mismatch. "
             f"Got: {str(archive_path)!r:.100}"
         )
-    return archive_path
+    os.replace(temp_path, archive_path)
+    return copied_hash
 
 
 def _verified_consumed_legacy_active_archive(

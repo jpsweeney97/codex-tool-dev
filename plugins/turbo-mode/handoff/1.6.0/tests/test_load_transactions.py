@@ -107,10 +107,18 @@ def test_explicit_primary_archive_load_writes_state_without_moving_archive(tmp_p
 
 def test_explicit_legacy_archive_load_copies_to_primary_archive_and_reuses_registry(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     legacy = _handoff(
         tmp_path / "docs" / "handoffs" / "archive" / "2026-05-13_12-00_legacy.md"
     )
+    copy_destinations: list[Path] = []
+
+    def copy_spy(source: Path, destination: Path) -> Path:
+        copy_destinations.append(destination)
+        return load_transactions.shutil.copyfile(source, destination)
+
+    monkeypatch.setattr(load_transactions.shutil, "copy2", copy_spy)
 
     first = load_handoff(tmp_path, project_name="demo", explicit_path=legacy, resume_token="one")
     second = load_handoff(tmp_path, project_name="demo", explicit_path=legacy, resume_token="two")
@@ -134,6 +142,10 @@ def test_explicit_legacy_archive_load_copies_to_primary_archive_and_reuses_regis
     assert len(registry["entries"]) == 1
     assert registry["entries"][0]["storage_location"] == "legacy_archive"
     assert registry["entries"][0]["copied_primary_archive_path"] == str(first.archive_path)
+    assert len(copy_destinations) == 1
+    assert copy_destinations[0].parent == first.archive_path.parent
+    assert copy_destinations[0] != first.archive_path
+    assert not copy_destinations[0].exists()
 
 
 def test_explicit_previous_primary_hidden_archive_uses_copy_registry(tmp_path: Path) -> None:
@@ -164,10 +176,18 @@ def test_explicit_previous_primary_hidden_archive_uses_copy_registry(tmp_path: P
 
 def test_legacy_active_load_copies_to_primary_archive_writes_state_and_consumes_source(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     legacy = _handoff(tmp_path / "docs" / "handoffs" / "2026-05-13_12-00_legacy.md")
     legacy_hash = _sha256(legacy)
     _write_legacy_active_opt_in(tmp_path, legacy)
+    copy_destinations: list[Path] = []
+
+    def copy_spy(source: Path, destination: Path) -> Path:
+        copy_destinations.append(destination)
+        return load_transactions.shutil.copyfile(source, destination)
+
+    monkeypatch.setattr(load_transactions.shutil, "copy2", copy_spy)
 
     result = load_handoff(tmp_path, project_name="demo", resume_token="legacy")
 
@@ -196,6 +216,10 @@ def test_legacy_active_load_copies_to_primary_archive_writes_state_and_consumes_
     assert entry["source_content_sha256"] == legacy_hash
     assert entry["copied_primary_archive_path"] == str(archive_path)
     assert entry["operation"] == "legacy-load"
+    assert len(copy_destinations) == 1
+    assert copy_destinations[0].parent == archive_path.parent
+    assert copy_destinations[0] != archive_path
+    assert not copy_destinations[0].exists()
 
     with pytest.raises(LoadTransactionError, match="no active handoff candidates"):
         load_handoff(tmp_path, project_name="demo", resume_token="legacy-again")
