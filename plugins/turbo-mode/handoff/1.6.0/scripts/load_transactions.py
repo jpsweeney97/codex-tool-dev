@@ -109,11 +109,7 @@ def _load_handoff_locked(
         StorageLocation.LEGACY_ARCHIVE,
         StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE,
     }:
-        archive_path = _copy_legacy_archive(
-            layout,
-            candidate,
-            transaction_id=transaction_id,
-        )
+        archive_path = _copy_legacy_archive(layout, candidate)
     elif candidate.storage_location == StorageLocation.LEGACY_ACTIVE:
         archive_path = _copy_legacy_active(layout, candidate)
     else:
@@ -150,6 +146,16 @@ def _load_handoff_locked(
     )
     if candidate.storage_location == StorageLocation.LEGACY_ACTIVE:
         _consume_legacy_active(
+            layout,
+            candidate,
+            copied_archive_path=archive_path,
+            transaction_id=transaction_id,
+        )
+    if candidate.storage_location in {
+        StorageLocation.LEGACY_ARCHIVE,
+        StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE,
+    }:
+        _record_copied_legacy_archive(
             layout,
             candidate,
             copied_archive_path=archive_path,
@@ -404,8 +410,6 @@ def _ensure_loadable(candidate: HandoffCandidate) -> None:
 def _copy_legacy_archive(
     layout,
     candidate: HandoffCandidate,
-    *,
-    transaction_id: str,
 ) -> Path:
     registry_path = layout.primary_state_dir / "copied-legacy-archives.json"
     registry = _read_registry(registry_path)
@@ -423,22 +427,48 @@ def _copy_legacy_archive(
 
     layout.primary_archive_dir.mkdir(parents=True, exist_ok=True)
     archive_path = allocate_archive_path(candidate.path, layout.primary_archive_dir)
-    copied_hash = _copy_to_archive_atomic(
+    _copy_to_archive_atomic(
         candidate.path,
         archive_path,
         expected_hash=candidate.content_sha256,
     )
+    return archive_path
+
+
+def _record_copied_legacy_archive(
+    layout,
+    candidate: HandoffCandidate,
+    *,
+    copied_archive_path: Path,
+    transaction_id: str,
+) -> None:
+    registry_path = layout.primary_state_dir / "copied-legacy-archives.json"
+    registry = _read_registry(registry_path)
+    key = _legacy_archive_key(layout.project_root, candidate)
+    copied_hash = _sha256_file(copied_archive_path)
+    for entry in registry["entries"]:
+        if _registry_key(entry) != key:
+            continue
+        if (
+            Path(str(entry["copied_primary_archive_path"])).exists()
+            and str(entry["copied_primary_archive_path"]) == str(copied_archive_path)
+            and str(entry.get("copied_content_sha256", "")) == copied_hash
+        ):
+            return
+        raise LoadTransactionError(
+            "load-handoff failed: copied legacy archive registry entry is stale. "
+            f"Got: {entry.get('copied_primary_archive_path')!r:.100}"
+        )
     registry["entries"].append({
         **key,
         "source_absolute_path": str(candidate.path),
-        "copied_primary_archive_path": str(archive_path),
+        "copied_primary_archive_path": str(copied_archive_path),
         "copied_content_sha256": copied_hash,
         "operation": "legacy-archive-load",
         "transaction_id": transaction_id,
         "copied_at": datetime.now(UTC).isoformat(),
     })
     _write_json_atomic(registry_path, registry)
-    return archive_path
 
 
 def _copy_legacy_active(layout, candidate: HandoffCandidate) -> Path:

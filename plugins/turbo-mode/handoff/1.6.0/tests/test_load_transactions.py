@@ -148,6 +148,38 @@ def test_explicit_legacy_archive_load_copies_to_primary_archive_and_reuses_regis
     assert not copy_destinations[0].exists()
 
 
+def test_legacy_archive_state_write_failure_does_not_record_copied_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy = _handoff(
+        tmp_path / "docs" / "handoffs" / "archive" / "2026-05-13_12-00_legacy.md"
+    )
+    archive = tmp_path / ".codex" / "handoffs" / "archive" / legacy.name
+
+    def fail_write_resume_state(*args: object, **kwargs: object) -> Path:
+        raise RuntimeError("state write failed")
+
+    monkeypatch.setattr(load_transactions, "write_resume_state", fail_write_resume_state)
+
+    with pytest.raises(RuntimeError, match="state write failed"):
+        load_transactions.load_handoff(
+            tmp_path,
+            project_name="demo",
+            explicit_path=legacy,
+            resume_token="retry",
+        )
+
+    assert archive.exists()
+    assert not (
+        tmp_path
+        / ".codex"
+        / "handoffs"
+        / ".session-state"
+        / "copied-legacy-archives.json"
+    ).exists()
+
+
 def test_explicit_previous_primary_hidden_archive_uses_copy_registry(tmp_path: Path) -> None:
     hidden = _handoff(
         tmp_path / ".codex" / "handoffs" / ".archive" / "2026-05-13_12-00_hidden.md"
