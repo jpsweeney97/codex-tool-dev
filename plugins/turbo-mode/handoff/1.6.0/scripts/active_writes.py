@@ -227,7 +227,15 @@ def _bind_slug(operation: str, slug: str | None) -> tuple[str, str]:
         return DEFAULT_SLUGS[operation], "helper-default"
     if not slug:
         raise ActiveWriteError("begin-active-write failed: slug must be non-empty. Got: ''")
+    _ensure_slug_segment("begin-active-write", slug)
     return slug, "caller-predeclared"
+
+
+def _ensure_slug_segment(operation: str, slug: str) -> None:
+    if "/" in slug or "\\" in slug or slug in {".", ".."}:
+        raise ActiveWriteError(
+            f"{operation} failed: slug must be a filename segment. Got: {slug!r:.100}"
+        )
 
 
 def _reservation_from_payload(payload: dict[str, object]) -> ActiveWriteReservation:
@@ -305,6 +313,7 @@ def allocate_active_path(
         raise ActiveWriteError(
             f"allocate-active-path failed: unsupported operation. Got: {operation!r:.100}"
         )
+    _ensure_slug_segment("allocate-active-path", slug)
     layout = get_storage_layout(project_root)
     timestamp = _parse_created_at(created_at)
     return _allocate_active_path(
