@@ -6,7 +6,14 @@ Provides project root detection and handoffs directory resolution.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
+
+try:
+    from scripts.storage_authority import get_storage_layout
+except ModuleNotFoundError:  # Direct execution/import from scripts directory
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.storage_authority import get_storage_layout  # type: ignore[no-redef]
 
 
 def get_project_root() -> tuple[Path, str]:
@@ -24,11 +31,16 @@ def get_project_root() -> tuple[Path, str]:
         )
         if result.returncode == 0:
             return Path(result.stdout.strip()), "git"
-        import sys
-        print(f"Warning: git rev-parse failed (returncode={result.returncode}). Falling back to cwd.", file=sys.stderr)
+
+        print(
+            f"Warning: git rev-parse failed (returncode={result.returncode}). Falling back to cwd.",
+            file=sys.stderr,
+        )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
-        import sys
-        print(f"Warning: git project detection failed ({type(exc).__name__}). Falling back to cwd.", file=sys.stderr)
+        print(
+            f"Warning: git project detection failed ({type(exc).__name__}). Falling back to cwd.",
+            file=sys.stderr,
+        )
     return Path.cwd(), "cwd"
 
 
@@ -43,31 +55,33 @@ def get_project_name() -> tuple[str, str]:
 
 
 def get_handoffs_dir() -> Path:
-    """Get handoffs directory: <project_root>/docs/handoffs/"""
+    """Get primary handoffs directory: <project_root>/.codex/handoffs/."""
     root, _ = get_project_root()
-    return root / "docs" / "handoffs"
+    return get_storage_layout(root).primary_active_dir
 
 
 def get_archive_dir() -> Path:
     """Return the archive directory for the current project's handoffs."""
-    return get_handoffs_dir() / "archive"
+    root, _ = get_project_root()
+    return get_storage_layout(root).primary_archive_dir
 
 
 def get_state_dir() -> Path:
-    """Get session state directory: <project_root>/docs/handoffs/.session-state/
+    """Get session state directory: <project_root>/.codex/handoffs/.session-state/
 
     State files are ephemeral bridge objects (24h TTL) linking resume to save
     via the chain protocol. The plugin writes filesystem artifacts only and
     does not add gitignore rules; tracking is host-repository policy.
     """
-    return get_handoffs_dir() / ".session-state"
+    root, _ = get_project_root()
+    return get_storage_layout(root).primary_state_dir
 
 
 def get_legacy_handoffs_dir() -> Path:
-    """Get legacy handoffs directory: <project_root>/.codex/handoffs/
+    """Get legacy handoffs directory: <project_root>/docs/handoffs/
 
     Used by search, triage, and load for fallback discovery of
     pre-migration handoff files.
     """
     root, _ = get_project_root()
-    return root / ".codex" / "handoffs"
+    return get_storage_layout(root).legacy_active_dir

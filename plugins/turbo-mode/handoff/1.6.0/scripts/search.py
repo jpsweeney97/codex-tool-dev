@@ -133,24 +133,25 @@ def main(argv: list[str] | None = None) -> str:
             "legacy_warning": None,
         })
 
-    # Legacy fallback: check .codex/handoffs/ for pre-migration files
+    # Legacy fallback: check docs/handoffs/ for pre-cutover files.
     legacy_warning = None
     try:
         legacy_dir = get_legacy_handoffs_dir()
         if legacy_dir.exists():
             legacy_results = search_handoffs(
                 legacy_dir, args.query, regex=args.regex,
-                skipped=skipped_files, archive_name=".archive",
+                skipped=skipped_files, archive_name="archive",
             )
             if legacy_results:
                 legacy_warning = (
-                    "Found handoffs at legacy location `.codex/handoffs/`. "
-                    "Run `/save` to migrate — the next save will write to `docs/handoffs/`."
+                    "Found handoffs at legacy location `docs/handoffs/`. "
+                    "Post-cutover writes use `.codex/handoffs/`; legacy matches are "
+                    "read-only compatibility input."
                 )
                 results.extend(legacy_results)
                 results.sort(key=lambda r: r["date"], reverse=True)
-    except Exception:
-        pass  # Legacy check is best-effort
+    except Exception as exc:
+        skipped_files.append({"file": "legacy-discovery", "reason": str(exc)})
 
     return json.dumps({
         "query": args.query,

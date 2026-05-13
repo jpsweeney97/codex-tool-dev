@@ -4,7 +4,17 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from scripts.search import main as search_main, parse_handoff, search_handoffs
+
+
+@pytest.fixture(autouse=True)
+def default_missing_legacy_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "scripts.search.get_legacy_handoffs_dir",
+        lambda: tmp_path / "missing-legacy",
+    )
 
 
 def test_search_module_reexports_parse_handoff() -> None:
@@ -360,6 +370,40 @@ class TestSearchCLI:
         assert result["results"][0]["date"] == "2026-02-20"
         assert result["results"][1]["archived"] is True
         assert result["error"] is None
+
+    def test_post_cutover_searches_legacy_docs_archive(self, tmp_path: Path) -> None:
+        primary_dir = tmp_path / ".codex" / "handoffs"
+        primary_dir.mkdir(parents=True)
+        legacy_dir = tmp_path / "docs" / "handoffs"
+        legacy_archive = legacy_dir / "archive"
+        legacy_archive.mkdir(parents=True)
+        _make_handoff(
+            legacy_archive, "Legacy Archived", "2026-01-15",
+            "## Decisions\n\nOld decision about split roots.\n"
+        )
+
+        with patch("scripts.search.get_project_name", return_value=("test", "git")):
+            with patch("scripts.search.get_handoffs_dir", return_value=primary_dir):
+                with patch("scripts.search.get_legacy_handoffs_dir", return_value=legacy_dir):
+                    output = search_main(["split roots"])
+
+        result = json.loads(output)
+        assert result["total_matches"] == 1
+        assert result["results"][0]["archived"] is True
+        assert "docs/handoffs" in result["legacy_warning"]
+        assert "next save will write to `docs/handoffs/`" not in result["legacy_warning"]
+
+    def test_legacy_discovery_error_is_reported(self, tmp_path: Path) -> None:
+        primary_dir = tmp_path / ".codex" / "handoffs"
+        primary_dir.mkdir(parents=True)
+
+        with patch("scripts.search.get_handoffs_dir", return_value=primary_dir):
+            with patch("scripts.search.get_legacy_handoffs_dir", side_effect=RuntimeError("boom")):
+                output = search_main(["anything"])
+
+        result = json.loads(output)
+        assert result["total_matches"] == 0
+        assert result["skipped"] == [{"file": "legacy-discovery", "reason": "boom"}]
 
     def test_no_results(self, tmp_path: Path) -> None:
         handoffs_dir = tmp_path / "handoffs"

@@ -7,6 +7,18 @@ from pathlib import Path
 
 import pytest
 
+import scripts.triage as triage_module
+
+
+@pytest.fixture(autouse=True)
+def default_missing_legacy_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        triage_module,
+        "get_legacy_handoffs_dir",
+        lambda: tmp_path / "missing-legacy",
+    )
+
+
 TICKET_DEFERRED = """\
 # T-20260228-01: Deferred ticket
 
@@ -459,6 +471,50 @@ class TestGenerateReport:
         report = generate_report(tickets_dir, handoffs_dir)
         # Should find items from archived handoff (all manual_review since no matching tickets)
         assert len(report["orphaned_items"]) > 0
+
+    def test_post_cutover_includes_legacy_docs_archive(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        from scripts.triage import generate_report
+
+        tickets_dir = tmp_path / "tickets"
+        tickets_dir.mkdir()
+        primary = tmp_path / ".codex" / "handoffs"
+        primary.mkdir(parents=True)
+        legacy = tmp_path / "docs" / "handoffs"
+        legacy_archive = legacy / "archive"
+        legacy_archive.mkdir(parents=True)
+        (legacy_archive / "legacy.md").write_text(HANDOFF_WITH_OPEN_QUESTIONS)
+        monkeypatch.setattr(triage_module, "get_legacy_handoffs_dir", lambda: legacy)
+
+        report = generate_report(tickets_dir, primary)
+
+        assert len(report["orphaned_items"]) > 0
+        assert "docs/handoffs" in report["legacy_warning"]
+        assert "next save will write to `docs/handoffs/`" not in report["legacy_warning"]
+
+    def test_legacy_discovery_error_warns(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        from scripts.triage import generate_report
+
+        tickets_dir = tmp_path / "tickets"
+        tickets_dir.mkdir()
+        primary = tmp_path / ".codex" / "handoffs"
+        primary.mkdir(parents=True)
+
+        def _fail_legacy() -> Path:
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(triage_module, "get_legacy_handoffs_dir", _fail_legacy)
+        with pytest.warns(UserWarning, match="Cannot scan legacy handoffs"):
+            report = generate_report(tickets_dir, primary)
+
+        assert report["orphaned_items"] == []
 
     def test_excludes_old_files(self, tmp_path: Path) -> None:
         """P1-10 fix: files older than 30 days should be excluded by mtime filter."""

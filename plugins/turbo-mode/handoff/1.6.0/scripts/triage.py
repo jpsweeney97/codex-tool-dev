@@ -300,12 +300,12 @@ def generate_report(
         all_items.extend(items)
         total_skipped_prose += skipped
 
-    # Legacy fallback: also scan .codex/handoffs/ for pre-migration files
+    # Legacy fallback: also scan docs/handoffs/ for pre-cutover files.
     legacy_found = False
     try:
         legacy_dir = get_legacy_handoffs_dir()
         if legacy_dir.exists():
-            for path in _scan_handoff_dirs(legacy_dir, archive_name=".archive"):
+            for path in _scan_handoff_dirs(legacy_dir, archive_name="archive"):
                 try:
                     text = path.read_text(encoding="utf-8")
                 except (OSError, UnicodeDecodeError) as exc:
@@ -316,8 +316,8 @@ def generate_report(
                     legacy_found = True
                 all_items.extend(items)
                 total_skipped_prose += skipped
-    except Exception:
-        pass  # Legacy check is best-effort
+    except Exception as exc:
+        warnings.warn(f"Cannot scan legacy handoffs: {exc}", stacklevel=2)
 
     # Match each item — separate orphaned from matched (P1-1)
     orphaned: list[MatchResult] = []
@@ -334,8 +334,9 @@ def generate_report(
     legacy_warning = None
     if legacy_found:
         legacy_warning = (
-            "Found handoffs at legacy location `.codex/handoffs/`. "
-            "Run `/save` to migrate — the next save will write to `docs/handoffs/`."
+            "Found handoffs at legacy location `docs/handoffs/`. "
+            "Post-cutover writes use `.codex/handoffs/`; legacy matches are "
+            "read-only compatibility input."
         )
 
     return {
