@@ -16,6 +16,12 @@ STATE_SKILLS = [
     PLUGIN_ROOT / "skills" / "quicksave" / "SKILL.md",
     PLUGIN_ROOT / "skills" / "summary" / "SKILL.md",
 ]
+LOAD_SKILL = PLUGIN_ROOT / "skills" / "load" / "SKILL.md"
+CHAIN_STATE_SKILLS = [
+    PLUGIN_ROOT / "skills" / "save" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "quicksave" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "summary" / "SKILL.md",
+]
 
 
 def test_no_skill_doc_uses_relative_script_paths() -> None:
@@ -37,7 +43,7 @@ def test_command_skills_define_plugin_root_setup() -> None:
 
 
 def test_state_skills_use_session_state_module() -> None:
-    for path in STATE_SKILLS:
+    for path in CHAIN_STATE_SKILLS:
         text = path.read_text(encoding="utf-8")
         assert "Resolve plugin root" in text
         assert "three levels above this `SKILL.md`" in text
@@ -51,6 +57,25 @@ def test_state_skills_use_session_state_module() -> None:
         assert "PYTHONDONTWRITEBYTECODE=1" in text
         assert "UV_PROJECT_ENVIRONMENT" not in text
         assert "uv run --project" not in text
+
+
+def test_load_skill_uses_load_transaction_and_listing_scripts() -> None:
+    text = LOAD_SKILL.read_text(encoding="utf-8")
+    assert "Resolve plugin root" in text
+    assert "three levels above this `SKILL.md`" in text
+    assert "not the `skills/` directory" in text
+    assert 'PLUGIN_ROOT="/absolute/path/to/handoff/1.6.0"' in text
+    assert 'python "$PLUGIN_ROOT/scripts/load_transactions.py"' in text
+    assert 'python "$PLUGIN_ROOT/scripts/list_handoffs.py"' in text
+    assert "<project_root>/.codex/handoffs/archive/<filename>" in text
+    assert (
+        "<project_root>/.codex/handoffs/.session-state/handoff-<project>-<resume_token>.json"
+        in text
+    )
+    assert "load_transactions.py\" \\" in text
+    assert "session_state.py" not in text
+    assert 'ls "$(git rev-parse --show-toplevel)/docs/handoffs"' not in text
+    assert "--archive-dir \"$PROJECT_ROOT/docs/handoffs/archive\"" not in text
 
 
 def test_defer_skill_uses_plugin_siblings_plain_field() -> None:
