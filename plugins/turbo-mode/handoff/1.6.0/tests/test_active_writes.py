@@ -335,6 +335,120 @@ def test_active_writer_flow_cli_cleanup_failure_remains_recoverable(
     assert not state_path.exists()
 
 
+@pytest.mark.parametrize(
+    ("operation", "slug"),
+    [
+        ("save", "handoff"),
+        ("summary", "summary"),
+        ("quicksave", "checkpoint"),
+    ],
+)
+def test_active_writer_flow_cli_allocates_collision_safe_paths_through_02(
+    tmp_path: Path,
+    operation: str,
+    slug: str,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    payloads = []
+    for index in range(3):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "active-writer-flow",
+                "--project-root",
+                str(tmp_path),
+                "--project",
+                "demo",
+                "--operation",
+                operation,
+                "--run-id",
+                f"{operation}-collision-{index}",
+                "--created-at",
+                "2026-05-13T16:45:00Z",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        payloads.append(json.loads(result.stdout))
+
+    active_dir = tmp_path / ".codex" / "handoffs"
+    assert [payload["active_path"] for payload in payloads] == [
+        str(active_dir / f"2026-05-13_16-45_{operation}-{slug}.md"),
+        str(active_dir / f"2026-05-13_16-45_{operation}-{slug}-01.md"),
+        str(active_dir / f"2026-05-13_16-45_{operation}-{slug}-02.md"),
+    ]
+    assert all(Path(payload["active_path"]).exists() for payload in payloads)
+
+
+def test_active_writer_flow_releases_lock_during_generation_and_reacquires_for_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    lock_path = (
+        tmp_path / ".codex" / "handoffs" / ".session-state" / "locks" / "active-write.lock"
+    )
+    original_generator = session_state._deterministic_active_writer_content
+    observed: dict[str, bool] = {}
+
+    def generate_while_competing_lock_exists(
+        operation_state: dict[str, object],
+        *,
+        content_note: str | None = None,
+    ) -> str:
+        observed["lock_released_during_generation"] = not lock_path.exists()
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_text(
+            json.dumps({
+                "lock_id": "competing-writer",
+                "project": "demo",
+                "operation": "save",
+            }),
+            encoding="utf-8",
+        )
+        return original_generator(operation_state, content_note=content_note)
+
+    monkeypatch.setattr(
+        session_state,
+        "_deterministic_active_writer_content",
+        generate_while_competing_lock_exists,
+    )
+
+    result = session_state.main([
+        "active-writer-flow",
+        "--project-root",
+        str(tmp_path),
+        "--project",
+        "demo",
+        "--operation",
+        "save",
+        "--run-id",
+        "flow-lock-reacquire",
+        "--created-at",
+        "2026-05-13T16:45:00Z",
+    ])
+
+    captured = capsys.readouterr()
+    assert observed["lock_released_during_generation"] is True
+    assert result == 1
+    assert "lock is already held" in captured.err
+    operation_state_path = (
+        tmp_path
+        / ".codex"
+        / "handoffs"
+        / ".session-state"
+        / "active-writes"
+        / "demo"
+        / "flow-lock-reacquire.json"
+    )
+    operation_state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    assert operation_state["status"] == "begun"
+    assert Path(operation_state["allocated_active_path"]).exists() is False
+
+
 def test_begin_active_write_persists_operation_state_before_content_generation(
     tmp_path: Path,
 ) -> None:
