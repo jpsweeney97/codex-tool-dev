@@ -357,6 +357,44 @@ def test_chain_state_recovery_inventory_cli_reports_state_identity_without_mutat
     assert not (tmp_path / ".codex" / "handoffs" / ".session-state" / "markers").exists()
 
 
+def test_list_chain_state_cli_aliases_recovery_inventory(tmp_path: Path) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    primary.write_text(
+        json.dumps({
+            "state_path": str(primary),
+            "project": "demo",
+            "resume_token": "token-a",
+            "archive_path": "/tmp/primary.md",
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "list-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["total"] == 1
+    assert payload["candidates"][0]["project_relative_state_path"] == (
+        ".codex/handoffs/.session-state/handoff-demo-token-a.json"
+    )
+
+
 def test_read_chain_state_cli_fails_ambiguous_primary_with_recovery_inventory(
     tmp_path: Path,
 ) -> None:

@@ -222,6 +222,10 @@ def main(argv: list[str] | None = None) -> int:
     chain_inventory_parser.add_argument("--project-root", required=True)
     chain_inventory_parser.add_argument("--project", required=True)
 
+    list_chain_parser = subparsers.add_parser("list-chain-state")
+    list_chain_parser.add_argument("--project-root", required=True)
+    list_chain_parser.add_argument("--project", required=True)
+
     read_chain_parser = subparsers.add_parser("read-chain-state")
     read_chain_parser.add_argument("--project-root", required=True)
     read_chain_parser.add_argument("--project", required=True)
@@ -391,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
         json.dump({"deleted": [str(path) for path in deleted]}, sys.stdout)
         return 0
 
-    if args.command == "chain-state-recovery-inventory":
+    if args.command in {"chain-state-recovery-inventory", "list-chain-state"}:
         from scripts.storage_authority import chain_state_recovery_inventory
 
         payload = chain_state_recovery_inventory(
