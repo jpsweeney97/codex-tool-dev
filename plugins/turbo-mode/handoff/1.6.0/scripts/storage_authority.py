@@ -9,6 +9,10 @@ import subprocess
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from scripts.active_writes import ActiveWriteReservation
 
 
 class StorageLocation(StrEnum):
@@ -90,6 +94,64 @@ def get_storage_layout(project_root: Path) -> StorageLayout:
         legacy_archive_dir=legacy / "archive",
         legacy_state_dir=legacy / ".session-state",
         previous_primary_hidden_archive_dir=primary / ".archive",
+    )
+
+
+def begin_active_write(
+    project_root: Path,
+    *,
+    project_name: str | None,
+    operation: str,
+    slug: str,
+    run_id: str | None = None,
+    created_at: str | None = None,
+    lease_seconds: int = 1800,
+) -> ActiveWriteReservation:
+    """Reserve a primary active handoff write through the storage facade."""
+    from scripts.active_writes import begin_active_write as _begin_active_write
+
+    return _begin_active_write(
+        project_root,
+        project_name=project_name,
+        operation=operation,
+        slug=slug,
+        run_id=run_id,
+        created_at=created_at,
+        lease_seconds=lease_seconds,
+    )
+
+
+def write_active_handoff(
+    project_root: Path,
+    *,
+    operation_state_path: Path,
+    content: str,
+    content_sha256: str,
+) -> dict[str, object]:
+    """Write a reserved primary active handoff through the storage facade."""
+    from scripts.active_writes import write_active_handoff as _write_active_handoff
+
+    return _write_active_handoff(
+        project_root,
+        operation_state_path=operation_state_path,
+        content=content,
+        content_sha256=content_sha256,
+    )
+
+
+def list_active_writes(
+    project_root: Path,
+    *,
+    project_name: str,
+    operation: str | None = None,
+) -> list[dict[str, object]]:
+    """List active write operation-state records through the storage facade."""
+    from scripts.active_writes import list_active_writes as _list_active_writes
+
+    return _list_active_writes(
+        project_root,
+        project_name=project_name,
+        operation=operation,
     )
 
 

@@ -217,6 +217,59 @@ def main(argv: list[str] | None = None) -> int:
     prune_parser.add_argument("--state-dir", required=True)
     prune_parser.add_argument("--max-age-hours", type=int, default=24)
 
+    begin_active_parser = subparsers.add_parser("begin-active-write")
+    begin_active_parser.add_argument("--project-root", required=True)
+    begin_active_parser.add_argument("--project", required=True)
+    begin_active_parser.add_argument(
+        "--operation",
+        choices=("save", "summary", "quicksave"),
+        required=True,
+    )
+    begin_active_parser.add_argument("--slug", required=True)
+    begin_active_parser.add_argument("--run-id", default=None)
+    begin_active_parser.add_argument("--created-at", default=None)
+    begin_active_parser.add_argument(
+        "--field",
+        choices=(
+            "operation_state_path",
+            "run_id",
+            "transaction_id",
+            "transaction_path",
+            "allocated_active_path",
+            "state_snapshot_hash",
+            "idempotency_key",
+        ),
+        default=None,
+    )
+
+    write_active_parser = subparsers.add_parser("write-active-handoff")
+    write_active_parser.add_argument("--project-root", required=True)
+    write_active_parser.add_argument("--operation-state-path", required=True)
+    write_active_parser.add_argument("--content-file", required=True)
+    write_active_parser.add_argument("--content-sha256", required=True)
+    write_active_parser.add_argument(
+        "--field",
+        choices=(
+            "active_path",
+            "operation_state_path",
+            "transaction_id",
+            "transaction_path",
+            "content_hash",
+            "output_sha256",
+            "status",
+        ),
+        default=None,
+    )
+
+    list_active_parser = subparsers.add_parser("list-active-writes")
+    list_active_parser.add_argument("--project-root", required=True)
+    list_active_parser.add_argument("--project", required=True)
+    list_active_parser.add_argument(
+        "--operation",
+        choices=("save", "summary", "quicksave"),
+        default=None,
+    )
+
     args = parser.parse_args(argv)
     if args.command == "archive":
         source = Path(args.source)
@@ -241,9 +294,55 @@ def main(argv: list[str] | None = None) -> int:
         clear_resume_state(Path(args.state_dir), args.state_path)
         return 0
 
-    deleted = prune_old_state_files(args.max_age_hours, state_dir=Path(args.state_dir))
-    json.dump({"deleted": [str(path) for path in deleted]}, sys.stdout)
-    return 0
+    if args.command == "prune-state":
+        deleted = prune_old_state_files(args.max_age_hours, state_dir=Path(args.state_dir))
+        json.dump({"deleted": [str(path) for path in deleted]}, sys.stdout)
+        return 0
+
+    if args.command == "begin-active-write":
+        from scripts.active_writes import ActiveWriteError
+        from scripts.storage_authority import begin_active_write
+
+        try:
+            reservation = begin_active_write(
+                Path(args.project_root),
+                project_name=args.project,
+                operation=args.operation,
+                slug=args.slug,
+                run_id=args.run_id,
+                created_at=args.created_at,
+            )
+        except ActiveWriteError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        return _emit(reservation.to_payload(), args.field)
+    if args.command == "write-active-handoff":
+        from scripts.active_writes import ActiveWriteError
+        from scripts.storage_authority import write_active_handoff
+
+        try:
+            payload = write_active_handoff(
+                Path(args.project_root),
+                operation_state_path=Path(args.operation_state_path),
+                content=Path(args.content_file).read_text(encoding="utf-8"),
+                content_sha256=args.content_sha256,
+            )
+        except ActiveWriteError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        return _emit(payload, args.field)
+    if args.command == "list-active-writes":
+        from scripts.storage_authority import list_active_writes
+
+        records = list_active_writes(
+            Path(args.project_root),
+            project_name=args.project,
+            operation=args.operation,
+        )
+        json.dump({"total": len(records), "active_writes": records}, sys.stdout, indent=2)
+        print()
+        return 0
+    return 1
 
 
 if __name__ == "__main__":
