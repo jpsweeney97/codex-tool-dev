@@ -657,6 +657,41 @@ def test_active_write_transaction_recover_commits_verified_written_output(
     assert transaction["active_path"] == str(active_path)
 
 
+def test_active_write_transaction_recover_records_content_mismatch(
+    tmp_path: Path,
+) -> None:
+    reservation = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="summary",
+        slug="mismatch",
+        created_at="2026-05-13T16:45:00Z",
+    )
+    expected = "---\ntitle: Expected\n---\n\n# Expected\n"
+    expected_hash = hashlib.sha256(expected.encode("utf-8")).hexdigest()
+    reservation.allocated_active_path.write_text(
+        "---\ntitle: Different\n---\n\n# Different\n",
+        encoding="utf-8",
+    )
+    state = json.loads(reservation.operation_state_path.read_text(encoding="utf-8"))
+    state["status"] = "written_not_confirmed"
+    state["content_hash"] = expected_hash
+    state["output_sha256"] = expected_hash
+    reservation.operation_state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+    with pytest.raises(active_writes.ActiveWriteError, match="content mismatch"):
+        active_writes.recover_active_write_transaction(
+            tmp_path,
+            operation_state_path=reservation.operation_state_path,
+        )
+
+    updated = json.loads(reservation.operation_state_path.read_text(encoding="utf-8"))
+    transaction = json.loads(reservation.transaction_path.read_text(encoding="utf-8"))
+    assert updated["status"] == "content_mismatch"
+    assert transaction["status"] == "content_mismatch"
+    assert transaction["active_path"] == str(reservation.allocated_active_path)
+
+
 def test_write_active_handoff_clears_snapshotted_primary_state_after_output_write(
     tmp_path: Path,
 ) -> None:

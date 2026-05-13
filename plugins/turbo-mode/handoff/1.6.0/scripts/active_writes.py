@@ -531,6 +531,15 @@ def recover_active_write_transaction(
             state["status"] = "content_mismatch"
             state["updated_at"] = datetime.now(UTC).isoformat()
             _write_json_atomic(operation_state_path, state)
+            transaction_path = Path(str(state["transaction_path"]))
+            _write_json_atomic(
+                transaction_path,
+                {
+                    **state,
+                    "status": "content_mismatch",
+                    "active_path": str(active_path),
+                },
+            )
             raise ActiveWriteError(
                 "active-write-transaction-recover failed: active output content mismatch. "
                 f"Got: {str(active_path)!r:.100}"
