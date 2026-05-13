@@ -40,6 +40,19 @@ class SelectionEligibility(StrEnum):
     NOT_STATE_BRIDGE_INPUT = "not-state-bridge-input"
 
 
+class ChainStateDiagnosticError(RuntimeError):
+    """Raised when chain-state selection requires explicit operator recovery."""
+
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+        error = payload.get("error", {})
+        if isinstance(error, dict):
+            message = str(error.get("message", "chain-state recovery required"))
+        else:
+            message = "chain-state recovery required"
+        super().__init__(message)
+
+
 FILENAME_TIMESTAMP_RE = re.compile(r"^(?P<timestamp>\d{4}-\d{2}-\d{2}_\d{2}-\d{2})_.+\.md$")
 LEGACY_ACTIVE_OPT_IN_MANIFEST = (
     Path("docs")
@@ -251,6 +264,117 @@ def chain_state_recovery_inventory(
         "project_root": str(layout.project_root),
         "project": project_name,
         "total": len(candidates),
+        "candidates": sorted(
+            candidates,
+            key=lambda candidate: str(candidate["project_relative_state_path"]),
+        ),
+    }
+
+
+def read_chain_state(
+    project_root: Path,
+    *,
+    project_name: str,
+) -> dict[str, object]:
+    """Read one unambiguous chain-state candidate or raise a recovery diagnostic."""
+    inventory = chain_state_recovery_inventory(project_root, project_name=project_name)
+    candidates = list(inventory["candidates"])
+    valid = [candidate for candidate in candidates if candidate["validation_status"] == "valid"]
+    primary = [
+        candidate
+        for candidate in valid
+        if candidate["storage_location"] == StorageLocation.PRIMARY_STATE
+    ]
+    legacy = [
+        candidate
+        for candidate in valid
+        if candidate["storage_location"]
+        in {StorageLocation.LEGACY_STATE, StorageLocation.STATE_LIKE_RESIDUE}
+    ]
+    if len(primary) > 1:
+        raise ChainStateDiagnosticError(
+            _chain_state_diagnostic(
+                code="ambiguous-primary-chain-state",
+                message="Multiple valid primary chain states require explicit operator recovery.",
+                inventory=inventory,
+                candidates=primary,
+                recovery_choices=[
+                    "continue-chain-state",
+                    "abandon-primary-chain-state",
+                    "abort",
+                ],
+            )
+        )
+    if len(primary) == 1 and legacy:
+        raise ChainStateDiagnosticError(
+            _chain_state_diagnostic(
+                code="primary-chain-state-with-unresolved-legacy",
+                message=(
+                    "Valid primary chain state exists with unresolved legacy state candidates."
+                ),
+                inventory=inventory,
+                candidates=[*primary, *legacy],
+                recovery_choices=[
+                    "mark-chain-state-consumed",
+                    "abandon-primary-chain-state",
+                    "abort",
+                ],
+            )
+        )
+    if len(primary) == 1:
+        return {
+            "status": "found",
+            "source": "primary",
+            "state": primary[0],
+        }
+    if len(legacy) > 1:
+        raise ChainStateDiagnosticError(
+            _chain_state_diagnostic(
+                code="ambiguous-legacy-chain-state",
+                message="Multiple valid legacy chain states require explicit operator recovery.",
+                inventory=inventory,
+                candidates=legacy,
+                recovery_choices=[
+                    "continue-chain-state",
+                    "mark-chain-state-consumed",
+                    "abort",
+                ],
+            )
+        )
+    if len(legacy) == 1:
+        return {
+            "status": "legacy-bridge-required",
+            "source": "legacy",
+            "state": legacy[0],
+        }
+    return {
+        "status": "absent",
+        "source": None,
+        "state": None,
+    }
+
+
+def _chain_state_diagnostic(
+    *,
+    code: str,
+    message: str,
+    inventory: dict[str, object],
+    candidates: list[dict[str, object]],
+    recovery_choices: list[str],
+) -> dict[str, object]:
+    return {
+        "error": {
+            "code": code,
+            "message": message,
+            "recovery_inventory_command": {
+                "command": "chain-state-recovery-inventory",
+                "args": {
+                    "project_root": inventory["project_root"],
+                    "project": inventory["project"],
+                },
+            },
+            "recovery_choices": recovery_choices,
+        },
         "candidates": sorted(
             candidates,
             key=lambda candidate: str(candidate["project_relative_state_path"]),

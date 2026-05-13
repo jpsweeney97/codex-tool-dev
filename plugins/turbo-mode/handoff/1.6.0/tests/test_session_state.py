@@ -357,6 +357,158 @@ def test_chain_state_recovery_inventory_cli_reports_state_identity_without_mutat
     assert not (tmp_path / ".codex" / "handoffs" / ".session-state" / "markers").exists()
 
 
+def test_read_chain_state_cli_fails_ambiguous_primary_with_recovery_inventory(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    state_dir = tmp_path / ".codex" / "handoffs" / ".session-state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    for token in ("token-a", "token-b"):
+        state = state_dir / f"handoff-demo-{token}.json"
+        state.write_text(
+            json.dumps({
+                "state_path": str(state),
+                "project": "demo",
+                "resume_token": token,
+                "archive_path": f"/tmp/{token}.md",
+                "created_at": "2026-05-13T16:00:00Z",
+            }),
+            encoding="utf-8",
+        )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert result.returncode == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "ambiguous-primary-chain-state"
+    assert payload["error"]["recovery_inventory_command"]["command"] == (
+        "chain-state-recovery-inventory"
+    )
+    assert payload["error"]["recovery_choices"] == [
+        "continue-chain-state",
+        "abandon-primary-chain-state",
+        "abort",
+    ]
+    assert len(payload["candidates"]) == 2
+    assert sorted(candidate["resume_token"] for candidate in payload["candidates"]) == [
+        "token-a",
+        "token-b",
+    ]
+    assert not (state_dir / "markers").exists()
+
+
+def test_read_chain_state_cli_rejects_primary_with_unresolved_legacy(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    legacy = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    primary.write_text(
+        json.dumps({
+            "state_path": str(primary),
+            "project": "demo",
+            "resume_token": "token-a",
+            "archive_path": "/tmp/primary.md",
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+    legacy.write_text(
+        json.dumps({
+            "state_path": str(legacy),
+            "project": "demo",
+            "resume_token": "token-b",
+            "archive_path": "/tmp/legacy.md",
+            "created_at": "2026-05-13T16:01:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert result.returncode == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "primary-chain-state-with-unresolved-legacy"
+    assert payload["error"]["recovery_choices"] == [
+        "mark-chain-state-consumed",
+        "abandon-primary-chain-state",
+        "abort",
+    ]
+    assert sorted(candidate["storage_location"] for candidate in payload["candidates"]) == [
+        "legacy_state",
+        "primary_state",
+    ]
+    assert not (primary.parent / "markers").exists()
+
+
+def test_read_chain_state_cli_reads_single_primary_state(tmp_path: Path) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    primary.write_text(
+        json.dumps({
+            "state_path": str(primary),
+            "project": "demo",
+            "resume_token": "token-a",
+            "archive_path": "/tmp/primary.md",
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "found"
+    assert payload["source"] == "primary"
+    assert payload["state"]["project_relative_state_path"] == (
+        ".codex/handoffs/.session-state/handoff-demo-token-a.json"
+    )
+    assert payload["state"]["resume_token"] == "token-a"
+
+
 def _residue_snapshot(root: Path, patterns: list[str]) -> set[str]:
     return {
         str(match.relative_to(root))

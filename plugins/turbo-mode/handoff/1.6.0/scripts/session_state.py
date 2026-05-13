@@ -222,6 +222,15 @@ def main(argv: list[str] | None = None) -> int:
     chain_inventory_parser.add_argument("--project-root", required=True)
     chain_inventory_parser.add_argument("--project", required=True)
 
+    read_chain_parser = subparsers.add_parser("read-chain-state")
+    read_chain_parser.add_argument("--project-root", required=True)
+    read_chain_parser.add_argument("--project", required=True)
+    read_chain_parser.add_argument(
+        "--field",
+        choices=("status", "source", "state"),
+        default=None,
+    )
+
     allocate_active_parser = subparsers.add_parser("allocate-active-path")
     allocate_active_parser.add_argument("--project-root", required=True)
     allocate_active_parser.add_argument(
@@ -392,6 +401,22 @@ def main(argv: list[str] | None = None) -> int:
         json.dump(payload, sys.stdout, indent=2)
         print()
         return 0
+
+    if args.command == "read-chain-state":
+        from scripts.storage_authority import ChainStateDiagnosticError, read_chain_state
+
+        try:
+            payload = read_chain_state(
+                Path(args.project_root),
+                project_name=args.project,
+            )
+        except ChainStateDiagnosticError as exc:
+            json.dump(exc.payload, sys.stdout, indent=2)
+            print()
+            return 2
+        if payload["status"] == "absent":
+            return 1
+        return _emit(payload, args.field)
 
     if args.command == "allocate-active-path":
         from scripts.active_writes import ActiveWriteError
