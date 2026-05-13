@@ -5,7 +5,7 @@ Gate 4 source closeout for `feature/handoff-storage-reversal-main`.
 ## Boundary
 
 - Branch: `feature/handoff-storage-reversal-main`
-- Closeout HEAD: `5d9b0fe feat: add storage authority inventory gate`
+- Source repair evidence through: `b337e0c docs: record handoff storage source closeout`
 - Composite evidence status: `source repaired`
 - Explicitly not claimed: `refresh-ready but not mutated`, `installed host matrix certified`, `installed cache certified`
 
@@ -61,4 +61,6 @@ The ignored local preflight files remain ignored runtime evidence:
 
 ## Residual Risk
 
-Installed-host behavior matrix certification remains Gate 5 work. Do not describe this closeout as installed-cache certified or installed-host certified.
+Installed-host behavior matrix certification remains Gate 5 work. The Gate 5 decision record is
+`docs/superpowers/plans/2026-05-13-handoff-storage-gate-5-decision.md`.
+Do not describe this closeout as installed-cache certified or installed-host certified.
