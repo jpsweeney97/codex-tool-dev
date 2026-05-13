@@ -8,6 +8,7 @@ from scripts.storage_authority import (
     StorageLocation,
     discover_handoff_inventory,
     eligible_active_candidates,
+    eligible_history_candidates,
     get_storage_layout,
 )
 
@@ -171,3 +172,96 @@ def test_active_selection_reports_invalid_hidden_nested_and_state_diagnostics(
     assert by_path[nested].skip_reason == "nested_file"
     assert by_path[state_doc].selection_eligibility == SelectionEligibility.SKIPPED
     assert by_path[state_doc].skip_reason == "state_directory"
+
+
+def test_history_search_keeps_no_frontmatter_archives_as_historical_profile(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / ".codex" / "handoffs" / "archive" / "2026-05-13_12-00_old.md"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    archive.write_text("## Older Handoff\n\nNo current frontmatter.\n", encoding="utf-8")
+
+    inventory = discover_handoff_inventory(tmp_path, scan_mode="history-search")
+    candidate = next(candidate for candidate in inventory.candidates if candidate.path == archive)
+
+    assert candidate.selection_eligibility == SelectionEligibility.ELIGIBLE
+    assert candidate.document_profile == "historical_archive"
+
+
+def test_history_search_dedups_duplicate_hashes_by_source_tier_then_path(
+    tmp_path: Path,
+) -> None:
+    primary_active = _handoff(
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_same.md",
+        "Same",
+    )
+    _handoff(
+        tmp_path / ".codex" / "handoffs" / "archive" / "2026-05-13_12-00_same.md",
+        "Same",
+    )
+    _handoff(tmp_path / "docs" / "handoffs" / "2026-05-13_12-00_same.md", "Same")
+    _handoff(
+        tmp_path / "docs" / "handoffs" / "archive" / "2026-05-13_12-00_same.md",
+        "Same",
+    )
+    _handoff(
+        tmp_path / ".codex" / "handoffs" / ".archive" / "2026-05-13_12-00_same.md",
+        "Same",
+    )
+
+    inventory = discover_handoff_inventory(tmp_path, scan_mode="history-search")
+
+    assert [candidate.path for candidate in eligible_history_candidates(inventory)] == [
+        primary_active,
+    ]
+
+
+def test_explicit_path_classifies_supported_storage_locations(tmp_path: Path) -> None:
+    paths = {
+        StorageLocation.PRIMARY_ACTIVE: _handoff(
+            tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_primary.md"
+        ),
+        StorageLocation.PRIMARY_ARCHIVE: _handoff(
+            tmp_path / ".codex" / "handoffs" / "archive" / "2026-05-13_12-00_primary.md"
+        ),
+        StorageLocation.LEGACY_ACTIVE: _handoff(
+            tmp_path / "docs" / "handoffs" / "2026-05-13_12-00_legacy.md"
+        ),
+        StorageLocation.LEGACY_ARCHIVE: _handoff(
+            tmp_path / "docs" / "handoffs" / "archive" / "2026-05-13_12-00_legacy.md"
+        ),
+        StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE: _handoff(
+            tmp_path / ".codex" / "handoffs" / ".archive" / "2026-05-13_12-00_hidden.md"
+        ),
+    }
+
+    for location, path in paths.items():
+        inventory = discover_handoff_inventory(
+            tmp_path,
+            scan_mode="explicit-path",
+            explicit_path=path,
+        )
+        candidate = inventory.candidates[0]
+        assert candidate.storage_location == location
+        assert candidate.selection_eligibility == SelectionEligibility.ELIGIBLE
+
+
+def test_state_bridge_reports_primary_and_legacy_state_without_mutation(
+    tmp_path: Path,
+) -> None:
+    primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token.json"
+    legacy = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    primary.write_text('{"project": "demo"}', encoding="utf-8")
+    legacy.write_text("/tmp/archive.md", encoding="utf-8")
+
+    inventory = discover_handoff_inventory(tmp_path, scan_mode="state-bridge")
+    by_path = {candidate.path: candidate for candidate in inventory.candidates}
+
+    assert by_path[primary].storage_location == StorageLocation.PRIMARY_STATE
+    assert by_path[primary].artifact_class == "primary-state-artifact"
+    assert by_path[primary].selection_eligibility == SelectionEligibility.ELIGIBLE
+    assert by_path[legacy].storage_location == StorageLocation.LEGACY_STATE
+    assert by_path[legacy].artifact_class == "legacy-state-artifact"
+    assert by_path[legacy].selection_eligibility == SelectionEligibility.ELIGIBLE
