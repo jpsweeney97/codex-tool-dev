@@ -160,6 +160,33 @@ def test_begin_active_write_rejects_slug_change_for_existing_run_id(tmp_path: Pa
     assert transactions == [first.transaction_path]
 
 
+def test_begin_active_write_rejects_second_live_reservation_for_same_state(
+    tmp_path: Path,
+) -> None:
+    first = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="save",
+        slug="first",
+        created_at="2026-05-13T16:45:00Z",
+    )
+
+    with pytest.raises(active_writes.ActiveWriteError, match="active write already reserved"):
+        active_writes.begin_active_write(
+            tmp_path,
+            project_name="demo",
+            operation="save",
+            slug="second",
+            created_at="2026-05-13T16:46:00Z",
+        )
+
+    transactions = sorted(
+        (tmp_path / ".codex" / "handoffs" / ".session-state" / "transactions").glob("*.json")
+    )
+    assert transactions == [first.transaction_path]
+    assert not (tmp_path / ".codex" / "handoffs" / "2026-05-13_16-46_second.md").exists()
+
+
 def test_write_active_handoff_commits_reserved_output(tmp_path: Path) -> None:
     script = Path(__file__).parent.parent / "scripts" / "session_state.py"
     begin = subprocess.run(

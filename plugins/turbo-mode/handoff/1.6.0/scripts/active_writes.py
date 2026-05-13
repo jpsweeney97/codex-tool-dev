@@ -122,12 +122,19 @@ def begin_active_write(
             layout.primary_state_dir,
             project,
         )
+        now = datetime.now(UTC)
+        _ensure_no_compatible_live_reservation(
+            layout.primary_state_dir,
+            project=project,
+            operation=operation,
+            state_snapshot_hash=state_snapshot_hash,
+            now=now,
+        )
         transaction_watermark = _transaction_watermark(layout.primary_state_dir)
         timestamp = _parse_created_at(created_at)
         active_path = _allocate_active_path(layout.primary_active_dir, slug, timestamp)
         active_run_id = run_id or uuid.uuid4().hex
         lease_id = uuid.uuid4().hex
-        now = datetime.now(UTC)
         acquired_at = now.isoformat()
         expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
         transaction_path = (
@@ -235,6 +242,37 @@ def _reservation_from_payload(payload: dict[str, object]) -> ActiveWriteReservat
         created_at=str(payload["created_at"]),
         updated_at=str(payload["updated_at"]),
     )
+
+
+def _ensure_no_compatible_live_reservation(
+    state_dir: Path,
+    *,
+    project: str,
+    operation: str,
+    state_snapshot_hash: str,
+    now: datetime,
+) -> None:
+    active_writes_dir = state_dir / "active-writes" / project
+    if not active_writes_dir.exists():
+        return
+    for path in sorted(active_writes_dir.glob("*.json")):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if record.get("operation") != operation:
+            continue
+        if record.get("state_snapshot_hash") != state_snapshot_hash:
+            continue
+        if record.get("status") in {"committed", "abandoned", "reservation_expired"}:
+            continue
+        expires_at = str(record.get("lease_expires_at", ""))
+        if expires_at and _parse_created_at(expires_at) < now:
+            continue
+        raise ActiveWriteError(
+            "begin-active-write failed: active write already reserved. "
+            f"Got: {str(path)!r:.100}"
+        )
 
 
 def allocate_active_path(
