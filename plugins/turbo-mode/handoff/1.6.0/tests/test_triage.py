@@ -508,7 +508,7 @@ class TestGenerateReport:
         primary.mkdir(parents=True)
 
         def _fail_legacy() -> Path:
-            raise RuntimeError("boom")
+            raise OSError("boom")
 
         monkeypatch.setattr(triage_module, "get_legacy_handoffs_dir", _fail_legacy)
         with pytest.warns(UserWarning, match="Cannot scan legacy handoffs"):

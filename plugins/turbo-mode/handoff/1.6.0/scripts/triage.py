@@ -316,7 +316,7 @@ def generate_report(
                     legacy_found = True
                 all_items.extend(items)
                 total_skipped_prose += skipped
-    except Exception as exc:
+    except OSError as exc:
         warnings.warn(f"Cannot scan legacy handoffs: {exc}", stacklevel=2)
 
     # Match each item — separate orphaned from matched (P1-1)
@@ -359,7 +359,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.handoffs_dir is None:
         try:
             args.handoffs_dir = get_handoffs_dir()
-        except Exception as exc:
+        except OSError as exc:
             json.dump({
                 "open_tickets": [],
                 "orphaned_items": [],

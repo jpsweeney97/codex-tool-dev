@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> str:
                 )
                 results.extend(legacy_results)
                 results.sort(key=lambda r: r["date"], reverse=True)
-    except Exception as exc:
+    except OSError as exc:
         skipped_files.append({"file": "legacy-discovery", "reason": str(exc)})
 
     return json.dumps({

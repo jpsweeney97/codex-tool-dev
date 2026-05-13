@@ -398,7 +398,7 @@ class TestSearchCLI:
         primary_dir.mkdir(parents=True)
 
         with patch("scripts.search.get_handoffs_dir", return_value=primary_dir):
-            with patch("scripts.search.get_legacy_handoffs_dir", side_effect=RuntimeError("boom")):
+            with patch("scripts.search.get_legacy_handoffs_dir", side_effect=OSError("boom")):
                 output = search_main(["anything"])
 
         result = json.loads(output)
