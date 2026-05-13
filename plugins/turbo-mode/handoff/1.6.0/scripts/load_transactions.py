@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -88,6 +89,15 @@ def _load_handoff_locked(
         candidate.path.replace(archive_path)
     elif candidate.storage_location == StorageLocation.PRIMARY_ARCHIVE:
         archive_path = candidate.path
+    elif candidate.storage_location in {
+        StorageLocation.LEGACY_ARCHIVE,
+        StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE,
+    }:
+        archive_path = _copy_legacy_archive(
+            layout,
+            candidate,
+            transaction_id=transaction_id,
+        )
     else:
         raise LoadTransactionError(
             "load-handoff failed: storage location not implemented. "
@@ -189,10 +199,95 @@ def _ensure_loadable(candidate: HandoffCandidate) -> None:
         return
     if candidate.storage_location == StorageLocation.PRIMARY_ARCHIVE:
         return
+    if candidate.storage_location in {
+        StorageLocation.LEGACY_ARCHIVE,
+        StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE,
+    }:
+        return
     raise LoadTransactionError(
         "load-handoff failed: unsupported storage location. "
         f"Got: {candidate.storage_location!r:.100}"
     )
+
+
+def _copy_legacy_archive(
+    layout,
+    candidate: HandoffCandidate,
+    *,
+    transaction_id: str,
+) -> Path:
+    registry_path = layout.primary_state_dir / "copied-legacy-archives.json"
+    registry = _read_registry(registry_path)
+    key = _legacy_archive_key(layout.project_root, candidate)
+    for entry in registry["entries"]:
+        if _registry_key(entry) != key:
+            continue
+        copied_path = Path(str(entry["copied_primary_archive_path"]))
+        if copied_path.exists() and _sha256_file(copied_path) == candidate.content_sha256:
+            return copied_path
+        raise LoadTransactionError(
+            "load-handoff failed: copied legacy archive registry entry is stale. "
+            f"Got: {str(copied_path)!r:.100}"
+        )
+
+    layout.primary_archive_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = allocate_archive_path(candidate.path, layout.primary_archive_dir)
+    shutil.copy2(candidate.path, archive_path)
+    copied_hash = _sha256_file(archive_path)
+    registry["entries"].append({
+        **key,
+        "source_absolute_path": str(candidate.path),
+        "copied_primary_archive_path": str(archive_path),
+        "copied_content_sha256": copied_hash,
+        "operation": "legacy-archive-load",
+        "transaction_id": transaction_id,
+        "copied_at": datetime.now(UTC).isoformat(),
+    })
+    _write_json_atomic(registry_path, registry)
+    return archive_path
+
+
+def _read_registry(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {"entries": []}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        raise LoadTransactionError(
+            f"load-handoff failed: invalid copied legacy archive registry. Got: {str(path)!r:.100}"
+        )
+    return data
+
+
+def _legacy_archive_key(project_root: Path, candidate: HandoffCandidate) -> dict[str, str]:
+    return {
+        "source_root": str(project_root),
+        "project_relative_source_path": candidate.path.relative_to(project_root).as_posix(),
+        "storage_location": candidate.storage_location,
+        "source_content_sha256": candidate.content_sha256 or "",
+    }
+
+
+def _registry_key(entry: dict[str, object]) -> dict[str, str]:
+    return {
+        "source_root": str(entry.get("source_root", "")),
+        "project_relative_source_path": str(entry.get("project_relative_source_path", "")),
+        "storage_location": str(entry.get("storage_location", "")),
+        "source_content_sha256": str(entry.get("source_content_sha256", "")),
+    }
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_json_atomic(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    os.replace(temp_path, path)
 
 
 def _write_transaction(
@@ -218,6 +313,4 @@ def _write_transaction(
         "state_path": str(state_path) if state_path is not None else None,
         "updated_at": datetime.now(UTC).isoformat(),
     }
-    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    os.replace(temp_path, path)
+    _write_json_atomic(path, payload)

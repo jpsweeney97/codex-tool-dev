@@ -77,6 +77,63 @@ def test_explicit_primary_archive_load_writes_state_without_moving_archive(tmp_p
     assert state["archive_path"] == str(archive)
 
 
+def test_explicit_legacy_archive_load_copies_to_primary_archive_and_reuses_registry(
+    tmp_path: Path,
+) -> None:
+    legacy = _handoff(
+        tmp_path / "docs" / "handoffs" / "archive" / "2026-05-13_12-00_legacy.md"
+    )
+
+    first = load_handoff(tmp_path, project_name="demo", explicit_path=legacy, resume_token="one")
+    second = load_handoff(tmp_path, project_name="demo", explicit_path=legacy, resume_token="two")
+
+    assert legacy.exists()
+    assert first.archive_path == second.archive_path
+    assert first.archive_path == tmp_path / ".codex" / "handoffs" / "archive" / legacy.name
+    first_state = json.loads(Path(first.state_path).read_text(encoding="utf-8"))
+    second_state = json.loads(Path(second.state_path).read_text(encoding="utf-8"))
+    assert first_state["archive_path"] == str(first.archive_path)
+    assert second_state["archive_path"] == str(first.archive_path)
+
+    registry_path = (
+        tmp_path
+        / ".codex"
+        / "handoffs"
+        / ".session-state"
+        / "copied-legacy-archives.json"
+    )
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    assert len(registry["entries"]) == 1
+    assert registry["entries"][0]["storage_location"] == "legacy_archive"
+    assert registry["entries"][0]["copied_primary_archive_path"] == str(first.archive_path)
+
+
+def test_explicit_previous_primary_hidden_archive_uses_copy_registry(tmp_path: Path) -> None:
+    hidden = _handoff(
+        tmp_path / ".codex" / "handoffs" / ".archive" / "2026-05-13_12-00_hidden.md"
+    )
+
+    result = load_handoff(
+        tmp_path,
+        project_name="demo",
+        explicit_path=hidden,
+        resume_token="hidden",
+    )
+
+    assert hidden.exists()
+    assert result.archive_path == tmp_path / ".codex" / "handoffs" / "archive" / hidden.name
+    registry = json.loads(
+        (
+            tmp_path
+            / ".codex"
+            / "handoffs"
+            / ".session-state"
+            / "copied-legacy-archives.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert registry["entries"][0]["storage_location"] == "previous_primary_hidden_archive"
+
+
 def test_tracked_primary_active_load_fails_before_mutation(tmp_path: Path) -> None:
     _git_init(tmp_path)
     source = _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_tracked.md")
