@@ -61,6 +61,73 @@ def test_active_writer_flow_cli_runs_begin_generate_write_protocol(
     assert active_path.read_text(encoding="utf-8").startswith("---\n")
 
 
+def test_active_writer_flow_cli_reuses_same_run_retry(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    command = [
+        sys.executable,
+        str(script),
+        "active-writer-flow",
+        "--project-root",
+        str(tmp_path),
+        "--project",
+        "demo",
+        "--operation",
+        "save",
+        "--run-id",
+        "stable-flow",
+        "--created-at",
+        "2026-05-13T16:45:00Z",
+    ]
+    first = subprocess.run(command, check=True, capture_output=True, text=True)
+
+    second = subprocess.run(command, check=False, capture_output=True, text=True)
+
+    assert second.returncode == 0, second.stderr
+    first_payload = json.loads(first.stdout)
+    second_payload = json.loads(second.stdout)
+    assert second_payload["transaction_id"] == first_payload["transaction_id"]
+    assert second_payload["active_path"] == first_payload["active_path"]
+    assert second_payload["status"] == "completed"
+
+
+def test_active_writer_flow_cli_rejects_changed_content_retry(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    command = [
+        sys.executable,
+        str(script),
+        "active-writer-flow",
+        "--project-root",
+        str(tmp_path),
+        "--project",
+        "demo",
+        "--operation",
+        "save",
+        "--run-id",
+        "stable-flow",
+        "--created-at",
+        "2026-05-13T16:45:00Z",
+    ]
+    first = subprocess.run(command, check=True, capture_output=True, text=True)
+
+    changed = subprocess.run(
+        [*command, "--content-note", "changed bytes"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert changed.returncode == 1
+    assert "content mismatch" in changed.stderr
+    first_payload = json.loads(first.stdout)
+    state = json.loads(Path(first_payload["operation_state_path"]).read_text(encoding="utf-8"))
+    assert state["status"] == "committed"
+    assert state["content_hash"] == first_payload["content_hash"]
+
+
 def test_begin_active_write_persists_operation_state_before_content_generation(
     tmp_path: Path,
 ) -> None:

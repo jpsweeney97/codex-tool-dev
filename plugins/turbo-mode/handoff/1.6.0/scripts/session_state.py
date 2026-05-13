@@ -333,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
     active_flow_parser.add_argument("--slug", default=None)
     active_flow_parser.add_argument("--run-id", default=None)
     active_flow_parser.add_argument("--created-at", default=None)
+    active_flow_parser.add_argument("--content-note", default=None)
     active_flow_parser.add_argument(
         "--field",
         choices=(
@@ -475,7 +476,10 @@ def main(argv: list[str] | None = None) -> int:
                 run_id=args.run_id,
                 created_at=args.created_at,
             )
-            content = _deterministic_active_writer_content(reservation.to_payload())
+            content = _deterministic_active_writer_content(
+                reservation.to_payload(),
+                content_note=args.content_note,
+            )
             content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
             payload = write_active_handoff(
                 Path(args.project_root),
@@ -490,8 +494,13 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
-def _deterministic_active_writer_content(operation_state: dict[str, object]) -> str:
+def _deterministic_active_writer_content(
+    operation_state: dict[str, object],
+    *,
+    content_note: str | None = None,
+) -> str:
     """Return deterministic markdown bound to one active-writer operation."""
+    note = content_note or "Deterministic active-writer flow content."
     return (
         "---\n"
         f"project: {operation_state['project']}\n"
@@ -504,7 +513,7 @@ def _deterministic_active_writer_content(operation_state: dict[str, object]) -> 
         f"active_writer_allocated_path: {operation_state['allocated_active_path']}\n"
         "---\n\n"
         f"# {operation_state['operation']} {operation_state['bound_slug']}\n\n"
-        "Deterministic active-writer flow content.\n"
+        f"{note}\n"
     )
 
 
