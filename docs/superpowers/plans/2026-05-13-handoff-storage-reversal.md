@@ -2,13 +2,13 @@
 
 ## Status
 
-Gate 0A/0B prep is committed on `feature/handoff-storage-reversal-main` at `bf83762`. The post-review plan reanchor is committed at `4b5f6fc`; the latest clean committed version of this document on this branch is the plan authority. Gate 0r remains open for branch/residue preflight refresh, TTL-sensitive residue reclassification, and hard-stop matrix creation. Source implementation remains blocked until Gate 0r passes.
+Gate 0A/0B prep is committed on `feature/handoff-storage-reversal-main` at `bf83762`. The post-review plan reanchor is committed at `4b5f6fc`; later plan-only corrections at `7effa25` and `8fd78af` supersede that reanchor. As of this revision, `HEAD 8fd78af` is the latest clean committed plan authority for this branch, and any later clean committed version of this document on this branch supersedes the named historical anchors. Gate 0r remains open for branch/residue preflight refresh, TTL-sensitive residue reclassification, hard-stop matrix creation, and the execution-economics controls below. Source implementation remains blocked until Gate 0r passes.
 
 This document is the implementation contract for reversing Handoff storage authority from the live source's current `docs/handoffs/` primary policy to `.codex/handoffs/` as the post-cutover write/read target. Until the implementation commit lands, `.codex/handoffs/` is target authority, not current repo truth.
 
 Done means all writers, readers, skill docs, helper scripts, tests, dormant validation helpers or live hooks, refresh classifier logic, refresh smoke, release docs, ignore policy, and stale-text gates move together. A partial reader-only migration is not closeout.
 
-The `bf83762` commit recorded Gate 0A/0B prep evidence for the then-committed contract by tracking this control document and the repo-authority residue ledger, patching source-repo ignore policy, and recording canonical-checkout local preflight evidence for current top-level `docs/handoffs/handoff-*` residue paths. The `4b5f6fc` commit records the post-review plan authority boundary. That boundary does not complete Gate 0r; Gate 0r remains open only for branch/residue preflight refresh, TTL-sensitive local residue reclassification, and hard-stop matrix creation. Source implementation may start only after `gate-0r-review-reanchor-and-preflight-refresh` passes. Source repair closeout remains blocked until active writer creation is covered by helper APIs and transaction tests. Installed-host certification remains blocked until the host-repo policy matrix below is covered by source-proof installed-plugin smoke.
+The `bf83762` commit recorded Gate 0A/0B prep evidence for the then-committed contract by tracking this control document and the repo-authority residue ledger, patching source-repo ignore policy, and recording canonical-checkout local preflight evidence for current top-level `docs/handoffs/handoff-*` residue paths. The `4b5f6fc` commit records the original post-review plan authority boundary, and `7effa25` plus `8fd78af` record later plan-only corrections. Those commits do not complete Gate 0r; Gate 0r remains open for branch/residue preflight refresh, TTL-sensitive local residue reclassification, hard-stop matrix creation, and capacity-budget recording. Source implementation may start only after `gate-0r-review-reanchor-and-preflight-refresh` passes. Source repair closeout remains blocked until active writer creation is covered by helper APIs and end-to-end skill-flow transaction tests. Installed-host certification remains blocked until the host-repo policy matrix below is covered by source-proof installed-plugin smoke.
 
 ## Policy Authority Override
 
@@ -24,7 +24,7 @@ This override does not make all `docs/handoffs/**` disposable. The implementatio
 
 - `tracked-durable-handoff-artifact`: any `git ls-files docs/handoffs` result, or any file explicitly named by a reviewed repo policy as durable. Preserve it; do not delete, untrack, treat it as operational cleanup, or include it in implicit active selection.
 - `ignored-legacy-operational-handoff`: ignored active handoff, checkpoint, summary, archive, or state created by the pre-cutover Handoff plugin. Treat it as read-only legacy migration/search/bridge input according to this plan.
-- `untracked-legacy-operational-handoff`: untracked `docs/handoffs/*.md` file that validates as a current-contract active handoff, checkpoint, or summary in a host repository where the pre-cutover runtime path was not ignored. Treat it as read-only legacy migration input. This class exists because host tracking policy is not a plugin invariant; valid pre-cutover runtime files must not be stranded merely because the host repo lacked an ignore rule.
+- `untracked-legacy-operational-handoff`: untracked `docs/handoffs/*.md` file that validates as a current-contract active handoff, checkpoint, or summary and has runtime provenance beyond merely being untracked. It must satisfy at least one of these proofs: parsed pre-cutover Handoff provenance accepted by the classifier, a current local-preflight evidence row naming the exact path and raw-byte SHA256 as runtime material, or an exact reviewed runtime migration opt-in naming the path and hash. Valid-looking untracked files without one of those proofs are `policy-conflict-artifact`, not migration input.
 - `reviewed-runtime-migration-opt-in`: an exact legacy `docs/handoffs/**` path plus source hash named by a reviewed migration note as safe to treat as runtime migration input. This is the only way a tracked or otherwise durable-looking `docs/handoffs/**` file may enter runtime migration selection.
 - `previous-primary-hidden-archive`: historical archive file under `<project_root>/.codex/handoffs/.archive/*.md` from the pre-`docs/handoffs/` storage generation. Treat it as read-only history-search and explicit-path input, copying or reusing a primary archive copy only through the explicit legacy archive transaction path.
 - `state-like-residue`: files such as `docs/handoffs/handoff-*.json` or `docs/handoffs/handoff-*` outside `.session-state/`. Inventory them, classify them, and either bridge exactly one valid project state candidate or reject with a diagnostic; never treat them as handoff markdown documents.
@@ -32,7 +32,7 @@ This override does not make all `docs/handoffs/**` disposable. The implementatio
 
 The intended override is narrow: after cutover, newly written Handoff operational session artifacts go under `.codex/handoffs/`; durable repository documentation under `docs/handoffs/**` remains durable when tracked or intentionally included by repo policy.
 
-Legacy active selection must be class-filtered before timestamp ordering. It may include only `ignored-legacy-operational-handoff`, `untracked-legacy-operational-handoff`, and exact `reviewed-runtime-migration-opt-in` files. It must exclude `tracked-durable-handoff-artifact` and `policy-conflict-artifact` files even when they look like valid current-contract handoff markdown.
+Legacy active selection must be class-filtered before timestamp ordering. It may include only `ignored-legacy-operational-handoff`, provenance-backed `untracked-legacy-operational-handoff`, and exact `reviewed-runtime-migration-opt-in` files. It must exclude `tracked-durable-handoff-artifact` and `policy-conflict-artifact` files even when they look like valid current-contract handoff markdown.
 
 ## Path Authority
 
@@ -59,10 +59,10 @@ This table describes the target after the reversal implementation lands.
 | Primary state | `<project_root>/.codex/handoffs/.session-state/handoff-<project>-<resume_token>.json` | Post-cutover chain state |
 | Consumed legacy-active registry | `<project_root>/.codex/handoffs/.session-state/consumed-legacy-active.json` | Post-cutover suppression state for loaded legacy active files |
 | Copied legacy-archive registry | `<project_root>/.codex/handoffs/.session-state/copied-legacy-archives.json` | Post-cutover idempotency state for explicit legacy archive loads |
-| Legacy active | `<project_root>/docs/handoffs/*.md` | Read-only migration input during cutover only when classified as ignored legacy operational input, untracked legacy operational input, or exact reviewed opt-in; tracked durable docs are excluded from active selection |
+| Legacy active | `<project_root>/docs/handoffs/*.md` | Read-only migration input during cutover only when classified as ignored legacy operational input, provenance-backed untracked legacy operational input, or exact reviewed opt-in; tracked durable docs and unproven valid-looking untracked docs are excluded from active selection |
 | Legacy archive | `<project_root>/docs/handoffs/archive/*.md` | Read-only history-search and explicit-path input; never active-selection input |
 | Previous-primary hidden archive | `<project_root>/.codex/handoffs/.archive/*.md` | Read-only history-search and explicit-path input for pre-`docs/handoffs/` archives; never active-selection input |
-| Legacy state | `<project_root>/docs/handoffs/.session-state/*` | Read-once bridge input for chain writers; never written; explicit loads rejected |
+| Legacy state | `<project_root>/docs/handoffs/.session-state/*` | Read-once bridge input for chain writers; legacy bytes are never modified, deleted, or trashed by normal writers; suppression is recorded under primary state with durable markers; explicit loads rejected |
 | State-like residue | `<project_root>/docs/handoffs/handoff-*` and `<project_root>/docs/handoffs/handoff-*.json` | Inventory-only unless exactly one valid project state bridge candidate; every local path requires local-preflight evidence disposition, and only repo-authority facts belong in the tracked ledger |
 
 ### Installed Host Repo Policy Matrix
@@ -79,7 +79,14 @@ Post-cutover helper output for mutating operations must include best-effort git 
 - `not-git-repo`: the project root is not inside a git worktree
 - `unknown`: git visibility could not be determined; include the diagnostic reason
 
-For target allocation, expose this as `target_git_visibility`. For source-backed operations, also expose `source_git_visibility` before mutation. A source path with `source_git_visibility=tracked-conflict` under `.codex/handoffs/**` is a tracked host file, not safe runtime material. Implicit and explicit primary load must fail closed with `TrackedRuntimeSourceError` or an equivalent typed diagnostic before moving it. Read-only inventory may report that path as `blocked_tracked_runtime_source`; default active selection must not silently choose it. Explicit read-only `/distill <path>` may read it only through explicit-path validation because no handoff source bytes are moved or suppressed.
+Git visibility is not filesystem safety. Post-cutover helper output for every path whose bytes could be read, moved, copied, written, suppressed, or used for collision allocation must also include filesystem status fields:
+
+- `target_fs_status` for allocation and write destinations
+- `source_fs_status` for source-backed operations
+
+Allowed filesystem status values are `missing`, `regular-file`, `directory`, `symlink`, `non-regular`, `unreadable`, `parent-missing`, `parent-file-conflict`, `path-escape`, and `unknown`. Collision diagnostics must report both git visibility and filesystem status; an existing directory, symlink, unreadable file, non-regular file, or parent-file conflict is occupied or blocked even when git visibility is `untracked` or `unknown`.
+
+For target allocation, expose git status as `target_git_visibility`. For source-backed operations, also expose `source_git_visibility` before mutation. A source path with `source_git_visibility=tracked-conflict` under `.codex/handoffs/**` is a tracked host file, not safe runtime material. Implicit and explicit primary load must fail closed with `TrackedRuntimeSourceError` or an equivalent typed diagnostic before moving it. Read-only inventory may report that path as `blocked_tracked_runtime_source`; default active selection must not silently choose it. Explicit read-only `/distill <path>` may read it only through explicit-path validation because no handoff source bytes are moved or suppressed.
 
 When a mutating command reports `target_git_visibility=untracked`, the helper JSON and the skill-facing human summary must also include:
 
@@ -118,12 +125,12 @@ If the resolved helper or skill doc realpath is inside the source checkout, inst
 Installed-host certification requires a first-class harness before any installed-host claim counts. The harness must be source-proof and cache-safe:
 
 - Create an isolated temporary `CODEX_HOME` for the smoke unless the operator explicitly requests a real-home guarded refresh. The default harness must not mutate `/Users/jp/.codex`, the user's active plugin cache, global config, host ignore files, or host indexes.
-- Install or stage the Handoff plugin into the isolated `CODEX_HOME` through the same app-server install authority path used by guarded refresh when feasible. If a test-only installer is used, it must produce the same installed-cache layout and record that it is not proof of app-server install behavior.
+- Install the Handoff plugin into the isolated `CODEX_HOME` through the guarded-refresh app-server install authority path: `plugins/turbo-mode/tools/refresh/app_server_inventory.py` request builders and `plugins/turbo-mode/tools/refresh/mutation.py` install orchestration, invoked through `plugins/turbo-mode/tools/refresh_installed_turbo_mode.py` when the gate is allowed to exercise the CLI. If Gate 1f uses a test-only installer because the app-server path is not available inside source tests, the evidence label must be `isolated harness layout proof only`, must record the non-equivalent installer, and must not use installed-host behavior language.
 - Pin plugin identity from `plugins/turbo-mode/handoff/1.6.0/.codex-plugin/plugin.json`, including `name`, `version`, manifest SHA256, source checkout root, installed plugin root, resolved helper path, resolved skill doc path, and install method.
 - Create disposable host repos for each row in the Installed Host Repo Policy Matrix, then run helpers from the installed plugin root with the source checkout removed from `PYTHONPATH` and import resolution.
 - Record cleanup policy and artifact roots. Temporary host repos may be removed after the summary is written, but the summary must retain enough path, manifest, command, and SHA256 evidence to reproduce the proof. Local-only raw output belongs under the refresh local-only evidence root, not in tracked source docs.
 
-Gate 1f must add this harness in source-test form without mutating an installed cache. Gate 5 is the earliest point where an installed-host or installed-cache certification label may be claimed.
+Gate 1f must add this harness in source-test form without mutating the real installed cache. Gate 5 is the earliest point where an installed-host or installed-cache certification label may be claimed, and only evidence produced through the app-server install authority path may use the label `installed-host behavior proof`.
 
 ### Residue Disposition Artifacts
 
@@ -185,7 +192,7 @@ The reversal cannot start by switching writers alone. Before implementation is c
 - installed-host behavior for no ignore, broad `.codex/` ignore, tracked `.codex/skills/**`, tracked handoff-path collision, tracked primary active source, and non-git project roots
 - local-preflight evidence completeness for every top-level `docs/handoffs/handoff-*` path, plus repo-authority ledger scope correctness
 
-During the reversal release, implicit active discovery for `/list-handoffs` and `/load` must consider valid primary active files plus eligible unconsumed legacy active files after artifact-class filtering. A legacy active file is selectable only when it is an ignored legacy operational handoff, an untracked legacy operational handoff, or an exact reviewed runtime migration opt-in. Tracked durable handoff artifacts and policy-conflict artifacts are diagnostic inventory rows, not active candidates. Dedup remains byte-exact, with primary active winning over selectable legacy active. This mixed-root behavior prevents operational active `docs/handoffs/*.md` files from becoming stranded after the first new `.codex/handoffs/*.md` write without consuming durable repository docs.
+During the reversal release, implicit active discovery for `/list-handoffs` and `/load` must consider valid primary active files plus eligible unconsumed legacy active files after artifact-class filtering. A legacy active file is selectable only when it is an ignored legacy operational handoff, a provenance-backed untracked legacy operational handoff, or an exact reviewed runtime migration opt-in. Valid-looking untracked files without plugin provenance, current local-preflight proof, or exact reviewed path-plus-hash opt-in are diagnostic `policy-conflict-artifact` rows, not active candidates. Tracked durable handoff artifacts and policy-conflict artifacts are diagnostic inventory rows, not active candidates. Dedup remains byte-exact, with primary active winning over selectable legacy active. This mixed-root behavior prevents proven operational active `docs/handoffs/*.md` files from becoming stranded after the first new `.codex/handoffs/*.md` write without consuming durable repository docs.
 
 Implicit `/load` chooses the most recent eligible active candidate from the combined primary-active plus class-filtered legacy-active set after dedup, using the Selection Ordering contract below. If it chooses a primary active file, Primary Load semantics apply. If it chooses a legacy active file, Legacy Load semantics apply.
 
@@ -197,14 +204,16 @@ Because legacy active files are read-only migration input, successful legacy `/l
 
 Use a durable consumed legacy-active registry under `.codex/handoffs/.session-state/consumed-legacy-active.json`. Each consumed entry must include:
 
-- absolute lexical legacy source path
-- containment-checked resolved path
+- source root enum and storage location
+- project-root-relative legacy source path
 - raw-byte SHA256 content hash
+- absolute lexical legacy source path as evidence
+- containment-checked resolved path as evidence
 - copied primary archive path
 - consumed timestamp
 - operation that consumed it, for example `legacy-load`
 
-Active-selection scans suppress a legacy active candidate only when the registry contains the same lexical source path and raw-byte content hash. If the legacy file changes bytes later, it is treated as a new active candidate and must be validated again.
+Active-selection scans suppress a legacy active candidate only when the registry contains the same source root, project-root-relative path, storage location, and raw-byte content hash. Absolute lexical and resolved paths are evidence, not the stable identity key; moving a clone must not resurrect an already consumed same-relative-path same-hash legacy active file. If the legacy file changes bytes later, it is treated as a new active candidate and must be validated again.
 
 A legacy load is not successful unless the copy to primary archive, primary state write, and consumed-registry write all succeed. After a successful legacy load, default `/list-handoffs` and implicit `/load` must not show or select the consumed legacy active file again. History search may still surface the legacy source as historical input with provenance.
 
@@ -214,9 +223,11 @@ Explicit legacy archive loads copy legacy archive content to primary archive sto
 
 Use a durable copied legacy-archive registry under `.codex/handoffs/.session-state/copied-legacy-archives.json`. Each copied entry must include:
 
-- absolute lexical legacy source path
-- containment-checked resolved path
+- source root enum and storage location
+- project-root-relative legacy source path
 - raw-byte SHA256 source content hash
+- absolute lexical legacy source path as evidence
+- containment-checked resolved path as evidence
 - copied primary archive path
 - raw-byte SHA256 copied archive content hash
 - copied timestamp
@@ -224,7 +235,7 @@ Use a durable copied legacy-archive registry under `.codex/handoffs/.session-sta
 - recovery status: `complete`, `recovery_required`, or `failed`
 - transaction id that created or last repaired the entry
 
-An explicit legacy archive load may reuse an entry only when the lexical source path, resolved path, and source hash match and the copied primary archive path exists with the copied hash. If any of those checks fail, recovery must diagnose the stale or corrupt registry entry before a new copy can be allocated.
+An explicit legacy archive load may reuse an entry only when the source root, project-root-relative path, storage location, and source hash match and the copied primary archive path exists with the copied hash. Absolute lexical and resolved paths must be re-recorded as current evidence but must not be the only key. If any stable-key or copied-content checks fail, recovery must diagnose the stale or corrupt registry entry before a new copy can be allocated.
 
 ### Legacy State Bridge
 
@@ -248,7 +259,7 @@ State precedence is deterministic:
 Ambiguous state diagnostics must include a concrete operator recovery workflow. The helper surface must provide a read-only state inventory mode, for example `list-chain-state`, that emits every same-project state candidate with lexical path, resolved path, project, resume token when available, archive path, age, source root, payload hash, and validation status. The diagnostic must tell the operator to choose one of these explicit outcomes:
 
 - continue from exactly one candidate by explicit state path or resume token, then write primary state under `.codex/handoffs/.session-state/`
-- mark one or more stale candidates consumed with a durable marker and post-clear proof
+- mark one or more stale candidates consumed with a durable marker and post-marker proof
 - abort without mutation
 
 No helper may guess among multiple valid same-project state candidates. A recovery command that marks stale state consumed must run under the project lock, record a transaction, and preserve enough metadata for later audit. Tests must cover the ambiguous diagnostic payload and at least one explicit recovery path.
@@ -262,7 +273,7 @@ These recovery outcomes map to concrete helper entrypoints. Implementation must 
 
 Primary state winning does not prove same-project legacy state candidates are stale. When exactly one valid primary state exists and any same-project legacy state or state-like residue candidate also exists, chain writers must stop before active output creation unless every legacy candidate already has an explicit durable operator disposition. The diagnostic must include the read-only inventory rows and require the operator to choose one of these outcomes:
 
-- mark specific legacy candidates stale or consumed with an explicit recovery command, transaction record, and post-clear proof
+- mark specific legacy candidates stale or consumed with an explicit recovery command, transaction record, and post-marker proof
 - continue from one explicit legacy candidate after abandoning or clearing the primary state through an explicit recovery command
 - preserve the candidates and abort without mutation
 
@@ -279,7 +290,7 @@ Local-preflight evidence rows with `disposition=bridge-once` are not exempt from
 
 The current canonical-checkout evidence row created at `2026-05-11T02:46:58.895416+00:00` cannot remain plain `bridge-once` for a `2026-05-13` Gate 1 start unless the preflight is regenerated and proves it is still inside the effective TTL, or the plan adds and verifies an expired-state recovery path.
 
-A successful bridged save/summary/quicksave must preserve the `resumed_from` link, write new output and any new chain state only under `.codex/handoffs/`, and clear the consumed legacy state file. Cleanup is resurrection-proof only if either deletion succeeds or a durable consumed marker is written using the existing consumed-marker pattern or a successor with equivalent semantics. A bridged writer is not successful unless a post-clear bridge lookup proves the legacy state no longer returns usable state. Malformed, expired, ambiguous, multiply matching, uncleared, or unmarkable legacy state must fail with an actionable diagnostic that names the state path or conflict; it must not silently break or resurrect the chain.
+A successful bridged save/summary/quicksave must preserve the `resumed_from` link, write new output and any new chain state only under `.codex/handoffs/`, and durably suppress the consumed legacy state through a primary-state marker. Legacy `docs/handoffs/.session-state/**` bytes are not modified, deleted, or trashed by normal bridge cleanup. Cleanup is resurrection-proof only if a durable consumed marker is written using the existing consumed-marker pattern or a successor with equivalent semantics, and a post-marker bridge lookup proves the legacy state no longer returns usable state. Malformed, expired, ambiguous, multiply matching, unsuppressed, or unmarkable legacy state must fail with an actionable diagnostic that names the state path or conflict; it must not silently break or resurrect the chain.
 
 Explicit loads from `docs/handoffs/.session-state/` remain rejected. Legacy state is bridge input only for the save/summary/quicksave chain writer.
 
@@ -318,7 +329,7 @@ Read-only workflows, including `/list-handoffs`, default and explicit `/distill`
 
 Mutating workflows, including implicit or explicit `/load`, `/save`, `/summary`, `/quicksave`, state clear, consumed-marker repair, copied-registry repair, and explicit operator recovery commands, must run `mutating-recovery` before selecting a source, reading a state bridge, or opening a new transaction. A partial archive copy, active write, or primary move without matching state and required registry entry must not silently create a second archive or active record for the same source/hash. Tests must cover read-only inventory over dirty transactions, interruption after archive mutation, interruption after active write, interruption after state write, duplicate retry, and concurrent attempts for every mutating load storage location and every active writer.
 
-Completed-transaction idempotency is source-hash scoped. Retrying or repeating an explicit legacy archive load for the same lexical source path plus raw-byte hash must reuse the verified primary archive path from `copied-legacy-archives.json` and write state to that path; it must not allocate a fresh primary archive copy each time. If the registry entry exists but the primary archive copy is missing or byte-mismatched, recovery must fail with a typed diagnostic rather than silently creating a second copy outside a repair transaction. Legacy active loads use `consumed-legacy-active.json` for the same source-path plus hash reuse and suppression semantics.
+Completed-transaction idempotency is source-hash scoped. Retrying or repeating an explicit legacy archive load for the same source root, project-relative source path, storage location, and raw-byte hash must reuse the verified primary archive path from `copied-legacy-archives.json` and write state to that path; it must not allocate a fresh primary archive copy each time. If the registry entry exists but the primary archive copy is missing or byte-mismatched, recovery must fail with a typed diagnostic rather than silently creating a second copy outside a repair transaction. Legacy active loads use `consumed-legacy-active.json` for the same source root, project-relative source path, storage location, and raw-byte hash reuse and suppression semantics.
 
 The active-writer transaction watermark is a per-project chain-mutation watermark, not an mtime, last filename, or partial transaction-log guess. Store it under primary state, for example `.codex/handoffs/.session-state/mutation-watermarks/<project>.json`, with at least:
 
@@ -358,7 +369,7 @@ Transaction records must be JSON and include at least:
 - `resume_source_sha256`, when an active writer preserves `resumed_from`
 - `caller_run_id` or helper-minted `run_id`, when the transaction writes generated active output
 - `state_path`, when the transaction reads, writes, clears, or bridges chain state
-- `state_action`: `none`, `read`, `write`, `clear`, or `bridge-clear`
+- `state_action`: `none`, `read`, `write`, `clear-primary`, or `bridge-marker`
 - `registry_path`
 - `copy_registry_path`
 - `expected_postconditions`
@@ -407,6 +418,8 @@ The caller protocol is:
 5. On retry, pass the original `run_id` and transaction id when known. If they are not known, the helper must discover compatible pending transactions by operation, project, state snapshot, resume source identity, and allocated path; if zero or more than one compatible pending transaction exists, it must fail closed before accepting regenerated content.
 6. If a retry matches the same idempotency key and content hash, reuse the existing transaction. If it matches the same idempotency key but content bytes changed, fail with `ActiveWriteContentChangedError` or an equivalent typed diagnostic.
 
+The implementation must make this protocol executable, not only documented. Gate 1d must add either a deterministic command-level wrapper, for example `active-writer-flow`, or a two-call helper test harness that runs the same sequence the skills will use: `begin-active-write`, deterministic content generation bound to the returned operation identity, `write-active-handoff`, retry with the same `run_id`, retry with changed bytes, context-loss recovery through `list-active-writes`, and cleanup-failure recovery. Skill-doc tests must execute this flow end-to-end for `/save`, `/summary`, and `/quicksave`; static scans for helper names are insufficient.
+
 The operation state cannot rely on LLM memory or skill prose alone. `begin-active-write` must persist an active-writer operation-state record before content generation under a primary state root such as `.codex/handoffs/.session-state/active-writes/<project>/<run_id>.json`. The exact path may vary, but it must be returned by the helper and included in the transaction record.
 
 The active-writer operation-state record must include at least:
@@ -451,7 +464,7 @@ The default reservation lease is 30 minutes. A helper may support explicit lease
 The save/summary/quicksave transaction boundary is split into reservation and write phases:
 
 1. Reservation phase: acquire the project lock, run mutating recovery for the project, read primary state or the one-time legacy state bridge, allocate the primary active output path, persist the transaction and operation-state reservation, and release the lock before content generation.
-2. Write phase: reacquire the project lock, validate lease freshness, state snapshot, transaction watermark, idempotency key, and content hash, write and verify the active handoff file, clear primary state and consume or mark any bridged legacy state with post-clear proof, then commit the transaction only after the active file exists, the content hash matches, and state cleanup cannot resurrect.
+2. Write phase: reacquire the project lock, validate lease freshness, state snapshot, transaction watermark, idempotency key, and content hash, write and verify the active handoff file, clear primary state and consume or mark any bridged legacy state with post-marker proof, then commit the transaction only after the active file exists, the content hash matches, and state cleanup cannot resurrect.
 
 A save/summary/quicksave operation is not successful if state cleanup fails after the active file write. In that case the transaction must remain recoverable or fail with a diagnostic that names the active path and state path; it must not report a clean save while leaving ambiguous chain state behind.
 
@@ -514,7 +527,7 @@ The implementation must provide documented helper entrypoints for at least:
 - `abandon-primary-chain-state`: abandon one exact primary state path by path plus hash before an explicit legacy continuation
 - `chain-state-recovery-inventory`: emit read-only chain-state recovery inventory without side effects
 - `write-chain-state`: write only primary state
-- `clear-chain-state`: clear primary state and consume only the bridged legacy state with post-clear proof; it must not infer that other same-project legacy candidates are stale
+- `clear-chain-state`: clear primary state and consume only the bridged legacy state with post-marker proof; it must not infer that other same-project legacy candidates are stale or modify legacy state bytes
 - `read-only-recovery-inventory`: inspect lock and transaction records without completing, rolling back, marking, clearing, copying, moving, or writing recovery artifacts
 - `recover-transaction`: complete a named fully verifiable pending transaction under the project lock, or fail with a typed diagnostic
 - `repair-consumed-legacy-active-registry`: repair or diagnose consumed legacy-active registry corruption under an explicit operator-selected transaction
@@ -536,11 +549,13 @@ Every candidate result must include typed fields:
 
 - `path`: absolute lexical path
 - `resolved_path`: resolved containment-checked path
+- `project_relative_path`: source path relative to the detected project root when containment allows one
 - `source_root`: enum `primary`, `legacy`, or `previous_primary`
 - `storage_location`: enum `primary_active`, `primary_archive`, `legacy_active`, `legacy_archive`, or `previous_primary_hidden_archive`
 - `lifecycle`: enum `active` or `archive`
 - `artifact_class`: enum `primary-runtime`, `ignored-legacy-operational-handoff`, `untracked-legacy-operational-handoff`, `tracked-durable-handoff-artifact`, `reviewed-runtime-migration-opt-in`, `previous-primary-hidden-archive`, `state-like-residue`, `policy-conflict-artifact`, or `unknown`
 - `source_git_visibility`: enum `ignored`, `untracked`, `tracked-conflict`, `not-git-repo`, or `unknown`
+- `source_fs_status`: enum `missing`, `regular-file`, `directory`, `symlink`, `non-regular`, `unreadable`, `parent-missing`, `parent-file-conflict`, `path-escape`, or `unknown`
 - `selection_eligibility`: enum `eligible`, `read-only-only`, `blocked-tracked-source`, `blocked-durable-artifact`, `blocked-policy-conflict`, or `blocked-invalid`
 - `content_hash`: byte-exact SHA256 of raw file bytes, computed only after containment and regular-file checks
 - `validity`: enum `valid`, `invalid`, `skipped`
@@ -565,7 +580,7 @@ Used by implicit `/load`, default `/list-handoffs`, and default `/distill`.
 Includes:
 
 - primary active: `.codex/handoffs/*.md` when not tracked by the host repo
-- unconsumed legacy active during cutover: `docs/handoffs/*.md` only when classed as ignored legacy operational input, untracked legacy operational input, or exact reviewed runtime migration opt-in
+- unconsumed legacy active during cutover: `docs/handoffs/*.md` only when classed as ignored legacy operational input, provenance-backed untracked legacy operational input, or exact reviewed runtime migration opt-in
 
 Excludes:
 
@@ -594,6 +609,8 @@ History search may surface consumed legacy active files and previous-primary hid
 
 For `/summary`, history search is read-only project-arc input. Summary arc synthesis must scan primary active, primary archive, legacy active, legacy archive, and previous-primary hidden archive using the same provenance and dedup rules as history search. It must not keep direct `docs/handoffs/archive/` or `.codex/handoffs/.archive/` shell scans after cutover.
 
+Summary arc context is a separate snapshot from chain-state transaction safety. If `/summary` uses history-search candidates before content generation, it must either persist a candidate-set manifest with source root, project-relative path, raw-byte hash, provenance, and manifest hash, then bind that manifest id into the active-writer operation state, or explicitly mark the arc context as `best_effort_not_snapshot_bound` in the generated summary and closeout evidence. A transactionally valid summary must not be misreported as semantically snapshot-bound unless the candidate-set manifest was recorded and revalidated.
+
 History search must preserve useful old archives that predate the current frontmatter contract. Files under archive roots that lack YAML frontmatter may be accepted only in history search with `validity=valid`, `document_profile=historical_archive`, reduced metadata, and provenance showing the source path. Historical archive profile is forbidden for active selection, explicit `/load`, explicit `/distill`, and chain state.
 
 ### Explicit Path
@@ -613,7 +630,7 @@ Reads primary state first. If exactly one valid primary state exists and no unre
 Implicit scans include only top-level active files after artifact-class and source-visibility filtering:
 
 - primary: `.codex/handoffs/*.md`
-- legacy active during cutover for load/list/distill: `docs/handoffs/*.md` only when ignored legacy operational input, untracked legacy operational input, or exact reviewed runtime migration opt-in
+- legacy active during cutover for load/list/distill: `docs/handoffs/*.md` only when ignored legacy operational input, provenance-backed untracked legacy operational input, or exact reviewed runtime migration opt-in
 
 Implicit scans exclude archives, nested files, hidden files, `.session-state/`, symlinks, path escapes, non-regular files, unreadable files, invalid documents, tracked primary runtime source files, tracked durable legacy artifacts, and policy-conflict artifacts.
 
@@ -691,7 +708,7 @@ Explicit `/load <path>` must use `validate-explicit-path` and then apply behavio
 
 Explicit path load never writes under `docs/handoffs/` or `.codex/handoffs/.archive/`. Historical archive profile files without current frontmatter are not loadable by explicit path unless a separate migration command is added and tested.
 
-Repeated explicit legacy archive loads for the same lexical source path plus raw-byte hash must be completed-transaction idempotent. The second and later loads must reuse the same verified primary archive path from the copied legacy-archive registry and update state to that path; they must not create `-01`, `-02`, or later duplicate primary archive copies solely because the user repeated the same explicit archive load.
+Repeated explicit legacy archive loads for the same source root, project-relative source path, storage location, and raw-byte hash must be completed-transaction idempotent. The second and later loads must reuse the same verified primary archive path from the copied legacy-archive registry and update state to that path; they must not create `-01`, `-02`, or later duplicate primary archive copies solely because the user repeated the same explicit archive load.
 
 ### List
 
@@ -887,21 +904,23 @@ Minimum source-repair coverage:
 - missing primary with valid legacy
 - invalid primary with valid legacy
 - legacy active exists, then new primary active exists, and default list/load still sees the eligible legacy active candidate during the cutover release
-- untracked valid `docs/handoffs/*.md` legacy active in a host repo with no ignore rule remains eligible during cutover and is copied/suppressed without mutating the source
+- untracked valid `docs/handoffs/*.md` legacy active in a host repo with no ignore rule remains eligible during cutover only when plugin provenance, current local-preflight evidence, or exact reviewed path-plus-hash opt-in proves it is runtime material; valid-looking untracked files without that proof become `policy-conflict-artifact`
 - tracked durable `docs/handoffs/*.md` files are excluded from default active selection unless an exact reviewed runtime migration opt-in names the path and hash
 - tracked `.codex/handoffs/*.md` primary source files are reported as blocked and are not moved by implicit or explicit load
 - successful legacy load copies to primary archive, writes primary state, writes consumed legacy-active registry, and removes the loaded legacy source from later active-selection list/load results
 - changed bytes at the same legacy source path are treated as a new candidate rather than suppressed by path alone
+- every source-backed candidate and target allocation reports filesystem status separately from git visibility, including directory, symlink, non-regular, unreadable, and parent-file-conflict cases
 - transaction coverage for read-only recovery inventory over pending transactions, interruption after archive mutation, interruption after active writer output, interruption after state write, duplicate retry, and concurrent attempts for primary active, primary archive, legacy active, legacy archive, save, summary, and quicksave paths
 - read-only list/distill/search/triage/state inventory never completes, rolls back, suppresses, clears, marks, or writes transaction recovery artifacts
 - save/summary/quicksave active writes call `begin-active-write` before content generation, allocate paths only through `allocate-active-path`, write only under `.codex/handoffs/`, use atomic temp-plus-rename semantics, and clear or mark chain state under the same project lock
+- save/summary/quicksave skill-flow tests execute the complete begin/generate/write/retry protocol with persisted operation identity instead of only statically scanning skill docs for helper names
 - two save/summary/quicksave calls with the same timestamp slug allocate deterministic collision-safe active paths through at least base, `-01`, and `-02`
 - save/summary/quicksave fails or enters recoverable transaction state rather than reporting success when active output is written but state cleanup fails
 - implicit load chooses the newest valid active candidate from combined primary-active and legacy-active discovery after dedup
 - load/list/distill recency uses filename timestamp, not filesystem mtime
 - filename timestamp ties prefer primary active over legacy active, then lexical absolute path
 - active-selection, history-search, explicit-path, and state-bridge scan modes have separate fixture coverage
-- summary arc synthesis uses history-search candidates across primary active, primary archive, legacy active, legacy archive, and previous-primary hidden archive
+- summary arc synthesis uses history-search candidates across primary active, primary archive, legacy active, legacy archive, and previous-primary hidden archive, and either records a candidate-set manifest hash in operation state or labels the arc context `best_effort_not_snapshot_bound`
 - explicit `/load <path>` behavior for primary active, primary archive, legacy active, legacy archive, and previous-primary hidden archive
 - no-frontmatter archive history is available only through history search with `document_profile=historical_archive`
 - unreadable roots
@@ -910,7 +929,7 @@ Minimum source-repair coverage:
 - nested files
 - explicit-path legacy archive behavior, history-search legacy archive behavior, and active-selection exclusion of legacy archives
 - previous-primary hidden archive `.codex/handoffs/.archive/*.md` participates in history search and explicit archive load compatibility but never active selection
-- repeated explicit previous-primary hidden archive load for the same lexical source path plus raw-byte hash reuses the same verified primary archive path from `copied-legacy-archives.json`
+- repeated explicit previous-primary hidden archive load for the same source root, project-relative source path, storage location, and raw-byte hash reuses the same verified primary archive path from `copied-legacy-archives.json`
 - `.session-state/` rejection
 - file symlink escape
 - directory symlink escape
@@ -921,8 +940,8 @@ Minimum source-repair coverage:
 - collision budget exhaustion
 - non-git cwd storage, project naming, state filename, and cleanup
 - search/triage provenance output visibly selecting primary over legacy
-- pre-upgrade legacy state plus post-upgrade save/summary/quicksave preserves `resumed_from`, writes only under `.codex/handoffs/`, and clears the consumed legacy state
-- bridged legacy state cleanup proves a second bridge lookup returns no usable state after deletion or durable consumed marking
+- pre-upgrade legacy state plus post-upgrade save/summary/quicksave preserves `resumed_from`, writes only under `.codex/handoffs/`, and suppresses the consumed legacy state through a primary-state marker without modifying legacy bytes
+- bridged legacy state cleanup proves a second bridge lookup returns no usable state after durable consumed marking
 - project-scoped state bridge lookup succeeds without caller-provided resume token when exactly one valid project state exists
 - valid primary state plus unresolved same-project legacy state fails before active output creation and requires explicit operator-selected recovery
 - multiple valid primary state candidates for the same project fail with an ambiguity diagnostic
@@ -932,8 +951,8 @@ Minimum source-repair coverage:
 - canonical-checkout local-preflight evidence includes the `canonical-checkout` residue scope and one disposition row per current top-level `docs/handoffs/handoff-*` or `docs/handoffs/handoff-*.json` path
 - `docs/superpowers/plans/2026-05-13-handoff-storage-residue-ledger.md` uses `scope` values to separate `repo-authority`, `local-preflight-summary`, and `policy-rule` rows and does not list ignored or untracked local residue as fresh-clone truth
 - `.codex/handoffs/.session-state/preflight/handoff-storage-residue-local-preflight.json` includes one local-preflight disposition row per current `docs/handoffs/handoff-*` and `docs/handoffs/handoff-*.json` path, with no `TBD` dispositions
-- explicit legacy archive load repeated for the same lexical source path plus raw-byte hash reuses the same verified primary archive path from `copied-legacy-archives.json`
-- copied legacy-archive registry entries include lexical source path, resolved path, source hash, copied archive path, copied hash, timestamp, operation, recovery status, and transaction id
+- explicit legacy archive load repeated for the same source root, project-relative path, storage location, and raw-byte hash reuses the same verified primary archive path from `copied-legacy-archives.json`
+- copied legacy-archive registry entries include source root, storage location, project-relative source path, source hash, lexical source path evidence, resolved path evidence, copied archive path, copied hash, timestamp, operation, recovery status, and transaction id
 - copied legacy-archive registry corruption or missing copied archive content fails with a recovery diagnostic instead of silently allocating a duplicate copy
 - active-writer transaction records include active output fields such as `allocated_active_path`, `temp_active_path`, `output_sha256`, and state cleanup action rather than relying on archive-only fields
 - active-writer idempotency keys exclude `transaction_id` and generated content hash, while transaction records keep those values as separate fields
@@ -954,7 +973,7 @@ Minimum source-repair coverage:
 - discovery/search/triage tests fail on broad exception swallowing that drops path-specific skip reasons
 - dormant validation helper closeout does not claim live hook behavior, or live hook closeout includes installed-config proof
 
-Installed-host certification coverage is separate from `source repaired`. These behavior tests are mandatory before claiming `installed host matrix certified` or `installed cache certified`. Gate 1f must add source-proof harness coverage for path resolution and cache isolation, but the full installed-host behavior matrix may remain `not-claimed` when the closeout label is only `source repaired`:
+Installed-host certification coverage is separate from `source repaired`. These behavior tests are mandatory before claiming the primitive proof label `installed host matrix behavior proved` or the composite labels `installed host matrix certified` and `installed cache certified`. Gate 1f must add source-proof harness coverage for path resolution and cache isolation, but the full installed-host behavior matrix may remain `not-claimed` when the closeout label is only `source repaired`:
 
 - installed-host smoke for no `.codex/` ignore reports untracked `.codex/handoffs/` runtime files without editing host ignore files
 - installed-host smoke for broad `.codex/` ignore reports ignored `.codex/handoffs/` runtime files without using source-repo ignore proof
@@ -985,7 +1004,9 @@ git status --short --ignored -- .codex/handoffs/.session-state/preflight/handoff
 
 The implementation branch for this execution is a fresh named implementation branch from current `main` in the canonical checkout, using this repo's `feature/*` branch-prefix policy. Direct implementation on `main` is not allowed. Branch switching is forbidden from a worktree with unrelated modified, deleted, or untracked paths. If `git status --short --untracked-files=all` shows anything outside the reviewed control document, repo-authority residue ledger, and explicitly ignored local-preflight evidence, stop and repair the checkout hygiene or revise this plan before code changes. Do not move, stash, delete, or normalize unrelated user work as part of this plan.
 
-The preflight must classify tracked durable handoff artifacts, ignored legacy operational artifacts, untracked legacy operational artifacts, previous-primary hidden archive artifacts, state-like residue, and policy-conflict artifacts before code changes. Collapsed directory-only status output is not sufficient; path-level inventory from `find` or an equivalent enumerator is required. The control document and repo-authority residue ledger must be tracked or otherwise explicitly recorded as durable implementation authority before source code changes begin. Local residue enumeration belongs in ignored local-preflight evidence and must not be presented as fresh-clone repo truth.
+The preflight must classify tracked durable handoff artifacts, ignored legacy operational artifacts, provenance-backed untracked legacy operational artifacts, previous-primary hidden archive artifacts, state-like residue, and policy-conflict artifacts before code changes. Collapsed directory-only status output is not sufficient; path-level inventory from `find` or an equivalent enumerator is required. The control document and repo-authority residue ledger must be tracked or otherwise explicitly recorded as durable implementation authority before source code changes begin. Local residue enumeration belongs in ignored local-preflight evidence and must not be presented as fresh-clone repo truth.
+
+Repeat this preflight at the start of every mutating behavior gate, not only Gate 0r. The closeout for Gates 1c, 1d, 1e, and 4 must name the preflight timestamp, branch head, local-preflight evidence hash, and TTL classification result used for that gate.
 
 ```bash
 uv run pytest \
@@ -1059,16 +1080,27 @@ The smoke must also assert that the helper and skill-doc realpaths under test ar
 
 ## Evidence Status Gates
 
-Closeout must use exactly one label:
+Closeout must record narrow proof labels before assigning a composite status. The proof labels are:
 
-- `source repaired`: source, docs, source-repo ignore policy, generated stale-text gate, helper tests, skill-doc surface tests, refresh classifier tests, active-writer transaction tests, hard-stop matrix proof, isolated installed-host harness/source-proof path tests, and source refresh smoke tests pass; installed-host matrix behavior smoke, installed cache, and live hook behavior are not claimed current.
-- `refresh-ready but not mutated`: all `source repaired` gates pass, plus refresh evidence says mutation is ready, but live installed-cache mutation was not run.
-- `installed host matrix certified`: all `source repaired` gates pass, installed plugin/helper smoke covers the host-repo policy matrix, and no broader installed-cache certification or live hook claim is made beyond that matrix.
-- `installed cache certified`: source/cache equality or approved divergence proof exists, installed cache was refreshed or verified current, installed-host matrix smoke passes, installed-cache smoke passes, the installed skill docs are the docs under test, and any live hook claim has installed-config proof.
+- `source storage repaired`: source helper APIs, storage discovery, filesystem/git diagnostics, transactions, registries, active writers, state bridge, recovery, source-repo ignore policy, and source tests pass.
+- `skill docs reconciled`: Handoff skill docs and release docs invoke the helper protocol and contain no current-facing stale storage authority text.
+- `refresh surfaces reconciled`: refresh classifier, fixtures, inventory, stale-text gate, and source refresh smoke agree with `.codex/handoffs/` as primary.
+- `installed harness source-proof`: isolated harness source tests prove installed-root resolution, cache isolation, manifest identity, and realpath separation; no installed-host behavior matrix or installed-cache currency is claimed.
+- `installed host matrix behavior proved`: installed plugin/helper smoke covers the host-repo policy matrix through the app-server install authority path.
+- `installed cache current`: source/cache equality or approved divergence proof exists, installed cache was refreshed or verified current, installed-cache smoke passes, the installed skill docs are the docs under test, and any live hook claim has installed-config proof.
+
+After those proof labels are recorded, closeout must use exactly one composite publication label:
+
+- `source repaired`: requires `source storage repaired`, `skill docs reconciled`, `refresh surfaces reconciled`, `installed harness source-proof`, hard-stop matrix proof, and source refresh smoke. It explicitly does not claim installed-host matrix behavior, installed-cache currency, or live hook behavior.
+- `refresh-ready but not mutated`: all `source repaired` requirements pass, plus refresh evidence says mutation is ready, but live installed-cache mutation was not run.
+- `installed host matrix certified`: all `source repaired` requirements pass, `installed host matrix behavior proved` passes, and no broader installed-cache certification or live hook claim is made beyond that matrix.
+- `installed cache certified`: all preceding requirements pass, plus `installed cache current` passes.
 
 ## Implementation Order
 
 Use named vertical commit gates so the implementation does not become one long unstable branch. A gate may go red locally while it is being implemented, but the gate boundary must be green and reviewable. Do not merge or hand off a gate that only adds tests for future code. Each gate must include its own tests, implementation, compatibility notes, and focused verification.
+
+Gate 0r freshness is not inherited by later behavior-changing gates. Before every gate or PR that starts mutating runtime behavior, rewires active writers or load semantics, changes state/registry handling, or claims source closeout, rerun branch/residue/TTL preflight from the current branch head. At minimum this applies to Gates 1c, 1d, 1e, 4, and any split PR that touches their owned surfaces. If the preflight discovers new residue, expired TTL evidence, dirty unrelated worktree state, or a changed branch base, the gate stops until the local-preflight evidence and this plan's disposition rules are refreshed.
 
 1. `gate-0a-control-authority-and-ignore-policy` - historical prep at `bf83762`: Created `feature/handoff-storage-reversal-main` from current `main`, recorded this control document and the repo-authority residue ledger, and patched the narrow source-repo `.codex/handoffs/**` ignore policy.
 2. `gate-0b-local-preflight-evidence` - historical prep at `bf83762`: Generated ignored canonical-checkout local-preflight evidence at `.codex/handoffs/.session-state/preflight/handoff-storage-residue-local-preflight.json`; evidence hash was `335e8b2fc615167d92168c7afb011da58753c3c2c010da5e0a5f3f37b7c85e12`.
@@ -1089,11 +1121,28 @@ Preferred PR split:
 - Discovery/read-only PR: Gates 0r, 1a, and 1b.
 - Load/archive transaction PR: Gate 1c.
 - Active writers/state recovery PR: Gates 1d and 1e, unless Gate 1d is large enough to split alone.
-- Docs/refresh/stale-text PR: Gates 2 and 3.
 - Installed-host harness source PR: Gate 1f, with no real installed-cache mutation claim.
+- Docs/refresh/stale-text PR: Gates 2 and 3, after Gate 1f is reviewed or explicitly merged first.
+- Source closeout PR or closeout commit: Gate 4, only after Gate 1f and Gates 2-3 are green.
 - Installed-host certification maintenance run: Gate 5 only if installed-host behavior certification or real installed-cache mutation is in scope.
 
 WIP cap: keep at most one non-green implementation gate open on a branch. If a gate starts pulling in the next slice to pass, stop and split or patch this implementation order before continuing.
+
+### Gate Capacity Model
+
+Each gate must start with a short gate brief in the PR description or closeout note naming the owner role, owned file set, expected test count, and split triggers. These budgets are planning controls, not permission to skip necessary files; exceeding one requires stopping to split the gate or patch this document.
+
+| Gate | Owner role | Expected owned files | Expected new or changed tests | Stop or split trigger |
+|---|---|---:|---:|---|
+| 1a discovery read-only | storage discovery owner | 6-10 | 20-35 cases | More than 12 files, any load/writer mutation, or unresolved broad exception swallowing. |
+| 1b reader/history | read-only surface owner | 5-9 | 15-30 cases | More than 10 files, any archive/state mutation, or stale direct root scans left in search/triage/summary. |
+| 1c load transactions | load transaction owner | 8-14 | 30-50 cases | More than 16 files, active-writer code required to pass, or registry/transaction recovery not reviewable in one diff. |
+| 1d active writers | active-writer owner | 8-14 | 30-50 cases | More than 16 files, state-bridge recovery dominates the diff, or skill-flow wrapper cannot be executed end-to-end. |
+| 1e state bridge/recovery | state recovery owner | 6-10 | 20-35 cases | More than 12 files, deletion of legacy state proposed, or operator recovery remains prose-only. |
+| 1f installed harness source | installed harness owner | 4-8 | 10-20 cases | More than 10 files, real `/Users/jp/.codex` mutation needed, or test-only installer evidence is mislabeled as installed-host behavior. |
+| 2 skill/release docs | skill docs owner | 8-14 | 8-15 surface assertions | More than 16 files or docs claim behavior not yet proven by source gates. |
+| 3 refresh/stale text | refresh owner | 6-12 | 15-30 cases | More than 14 files, inventory generator mutates during `--check`, or refresh labels blur source and installed-cache proof. |
+| 4 source closeout | closeout owner | 2-5 evidence/control files | hard-stop matrix plus command evidence | Any unproved hard stop, any manual-review row without named reviewer evidence, or any composite label with missing primitive proof labels. |
 
 ## Hard Stop Conditions
 
@@ -1101,6 +1150,7 @@ Stop implementation and repair the contract before continuing if any of these oc
 
 - Preflight does not classify `docs/handoffs/**` artifacts or the branch/worktree state before implementation.
 - Preflight relies on collapsed `docs/handoffs/` status output instead of path-level artifact enumeration.
+- A mutating behavior gate starts from stale Gate 0r evidence instead of rerunning branch/residue/TTL preflight from the current branch head.
 - Implementation proceeds directly on `main` instead of a fresh named implementation branch from current `main`.
 - Branch switching or implementation starts from a dirty worktree with unrelated modified, deleted, or untracked paths instead of stopping and repairing checkout hygiene.
 - A non-canonical implementation worktree is introduced without first revising this plan, the residue ledger, and the local-preflight evidence schema.
@@ -1110,9 +1160,11 @@ Stop implementation and repair the contract before continuing if any of these oc
 - Any local-preflight `docs/handoffs/handoff-*` or `docs/handoffs/handoff-*.json` path lacks an ignored local-preflight evidence row with scope, explicit disposition, and verification hook.
 - The policy-authority override is used to delete, untrack, or reclassify tracked durable handoff artifacts as disposable.
 - Default active selection includes tracked durable `docs/handoffs/*.md` artifacts without an exact reviewed runtime migration opt-in path and hash.
-- Default active selection excludes valid ignored or untracked legacy operational `docs/handoffs/*.md` files during the cutover release without a documented diagnostic that intentionally blocks them.
+- Default active selection includes valid-looking untracked `docs/handoffs/*.md` files without plugin provenance, current local-preflight proof, or exact reviewed runtime migration opt-in path and hash.
+- Default active selection excludes valid ignored or provenance-backed untracked legacy operational `docs/handoffs/*.md` files during the cutover release without a documented diagnostic that intentionally blocks them.
 - Previous-primary hidden archive files under `.codex/handoffs/.archive/*.md` disappear from history search or explicit archive-load compatibility without a compatibility-ledger decision and tests.
 - A tracked `.codex/handoffs/*.md` source file is moved, archived, suppressed, or otherwise mutated by implicit or explicit primary load.
+- A source-backed operation or target allocation reports only git visibility and omits filesystem status for directory, symlink, non-regular, unreadable, path-escape, or parent-file-conflict cases.
 - Source-repo `.gitignore` checks are treated as proof of installed-host behavior.
 - Handoff edits a host repo's `.gitignore`, `.git/info/exclude`, tracked `.codex/**` content, or index state during normal save/load/list/search/summary/quicksave behavior.
 - Installed-host smoke does not cover no ignore, broad `.codex/` ignore, tracked `.codex/skills/**`, tracked handoff-path collision, tracked primary active source, and non-git project-root cases before claiming installed-host readiness.
@@ -1121,6 +1173,7 @@ Stop implementation and repair the contract before continuing if any of these oc
 - Save, summary, or quicksave constructs active output paths outside `allocate-active-path` or writes active markdown outside `write-active-handoff`.
 - Save, summary, or quicksave reports success after writing active output while chain-state cleanup remains failed, ambiguous, or recoverable-only.
 - Save, summary, or quicksave generates final content before `begin-active-write` has persisted a stable run id, state snapshot, and allocated path.
+- Save, summary, or quicksave skill-flow tests only static-scan helper names and do not execute the begin/generate/write/retry protocol with persisted operation identity.
 - `begin-active-write` holds the project lock across LLM or local content generation instead of releasing it after durable reservation.
 - `write-active-handoff` proceeds after an expired lease, conflicting chain mutation, state snapshot mismatch, transaction watermark mismatch, or ambiguous reservation match.
 - Active-writer idempotency key includes `transaction_id` or generated content hash.
@@ -1131,7 +1184,8 @@ Stop implementation and repair the contract before continuing if any of these oc
 - Read-only `/list-handoffs`, `/distill`, `/search`, `/triage`, or state inventory completes, rolls back, suppresses, clears, or marks a pending transaction instead of only reporting read-only recovery inventory.
 - A successful legacy load leaves the loaded legacy active source visible to later active-selection scans without changed bytes.
 - A legacy load can produce duplicate primary archive/state records for one source/hash after retry or concurrent load.
-- Repeated explicit legacy archive load for the same lexical source path plus raw-byte hash creates duplicate primary archive copies instead of reusing the copied legacy-archive registry.
+- Repeated explicit legacy archive load for the same source root, project-relative source path, storage location, and raw-byte hash creates duplicate primary archive copies instead of reusing the copied legacy-archive registry.
+- Consumed or copied legacy registries use absolute paths as the only stable identity key instead of source root, project-relative source path, storage location, and raw-byte hash.
 - Any mutating load/state path bypasses the project lock, transaction record, atomic write, or recovery protocol.
 - Any active writer bypasses the project lock, transaction record, atomic write, or recovery protocol.
 - A transaction interruption can leave inconsistent active/archive/state/registry artifacts without a recovery diagnostic.
@@ -1154,6 +1208,7 @@ Stop implementation and repair the contract before continuing if any of these oc
 - Skill docs retain direct shell globbing, `ls -t`, or hardcoded archive/state path construction instead of calling helper entrypoints.
 - Chain-state helpers require `uv run` or third-party dependencies without an explicit launcher-class waiver.
 - `/summary` project-arc synthesis keeps direct `docs/handoffs/archive/` scans or misses primary archive history after cutover.
+- `/summary` claims snapshot-bound project-arc synthesis without recording and revalidating a candidate-set manifest hash, or fails to label the arc context `best_effort_not_snapshot_bound`.
 - A preserved public script API or CLI subcommand is removed or silently changes output shape without a compatibility-ledger decision and test.
 - `storage_authority_inventory.py --check` mutates files or lacks a corresponding `--write` update path.
 - Closeout runs `storage_authority_inventory.py --write` instead of check-only verification.
@@ -1163,6 +1218,8 @@ Stop implementation and repair the contract before continuing if any of these oc
 ## Hard Stop Closeout Matrix
 
 Gate 0r must create or update a closeout matrix before source code implementation starts. The matrix may live in this document or in `docs/superpowers/plans/2026-05-13-handoff-storage-hard-stop-closeout.md`, but it must be tracked before Gate 1 source edits.
+
+The matrix must be generated or mechanically checked from the Hard Stop Conditions bullet list. A hand-copied matrix is not sufficient. Gate 0r must add stable `HS-###` identities either by embedding them in the bullet source or by a generator that assigns IDs and stores a checksum of each stop condition. Closeout must run the generator in check mode and prove the committed matrix is current. `manual-review` is exceptional: every manual row must name the reviewer evidence artifact and explain why no test, smoke, static scan, ledger check, or generated inventory can prove the stop.
 
 The matrix must include one row for every bullet in Hard Stop Conditions with these columns:
 
@@ -1176,13 +1233,19 @@ The matrix must include one row for every bullet in Hard Stop Conditions with th
 | `proof_command_or_artifact` | Exact pytest selector, script command, smoke summary, generated inventory, or reviewer checklist item. |
 | `closeout_status` | `pending`, `proved`, `not-claimed`, or `blocked`. |
 
-Closeout cannot claim `source repaired` unless every hard-stop row is `proved` or `not-claimed` with an evidence-status label that explicitly excludes that surface. `manual-review` rows are allowed only when the plan explains why the stop is not machine-checkable and names the reviewer checklist item. A summary statement that tests passed is not a substitute for this matrix.
+Closeout cannot claim `source repaired` unless every hard-stop row is `proved` or `not-claimed` with an evidence-status label that explicitly excludes that surface. `manual-review` rows are allowed only under the exceptional rule above. A summary statement that tests passed is not a substitute for this matrix.
 
 ## Boundary Ledger
 
 Gate 0A/0B prep commit: `bf83762 chore: prepare handoff storage reversal gate 0a`
 
-Post-review plan authority commit: `4b5f6fc docs: reanchor handoff storage reversal plan`. Later plan-only correction commits supersede this boundary only after they are committed on this branch with a clean worktree; do not try to self-name a commit hash inside the commit that creates it.
+Post-review plan authority commits:
+
+- `4b5f6fc docs: reanchor handoff storage reversal plan`
+- `7effa25 docs: tighten handoff reversal execution semantics`
+- `8fd78af docs: define handoff mutation watermark`
+
+As of this revision, `8fd78af` is the latest clean committed authority boundary. Later plan-only correction commits supersede this boundary only after they are committed on this branch with a clean worktree; do not try to self-name a commit hash inside the commit that creates it.
 
 Final source implementation commit: filled during `gate-4-source-closeout` after source repair verification passes.
 
@@ -1220,4 +1283,4 @@ Gate 0r verification remains open until branch hygiene, ignored-evidence visibil
 
 ### Evidence Status
 
-Gate 0A/0B prep exists historically at `bf83762`, and the post-review plan reanchor exists at `4b5f6fc`. No `source repaired`, `refresh-ready but not mutated`, `installed host matrix certified`, or `installed cache certified` claim exists until the corresponding later gates run and record fresh verification.
+Gate 0A/0B prep exists historically at `bf83762`. The post-review plan authority lineage is `4b5f6fc` -> `7effa25` -> `8fd78af`, with later clean committed plan corrections superseding that lineage. No primitive proof label or composite publication label exists until the corresponding later gates run and record fresh verification.
