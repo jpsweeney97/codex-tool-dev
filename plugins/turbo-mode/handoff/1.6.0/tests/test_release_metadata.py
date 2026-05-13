@@ -5,7 +5,6 @@ import re
 import tomllib
 from pathlib import Path
 
-
 PLUGIN_ROOT = Path(__file__).parent.parent
 POLICY_DOCS = [
     PLUGIN_ROOT / "README.md",
@@ -15,6 +14,16 @@ POLICY_DOCS = [
     PLUGIN_ROOT / "skills" / "quicksave" / "SKILL.md",
     PLUGIN_ROOT / "skills" / "summary" / "SKILL.md",
 ]
+CHAIN_WRITER_DOCS = [
+    PLUGIN_ROOT / "skills" / "save" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "quicksave" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "summary" / "SKILL.md",
+]
+STATE_WRITER_DOCS = [
+    PLUGIN_ROOT / "README.md",
+    PLUGIN_ROOT / "references" / "handoff-contract.md",
+    PLUGIN_ROOT / "skills" / "load" / "SKILL.md",
+]
 POLICY_CODE_COMMENTS = [
     PLUGIN_ROOT / "scripts" / "cleanup.py",
     PLUGIN_ROOT / "scripts" / "project_paths.py",
@@ -22,7 +31,9 @@ POLICY_CODE_COMMENTS = [
 
 
 def test_versions_are_aligned() -> None:
-    plugin_json = json.loads((PLUGIN_ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    plugin_json = json.loads(
+        (PLUGIN_ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
     pyproject = tomllib.loads((PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert plugin_json["version"] == "1.6.0"
     assert pyproject["project"]["version"] == "1.6.0"
@@ -38,9 +49,18 @@ def test_docs_do_not_claim_universal_gitignore_policy() -> None:
 
 
 def test_docs_use_resume_token_state_shape() -> None:
-    for path in POLICY_DOCS:
+    for path in STATE_WRITER_DOCS:
         text = path.read_text(encoding="utf-8")
         assert "handoff-<project>-<resume_token>.json" in text
+
+
+def test_chain_writer_docs_use_active_writer_state_bridge() -> None:
+    for path in CHAIN_WRITER_DOCS:
+        text = path.read_text(encoding="utf-8")
+        assert "begin-active-write" in text
+        assert "write-active-handoff" in text
+        assert "resumed_from_path" in text
+        assert "handoff-<project>-<resume_token>.json" not in text
 
 
 def test_internal_comments_do_not_assert_gitignored_or_local_only_policy() -> None:
