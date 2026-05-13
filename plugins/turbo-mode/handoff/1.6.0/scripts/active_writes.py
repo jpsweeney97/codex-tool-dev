@@ -142,6 +142,7 @@ def begin_active_write(
         transaction_watermark = _transaction_watermark(layout.primary_state_dir)
         timestamp = _parse_created_at(created_at)
         active_path = _allocate_active_path(
+            layout.project_root,
             layout.primary_active_dir,
             operation,
             bound_slug,
@@ -306,7 +307,13 @@ def allocate_active_path(
         )
     layout = get_storage_layout(project_root)
     timestamp = _parse_created_at(created_at)
-    return _allocate_active_path(layout.primary_active_dir, operation, slug, timestamp)
+    return _allocate_active_path(
+        layout.project_root,
+        layout.primary_active_dir,
+        operation,
+        slug,
+        timestamp,
+    )
 
 
 def write_active_handoff(
@@ -541,6 +548,7 @@ def recover_active_write_transaction(
 
 
 def _allocate_active_path(
+    project_root: Path,
     active_dir: Path,
     operation: str,
     slug: str,
@@ -550,19 +558,35 @@ def _allocate_active_path(
     prefix = created_at.strftime("%Y-%m-%d_%H-%M")
     stem = f"{operation}-{slug}"
     candidate = active_dir / f"{prefix}_{stem}.md"
-    if not _active_path_occupied(candidate):
+    if not _active_path_occupied(project_root, candidate):
         return candidate
     for index in range(1, 100):
         candidate = active_dir / f"{prefix}_{stem}-{index:02d}.md"
-        if not _active_path_occupied(candidate):
+        if not _active_path_occupied(project_root, candidate):
             return candidate
     raise ActiveWriteError(
         f"allocate-active-path failed: collision budget exhausted. Got: {slug!r:.100}"
     )
 
 
-def _active_path_occupied(path: Path) -> bool:
-    return path.exists() or path.is_symlink()
+def _active_path_occupied(project_root: Path, path: Path) -> bool:
+    return path.exists() or path.is_symlink() or _git_tracks_path(project_root, path)
+
+
+def _git_tracks_path(project_root: Path, path: Path) -> bool:
+    project = project_root.resolve()
+    try:
+        rel = path.resolve().relative_to(project).as_posix()
+    except ValueError:
+        return False
+    tracked = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", "--", rel],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return tracked.returncode == 0
 
 
 def _state_snapshot(

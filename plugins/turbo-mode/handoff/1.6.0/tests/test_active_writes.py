@@ -154,6 +154,30 @@ def test_allocate_active_path_treats_dangling_symlink_as_occupied(tmp_path: Path
     assert active_path == tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_save-repeat-01.md"
 
 
+def test_allocate_active_path_treats_tracked_missing_path_as_occupied(tmp_path: Path) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    existing = tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_save-repeat.md"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("tracked candidate\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", str(existing.relative_to(tmp_path))],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(["trash", str(existing)], check=True, capture_output=True, text=True)
+
+    active_path = active_writes.allocate_active_path(
+        tmp_path,
+        operation="save",
+        slug="repeat",
+        created_at="2026-05-13T16:45:00Z",
+    )
+
+    assert active_path == tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_save-repeat-01.md"
+
+
 def test_begin_active_write_reuses_existing_run_id_reservation(tmp_path: Path) -> None:
     first = active_writes.begin_active_write(
         tmp_path,
