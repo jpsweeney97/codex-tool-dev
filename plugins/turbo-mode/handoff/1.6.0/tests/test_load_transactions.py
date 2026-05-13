@@ -105,6 +105,43 @@ def test_explicit_primary_archive_load_writes_state_without_moving_archive(tmp_p
     assert state["archive_path"] == str(archive)
 
 
+def test_load_retry_recovers_primary_archive_after_state_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _handoff(
+        tmp_path / ".codex" / "handoffs" / "archive" / "2026-05-13_12-00_archived.md"
+    )
+    before = archive.read_text(encoding="utf-8")
+    state_path = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-retry.json"
+    original_write_resume_state = load_transactions.write_resume_state
+
+    def fail_write_resume_state(*args: object, **kwargs: object) -> Path:
+        raise RuntimeError("state write failed")
+
+    monkeypatch.setattr(load_transactions, "write_resume_state", fail_write_resume_state)
+    with pytest.raises(RuntimeError, match="state write failed"):
+        load_transactions.load_handoff(
+            tmp_path,
+            project_name="demo",
+            explicit_path=archive,
+            resume_token="retry",
+        )
+
+    assert archive.read_text(encoding="utf-8") == before
+    assert not state_path.exists()
+
+    monkeypatch.setattr(load_transactions, "write_resume_state", original_write_resume_state)
+
+    result = load_transactions.load_handoff(tmp_path, project_name="demo", resume_token="retry")
+
+    assert result.source_path == archive
+    assert result.archive_path == archive
+    assert result.state_path == state_path
+    assert json.loads(state_path.read_text(encoding="utf-8"))["archive_path"] == str(archive)
+    assert list_load_recovery_records(tmp_path) == []
+
+
 def test_explicit_legacy_archive_load_copies_to_primary_archive_and_reuses_registry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

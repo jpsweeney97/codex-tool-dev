@@ -211,6 +211,7 @@ def _recover_pending_load(layout) -> LoadResult | None:
             continue
         if record.get("storage_location") not in {
             StorageLocation.PRIMARY_ACTIVE,
+            StorageLocation.PRIMARY_ARCHIVE,
             StorageLocation.LEGACY_ACTIVE,
             StorageLocation.LEGACY_ARCHIVE,
             StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE,
