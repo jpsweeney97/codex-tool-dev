@@ -60,6 +60,15 @@ def test_begin_active_write_persists_operation_state_before_content_generation(
     assert payload["lease_expires_at"]
     assert payload["transaction_watermark"]
     assert payload["state_snapshot_hash"]
+    assert payload["recovery_commands"]["continue"]["command"] == (
+        "active-write-transaction-recover"
+    )
+    assert payload["recovery_commands"]["continue"]["args"]["project_root"] == str(tmp_path)
+    assert payload["recovery_commands"]["continue"]["args"]["operation_state_path"] == str(
+        operation_state_path
+    )
+    assert payload["recovery_commands"]["retry_write"]["command"] == "write-active-handoff"
+    assert payload["recovery_commands"]["abandon"]["command"] == "abandon-active-write"
 
     transaction_path = Path(payload["transaction_path"])
     transaction = json.loads(transaction_path.read_text(encoding="utf-8"))

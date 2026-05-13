@@ -53,6 +53,7 @@ class ActiveWriteReservation:
     lease_acquired_at: str
     lease_expires_at: str
     transaction_watermark: str
+    recovery_commands: dict[str, object]
     status: str
     created_at: str
     updated_at: str
@@ -80,6 +81,7 @@ class ActiveWriteReservation:
             "lease_acquired_at": self.lease_acquired_at,
             "lease_expires_at": self.lease_expires_at,
             "transaction_watermark": self.transaction_watermark,
+            "recovery_commands": self.recovery_commands,
             "status": self.status,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -185,6 +187,7 @@ def begin_active_write(
             lease_acquired_at=acquired_at,
             lease_expires_at=expires_at,
             transaction_watermark=transaction_watermark,
+            recovery_commands=_recovery_commands(layout.project_root, operation_state_path),
             status="begun",
             created_at=acquired_at,
             updated_at=acquired_at,
@@ -268,6 +271,7 @@ def _reservation_from_payload(payload: dict[str, object]) -> ActiveWriteReservat
         lease_acquired_at=str(payload["lease_acquired_at"]),
         lease_expires_at=str(payload["lease_expires_at"]),
         transaction_watermark=str(payload["transaction_watermark"]),
+        recovery_commands=dict(payload.get("recovery_commands", {})),
         status=str(payload["status"]),
         created_at=str(payload["created_at"]),
         updated_at=str(payload["updated_at"]),
@@ -298,7 +302,37 @@ def _ensure_no_compatible_reservation(
         raise ActiveWriteError(
             "begin-active-write failed: active write already reserved. "
             f"Got: {str(path)!r:.100}"
-        )
+    )
+
+
+def _recovery_commands(project_root: Path, operation_state_path: Path) -> dict[str, object]:
+    operation_state = str(operation_state_path)
+    return {
+        "continue": {
+            "command": "active-write-transaction-recover",
+            "args": {
+                "project_root": str(project_root),
+                "operation_state_path": operation_state,
+            },
+        },
+        "retry_write": {
+            "command": "write-active-handoff",
+            "args": {
+                "project_root": str(project_root),
+                "operation_state_path": operation_state,
+                "content_file": "<content-file>",
+                "content_sha256": "<sha256>",
+            },
+        },
+        "abandon": {
+            "command": "abandon-active-write",
+            "args": {
+                "project_root": str(project_root),
+                "operation_state_path": operation_state,
+                "reason": "<reason>",
+            },
+        },
+    }
 
 
 def allocate_active_path(
