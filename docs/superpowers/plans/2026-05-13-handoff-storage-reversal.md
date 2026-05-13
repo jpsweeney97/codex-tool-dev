@@ -2,13 +2,15 @@
 
 ## Status
 
-Gate 0A/0B prep is committed on `feature/handoff-storage-reversal-main` at `bf83762`. The post-review plan reanchor is committed at `4b5f6fc`; later plan-only corrections at `7effa25` and `8fd78af` supersede that reanchor. As of this revision, `HEAD 8fd78af` is the latest clean committed plan authority for this branch, and any later clean committed version of this document on this branch supersedes the named historical anchors. Gate 0r remains open for branch/residue preflight refresh, TTL-sensitive residue reclassification, hard-stop matrix creation, and the execution-economics controls below. Source implementation remains blocked until Gate 0r passes.
+Gate 0A/0B prep is committed on `feature/handoff-storage-reversal-main` at `bf83762`. The committed plan authority lineage before this working-tree revision is `4b5f6fc` -> `7effa25` -> `8fd78af` -> `2769186` -> `e9b416a` -> `688335a`. This document must not self-name the commit that contains it: until this revision is committed, it is a working-tree plan patch. Gate 0r must record the current committed plan boundary after this patch is committed and before any source implementation starts. Gate 0r remains open for branch/residue preflight refresh, TTL-sensitive residue reclassification, legacy-active markdown preflight, hard-stop matrix creation, gate proof-map creation, and the execution-economics controls below. Source implementation remains blocked until Gate 0r passes.
+
+For this execution, `feature/handoff-storage-reversal-main` is the canonical implementation branch and checkout topology. Creating a different implementation branch, rebasing onto a different base, or moving execution into an isolated worktree is forbidden unless this plan is patched first; that patch must require regenerating both preflight evidence files from the new topology and updating the ledger/base-commit authority boundary before any Gate 0r evidence may be reused.
 
 This document is the implementation contract for reversing Handoff storage authority from the live source's current `docs/handoffs/` primary policy to `.codex/handoffs/` as the post-cutover write/read target. Until the implementation commit lands, `.codex/handoffs/` is target authority, not current repo truth.
 
 Done means all writers, readers, skill docs, helper scripts, tests, dormant validation helpers or live hooks, refresh classifier logic, refresh smoke, release docs, ignore policy, and stale-text gates move together. A partial reader-only migration is not closeout.
 
-The `bf83762` commit recorded Gate 0A/0B prep evidence for the then-committed contract by tracking this control document and the repo-authority residue ledger, patching source-repo ignore policy, and recording canonical-checkout local preflight evidence for current top-level `docs/handoffs/handoff-*` residue paths. The `4b5f6fc` commit records the original post-review plan authority boundary, and `7effa25` plus `8fd78af` record later plan-only corrections. Those commits do not complete Gate 0r; Gate 0r remains open for branch/residue preflight refresh, TTL-sensitive local residue reclassification, hard-stop matrix creation, and capacity-budget recording. Source implementation may start only after `gate-0r-review-reanchor-and-preflight-refresh` passes. Source repair closeout remains blocked until active writer creation is covered by helper APIs and end-to-end skill-flow transaction tests. Installed-host certification remains blocked until the host-repo policy matrix below is covered by source-proof installed-plugin smoke.
+The `bf83762` commit recorded Gate 0A/0B prep evidence for the then-committed contract by tracking this control document and the repo-authority residue ledger, patching source-repo ignore policy, and recording canonical-checkout local preflight evidence for current top-level `docs/handoffs/handoff-*` residue paths. The `4b5f6fc` commit records the original post-review plan authority boundary, and later plan-only corrections through `688335a` record subsequent hardening. Those commits do not complete Gate 0r; Gate 0r remains open for branch/residue preflight refresh, TTL-sensitive local residue reclassification, legacy-active markdown preflight, hard-stop matrix creation, gate proof-map creation, and capacity-budget recording. Source implementation may start only after `gate-0r-review-reanchor-and-preflight-refresh` passes from the current committed plan boundary. Source repair closeout remains blocked until active writer creation is covered by helper APIs and end-to-end skill-flow transaction tests. Installed-host certification remains blocked until the host-repo policy matrix below is covered by source-proof installed-plugin smoke.
 
 ## Policy Authority Override
 
@@ -23,16 +25,47 @@ The conflict is:
 This override does not make all `docs/handoffs/**` disposable. The implementation must classify `docs/handoffs/**` into these classes before changing policy or code:
 
 - `tracked-durable-handoff-artifact`: any `git ls-files docs/handoffs` result, or any file explicitly named by a reviewed repo policy as durable. Preserve it; do not delete, untrack, treat it as operational cleanup, or include it in implicit active selection.
-- `ignored-legacy-operational-handoff`: ignored active handoff, checkpoint, summary, archive, or state created by the pre-cutover Handoff plugin. Treat it as read-only legacy migration/search/bridge input according to this plan.
-- `untracked-legacy-operational-handoff`: untracked `docs/handoffs/*.md` file that validates as a current-contract active handoff, checkpoint, or summary and has runtime provenance beyond merely being untracked. It must satisfy at least one of these proofs: parsed pre-cutover Handoff provenance accepted by the classifier, a current local-preflight evidence row naming the exact path and raw-byte SHA256 as runtime material, or an exact reviewed runtime migration opt-in naming the path and hash. Valid-looking untracked files without one of those proofs are `policy-conflict-artifact`, not migration input.
+- `ignored-legacy-operational-handoff`: ignored top-level active handoff, checkpoint, or summary markdown under `docs/handoffs/*.md` created by the pre-cutover Handoff plugin and proven by the legacy provenance classifier below. Ignored git visibility is required for this class, but ignored status alone is not origin proof. Valid-looking ignored files without an accepted provenance proof are `policy-conflict-artifact`, not migration input. Archive and state paths must not use this active markdown class.
+- `untracked-legacy-operational-handoff`: untracked `docs/handoffs/*.md` file that validates as a current-contract active handoff, checkpoint, or summary and is proven by the legacy provenance classifier below. Untracked git visibility is required for this class, but untracked status alone is not origin proof. Valid-looking untracked files without an accepted provenance proof are `policy-conflict-artifact`, not migration input.
+- `legacy-operational-archive`: ignored or untracked archive markdown under `docs/handoffs/archive/*.md` created by the pre-cutover Handoff plugin. Treat it as read-only history-search and explicit-path input; never include it in active selection, never classify it with the legacy active markdown classifier, and preserve tracked or intentionally durable archive files under the tracked-durable rules.
+- `legacy-state-bridge-input`: chain-state files under `docs/handoffs/.session-state/**` created by the pre-cutover Handoff plugin. Treat them only as bridge or recovery input under the Legacy State Bridge contract; never treat them as handoff markdown documents or active-selection candidates.
 - `reviewed-runtime-migration-opt-in`: an exact legacy `docs/handoffs/**` path plus source hash named by a reviewed migration note as safe to treat as runtime migration input. This is the only way a tracked or otherwise durable-looking `docs/handoffs/**` file may enter runtime migration selection.
 - `previous-primary-hidden-archive`: historical archive file under `<project_root>/.codex/handoffs/.archive/*.md` from the pre-`docs/handoffs/` storage generation. Treat it as read-only history-search and explicit-path input, copying or reusing a primary archive copy only through the explicit legacy archive transaction path.
 - `state-like-residue`: files such as `docs/handoffs/handoff-*.json` or `docs/handoffs/handoff-*` outside `.session-state/`. Inventory them, classify them, and either bridge exactly one valid project state candidate or reject with a diagnostic; never treat them as handoff markdown documents.
-- `policy-conflict-artifact`: any artifact whose durable-vs-operational classification is ambiguous. Stop before implementation until it is classified by a reviewed note or plan update.
+- `non-handoff-filesystem-residue`: unsupported or incidental files under `docs/handoffs/**`, such as `.DS_Store`, local `.gitignore` files, non-markdown top-level files that are not state-like residue, archive non-markdown files, or other entries that are not handoff markdown, archive markdown, state bridge input, reviewed opt-in input, or state-like residue. Inventory them with an explicit out-of-scope disposition; never select, migrate, copy, delete, quarantine, or treat them as proof of handoff runtime provenance.
+- `policy-conflict-artifact`: any artifact whose durable-vs-operational classification cannot be proven as eligible runtime migration input. This is a valid blocked disposition when a legacy-active preflight row records the path, hash when readable, missing provenance, `selection_eligibility=blocked-policy-conflict`, and verification hook. Stop before implementation only when a path has no explicit disposition, when the implementation would need to select it implicitly, or when an operator wants it treated as migration input without a reviewed opt-in.
 
 The intended override is narrow: after cutover, newly written Handoff operational session artifacts go under `.codex/handoffs/`; durable repository documentation under `docs/handoffs/**` remains durable when tracked or intentionally included by repo policy.
 
-Legacy active selection must be class-filtered before timestamp ordering. It may include only `ignored-legacy-operational-handoff`, provenance-backed `untracked-legacy-operational-handoff`, and exact `reviewed-runtime-migration-opt-in` files. It must exclude `tracked-durable-handoff-artifact` and `policy-conflict-artifact` files even when they look like valid current-contract handoff markdown.
+Legacy active selection must be class-filtered before timestamp ordering. It may include only provenance-backed `ignored-legacy-operational-handoff`, provenance-backed `untracked-legacy-operational-handoff`, and exact `reviewed-runtime-migration-opt-in` files whose `storage_location` is `legacy_active`. It must exclude `tracked-durable-handoff-artifact`, `legacy-operational-archive`, `legacy-state-bridge-input`, `state-like-residue`, `non-handoff-filesystem-residue`, and `policy-conflict-artifact` files even when they look like valid current-contract handoff markdown.
+
+### Legacy Provenance Classifier
+
+Gate 1a must implement the legacy provenance classifier before any ignored or untracked `docs/handoffs/*.md` file may enter active selection. The classifier is allowed to return `ignored-legacy-operational-handoff` or `untracked-legacy-operational-handoff` only when every file-shape check passes and at least one provenance proof passes.
+
+Required file-shape checks:
+
+- The path is a top-level contained `docs/handoffs/*.md` file, not under `archive/`, `.session-state/`, a hidden basename, a symlink, a directory, a non-regular file, or a path escape.
+- Git visibility is `ignored` or `untracked`. Tracked files use the tracked-durable or reviewed-opt-in path.
+- The raw-byte SHA256 is computed after containment and regular-file checks.
+- The filename has a parseable `YYYY-MM-DD_HH-MM_*.md` timestamp.
+- The document validates as `current_contract` through the shared handoff validator, with frontmatter `project`, `created_at`, `session_id`, and `type` present or deliberately accepted by a named backward-compatibility rule. Type inference for old files may support validation, but type inference alone is not provenance.
+
+Accepted provenance proofs:
+
+- `plugin-origin-runtime-marker-provenance`: metadata outside ordinary handoff document content proves the file was generated by the pre-cutover Handoff plugin as runtime material. The proof must name the marker field or sidecar source, marker schema version, project, source root, project-relative path, raw-byte SHA256, and the helper or preflight command that verified it. Ordinary document frontmatter fields such as `session_id`, `type`, `project`, `created_at`, `branch`, `commit`, `resumed_from`, and `files` are runtime-shaped signals only; they are not origin proof by themselves because they are part of the normal handoff schema and can appear in copied or user-authored durable documents.
+- `legacy-active-preflight-runtime-provenance`: current legacy-active preflight evidence names the exact lexical path, resolved path, project-relative path, raw-byte SHA256, git status class, detected document profile, and one accepted external origin source for this Gate 0r or later branch head. The accepted external origin source must be a plugin-origin marker or sidecar outside ordinary handoff frontmatter, or a reviewed tracked opt-in record naming the same path and hash. A local-preflight row that merely asserts "runtime material" or records runtime-shaped frontmatter is not provenance.
+- `reviewed-runtime-migration-opt-in`: a reviewed tracked note names the exact project-relative path, raw-byte SHA256, source root, storage location, reviewer, and reason that this specific artifact is runtime migration input.
+
+Gate 0r may create a tracked reviewed opt-in manifest for current valid-looking legacy active files that lack plugin-origin marker provenance but are intentionally selected for runtime migration. For this execution the manifest path is:
+
+```text
+docs/superpowers/plans/2026-05-13-handoff-storage-legacy-active-opt-ins.md
+```
+
+The opt-in manifest must be reviewed before Gate 1 source edits, must name each exact project-relative path plus raw-byte SHA256, and must explain why ordinary frontmatter was not accepted as origin proof. Any valid-looking ignored or untracked legacy active file not named in that manifest, not marker-backed, and not otherwise externally proven remains `policy-conflict-artifact` and is excluded from active selection without blocking implementation.
+
+The canonical legacy-active provenance field set is `external_origin_source`, `origin_evidence_fields`, `missing_or_rejected_provenance_fields`, `artifact_class`, and `selection_eligibility`. `legacy_active_preflight.py` must emit exactly this field set for every valid-looking ignored or untracked legacy file; evidence must not emit separate `provenance_basis` or `matched_provenance_fields` aliases. If implementation code uses internal names, it must map deterministically to the evidence schema as `provenance_basis` -> `external_origin_source` and `matched_provenance_fields` -> `origin_evidence_fields` before writing or checking evidence. A file that passes document validation but lacks an accepted provenance proof is `policy-conflict-artifact` with `external_origin_source=none` and `selection_eligibility=blocked-policy-conflict`. Broad parser tolerance, runtime-shaped frontmatter, a plausible filename, ignored git visibility, or untracked git visibility is not enough to treat a file as runtime migration input.
 
 ## Path Authority
 
@@ -59,7 +92,7 @@ This table describes the target after the reversal implementation lands.
 | Primary state | `<project_root>/.codex/handoffs/.session-state/handoff-<project>-<resume_token>.json` | Post-cutover chain state |
 | Consumed legacy-active registry | `<project_root>/.codex/handoffs/.session-state/consumed-legacy-active.json` | Post-cutover suppression state for loaded legacy active files |
 | Copied legacy-archive registry | `<project_root>/.codex/handoffs/.session-state/copied-legacy-archives.json` | Post-cutover idempotency state for explicit legacy archive loads |
-| Legacy active | `<project_root>/docs/handoffs/*.md` | Read-only migration input during cutover only when classified as ignored legacy operational input, provenance-backed untracked legacy operational input, or exact reviewed opt-in; tracked durable docs and unproven valid-looking untracked docs are excluded from active selection |
+| Legacy active | `<project_root>/docs/handoffs/*.md` | Read-only migration input during cutover only when classified as provenance-backed ignored legacy active markdown, provenance-backed untracked legacy active markdown, or exact reviewed opt-in; tracked durable docs and unproven valid-looking ignored or untracked docs are excluded from active selection |
 | Legacy archive | `<project_root>/docs/handoffs/archive/*.md` | Read-only history-search and explicit-path input; never active-selection input |
 | Previous-primary hidden archive | `<project_root>/.codex/handoffs/.archive/*.md` | Read-only history-search and explicit-path input for pre-`docs/handoffs/` archives; never active-selection input |
 | Legacy state | `<project_root>/docs/handoffs/.session-state/*` | Read-once bridge input for chain writers; legacy bytes are never modified, deleted, or trashed by normal writers; suppression is recorded under primary state with durable markers; explicit loads rejected |
@@ -86,7 +119,7 @@ Git visibility is not filesystem safety. Post-cutover helper output for every pa
 
 Allowed filesystem status values are `missing`, `regular-file`, `directory`, `symlink`, `non-regular`, `unreadable`, `parent-missing`, `parent-file-conflict`, `path-escape`, and `unknown`. Collision diagnostics must report both git visibility and filesystem status; an existing directory, symlink, unreadable file, non-regular file, or parent-file conflict is occupied or blocked even when git visibility is `untracked` or `unknown`.
 
-For target allocation, expose git status as `target_git_visibility`. For source-backed operations, also expose `source_git_visibility` before mutation. A source path with `source_git_visibility=tracked-conflict` under `.codex/handoffs/**` is a tracked host file, not safe runtime material. Implicit and explicit primary load must fail closed with `TrackedRuntimeSourceError` or an equivalent typed diagnostic before moving it. Read-only inventory may report that path as `blocked_tracked_runtime_source`; default active selection must not silently choose it. Explicit read-only `/distill <path>` may read it only through explicit-path validation because no handoff source bytes are moved or suppressed.
+For target allocation, expose git status as `target_git_visibility`. For source-backed operations, also expose `source_git_visibility` before mutation. A source path with `source_git_visibility=tracked-conflict` under `.codex/handoffs/**` is a tracked host file, not safe runtime material. Implicit and explicit primary load must fail closed with `TrackedRuntimeSourceError` or an equivalent typed diagnostic before moving it. Read-only inventory may report diagnostic reason `blocked_tracked_runtime_source`, but the machine `selection_eligibility` field for that row must remain `blocked-tracked-source`. Default active selection must not silently choose it. Explicit read-only `/distill <path>` may read it only through explicit-path validation because no handoff source bytes are moved or suppressed.
 
 When a mutating command reports `target_git_visibility=untracked`, the helper JSON and the skill-facing human summary must also include:
 
@@ -120,24 +153,45 @@ Installed-host smoke must be source-proof. The smoke must resolve an installed H
 
 If the resolved helper or skill doc realpath is inside the source checkout, installed-host certification is invalid even if behavior tests pass. Source-tree pytest may orchestrate the smoke, but the code under test must be imported or executed from the installed plugin root after removing the source checkout from `PYTHONPATH` and import resolution.
 
+Installed-host source-proofing must be asserted in the harness, not inferred from command names. Before any installed-host behavior assertion counts, the harness must prove:
+
+- The helper process runs with a temporary current working directory outside the source checkout.
+- `PYTHONPATH` is unset or does not include the source checkout, and `sys.path` in the helper process has no source-checkout entry except Python standard library paths.
+- Every loaded Handoff module under test reports `__file__` or `inspect.getfile()` under `installed_plugin_root`, never under `source_checkout_root`.
+- `resolved_helper_path`, `resolved_skill_doc_path`, and every helper subprocess command path realpath are outside `source_checkout_root` and inside the pinned installed plugin root.
+- The installed plugin manifest hash and version match the harness-pinned identity before host behavior is asserted.
+
+If any source-checkout module is present in `sys.modules`, or if import resolution can find the source checkout before the installed root, the run is source verification only and cannot emit `installed-harness-source-proof`, `installed host matrix behavior proved`, `installed host matrix certified`, or `installed cache certified`.
+
 ### Installed Host Harness
 
-Installed-host certification requires a first-class harness before any installed-host claim counts. The harness must be source-proof and cache-safe:
+Installed-host certification requires a first-class harness before any installed-host claim counts. The harness has four distinct evidence labels, and labels must not cross between them:
+
+- `isolated harness layout proof only` is a development-only bootstrap label. It may use a test-only installer to prove the harness can create an isolated layout, but it does not satisfy `source-harness-isolation-proof`, `installed-harness-source-proof`, `installed host matrix behavior proved`, or any installed-cache label.
+- `source-harness-isolation-proof` mode is Gate 1f source repair. It may use a test-only installer or fixture plugin root only when the app-server install path is not available inside source tests. It must record that installer as non-equivalent to installed-cache refresh, then prove the harness assertions for cache isolation, manifest identity, realpath separation, helper cwd isolation, import isolation, and source-checkout leak rejection. It must not run or report the Installed Host Repo Policy Matrix as behavior proof, and it must not claim app-server-installed source proof.
+- `installed-harness-source-proof` mode is post-source-repair refresh readiness evidence. It must install the Handoff plugin into an isolated `CODEX_HOME` through the guarded-refresh app-server install authority path, then prove installed-root resolution, cache isolation, manifest identity, realpath separation, helper cwd isolation, and import isolation. It must not run or report the Installed Host Repo Policy Matrix as behavior proof.
+- `installed-host-behavior-proof` mode is Gate 5 certification. It must install through the guarded-refresh app-server install authority path, create disposable host repos for every Installed Host Repo Policy Matrix row, and run behavior assertions from the installed plugin root. Only this mode may emit `installed-host behavior proof`, `installed host matrix behavior proved`, `installed host matrix certified`, or `installed cache certified`.
+
+The harness must be source-proof and cache-safe:
 
 - Create an isolated temporary `CODEX_HOME` for the smoke unless the operator explicitly requests a real-home guarded refresh. The default harness must not mutate `/Users/jp/.codex`, the user's active plugin cache, global config, host ignore files, or host indexes.
-- Install the Handoff plugin into the isolated `CODEX_HOME` through the guarded-refresh app-server install authority path: `plugins/turbo-mode/tools/refresh/app_server_inventory.py` request builders and `plugins/turbo-mode/tools/refresh/mutation.py` install orchestration, invoked through `plugins/turbo-mode/tools/refresh_installed_turbo_mode.py` when the gate is allowed to exercise the CLI. If Gate 1f uses a test-only installer because the app-server path is not available inside source tests, the evidence label must be `isolated harness layout proof only`, must record the non-equivalent installer, and must not use installed-host behavior language.
+- Install the Handoff plugin into the isolated `CODEX_HOME` through the guarded-refresh app-server install authority path only for `installed-harness-source-proof` or `installed-host-behavior-proof` modes: `plugins/turbo-mode/tools/refresh/app_server_inventory.py` request builders and `plugins/turbo-mode/tools/refresh/mutation.py` install orchestration, invoked through `plugins/turbo-mode/tools/refresh_installed_turbo_mode.py` when the gate is allowed to exercise installed behavior. If Gate 1f uses a test-only installer because the app-server path is not available inside source tests, the evidence label may be no stronger than `source-harness-isolation-proof`, must record the non-equivalent installer, and must not use installed-host behavior or app-server-installed proof language.
 - Pin plugin identity from `plugins/turbo-mode/handoff/1.6.0/.codex-plugin/plugin.json`, including `name`, `version`, manifest SHA256, source checkout root, installed plugin root, resolved helper path, resolved skill doc path, and install method.
-- Create disposable host repos for each row in the Installed Host Repo Policy Matrix, then run helpers from the installed plugin root with the source checkout removed from `PYTHONPATH` and import resolution.
+- In Gate 1f source-harness mode, create only the minimal disposable host or non-git directory needed to prove cwd, realpath, manifest, and import isolation through the isolated root. Do not run host-policy behavior rows or report behavior assertions.
+- In installed-harness-source-proof mode, rerun the same source-proof assertions through the app-server-installed isolated root before claiming refresh-ready or installed certification labels.
+- In Gate 5 behavior-proof mode, create disposable host repos for each row in the Installed Host Repo Policy Matrix, then run helpers from the installed plugin root with the source checkout removed from `PYTHONPATH` and import resolution. The helper subprocess must emit the source-proof fields above in the same summary as the behavior assertions.
 - Record cleanup policy and artifact roots. Temporary host repos may be removed after the summary is written, but the summary must retain enough path, manifest, command, and SHA256 evidence to reproduce the proof. Local-only raw output belongs under the refresh local-only evidence root, not in tracked source docs.
 
-Gate 1f must add this harness in source-test form without mutating the real installed cache. Gate 5 is the earliest point where an installed-host or installed-cache certification label may be claimed, and only evidence produced through the app-server install authority path may use the label `installed-host behavior proof`.
+Gate 1f must add this harness in source-test form without mutating the real installed cache. Gate 4 may claim `source repaired` only after Gate 1f has produced `source-harness-isolation-proof`; it must not imply app-server-installed source proof. `refresh-ready but not mutated`, `installed host matrix certified`, and `installed cache certified` require the stricter `installed-harness-source-proof` label from an isolated app-server-installed root. Gate 5 is the earliest point where an installed-host behavior or installed-cache certification label may be claimed, and only evidence produced through the app-server install authority path may use the label `installed-host behavior proof`.
 
 ### Residue Disposition Artifacts
 
-Preflight residue handling has two separate artifacts with different authority scopes:
+Preflight handling has four separate evidence and accounting surfaces with different authority scopes:
 
 1. A tracked repo-authority ledger for clone-global policy and tracked or intentionally durable repo facts.
-2. An ignored local-preflight evidence file for this machine's operational residue corpus.
+2. An ignored local-preflight evidence file for this machine's state-like residue corpus.
+3. An ignored legacy-active preflight evidence file for this machine's valid-looking `docs/handoffs/*.md` active legacy corpus.
+4. Explicit out-of-scope rows for non-handoff filesystem residue under `docs/handoffs/**`, recorded in ignored local-preflight evidence so these paths cannot remain implicit.
 
 The tracked repo-authority ledger path is:
 
@@ -151,13 +205,39 @@ The repo-authority ledger must include a `scope` column for every row. Allowed v
 - `local-preflight-summary`: summary row that references local evidence by run id, timestamp, count, and evidence hash, but does not claim the local paths exist in fresh clones
 - `policy-rule`: durable classification or disposition rule that applies to future implementations
 
-The local-preflight evidence path is ignored runtime evidence under:
+The state-like residue local-preflight evidence path is ignored runtime evidence under:
 
 ```text
 .codex/handoffs/.session-state/preflight/handoff-storage-residue-local-preflight.json
 ```
 
-The local-preflight evidence file must enumerate every current path matched by `docs/handoffs/handoff-*` and `docs/handoffs/handoff-*.json` at preflight time. Each row must include:
+Gate 0r must add a concrete checker for this evidence and the tracked ledger before source edits:
+
+```bash
+python plugins/turbo-mode/tools/handoff_storage_reversal/residue_preflight.py \
+  --project-root . \
+  --plan docs/superpowers/plans/2026-05-13-handoff-storage-reversal.md \
+  --ledger docs/superpowers/plans/2026-05-13-handoff-storage-residue-ledger.md \
+  --evidence .codex/handoffs/.session-state/preflight/handoff-storage-residue-local-preflight.json \
+  --write
+```
+
+```bash
+python plugins/turbo-mode/tools/handoff_storage_reversal/residue_preflight.py \
+  --project-root . \
+  --plan docs/superpowers/plans/2026-05-13-handoff-storage-reversal.md \
+  --ledger docs/superpowers/plans/2026-05-13-handoff-storage-residue-ledger.md \
+  --evidence .codex/handoffs/.session-state/preflight/handoff-storage-residue-local-preflight.json \
+  --check
+```
+
+The checker must be stdlib-only, must not import storage implementation modules, and must enumerate every current path under `docs/handoffs/` with `find docs/handoffs -mindepth 1 -print` semantics or an equivalent contained path walker. `--write` may create or refresh the ignored evidence during Gate 0r. `--check` must be no-write and fail when evidence is missing, stale against current path inventory, missing required fields, contains `TBD`, leaves any `docs/handoffs/**` path without a row, delegated evidence reference, or permitted directory-summary manifest reference for archive/state descendants, leaves any state-like residue row with historical plain `bridge-once`, or grants handoff active-selection eligibility to any row outside the legacy-active checker.
+
+The checker may delegate top-level `docs/handoffs/*.md` active markdown classification to `legacy_active_preflight.py`; delegated rows must name the legacy-active evidence file, evidence SHA256, delegated project-relative path, and delegated artifact class. Delegation is not allowed for state-like residue, `.session-state/**` state bridge inputs, archive paths, previous-primary hidden archives, or non-handoff filesystem residue.
+
+The checker must also validate the tracked residue ledger. It must fail if the ledger lacks a `scope` column, uses values outside `repo-authority`, `local-preflight-summary`, and `policy-rule`, lists ignored or untracked machine-local paths as `repo-authority`, or contains a `policy-rule` row for `docs/handoffs/*.md` active legacy files that omits the current control-document requirement: only provenance-backed ignored legacy active markdown, provenance-backed untracked legacy active markdown, or exact reviewed path-plus-raw-byte-hash opt-in with `storage_location=legacy_active` may enter runtime migration selection. Ledger policy drift is a Gate 0r blocker even when local evidence rows are otherwise complete.
+
+The state-like residue local-preflight evidence file must enumerate every current path matched by `docs/handoffs/handoff-*` and `docs/handoffs/handoff-*.json` at preflight time, plus any non-handoff filesystem residue under `docs/handoffs/**` that is not delegated to another preflight class. It is not legacy active markdown provenance and must not be used to make `docs/handoffs/*.md` handoff documents eligible for active selection. Each state-like row must include:
 
 - lexical path and resolved containment-checked path
 - inventory scope: `canonical-checkout`
@@ -169,15 +249,63 @@ The local-preflight evidence file must enumerate every current path matched by `
 - rationale and verification command or test that proves the disposition
 - scope: `local-preflight`
 
+Each non-handoff filesystem residue row must include lexical path, resolved containment-checked path, project-root-relative path, git status class, filesystem status, raw-byte SHA256 when readable, artifact class `non-handoff-filesystem-residue`, disposition `out-of-scope-preserve`, rationale, verification command or delegated evidence reference when applicable, and scope `local-preflight`. These rows are diagnostic accounting only; they must not become active-selection, history-search, explicit-path, state-bridge, migration, or cleanup input.
+
+Rows for legacy archive paths and legacy state scope paths that are not delegated to `legacy_active_preflight.py` must include lexical path, resolved containment-checked path, project-root-relative path, git status class, filesystem status, raw-byte SHA256 when readable, artifact class `legacy-operational-archive`, `legacy-state-bridge-input`, or `non-handoff-filesystem-residue`, disposition `scope-owned-by-history-search`, `scope-owned-by-state-bridge`, or `out-of-scope-preserve`, rationale, verification command, and scope `local-preflight`. Strict per-file rows remain required for top-level `docs/handoffs/*.md` active markdown, top-level state-like residue, and any top-level non-handoff residue. Descendants under churn-prone scope roots such as `docs/handoffs/archive/` and `docs/handoffs/.session-state/` may instead be represented by a directory row that includes descendant count, a sorted manifest hash, manifest generation command, and explicit scope-owned disposition; if the directory row is absent, markdown archive files and state payload files under those roots still need their own rows or explicit skip reasons.
+
+The legacy-active preflight evidence path is ignored runtime evidence under:
+
+```text
+.codex/handoffs/.session-state/preflight/handoff-storage-legacy-active-preflight.json
+```
+
+Gate 0r must add a concrete checker for this evidence before source edits:
+
+```bash
+python plugins/turbo-mode/tools/handoff_storage_reversal/legacy_active_preflight.py \
+  --project-root . \
+  --evidence .codex/handoffs/.session-state/preflight/handoff-storage-legacy-active-preflight.json \
+  --write
+```
+
+```bash
+python plugins/turbo-mode/tools/handoff_storage_reversal/legacy_active_preflight.py \
+  --project-root . \
+  --evidence .codex/handoffs/.session-state/preflight/handoff-storage-legacy-active-preflight.json \
+  --check
+```
+
+The checker must be stdlib-only, must not import storage implementation modules, and must enumerate only current top-level `docs/handoffs/*.md` active markdown paths. It may report `docs/handoffs/archive/**`, `docs/handoffs/.session-state/**`, and top-level `docs/handoffs/handoff-*` state-like residue as explicitly out of legacy-active scope, but it must not classify those paths with `ignored-legacy-operational-handoff` or `untracked-legacy-operational-handoff`. `--write` may create or refresh the ignored evidence during Gate 0r. `--check` must be no-write and fail when the evidence is missing, stale against the current path inventory, missing required fields, contains `TBD`, or grants active-selection eligibility without an accepted external origin source or exact reviewed opt-in.
+
+The legacy-active preflight evidence file must enumerate every current top-level `docs/handoffs/*.md` file, including valid, invalid, ignored, untracked, and tracked paths. It is the only local-preflight source that may support active markdown provenance, and only when it records an accepted external origin source. Each row must include:
+
+- lexical path and resolved containment-checked path
+- project-root-relative path
+- inventory scope: `canonical-checkout`
+- git status class: tracked, ignored, untracked, or missing-after-inventory
+- raw-byte SHA256 when readable
+- detected document profile: `current_contract`, `historical_archive`, or `invalid`
+- document validation status and path-specific validation or skip reason
+- external origin source: `plugin-origin-runtime-marker-provenance`, `reviewed-runtime-migration-opt-in`, or `none`
+- origin evidence fields required by the selected external origin source, including marker or sidecar schema version when marker-backed, reviewed note path and reviewer when opt-in backed, and the raw-byte SHA256 that ties the evidence to the file
+- artifact class and selection eligibility
+- missing or rejected provenance fields
+- rationale and verification command or test that proves the classification
+- scope: `legacy-active-preflight`
+
+If a valid-looking ignored or untracked active markdown row has `external_origin_source=none`, the classifier must emit `policy-conflict-artifact` and `selection_eligibility=blocked-policy-conflict`; it must not infer runtime origin from ignored/untracked git visibility, filename shape, frontmatter, branch/commit metadata, or local operator familiarity.
+
+These row fields are the single source of truth for legacy-active provenance evidence. Any source classifier return object, preflight writer, preflight checker, enforcement test, or downstream consumer must validate against this same schema or an explicit deterministic internal-to-evidence mapping table in this plan; adding a second JSON shape for the same fact is a Gate 0r blocker.
+
 The tracked repo-authority ledger must not enumerate ignored or untracked machine-local residue paths as if they are fresh-clone project facts. It may reference the local-preflight evidence by hash and count, for example "local preflight run `<id>` saw 1 ignored state-like residue path; see ignored evidence file hash `<sha256>`." That reference is evidence for this checkout only, not durable repo authority.
 
-No local residue path may remain implicit during implementation execution. Implementation must stop if any local-preflight evidence row has `TBD`, no disposition, no scope, or no verification hook. A residue path may be quarantined only under ignored `.codex/handoffs/.session-state/quarantine/` with a transaction record and source hash. Destructive cleanup is out of scope unless a later explicit instruction authorizes it.
+No local residue path or legacy active markdown path may remain implicit during implementation execution. Implementation must stop if any local-preflight or legacy-active preflight evidence row has `TBD`, no disposition or artifact class, no scope, or no verification hook. A residue path may be quarantined only under ignored `.codex/handoffs/.session-state/quarantine/` with a transaction record and source hash. Destructive cleanup is out of scope unless a later explicit instruction authorizes it.
 
-Gate 0A for this execution uses the canonical checkout at `/Users/jp/Projects/active/codex-tool-dev` after preserving unrelated P2 work on its own branch and switching the canonical checkout back to `main`. Local-preflight evidence must use `inventory_scope=canonical-checkout`. If a later attempt needs an isolated implementation worktree, stop and revise this plan, the residue ledger, and the local-preflight evidence schema before continuing; do not reuse canonical-checkout evidence for a different topology.
+Gate 0A for this execution uses the canonical checkout at `/Users/jp/Projects/active/codex-tool-dev` after preserving unrelated P2 work on its own branch and switching the canonical checkout back to `main`. State-like local-preflight evidence and legacy-active preflight evidence must use `inventory_scope=canonical-checkout`. If a later attempt needs an isolated implementation worktree, stop and revise this plan, the residue ledger, and both preflight evidence schemas before continuing; do not reuse canonical-checkout evidence for a different topology.
 
 ## Cutover Inventory And Bridge
 
-The reversal cannot start by switching writers alone. Before implementation is considered ready, add tests and command evidence for a cutover inventory covering:
+The reversal cannot start by switching writers alone. Before source repair is considered ready, add tests and command evidence for a cutover inventory covering:
 
 - valid primary active files under `.codex/handoffs/*.md`
 - legacy active files under `docs/handoffs/*.md` only after artifact-class filtering excludes tracked durable docs and unresolved policy-conflict artifacts
@@ -189,14 +317,28 @@ The reversal cannot start by switching writers alone. Before implementation is c
 - copied legacy-archive registry state under `.codex/handoffs/.session-state/copied-legacy-archives.json`
 - ignore behavior for new `.codex/handoffs/` runtime files
 - preservation of existing `docs/handoffs/` runtime ignore behavior
-- installed-host behavior for no ignore, broad `.codex/` ignore, tracked `.codex/skills/**`, tracked handoff-path collision, tracked primary active source, and non-git project roots
-- local-preflight evidence completeness for every top-level `docs/handoffs/handoff-*` path, plus repo-authority ledger scope correctness
+- local-preflight evidence completeness for every `docs/handoffs/**` path, including state-like residue rows, delegated legacy-active markdown rows, legacy archive and state scope rows, non-handoff filesystem residue rows, plus legacy-active preflight classification for every top-level `docs/handoffs/*.md` path and repo-authority ledger scope/policy drift correctness
 
-During the reversal release, implicit active discovery for `/list-handoffs` and `/load` must consider valid primary active files plus eligible unconsumed legacy active files after artifact-class filtering. A legacy active file is selectable only when it is an ignored legacy operational handoff, a provenance-backed untracked legacy operational handoff, or an exact reviewed runtime migration opt-in. Valid-looking untracked files without plugin provenance, current local-preflight proof, or exact reviewed path-plus-hash opt-in are diagnostic `policy-conflict-artifact` rows, not active candidates. Tracked durable handoff artifacts and policy-conflict artifacts are diagnostic inventory rows, not active candidates. Dedup remains byte-exact, with primary active winning over selectable legacy active. This mixed-root behavior prevents proven operational active `docs/handoffs/*.md` files from becoming stranded after the first new `.codex/handoffs/*.md` write without consuming durable repository docs.
+Installed-host behavior for no ignore, broad `.codex/` ignore, tracked `.codex/skills/**`, tracked handoff-path collision, tracked primary active source, and non-git project roots is Gate 5 certification evidence, not source-repair readiness evidence. It is required only before claiming `installed host matrix behavior proved`, `installed host matrix certified`, or `installed cache certified`.
+
+During the reversal release, implicit active discovery for `/list-handoffs` and `/load` must consider valid primary active files plus eligible unconsumed legacy active files after artifact-class filtering. A legacy active file is selectable only when it is a provenance-backed ignored legacy active markdown file, a provenance-backed untracked legacy active markdown file, or an exact reviewed runtime migration opt-in with `storage_location=legacy_active`. Valid-looking ignored or untracked files without plugin-origin runtime marker provenance, legacy-active preflight evidence tied to an accepted external origin source, or exact reviewed path-plus-hash opt-in are diagnostic `policy-conflict-artifact` rows, not active candidates. Tracked durable handoff artifacts, legacy operational archives, legacy state bridge inputs, state-like residue, and policy-conflict artifacts are diagnostic inventory rows, not active candidates. Dedup remains byte-exact, with primary active winning over selectable legacy active. This mixed-root behavior prevents proven operational active `docs/handoffs/*.md` files from becoming stranded after the first new `.codex/handoffs/*.md` write without consuming durable repository docs.
 
 Implicit `/load` chooses the most recent eligible active candidate from the combined primary-active plus class-filtered legacy-active set after dedup, using the Selection Ordering contract below. If it chooses a primary active file, Primary Load semantics apply. If it chooses a legacy active file, Legacy Load semantics apply.
 
 Fallback-only legacy discovery may be restored only in a later release after an explicit deprecation or migration gate proves legacy active files have been copied, intentionally left behind, or made explicitly path-only. That later gate is out of scope for this implementation.
+
+### Alternative Rejected: One-Time Migration Command
+
+This plan deliberately rejects a default one-time migration command that copies all eligible `docs/handoffs/` runtime files into `.codex/handoffs/` and then makes active selection primary-only.
+
+That alternative would reduce mixed-root active-selection complexity, but it has worse cutover failure modes for this plugin:
+
+- It requires a mutating sweep before ordinary `/load`, `/list-handoffs`, `/distill`, `/save`, `/summary`, or `/quicksave` can be trusted after upgrade.
+- It risks copying durable or policy-conflict `docs/handoffs/**` artifacts unless the same artifact-class classifier already exists.
+- It creates a large all-at-once transaction surface instead of allowing proven legacy runtime files to remain read-only migration input until selected.
+- It can strand users who upgrade with a valid active legacy file but do not run the migration command before the first post-upgrade command.
+
+The accepted tradeoff is one cutover release with mixed primary plus class-filtered legacy active discovery, consumed legacy-active suppression, and explicit provenance diagnostics. A later release may switch to primary-only active selection only after an explicit deprecation gate proves every eligible legacy active file has been consumed, copied, intentionally left behind, or made explicit-path-only.
 
 ### Consumed Legacy Active Suppression
 
@@ -393,10 +535,21 @@ Transaction records must be JSON and include at least:
 
 `/save`, `/summary`, and `/quicksave` are active writers. They must not build `.codex/handoffs/` paths directly in skill prose, shell snippets, or one-off helper code. They must use shared helper APIs that run under the project lock and transaction protocol.
 
+Active-writer rewire is blocked until the state-bridge dependency is executable. Gate 1d may implement operation-state reservation, idempotency, allocation, write, and retry mechanics with primary-state-only fixtures, but it must not rewire `/save`, `/summary`, or `/quicksave` in skill docs or command surfaces until one of these is true:
+
+- Gate 1d includes the minimal state-bridge read and durable bridge-marker behavior needed by `begin-active-write` and `write-active-handoff`, with the required pre-upgrade legacy-state plus post-upgrade save/summary/quicksave tests.
+- Gate 1e has already landed on the same implementation branch, including project-scoped bridge lookup, ambiguity diagnostics, `continue-chain-state`, `mark-chain-state-consumed`, and post-marker bridge suppression proof.
+
+If Gate 1d remains separate from Gate 1e, its closeout label is `active-writer mechanics staged`, not `active writers rewired`. A branch or PR must not claim `/save`, `/summary`, or `/quicksave` behavior is source-repaired while a valid pre-upgrade chain state can still lose `resumed_from`, fail after content generation, or require prose-only recovery.
+
+If Gate 1d closes as staged and Gate 1e lands later, Gate 1g is the named integration gate that makes the staged active-writer mechanics bridge-backed. Gate 1g must run the active-writer operation-state flow against completed bridge/recovery behavior before skill docs, command surfaces, PR text, or closeout labels may say `/save`, `/summary`, or `/quicksave` are rewired.
+
 The implementation must provide:
 
-- `begin-active-write`: reserve a save/summary/quicksave transaction before generated content is accepted. It must acquire the project lock, run mutating recovery, read primary or bridged chain state, mint or accept a caller-provided run id, allocate and bind the active path, persist the idempotency key, pending transaction record, operation-state record, reservation lease, state snapshot, and transaction watermark, then release the lock before content generation. It must return the `run_id`, transaction id, allocated path, state snapshot id, resumed-from identity, operation-state path, lease id, and lease expiry to the caller.
-- `allocate-active-path`: allocate a collision-safe primary active path under `.codex/handoffs/` from an operation kind, timestamp, and slug. Allocation must use filename timestamp format `YYYY-MM-DD_HH-MM_<kind>-<slug>.md`, treat existing files, directories, symlinks, and tracked exact-path conflicts as occupied, and support at least base, `-01`, and `-02` suffixes before returning collision-budget exhaustion.
+Active-writer slug and path binding must happen before final content generation without depending on final generated prose. `begin-active-write` must either accept a caller-provided `requested_slug` chosen before final content generation or mint a deterministic helper default slug from the operation kind, for example `handoff`, `summary`, or `checkpoint`. The helper must record `slug_source` as `caller-predeclared` or `helper-default`. The generated markdown title may differ from the filename slug, but generated content must not rename, reallocate, or mutate the bound path. If a retry or regenerated answer attempts to change the slug for the same `run_id` or idempotency key after path binding, the helper must fail closed unless the operator explicitly abandons the active write and starts a new one.
+
+- `begin-active-write`: reserve a save/summary/quicksave transaction before generated content is accepted. It must acquire the project lock, run mutating recovery, read primary or bridged chain state, mint or accept a caller-provided run id, bind `requested_slug` or a helper-default slug, allocate and bind the active path, persist the idempotency key, pending transaction record, operation-state record, reservation lease, state snapshot, slug source, and transaction watermark, then release the lock before content generation. It must return the `run_id`, transaction id, allocated path, bound slug, slug source, state snapshot id, resumed-from identity, operation-state path, lease id, and lease expiry to the caller.
+- `allocate-active-path`: allocate a collision-safe primary active path under `.codex/handoffs/` from an operation kind, timestamp, and pre-bound slug. Allocation must use filename timestamp format `YYYY-MM-DD_HH-MM_<kind>-<slug>.md`, treat existing files, directories, symlinks, and tracked exact-path conflicts as occupied, and support at least base, `-01`, and `-02` suffixes before returning collision-budget exhaustion. It must not derive or update the slug from generated title or body content after `begin-active-write` returns.
 - `write-active-handoff`: acquire the project lock and accept only content tied to a previously returned `run_id`, transaction id, allocated path, state snapshot id, lease id, and idempotency key. It must validate reservation freshness, state snapshot identity, transaction watermark, and no conflicting chain mutation before writing. It writes active handoff markdown under `.codex/handoffs/` via same-directory temp file and atomic rename, verifies the raw-byte hash, preserves `resumed_from` from primary or bridged legacy state, and clears or durably marks consumed chain state only after the active file is proven present.
 - `active-write-transaction-recover`: recover or fail pending save/summary/quicksave transactions before any new mutating active write or state bridge lookup. Read-only selection uses `read-only-recovery-inventory` instead.
 
@@ -409,6 +562,7 @@ The key must include:
 - state snapshot id or state hash when chain state was read
 - resume source path and hash when `resumed_from` exists
 - caller-provided run id when available, otherwise a helper-minted run id emitted and persisted before path allocation or content mutation
+- slug source and bound slug
 - allocated active path after the transaction binds one
 
 Active writer recovery states are:
@@ -423,13 +577,13 @@ If a caller retries `/save`, `/summary`, or `/quicksave` after a pending transac
 The caller protocol is:
 
 1. Call `begin-active-write` before asking an LLM or local generator to produce final handoff content.
-2. Preserve the returned `run_id`, transaction id, allocated path, state snapshot id, and resumed-from identity in the caller-visible operation state.
-3. Generate content for that exact operation identity.
+2. Preserve the returned `run_id`, transaction id, allocated path, bound slug, slug source, state snapshot id, and resumed-from identity in the caller-visible operation state.
+3. Generate content for that exact operation identity. Do not regenerate the filename slug from the final title or body after `begin-active-write` has returned.
 4. Call `write-active-handoff` with the same operation identity and the generated content hash.
 5. On retry, pass the original `run_id` and transaction id when known. If they are not known, the helper must discover compatible pending transactions by operation, project, state snapshot, resume source identity, and allocated path; if zero or more than one compatible pending transaction exists, it must fail closed before accepting regenerated content.
 6. If a retry matches the same idempotency key and content hash, reuse the existing transaction. If it matches the same idempotency key but content bytes changed, fail with `ActiveWriteContentChangedError` or an equivalent typed diagnostic.
 
-The implementation must make this protocol executable, not only documented. Gate 1d must add either a deterministic command-level wrapper, for example `active-writer-flow`, or a two-call helper test harness that runs the same sequence the skills will use: `begin-active-write`, deterministic content generation bound to the returned operation identity, `write-active-handoff`, retry with the same `run_id`, retry with changed bytes, context-loss recovery through `list-active-writes`, and cleanup-failure recovery. Skill-doc tests must execute this flow end-to-end for `/save`, `/summary`, and `/quicksave`; static scans for helper names are insufficient.
+The implementation must make this protocol executable, not only documented. Gate 1d must add either a deterministic command-level wrapper, for example `active-writer-flow`, or a two-call helper test harness that runs the same sequence the skills will use: `begin-active-write`, deterministic content generation bound to the returned operation identity and bound slug, `write-active-handoff`, retry with the same `run_id`, retry with changed bytes, retry that attempts to change the slug after path binding, context-loss recovery through `list-active-writes`, and cleanup-failure recovery. Skill-doc tests must execute this flow end-to-end for `/save`, `/summary`, and `/quicksave`; static scans for helper names are insufficient.
 
 The operation state cannot rely on LLM memory or skill prose alone. `begin-active-write` must persist an active-writer operation-state record before content generation under a primary state root such as `.codex/handoffs/.session-state/active-writes/<project>/<run_id>.json`. The exact path may vary, but it must be returned by the helper and included in the transaction record.
 
@@ -444,6 +598,7 @@ The active-writer operation-state record must include at least:
 - allocated active path
 - state snapshot id and hash
 - resumed-from path and hash when present
+- bound slug and slug source
 - operation-state path
 - lease id
 - lease acquired timestamp
@@ -545,13 +700,13 @@ The implementation must provide documented helper entrypoints for at least:
 - `repair-copied-legacy-archive-registry`: repair or diagnose copied legacy-archive registry corruption under an explicit operator-selected transaction
 - `history-candidates`: return `/search`, `/triage`, and `/summary` arc candidates from Scan Mode `history_search`
 
-`test_skill_docs.py` or an equivalent surface test must prove load/list/distill/save/summary/quicksave docs invoke these helpers and do not retain stale shell-only path implementations.
+`test_skill_docs.py` or an equivalent surface test must prove load/list/distill/save/summary/quicksave docs invoke these helpers and do not retain stale shell-only path implementations. Save/summary/quicksave doc rewires are allowed only after the Active Writer Creation Contract's state-bridge dependency rule is satisfied.
 
 ### Helper Launcher Classes
 
 Skill docs must preserve the current direct-Python chain-state and active-writer contract where it matters:
 
-- Chain-state, active-writer, and archive-mutation helpers must be stdlib-only and runnable as direct Python, for example `python "$PLUGIN_ROOT/scripts/session_state.py" ...` or a successor stdlib-only helper path. These helpers include `allocate-active-path`, `write-active-handoff`, `active-write-transaction-recover`, `archive-primary-active`, `copy-legacy-active-to-primary-archive`, `copy-legacy-archive-to-primary-archive`, `read-chain-state`, `list-chain-state`, `write-chain-state`, and `clear-chain-state`.
+- Chain-state, active-writer, archive-mutation, registry-repair, transaction-recovery, and explicit-path validation helpers must be stdlib-only and runnable as direct Python, for example `python "$PLUGIN_ROOT/scripts/session_state.py" ...` or a successor stdlib-only helper path. These helpers include `begin-active-write`, `allocate-active-path`, `write-active-handoff`, `list-active-writes`, `active-write-transaction-recover`, `abandon-active-write`, `archive-primary-active`, `copy-legacy-active-to-primary-archive`, `copy-legacy-archive-to-primary-archive`, `validate-explicit-path`, `read-chain-state`, `list-chain-state`, `continue-chain-state`, `mark-chain-state-consumed`, `abandon-primary-chain-state`, `chain-state-recovery-inventory`, `write-chain-state`, `clear-chain-state`, `read-only-recovery-inventory`, `recover-transaction`, `repair-consumed-legacy-active-registry`, and `repair-copied-legacy-archive-registry`.
 - Discovery and history helpers should also be stdlib-only if feasible. If a helper truly needs dependencies, it may use `uv run`, but the plan must name that helper as dependency-bearing and skill-doc tests must prove chain-state helpers did not regress to `uv run`.
 - Refresh tooling, tests, and marketplace mutation helpers may use `uv run`; that does not waive the direct-Python contract for chain-state helpers.
 - `test_skill_docs.py` must keep or replace the current direct-Python-vs-command-helper distinction deliberately. Removing that distinction without an equivalent launcher-class assertion is a hard stop.
@@ -564,7 +719,7 @@ Every candidate result must include typed fields:
 - `source_root`: enum `primary`, `legacy`, or `previous_primary`
 - `storage_location`: enum `primary_active`, `primary_archive`, `legacy_active`, `legacy_archive`, or `previous_primary_hidden_archive`
 - `lifecycle`: enum `active` or `archive`
-- `artifact_class`: enum `primary-runtime`, `ignored-legacy-operational-handoff`, `untracked-legacy-operational-handoff`, `tracked-durable-handoff-artifact`, `reviewed-runtime-migration-opt-in`, `previous-primary-hidden-archive`, `state-like-residue`, `policy-conflict-artifact`, or `unknown`
+- `artifact_class`: enum `primary-runtime`, `ignored-legacy-operational-handoff`, `untracked-legacy-operational-handoff`, `legacy-operational-archive`, `legacy-state-bridge-input`, `tracked-durable-handoff-artifact`, `reviewed-runtime-migration-opt-in`, `previous-primary-hidden-archive`, `state-like-residue`, `non-handoff-filesystem-residue`, `policy-conflict-artifact`, or `unknown`
 - `source_git_visibility`: enum `ignored`, `untracked`, `tracked-conflict`, `not-git-repo`, or `unknown`
 - `source_fs_status`: enum `missing`, `regular-file`, `directory`, `symlink`, `non-regular`, `unreadable`, `parent-missing`, `parent-file-conflict`, `path-escape`, or `unknown`
 - `selection_eligibility`: enum `eligible`, `read-only-only`, `blocked-tracked-source`, `blocked-durable-artifact`, `blocked-policy-conflict`, or `blocked-invalid`
@@ -577,6 +732,10 @@ Every candidate result must include typed fields:
 `invalid_reason` is for document validation failures such as missing frontmatter, invalid type, missing required fields, or malformed required sections.
 
 `skip_reason` is for filesystem and discovery exclusions such as hidden file, nested implicit file, symlink, path escape, non-regular file, unreadable file, forbidden state directory, or outside scan scope.
+
+`selection_eligibility` values are hyphenated machine values. Underscore strings such as `blocked_tracked_runtime_source` and `blocked_durable_artifact` are diagnostic reason codes only; helpers, preflight evidence, proof maps, and tests must not emit them as `selection_eligibility` values.
+
+`non-handoff-filesystem-residue` rows must use `selection_eligibility=blocked-invalid` when they are projected into candidate-style diagnostics. They are inventory/accounting rows, not candidate rows, and must carry a skip reason such as `non_handoff_filesystem_residue` instead of being silently dropped.
 
 No broad `except Exception: pass` behavior is allowed in discovery paths. Skips must preserve path and reason.
 
@@ -591,7 +750,7 @@ Used by implicit `/load`, default `/list-handoffs`, and default `/distill`.
 Includes:
 
 - primary active: `.codex/handoffs/*.md` when not tracked by the host repo
-- unconsumed legacy active during cutover: `docs/handoffs/*.md` only when classed as ignored legacy operational input, provenance-backed untracked legacy operational input, or exact reviewed runtime migration opt-in
+- unconsumed legacy active during cutover: `docs/handoffs/*.md` only when classed as provenance-backed ignored legacy active markdown, provenance-backed untracked legacy active markdown, or exact reviewed runtime migration opt-in
 
 Excludes:
 
@@ -641,12 +800,12 @@ Reads primary state first. If exactly one valid primary state exists and no unre
 Implicit scans include only top-level active files after artifact-class and source-visibility filtering:
 
 - primary: `.codex/handoffs/*.md`
-- legacy active during cutover for load/list/distill: `docs/handoffs/*.md` only when ignored legacy operational input, provenance-backed untracked legacy operational input, or exact reviewed runtime migration opt-in
+- legacy active during cutover for load/list/distill: `docs/handoffs/*.md` only when provenance-backed ignored legacy active markdown, provenance-backed untracked legacy active markdown, or exact reviewed runtime migration opt-in
 
 Implicit scans exclude archives, nested files, hidden files, `.session-state/`, symlinks, path escapes, non-regular files, unreadable files, invalid documents, tracked primary runtime source files, tracked durable legacy artifacts, and policy-conflict artifacts.
 
 Invalid primary files produce path-specific diagnostics and do not hide eligible legacy active files.
-Tracked primary runtime source files produce `blocked_tracked_runtime_source` diagnostics and do not hide valid eligible candidates. Tracked durable legacy artifacts produce `blocked_durable_artifact` diagnostics and do not participate in active selection unless a reviewed migration opt-in names the exact path and hash.
+Tracked primary runtime source files produce `blocked_tracked_runtime_source` diagnostic reasons with `selection_eligibility=blocked-tracked-source` and do not hide valid eligible candidates. Tracked durable legacy artifacts produce `blocked_durable_artifact` diagnostic reasons with `selection_eligibility=blocked-durable-artifact` and do not participate in active selection unless a reviewed migration opt-in names the exact path and hash.
 
 Hidden-path policy is component-aware:
 
@@ -790,6 +949,7 @@ The reversal is not done unless all of these are reconciled:
 - `plugins/turbo-mode/handoff/1.6.0/scripts/handoff_parsing.py`
 - `plugins/turbo-mode/handoff/1.6.0/scripts/storage_authority.py`
 - internal storage authority modules added behind the `storage_authority.py` facade, such as `storage_paths.py`, `storage_discovery.py`, `storage_git.py`, `storage_transactions.py`, `storage_state_bridge.py`, `storage_active_writes.py`, and `storage_registries.py`
+- control tooling scripts added for this plan outside the shipped Handoff plugin runtime tree, including `plugins/turbo-mode/tools/handoff_storage_reversal/hard_stop_matrix.py`, `plugins/turbo-mode/tools/handoff_storage_reversal/gate_proof_map.py`, `plugins/turbo-mode/tools/handoff_storage_reversal/residue_preflight.py`, and `plugins/turbo-mode/tools/handoff_storage_reversal/legacy_active_preflight.py`
 - `plugins/turbo-mode/handoff/1.6.0/skills/load/SKILL.md`
 - `plugins/turbo-mode/handoff/1.6.0/skills/save/SKILL.md`
 - `plugins/turbo-mode/handoff/1.6.0/skills/summary/SKILL.md`
@@ -832,6 +992,13 @@ If validation becomes live:
 
 These compatibility decisions are fixed for implementation. Closeout must include tests for every preserved, wrapper-preserved, and deprecated-with-diagnostic surface below.
 
+For `session_state.py` wrapper-preserved state commands, the old `--state-dir "$PROJECT_ROOT/docs/handoffs/.session-state"` argument is a stale-caller compatibility input, not a post-cutover write authority. Helpers must resolve the project root from either the provided `--state-dir` suffix or an explicit project-root argument if one is added. After cutover:
+
+- `write-state`, `clear-state`, and `prune-state` must reject a provided legacy `docs/handoffs/.session-state` directory with a typed diagnostic such as `StaleStateDirError` before writing, clearing, marking, pruning, or trashing anything under `docs/handoffs/`.
+- `read-state` may use a provided legacy `docs/handoffs/.session-state` directory only as legacy bridge input after computing the primary state root under `.codex/handoffs/.session-state`; it must not migrate by writing JSON state under `docs/handoffs/`.
+- A provided primary `.codex/handoffs/.session-state` directory remains accepted for compatibility, but the helper must still validate containment and project identity.
+- Stale skill docs or external callers that pass the old legacy state directory must be covered by tests so the failure or bridge behavior is explicit rather than silently preserving the old write root.
+
 | Surface | Decision | Required behavior |
 |---|---|---|
 | `project_paths.py get_project_root` | preserved | Keep return type and fallback behavior unchanged. |
@@ -841,11 +1008,11 @@ These compatibility decisions are fixed for implementation. Closeout must includ
 | `project_paths.py get_state_dir` | wrapper-preserved | Return the post-cutover primary state root, `<project_root>/.codex/handoffs/.session-state`, by delegating to `storage_authority.py`. |
 | `project_paths.py get_legacy_handoffs_dir` | wrapper-preserved | Return the legacy active root, `<project_root>/docs/handoffs`, during the cutover release. Previous-primary hidden archive access must use `storage_authority.py`, not this function. |
 | Historical `.codex/handoffs/.archive/` fallback | preserved | Implement only through `storage_authority.py` history-search and explicit-path modes; never active selection. |
-| `session_state.py archive` CLI | wrapper-preserved with narrowed source class | Preserve `--field archived_path` output. It may archive primary active inputs only. It must reject legacy active, legacy archive, and previous-primary hidden archive inputs with a diagnostic naming the correct copy helper. |
-| `session_state.py write-state` CLI | wrapper-preserved | Preserve `--field state_path`; write only primary state under `.codex/handoffs/.session-state`. |
-| `session_state.py read-state` CLI | wrapper-preserved | Preserve `--field state_path`, `archive_path`, and `resume_token`; read primary state first, then exactly one valid project-scoped legacy bridge candidate. |
-| `session_state.py clear-state` CLI | wrapper-preserved | Preserve exit contract; clear or durably consume only the state path selected by the current chain under the project lock. |
-| `session_state.py prune-state` CLI | wrapper-preserved | Preserve pruning behavior, but target only primary state unless an explicit recovery command names legacy state. |
+| `session_state.py archive` CLI | wrapper-preserved | Preserve `--field archived_path` output with narrowed source-class behavior. It may archive primary active inputs only. It must reject legacy active, legacy archive, and previous-primary hidden archive inputs with a diagnostic naming the correct copy helper. |
+| `session_state.py write-state` CLI | wrapper-preserved | Preserve `--field state_path`; write only primary state under `.codex/handoffs/.session-state`; reject stale legacy `--state-dir` values before mutation. |
+| `session_state.py read-state` CLI | wrapper-preserved | Preserve `--field state_path`, `archive_path`, and `resume_token`; read primary state first, then exactly one valid project-scoped legacy bridge candidate; treat stale legacy `--state-dir` only as bridge input and never as a write target. |
+| `session_state.py clear-state` CLI | wrapper-preserved | Preserve exit contract; clear or durably consume only the state path selected by the current chain under the project lock; reject stale legacy `--state-dir` values before mutation unless an explicit recovery helper selected a legacy candidate. |
+| `session_state.py prune-state` CLI | wrapper-preserved | Preserve pruning behavior, but target only primary state; reject stale legacy `--state-dir` values unless an explicit recovery command names legacy state. |
 | `session_state.py allocate_archive_path` Python API | wrapper-preserved | Delegate to `storage_authority.py`; preserve collision suffix behavior for primary archive allocation. |
 | New active writer helpers | added | Add `begin-active-write`, `allocate-active-path`, `write-active-handoff`, `list-active-writes`, `active-write-transaction-recover`, and `abandon-active-write` as functions in `storage_authority.py` and CLI subcommands in `session_state.py`. |
 | New legacy copy helpers | added | Add `copy-legacy-active-to-primary-archive` and `copy-legacy-archive-to-primary-archive` as functions in `storage_authority.py` and CLI subcommands in `session_state.py`. |
@@ -882,6 +1049,8 @@ Generation and verification must be separate commands:
 
 Bootstrap rule: the first implementation pass may create the generator and artifact with `--write`. After the artifact exists, all verification and closeout uses `--check`, and `--check` must be no-write.
 
+Gate 0r proof-map coverage for this section is a bootstrap requirement, not final generated-row coverage. Before `storage_authority_inventory.py` and `storage_authority_inventory.json` exist, the proof map must include a stale-text bootstrap row that assigns creation of the generator, fixture artifact, and no-write check contract to Gate 3. After Gate 3 creates the generator and artifact, Gate 3 must rerun `gate_proof_map.py --write` or an equivalent reviewed update so the proof map contains the generated stale-text requirement rows, then `gate_proof_map.py --check` must verify those rows. Gate 0r must not pretend to cover generated stale-text rows before the generator can emit them.
+
 The inventory generator must emit the committed or reviewable artifact containing:
 
 - generated authority path list
@@ -893,6 +1062,8 @@ The inventory generator must emit the committed or reviewable artifact containin
 The gate passes only when this artifact or result is current with the source tree and has no unallowlisted blocked matches. Verification must include a no-dirty-tree check after `--check` for the inventory artifact and any generated scan outputs.
 
 The stale-text gate must scan runtime warning strings as well as prose.
+
+Because the hard-stop matrix and gate proof map scripts live outside the shipped Handoff plugin runtime tree, the generated inventory must not classify `hard_stop_matrix.py` and `gate_proof_map.py` as runtime helper entrypoints or installed plugin command surfaces. Refresh classifier and stale-text checks must still include these control-tooling files when they scan source-tree storage-authority text, but skill docs and installed-host harnesses must not treat them as ordinary Handoff user workflow helpers.
 
 Allowed stale text examples:
 
@@ -915,7 +1086,10 @@ Minimum source-repair coverage:
 - missing primary with valid legacy
 - invalid primary with valid legacy
 - legacy active exists, then new primary active exists, and default list/load still sees the eligible legacy active candidate during the cutover release
-- untracked valid `docs/handoffs/*.md` legacy active in a host repo with no ignore rule remains eligible during cutover only when plugin provenance, current local-preflight evidence, or exact reviewed path-plus-hash opt-in proves it is runtime material; valid-looking untracked files without that proof become `policy-conflict-artifact`
+- ignored or untracked valid `docs/handoffs/*.md` legacy active files remain eligible during cutover only when plugin-origin runtime marker provenance, legacy-active preflight evidence tied to an accepted external origin source, or exact reviewed path-plus-hash opt-in proves they are runtime material; valid-looking ignored or untracked files without that proof become `policy-conflict-artifact`
+- ignored or untracked valid `docs/handoffs/*.md` files with only ordinary runtime-shaped frontmatter fields such as `session_id`, `type`, `project`, `created_at`, `branch`, `commit`, `resumed_from`, or `files` become `policy-conflict-artifact` unless another accepted provenance proof exists
+- valid-looking ignored or untracked `docs/handoffs/*.md` files with explicit `policy-conflict-artifact` rejection rows are excluded from active selection without blocking implementation, as long as the implementation does not need to select them implicitly
+- reviewed legacy-active opt-in manifest rows enable runtime migration only for exact project-relative path plus raw-byte hash matches; path mismatch, hash mismatch, or missing reviewer/reason keeps the file blocked as `policy-conflict-artifact`
 - tracked durable `docs/handoffs/*.md` files are excluded from default active selection unless an exact reviewed runtime migration opt-in names the path and hash
 - tracked `.codex/handoffs/*.md` primary source files are reported as blocked and are not moved by implicit or explicit load
 - successful legacy load copies to primary archive, writes primary state, writes consumed legacy-active registry, and removes the loaded legacy source from later active-selection list/load results
@@ -961,9 +1135,11 @@ Minimum source-repair coverage:
 - multiple valid legacy candidates for the same project fail with an ambiguity diagnostic when no primary state exists
 - malformed, expired, ambiguous, or multiply matching legacy state emits an actionable diagnostic
 - top-level `docs/handoffs/handoff-*` and `docs/handoffs/handoff-*.json` state-like residue is inventoried, classified, and either validly bridged or diagnostically rejected
-- canonical-checkout local-preflight evidence includes the `canonical-checkout` residue scope and one disposition row per current top-level `docs/handoffs/handoff-*` or `docs/handoffs/handoff-*.json` path
-- `docs/superpowers/plans/2026-05-13-handoff-storage-residue-ledger.md` uses `scope` values to separate `repo-authority`, `local-preflight-summary`, and `policy-rule` rows and does not list ignored or untracked local residue as fresh-clone truth
-- `.codex/handoffs/.session-state/preflight/handoff-storage-residue-local-preflight.json` includes one local-preflight disposition row per current `docs/handoffs/handoff-*` and `docs/handoffs/handoff-*.json` path, with no `TBD` dispositions
+- canonical-checkout local-preflight evidence includes the `canonical-checkout` residue scope and explicit accounting for every current `docs/handoffs/**` path, either as a state-like residue row, a non-handoff filesystem residue row, a legacy state/archive scope row, a permitted archive/state directory-summary manifest reference, or a delegated legacy-active markdown row tied to the legacy-active evidence hash
+- legacy-active preflight evidence includes one classification row per current top-level `docs/handoffs/*.md` path and blocks valid-looking ignored or untracked markdown with no accepted external origin source as `policy-conflict-artifact`
+- `docs/superpowers/plans/2026-05-13-handoff-storage-residue-ledger.md` uses `scope` values to separate `repo-authority`, `local-preflight-summary`, and `policy-rule` rows, does not list ignored or untracked local residue as fresh-clone truth, and keeps the `docs/handoffs/*.md` policy-rule row aligned with the current provenance-backed eligibility contract
+- `.codex/handoffs/.session-state/preflight/handoff-storage-residue-local-preflight.json` includes one local-preflight disposition row per current `docs/handoffs/handoff-*` and `docs/handoffs/handoff-*.json` path, plus an explicit row, delegated evidence reference, or permitted archive/state directory-summary manifest reference for every other current `docs/handoffs/**` path, with no `TBD` dispositions or artifact classes
+- `.codex/handoffs/.session-state/preflight/handoff-storage-legacy-active-preflight.json` includes one legacy-active preflight row per current top-level `docs/handoffs/*.md` path, with no `TBD` artifact classes or provenance fields
 - explicit legacy archive load repeated for the same source root, project-relative path, storage location, and raw-byte hash reuses the same verified primary archive path from `copied-legacy-archives.json`
 - copied legacy-archive registry entries include source root, storage location, project-relative source path, source hash, lexical source path evidence, resolved path evidence, copied archive path, copied hash, timestamp, operation, recovery status, and transaction id
 - copied legacy-archive registry corruption or missing copied archive content fails with a recovery diagnostic instead of silently allocating a duplicate copy
@@ -973,6 +1149,8 @@ Minimum source-repair coverage:
 - active-writer recovery covers `pending_before_write`, `written_not_confirmed`, `cleanup_failed`, and `content_mismatch`
 - active-writer tests prove the project lock is released during content generation and reacquired by `write-active-handoff`
 - active-writer tests cover reservation lease expiry, lease renewal if implemented, conflicting state mutation after reservation, transaction watermark mismatch, and abandonment of expired reservations
+- active-writer tests cover caller-predeclared slug binding, helper-default slug binding, and a retry that attempts to change the slug after path binding and fails closed
+- stale `session_state.py --state-dir "$PROJECT_ROOT/docs/handoffs/.session-state"` callers cannot write, clear, prune, or migrate state under `docs/handoffs/`; `read-state` may use that path only as legacy bridge input after primary state-root resolution
 - ambiguous same-project state emits a candidate inventory and supports an explicit operator recovery path without guessing
 - `.codex/handoffs/*.md`, `.codex/handoffs/archive/*.md`, and `.codex/handoffs/.session-state/*.json` are ignored
 - `.codex/handoffs/.session-state/**`, including locks, transactions, markers, temp files, and recovery records, is ignored
@@ -986,7 +1164,7 @@ Minimum source-repair coverage:
 - discovery/search/triage tests fail on broad exception swallowing that drops path-specific skip reasons
 - dormant validation helper closeout does not claim live hook behavior, or live hook closeout includes installed-config proof
 
-Installed-host certification coverage is separate from `source repaired`. These behavior tests are mandatory before claiming the primitive proof label `installed host matrix behavior proved` or the composite labels `installed host matrix certified` and `installed cache certified`. Gate 1f must add source-proof harness coverage for path resolution and cache isolation, but the full installed-host behavior matrix may remain `not-claimed` when the closeout label is only `source repaired`:
+Installed-host certification coverage is separate from `source repaired`. These behavior tests are mandatory before claiming the primitive proof label `installed host matrix behavior proved` or the composite labels `installed host matrix certified` and `installed cache certified`. Gate 1f must add `source-harness-isolation-proof` coverage for path resolution and cache isolation, but app-server-installed harness proof and the full installed-host behavior matrix may remain `not-claimed` when the closeout label is only `source repaired`:
 
 - installed-host smoke for no `.codex/` ignore reports untracked `.codex/handoffs/` runtime files without editing host ignore files
 - installed-host smoke for broad `.codex/` ignore reports ignored `.codex/handoffs/` runtime files without using source-repo ignore proof
@@ -1014,13 +1192,49 @@ find .codex/handoffs/.archive -maxdepth 1 -name '*.md' -print 2>/dev/null | sort
 git check-ignore -v docs/handoffs/.session-state docs/handoffs/archive docs/handoffs/example.md
 git status --short -- docs/superpowers/plans/2026-05-13-handoff-storage-reversal.md docs/superpowers/plans/2026-05-13-handoff-storage-residue-ledger.md
 git status --short --ignored -- .codex/handoffs/.session-state/preflight/handoff-storage-residue-local-preflight.json
+git status --short --ignored -- .codex/handoffs/.session-state/preflight/handoff-storage-legacy-active-preflight.json
 ```
 
-The implementation branch for this execution is a fresh named implementation branch from current `main` in the canonical checkout, using this repo's `feature/*` branch-prefix policy. Direct implementation on `main` is not allowed. Branch switching is forbidden from a worktree with unrelated modified, deleted, or untracked paths. If `git status --short --untracked-files=all` shows anything outside the reviewed control document, repo-authority residue ledger, and explicitly ignored local-preflight evidence, stop and repair the checkout hygiene or revise this plan before code changes. Do not move, stash, delete, or normalize unrelated user work as part of this plan.
+The implementation branch for this execution is `feature/handoff-storage-reversal-main` in the canonical checkout, using this repo's `feature/*` branch-prefix policy. Direct implementation on `main` is not allowed. Creating a new implementation branch from `main`, switching to a different branch base, or using a different worktree topology is not allowed under the current Gate 0r evidence contract; if execution intentionally changes topology later, stop and patch this plan first to require regenerated state-like local-preflight evidence, regenerated legacy-active preflight evidence, refreshed ledger/proof-map base-commit authority, and a new Gate 0r branch/status record before any old evidence is reused. Branch switching is forbidden from a worktree with unrelated modified, deleted, or untracked paths. If `git status --short --untracked-files=all` shows anything outside the reviewed control document, repo-authority residue ledger, explicitly ignored state-like local-preflight evidence, and explicitly ignored legacy-active preflight evidence, stop and repair the checkout hygiene or revise this plan before code changes. During Gate 0r only, the permitted tracked authority-edit set also includes the optional reviewed legacy-active opt-in manifest, `docs/superpowers/plans/2026-05-13-handoff-storage-hard-stop-closeout.md`, `docs/superpowers/plans/2026-05-13-handoff-storage-gate-proof-map.md`, and the source-tree control tooling scripts named by this plan under `plugins/turbo-mode/tools/handoff_storage_reversal/`. Those files are plan/control surfaces, not Handoff runtime implementation surfaces, and Gate 0r is green only after they are committed and ordinary status is clean. Gate 1 runtime implementation must not rely on the Gate 0r authority-edit allowlist. Do not move, stash, delete, or normalize unrelated user work as part of this plan.
 
-The preflight must classify tracked durable handoff artifacts, ignored legacy operational artifacts, provenance-backed untracked legacy operational artifacts, previous-primary hidden archive artifacts, state-like residue, and policy-conflict artifacts before code changes. Collapsed directory-only status output is not sufficient; path-level inventory from `find` or an equivalent enumerator is required. The control document and repo-authority residue ledger must be tracked or otherwise explicitly recorded as durable implementation authority before source code changes begin. Local residue enumeration belongs in ignored local-preflight evidence and must not be presented as fresh-clone repo truth.
+The preflight must classify tracked durable handoff artifacts, provenance-backed ignored legacy active markdown artifacts, provenance-backed untracked legacy active markdown artifacts, legacy operational archives, legacy state bridge inputs, previous-primary hidden archive artifacts, state-like residue, and policy-conflict artifacts before code changes. Collapsed directory-only status output is not sufficient; path-level inventory from `find` or an equivalent enumerator is required. The control document and repo-authority residue ledger must be tracked or otherwise explicitly recorded as durable implementation authority before source code changes begin. Local state-like residue enumeration belongs in ignored state-like local-preflight evidence, legacy active markdown classification belongs in ignored legacy-active preflight evidence, and neither may be presented as fresh-clone repo truth.
 
-Repeat this preflight at the start of every mutating behavior gate, not only Gate 0r. The closeout for Gates 1c, 1d, 1e, and 4 must name the preflight timestamp, branch head, local-preflight evidence hash, and TTL classification result used for that gate.
+Repeat this preflight at the start of every mutating behavior gate, not only Gate 0r. The closeout for Gates 1c, 1d, 1e, 1g, and 4 must name the preflight timestamp, branch head, state-like local-preflight evidence hash, legacy-active preflight evidence hash, and TTL classification result used for that gate.
+
+Gate 0r control-map verification:
+
+```bash
+python plugins/turbo-mode/tools/handoff_storage_reversal/hard_stop_matrix.py \
+  --plan docs/superpowers/plans/2026-05-13-handoff-storage-reversal.md \
+  --matrix docs/superpowers/plans/2026-05-13-handoff-storage-hard-stop-closeout.md \
+  --check
+python plugins/turbo-mode/tools/handoff_storage_reversal/gate_proof_map.py \
+  --plan docs/superpowers/plans/2026-05-13-handoff-storage-reversal.md \
+  --hard-stop-matrix docs/superpowers/plans/2026-05-13-handoff-storage-hard-stop-closeout.md \
+  --map docs/superpowers/plans/2026-05-13-handoff-storage-gate-proof-map.md \
+  --check
+python plugins/turbo-mode/tools/handoff_storage_reversal/residue_preflight.py \
+  --project-root . \
+  --plan docs/superpowers/plans/2026-05-13-handoff-storage-reversal.md \
+  --ledger docs/superpowers/plans/2026-05-13-handoff-storage-residue-ledger.md \
+  --evidence .codex/handoffs/.session-state/preflight/handoff-storage-residue-local-preflight.json \
+  --check
+python plugins/turbo-mode/tools/handoff_storage_reversal/legacy_active_preflight.py \
+  --project-root . \
+  --evidence .codex/handoffs/.session-state/preflight/handoff-storage-legacy-active-preflight.json \
+  --check
+git ls-files --error-unmatch plugins/turbo-mode/tools/handoff_storage_reversal/hard_stop_matrix.py
+git ls-files --error-unmatch plugins/turbo-mode/tools/handoff_storage_reversal/gate_proof_map.py
+git ls-files --error-unmatch plugins/turbo-mode/tools/handoff_storage_reversal/residue_preflight.py
+git ls-files --error-unmatch plugins/turbo-mode/tools/handoff_storage_reversal/legacy_active_preflight.py
+git ls-files --error-unmatch docs/superpowers/plans/2026-05-13-handoff-storage-hard-stop-closeout.md
+git ls-files --error-unmatch docs/superpowers/plans/2026-05-13-handoff-storage-gate-proof-map.md
+git diff --exit-code -- docs/superpowers/plans/2026-05-13-handoff-storage-hard-stop-closeout.md
+git diff --exit-code -- docs/superpowers/plans/2026-05-13-handoff-storage-gate-proof-map.md
+git status --short -- docs/superpowers/plans/2026-05-13-handoff-storage-hard-stop-closeout.md docs/superpowers/plans/2026-05-13-handoff-storage-gate-proof-map.md
+```
+
+The proof map must be a separate tracked file for this execution. Do not embed it in this document unless this plan is patched first to define an equivalent generated/check-mode parser for embedded rows. Gate 0r closeout must run the proof-map check and prove that every Required Tests bullet, every Hard Stop Conditions row from the checked hard-stop matrix, every Installed Host Repo Policy Matrix row, every Compatibility Ledger row with decision `preserved`, `added`, `wrapper-preserved`, or `deprecated with diagnostic`, and the stale-text bootstrap requirement each have an enforcing gate and proof command or artifact. After Gate 3 creates the stale-text generator and fixture artifact, Gate 3 closeout must update and check the proof map so every generated stale-text requirement row is mapped before source closeout can claim `refresh surfaces reconciled`.
 
 ```bash
 uv run pytest \
@@ -1077,12 +1291,13 @@ git check-ignore -v docs/handoffs/.session-state/example.json
 
 It must also include a documented negative check proving a `.codex/skills/<sample>` path is not ignored by the new handoff runtime rules. The negative check is expected to exit non-zero; the closeout must report that expected non-match explicitly.
 
-Residue verification must include two checks:
+Residue and legacy-active verification must include three checks:
 
-- a repo-authority ledger check that fails if `docs/superpowers/plans/2026-05-13-handoff-storage-residue-ledger.md` lacks a `scope` column or contains ignored/untracked local residue rows as `repo-authority`
-- a local-preflight evidence check that compares the current preflight inventory to `.codex/handoffs/.session-state/preflight/handoff-storage-residue-local-preflight.json` and fails if any current `docs/handoffs/handoff-*` or `docs/handoffs/handoff-*.json` path lacks a local disposition row
+- a repo-authority ledger check through `residue_preflight.py --check` that fails if `docs/superpowers/plans/2026-05-13-handoff-storage-residue-ledger.md` lacks a `scope` column, contains ignored/untracked local residue rows as `repo-authority`, or carries stale `docs/handoffs/*.md` policy-rule text that omits the provenance-backed ignored/untracked or exact reviewed opt-in eligibility requirement
+- a local-preflight evidence check through `residue_preflight.py --check` that compares the current `docs/handoffs/**` inventory to `.codex/handoffs/.session-state/preflight/handoff-storage-residue-local-preflight.json` and fails if any current path lacks a state-like disposition row, a non-handoff filesystem residue row, a legacy state/archive scope row, or a delegated legacy-active evidence reference
+- a legacy-active preflight evidence check through `legacy_active_preflight.py --check` that compares current top-level `docs/handoffs/*.md` inventory to `.codex/handoffs/.session-state/preflight/handoff-storage-legacy-active-preflight.json` and fails if any current active markdown path lacks an artifact class, selection eligibility, raw-byte hash when readable, and accepted external origin source or explicit `policy-conflict-artifact` rejection
 
-Installed-host matrix verification must include the installed plugin/helper path, not source-only imports. The implementation may add a focused test or smoke command, but closeout must name the exact command. A source-tree pytest selector is allowed only as an orchestrator that resolves and executes the installed plugin code path. Minimum selector if implemented as pytest:
+Installed-host matrix verification is not part of the `source repaired` closeout command floor. When Gate 5 is in scope, or when any closeout claims `installed host matrix behavior proved`, `installed host matrix certified`, or `installed cache certified`, verification must include the installed plugin/helper path, not source-only imports. The implementation may add a focused test or smoke command, but closeout must name the exact command. A source-tree pytest selector is allowed only as an orchestrator that resolves and executes the installed plugin code path. Minimum selector if implemented as pytest:
 
 ```bash
 uv run pytest plugins/turbo-mode/handoff/1.6.0/tests/test_installed_host_repo_storage.py
@@ -1099,64 +1314,115 @@ Closeout must record narrow proof labels before assigning a composite status. Th
 - `source storage repaired`: source helper APIs, storage discovery, filesystem/git diagnostics, transactions, registries, active writers, state bridge, recovery, source-repo ignore policy, and source tests pass.
 - `skill docs reconciled`: Handoff skill docs and release docs invoke the helper protocol and contain no current-facing stale storage authority text.
 - `refresh surfaces reconciled`: refresh classifier, fixtures, inventory, stale-text gate, and source refresh smoke agree with `.codex/handoffs/` as primary.
-- `installed harness source-proof`: isolated harness source tests prove installed-root resolution, cache isolation, manifest identity, and realpath separation; no installed-host behavior matrix or installed-cache currency is claimed.
+- `source-harness-isolation-proof`: source tests prove the installed-host harness assertions for isolated layout, manifest identity, realpath separation, helper cwd isolation, import isolation, and source-checkout leak rejection without mutating the real installed cache. A test-only installer or fixture plugin root may satisfy this label only when it records the non-equivalent install method and avoids app-server-installed proof language.
+- `installed-harness-source-proof`: isolated harness source tests install the Handoff plugin through the guarded-refresh app-server install authority path into an isolated `CODEX_HOME`, then prove installed-root resolution, cache isolation, manifest identity, realpath separation, helper cwd isolation, and import isolation; no installed-host behavior matrix or installed-cache currency is claimed. Test-only installer layout proof does not satisfy this label.
 - `installed host matrix behavior proved`: installed plugin/helper smoke covers the host-repo policy matrix through the app-server install authority path.
 - `installed cache current`: source/cache equality or approved divergence proof exists, installed cache was refreshed or verified current, installed-cache smoke passes, the installed skill docs are the docs under test, and any live hook claim has installed-config proof.
 
 After those proof labels are recorded, closeout must use exactly one composite publication label:
 
-- `source repaired`: requires `source storage repaired`, `skill docs reconciled`, `refresh surfaces reconciled`, `installed harness source-proof`, hard-stop matrix proof, and source refresh smoke. It explicitly does not claim installed-host matrix behavior, installed-cache currency, or live hook behavior.
-- `refresh-ready but not mutated`: all `source repaired` requirements pass, plus refresh evidence says mutation is ready, but live installed-cache mutation was not run.
-- `installed host matrix certified`: all `source repaired` requirements pass, `installed host matrix behavior proved` passes, and no broader installed-cache certification or live hook claim is made beyond that matrix.
+- `source repaired`: requires `source storage repaired`, `skill docs reconciled`, `refresh surfaces reconciled`, `source-harness-isolation-proof`, hard-stop matrix proof, and source refresh smoke. It explicitly does not claim app-server-installed harness proof, installed-host matrix behavior, installed-cache currency, or live hook behavior.
+- `refresh-ready but not mutated`: all `source repaired` requirements pass, `installed-harness-source-proof` passes, and refresh evidence says mutation is ready, but live installed-cache mutation was not run.
+- `installed host matrix certified`: all `refresh-ready but not mutated` requirements pass, `installed host matrix behavior proved` passes, and no broader installed-cache certification or live hook claim is made beyond that matrix.
 - `installed cache certified`: all preceding requirements pass, plus `installed cache current` passes.
 
 ## Implementation Order
 
 Use named vertical commit gates so the implementation does not become one long unstable branch. A gate may go red locally while it is being implemented, but the gate boundary must be green and reviewable. Do not merge or hand off a gate that only adds tests for future code. Each gate must include its own tests, implementation, compatibility notes, and focused verification.
 
-Gate 0r freshness is not inherited by later behavior-changing gates. Before every gate or PR that starts mutating runtime behavior, rewires active writers or load semantics, changes state/registry handling, or claims source closeout, rerun branch/residue/TTL preflight from the current branch head. At minimum this applies to Gates 1c, 1d, 1e, 4, and any split PR that touches their owned surfaces. If the preflight discovers new residue, expired TTL evidence, dirty unrelated worktree state, or a changed branch base, the gate stops until the local-preflight evidence and this plan's disposition rules are refreshed.
+Gate 0r freshness is not inherited by later behavior-changing gates. Before every gate or PR that starts mutating runtime behavior, rewires active writers or load semantics, changes state/registry handling, or claims source closeout, rerun branch/residue/TTL preflight from the current branch head. At minimum this applies to Gates 1c, 1d, 1e, 1g, 4, and any split PR that touches their owned surfaces. If the preflight discovers new residue, expired TTL evidence, dirty unrelated worktree state, or a changed branch base, the gate stops until the local-preflight evidence and this plan's disposition rules are refreshed.
 
 1. `gate-0a-control-authority-and-ignore-policy` - historical prep at `bf83762`: Created `feature/handoff-storage-reversal-main` from current `main`, recorded this control document and the repo-authority residue ledger, and patched the narrow source-repo `.codex/handoffs/**` ignore policy.
 2. `gate-0b-local-preflight-evidence` - historical prep at `bf83762`: Generated ignored canonical-checkout local-preflight evidence at `.codex/handoffs/.session-state/preflight/handoff-storage-residue-local-preflight.json`; evidence hash was `335e8b2fc615167d92168c7afb011da58753c3c2c010da5e0a5f3f37b7c85e12`.
-3. `gate-0r-review-reanchor-and-preflight-refresh`: During Gate 0r, reviewed tracked plan, ledger, preflight, or hard-stop matrix edits may exist in the worktree while they are being prepared. Gate 0r is green only after those tracked authority edits are committed, `git status --short --untracked-files=all` is clean, expected ignored local runtime evidence is verified separately with `git status --short --ignored --untracked-files=all <paths>`, branch/residue preflight has been rerun, TTL-sensitive `bridge-once` evidence has been refreshed or reclassified, and the hard-stop closeout matrix is tracked in committed history. Source code implementation remains blocked until this gate is green.
+3. `gate-0r-review-reanchor-and-preflight-refresh`: During Gate 0r, reviewed tracked plan, ledger, optional legacy-active opt-in manifest, preflight, hard-stop matrix, proof-map, or source-tree control-tooling script edits named by this plan may exist in the worktree while they are being prepared. Gate 0r is green only after those tracked authority edits are committed, `git status --short --untracked-files=all` is clean, expected ignored local runtime evidence is verified separately with `git status --short --ignored --untracked-files=all <paths>`, branch/residue preflight has been rerun, TTL-sensitive `bridge-once` evidence has been refreshed or reclassified, `residue_preflight.py --check` proves every current `docs/handoffs/**` path has a state-like disposition row, non-handoff filesystem residue row, legacy state/archive scope row, permitted archive/state directory-summary manifest reference, or delegated legacy-active evidence reference and proves the repo-authority ledger has no stale policy-rule drift, `legacy_active_preflight.py --check` proves legacy-active preflight evidence has classified every current top-level `docs/handoffs/*.md` path, any legacy-active opt-in manifest rows are tracked and reviewed with exact path-plus-hash matching, the hard-stop closeout matrix is tracked and passes `hard_stop_matrix.py --check`, and the proof map is tracked and passes `gate_proof_map.py --check` against that hard-stop matrix for all Gate 0r row sources including the stale-text bootstrap requirement. Source code implementation remains blocked until this gate is green.
 4. `gate-1a-discovery-read-only-slice`: Add the `storage_authority.py` facade plus internal path/discovery/git modules needed for read-only inventory. Add and pass tests for cutover inventory, scan-mode separation, artifact-class filtering, git visibility filtering, candidate validation, skip reasons, dedup, ordering, source-repo ignore policy, and the ban on broad exception swallowing in search/triage discovery. Rewire only read-only discovery call sites that this gate can leave green.
 5. `gate-1b-reader-history-slice`: Rewire `/list-handoffs`, default and explicit `/distill`, `/search`, and `/triage` history search to the shared read-only discovery facade. Add and pass provenance, dedup-winner, historical-archive, `--project-root`, deprecated `--handoffs-dir`, and no-side-effect recovery-inventory tests. This gate must not add mutating load behavior.
 6. `gate-1c-load-transaction-slice`: Add transaction, registry, lock, atomic archive copy/move, and recovery primitives needed for load. Add and pass tests for primary active/archive load, tracked primary active source fail-closed behavior, legacy active/archive load, consumed legacy-active registry, copied legacy-archive registry, read-only recovery inventory, mutating recovery, explicit load idempotency, interruption, and concurrent retry. Rewire `/load` only after these tests pass.
-7. `gate-1d-active-writer-operation-state-slice`: Add active-writer operation-state persistence, `begin-active-write`, `allocate-active-path`, `write-active-handoff`, `list-active-writes`, `active-write-transaction-recover`, and `abandon-active-write`. Add and pass tests for helper-minted run id persistence, visible operation identity, context-compaction/retry recovery, active allocation, atomic write, idempotency key, changed-content retry failure, partial write recovery, and state cleanup. Rewire `/save`, `/summary`, and `/quicksave` only after the operation-state contract is green.
+7. `gate-1d-active-writer-operation-state-slice`: Add active-writer operation-state persistence, `begin-active-write`, `allocate-active-path`, `write-active-handoff`, `list-active-writes`, `active-write-transaction-recover`, and `abandon-active-write`. Add and pass tests for helper-minted run id persistence, visible operation identity, context-compaction/retry recovery, active allocation, atomic write, idempotency key, changed-content retry failure, partial write recovery, and state cleanup. Rewire `/save`, `/summary`, and `/quicksave` only after the operation-state contract is green and the Active Writer Creation Contract's state-bridge dependency rule is satisfied; otherwise Gate 1d may close only as `active-writer mechanics staged`.
 8. `gate-1e-state-bridge-and-recovery-slice`: Add project-scoped legacy-state bridge and operator recovery commands. Add and pass tests for state-like residue handling, TTL expiry diagnostics, ambiguous state diagnostics, primary-state-plus-unresolved-legacy fail-closed behavior, bridge cleanup proof, `continue-chain-state`, `mark-chain-state-consumed`, `abandon-primary-chain-state`, and `chain-state-recovery-inventory`.
-9. `gate-1f-installed-host-harness-slice`: Add the isolated installed-host harness and source-proof orchestration tests that resolve installed plugin realpaths outside the source checkout. This gate is part of source repair before Gate 4 and may pass as harness/source-test coverage without claiming installed-host matrix behavior or installed-cache certification.
-10. `gate-2-skill-docs-release-docs`: Reconcile skill docs, dormant validation helpers or live hooks, README, changelog, contract docs, release metadata, and helper launcher-class assertions with `.codex/handoffs/` as primary.
-11. `gate-3-refresh-and-stale-text`: Reconcile refresh classifier source, fixtures, inventory tests, `plugins/turbo-mode/tools/refresh/smoke.py`, the generated stale-text gate, storage authority inventory artifacts, and separate `--write`/`--check` inventory commands.
-12. `gate-4-source-closeout`: Run source verification, prove every hard-stop matrix row, and assign exactly one evidence status gate.
-13. `gate-5-installed-certification`: Only after source repair is proven, decide whether to run installed-cache refresh/certification and the installed-host matrix smoke.
+9. `gate-1f-installed-host-harness-slice`: Add the isolated installed-host harness and source-harness isolation tests that prove the harness catches source-checkout leakage and resolves helper realpaths outside the source checkout under an isolated root. This gate is part of source repair before Gate 4 and may pass with test-only or fixture install coverage when it records the non-equivalent install method and avoids app-server-installed, installed-host matrix, or installed-cache certification claims.
+10. `gate-1g-active-writer-bridge-integration-slice`: Required whenever Gate 1d closed as `active-writer mechanics staged` before Gate 1e landed. Re-run active-writer begin/generate/write/retry flows against the completed state bridge, prove pre-upgrade legacy state plus post-upgrade save/summary/quicksave preserves `resumed_from`, prove cleanup suppression markers prevent bridge resurrection, and only then allow `/save`, `/summary`, or `/quicksave` skill-doc rewires or `active writers rewired` source claims. If Gate 1d already included the minimal state bridge and all bridge-backed active-writer tests, Gate 1g may close as an explicit no-op with proof-map rows pointing to the Gate 1d evidence.
+11. `gate-2-skill-docs-release-docs`: Reconcile skill docs, dormant validation helpers or live hooks, README, changelog, contract docs, release metadata, and helper launcher-class assertions with `.codex/handoffs/` as primary.
+12. `gate-3-refresh-and-stale-text`: Reconcile refresh classifier source, fixtures, inventory tests, `plugins/turbo-mode/tools/refresh/smoke.py`, the generated stale-text gate, storage authority inventory artifacts, and separate `--write`/`--check` inventory commands. This gate must replace the Gate 0r stale-text bootstrap proof-map row with generated stale-text requirement rows, then run `gate_proof_map.py --check` before claiming refresh surfaces are reconciled.
+13. `gate-4-source-closeout`: Run source verification, prove every hard-stop matrix row, and assign exactly one evidence status gate.
+14. `gate-5-installed-certification`: Only after source repair is proven, decide whether to run installed-cache refresh/certification and the installed-host matrix smoke.
 
 Preferred PR split:
 
 - Discovery/read-only PR: Gates 0r, 1a, and 1b.
 - Load/archive transaction PR: Gate 1c.
-- Active writers/state recovery PR: Gates 1d and 1e, unless Gate 1d is large enough to split alone.
-- Installed-host harness source PR: Gate 1f, with no real installed-cache mutation claim.
+- Active writers/state recovery PR: Gates 1d, 1e, and 1g, unless Gate 1d is large enough to split alone.
+- Installed-host harness source PR: Gate 1f, with no real installed-cache mutation or app-server-installed proof claim unless explicitly run as a later refresh-readiness gate.
 - Docs/refresh/stale-text PR: Gates 2 and 3, after Gate 1f is reviewed or explicitly merged first.
-- Source closeout PR or closeout commit: Gate 4, only after Gate 1f and Gates 2-3 are green.
+- Source closeout PR or closeout commit: Gate 4, only after required Gates 1a-1g and Gates 2-3 are green.
 - Installed-host certification maintenance run: Gate 5 only if installed-host behavior certification or real installed-cache mutation is in scope.
 
 WIP cap: keep at most one non-green implementation gate open on a branch. If a gate starts pulling in the next slice to pass, stop and split or patch this implementation order before continuing.
 
+### Gate Proof Map
+
+Gate 0r must create a tracked proof map before Gate 1 source edits. For this execution the proof map must live in:
+
+```text
+docs/superpowers/plans/2026-05-13-handoff-storage-gate-proof-map.md
+```
+
+The proof map is the execution-economics control for this reversal. During Gate 0r it must assign every Required Tests bullet, every Hard Stop Conditions row, every Installed Host Repo Policy Matrix row, every Compatibility Ledger row with decision `preserved`, `added`, `wrapper-preserved`, or `deprecated with diagnostic`, and the stale-text bootstrap requirement to an enforcing gate. Generated stale-text rows become proof-map inputs only after Gate 3 creates `storage_authority_inventory.py` and `storage_authority_inventory.json`; Gate 3 must then refresh and check the proof map so those generated rows are mapped before source closeout.
+
+The proof map must be generated or mechanically checked from this control document. A hand-copied proof map is not sufficient. Gate 0r must add `plugins/turbo-mode/tools/handoff_storage_reversal/gate_proof_map.py` as source-tree control tooling outside the shipped Handoff plugin runtime tree. The script must be stdlib-only, must not import storage implementation modules, and must support:
+
+```bash
+python plugins/turbo-mode/tools/handoff_storage_reversal/gate_proof_map.py \
+  --plan docs/superpowers/plans/2026-05-13-handoff-storage-reversal.md \
+  --hard-stop-matrix docs/superpowers/plans/2026-05-13-handoff-storage-hard-stop-closeout.md \
+  --map docs/superpowers/plans/2026-05-13-handoff-storage-gate-proof-map.md \
+  --write
+```
+
+```bash
+python plugins/turbo-mode/tools/handoff_storage_reversal/gate_proof_map.py \
+  --plan docs/superpowers/plans/2026-05-13-handoff-storage-reversal.md \
+  --hard-stop-matrix docs/superpowers/plans/2026-05-13-handoff-storage-hard-stop-closeout.md \
+  --map docs/superpowers/plans/2026-05-13-handoff-storage-gate-proof-map.md \
+  --check
+```
+
+`--write` may create or refresh the tracked proof map during Gate 0r. `--check` must be no-write, fail if any required source row is missing from the proof map, fail if mapped text hashes diverge, fail if hard-stop `HS-###` IDs or hashes do not match the checked hard-stop matrix, and leave `git diff --exit-code -- docs/superpowers/plans/2026-05-13-handoff-storage-gate-proof-map.md` clean. The script must parse the required rows from the headings that define them, use the supplied hard-stop matrix as the source of truth for hard-stop IDs and hashes, assign stable IDs in source order for all non-hard-stop requirements, normalize each requirement with a documented whitespace rule, and store a SHA256 over the normalized exact requirement text. It must emit per-gate row counts and fail if any gate exceeds the explicit proof-map row budget in the Gate Capacity Model without a mapped split trigger or plan patch.
+
+The proof map must include these columns:
+
+| Column | Requirement |
+|---|---|
+| `requirement_id` | Stable ID for the mapped requirement. Hard stops use the `HS-###` IDs from the hard-stop matrix. Other requirements use stable prefixes such as `RT-###`, `CL-###`, `IH-###`, `ST-BOOTSTRAP`, or generated `ST-###`. |
+| `source_reference` | File, heading, and line or checksum-addressable text for the requirement. |
+| `requirement_sha256` | SHA256 over the normalized exact requirement text emitted by `gate_proof_map.py`. |
+| `first_enforcing_gate` | Earliest gate that must make the requirement true. |
+| `proof_owner` | `storage-discovery`, `reader-history`, `load-transaction`, `active-writer`, `state-recovery`, `installed-harness`, `skill-docs`, `refresh`, or `closeout`. |
+| `proof_command_or_artifact` | Exact selector, smoke command, generated inventory, ledger check, or manual-review artifact that proves the requirement. |
+| `split_trigger` | Gate-local threshold that forces a split before continuing. |
+| `status` | `pending`, `proved`, `not-claimed`, or `blocked`. |
+
+Gate briefs and PR descriptions must reference the relevant proof-map rows. If one gate owns more rows than its Gate Capacity Model budget can credibly review, the gate stops before implementation and this plan must be split or patched. A green pytest selector is not enough when proof-map rows remain pending, missing, hash-divergent, over budget without split disposition, or lacking a concrete command or artifact.
+
 ### Gate Capacity Model
 
-Each gate must start with a short gate brief in the PR description or closeout note naming the owner role, owned file set, expected test count, and split triggers. These budgets are planning controls, not permission to skip necessary files; exceeding one requires stopping to split the gate or patch this document.
+Each gate must start with a short gate brief in the PR description or closeout note naming the owner role, owned file set, expected test count, proof-map row budget, and split triggers. These budgets are planning controls, not permission to skip necessary files; exceeding one requires stopping to split the gate or patch this document.
 
-| Gate | Owner role | Expected owned files | Expected new or changed tests | Stop or split trigger |
-|---|---|---:|---:|---|
-| 1a discovery read-only | storage discovery owner | 6-10 | 20-35 cases | More than 12 files, any load/writer mutation, or unresolved broad exception swallowing. |
-| 1b reader/history | read-only surface owner | 5-9 | 15-30 cases | More than 10 files, any archive/state mutation, or stale direct root scans left in search/triage/summary. |
-| 1c load transactions | load transaction owner | 8-14 | 30-50 cases | More than 16 files, active-writer code required to pass, or registry/transaction recovery not reviewable in one diff. |
-| 1d active writers | active-writer owner | 8-14 | 30-50 cases | More than 16 files, state-bridge recovery dominates the diff, or skill-flow wrapper cannot be executed end-to-end. |
-| 1e state bridge/recovery | state recovery owner | 6-10 | 20-35 cases | More than 12 files, deletion of legacy state proposed, or operator recovery remains prose-only. |
-| 1f installed harness source | installed harness owner | 4-8 | 10-20 cases | More than 10 files, real `/Users/jp/.codex` mutation needed, or test-only installer evidence is mislabeled as installed-host behavior. |
-| 2 skill/release docs | skill docs owner | 8-14 | 8-15 surface assertions | More than 16 files or docs claim behavior not yet proven by source gates. |
-| 3 refresh/stale text | refresh owner | 6-12 | 15-30 cases | More than 14 files, inventory generator mutates during `--check`, or refresh labels blur source and installed-cache proof. |
-| 4 source closeout | closeout owner | 2-5 evidence/control files | hard-stop matrix plus command evidence | Any unproved hard stop, any manual-review row without named reviewer evidence, or any composite label with missing primitive proof labels. |
+| Gate | Owner role | Expected owned files | Expected new or changed tests | Max proof-map rows | Stop or split trigger |
+|---|---|---:|---:|---:|---|
+| 1a discovery read-only | storage discovery owner | 6-10 | 20-35 cases | 40 | More than 12 files, any load/writer mutation, or unresolved broad exception swallowing. |
+| 1b reader/history | read-only surface owner | 5-9 | 15-30 cases | 28 | More than 10 files, any archive/state mutation, or stale direct root scans left in search/triage/summary. |
+| 1c load transactions | load transaction owner | 8-14 | 30-50 cases | 45 | More than 16 files, active-writer code required to pass, or registry/transaction recovery not reviewable in one diff. |
+| 1d active writers | active-writer owner | 8-14 | 30-50 cases | 45 | More than 16 files, state-bridge recovery dominates the diff, or skill-flow wrapper cannot be executed end-to-end. |
+| 1e state bridge/recovery | state recovery owner | 6-10 | 20-35 cases | 40 | More than 12 files, deletion of legacy state proposed, or operator recovery remains prose-only. |
+| 1f installed harness source | installed harness owner | 4-8 | 10-20 cases | 24 | More than 10 files, real `/Users/jp/.codex` mutation needed, source-harness isolation proof relies on ordinary source imports, or any app-server-installed proof claim relies on a test-only installer. |
+| 1g active-writer bridge integration | active-writer/state integration owner | 3-6 | 10-20 cases | 18 | Any new broad storage primitive, skill-doc rewire before bridge-backed flow passes, or unresolved staged-vs-rewired label ambiguity. |
+| 2 skill/release docs | skill docs owner | 8-14 | 8-15 surface assertions | 30 | More than 16 files or docs claim behavior not yet proven by source gates. |
+| 3 refresh/stale text | refresh owner | 6-12 | 15-30 cases | 34 | More than 14 files, inventory generator mutates during `--check`, or refresh labels blur source and installed-cache proof. |
+| 4 source closeout | closeout owner | 2-5 evidence/control files | hard-stop matrix plus command evidence | 30 | Any unproved hard stop, any manual-review row without named reviewer evidence, or any composite label with missing primitive proof labels. |
+| 5 installed certification | installed certification owner | 2-6 harness, smoke, and evidence files | 6-12 host matrix cases | 18 | Any real `/Users/jp/.codex` mutation without explicit operator request, source-checkout import leakage, app-server install authority unavailable for claimed installed proof, host ignore/index mutation, or expansion beyond the Installed Host Repo Policy Matrix. |
+
+Gate 5 rows may remain `not-claimed` in the proof map during source-repair closeout only when the composite label is no stronger than `source repaired` and the row records that installed-host behavior, installed-cache currency, and real installed-cache mutation are explicitly excluded. Once any closeout claims `refresh-ready but not mutated`, `installed host matrix certified`, or `installed cache certified`, the relevant Gate 5 proof-map rows are no longer budget-exempt and must obey the Gate 5 budget and split trigger above.
 
 ## Hard Stop Conditions
 
@@ -1165,17 +1431,26 @@ Stop implementation and repair the contract before continuing if any of these oc
 - Preflight does not classify `docs/handoffs/**` artifacts or the branch/worktree state before implementation.
 - Preflight relies on collapsed `docs/handoffs/` status output instead of path-level artifact enumeration.
 - A mutating behavior gate starts from stale Gate 0r evidence instead of rerunning branch/residue/TTL preflight from the current branch head.
-- Implementation proceeds directly on `main` instead of a fresh named implementation branch from current `main`.
+- Implementation proceeds directly on `main`, creates a different implementation branch, switches to a different base, or moves to a different worktree topology instead of continuing on `feature/handoff-storage-reversal-main` under the current Gate 0r evidence contract.
 - Branch switching or implementation starts from a dirty worktree with unrelated modified, deleted, or untracked paths instead of stopping and repairing checkout hygiene.
-- A non-canonical implementation worktree is introduced without first revising this plan, the residue ledger, and the local-preflight evidence schema.
+- A non-canonical implementation worktree is introduced without first revising this plan, the residue ledger, and the local-preflight plus legacy-active preflight evidence schemas.
 - Source code implementation starts while this control document is still untracked or not otherwise recorded as durable implementation authority.
+- Gate 1 source edits start before the hard-stop closeout matrix and gate proof map are tracked, checked, and anchored to the current committed plan boundary.
+- Gate 1 source edits start before `gate_proof_map.py --check` proves full coverage for Required Tests, Hard Stops, Installed Host Matrix rows, Compatibility Ledger rows, the stale-text bootstrap requirement, and per-gate proof-map row budgets. After Gate 3 creates the generated stale-text artifact, source closeout starts before `gate_proof_map.py --check` proves the generated stale-text rows are mapped.
 - Local-preflight evidence is generated before the narrow source-repo `.codex/handoffs/**` ignore policy is patched and verified.
 - The tracked residue ledger lists ignored or untracked machine-local residue paths as `repo-authority` fresh-clone facts.
 - Any local-preflight `docs/handoffs/handoff-*` or `docs/handoffs/handoff-*.json` path lacks an ignored local-preflight evidence row with scope, explicit disposition, and verification hook.
+- Any current `docs/handoffs/**` path is absent from `residue_preflight.py --check` output, including paths delegated to legacy-active preflight, archive/state scope rows, state-like residue rows, and non-handoff filesystem residue rows.
+- The tracked residue ledger contains stale `docs/handoffs/*.md` policy-rule text that omits the current provenance-backed ignored/untracked or exact reviewed path-plus-hash opt-in eligibility requirement.
+- Any top-level `docs/handoffs/*.md` path lacks an ignored legacy-active preflight evidence row with artifact class, selection eligibility, raw-byte hash when readable, and accepted external origin source or explicit `policy-conflict-artifact` rejection.
+- A reviewed legacy-active opt-in manifest is used without being tracked, reviewed, and tied to exact project-relative path plus raw-byte hash rows before Gate 1 source edits.
 - The policy-authority override is used to delete, untrack, or reclassify tracked durable handoff artifacts as disposable.
 - Default active selection includes tracked durable `docs/handoffs/*.md` artifacts without an exact reviewed runtime migration opt-in path and hash.
-- Default active selection includes valid-looking untracked `docs/handoffs/*.md` files without plugin provenance, current local-preflight proof, or exact reviewed runtime migration opt-in path and hash.
-- Default active selection excludes valid ignored or provenance-backed untracked legacy operational `docs/handoffs/*.md` files during the cutover release without a documented diagnostic that intentionally blocks them.
+- Default active selection includes valid-looking ignored or untracked `docs/handoffs/*.md` files without plugin-origin runtime marker provenance, legacy-active preflight evidence tied to an accepted external origin source, or exact reviewed runtime migration opt-in path and hash.
+- Default active selection treats a reviewed runtime migration opt-in as matching when the project-relative path or raw-byte hash differs from the manifest row.
+- Implementation stops solely because a valid-looking legacy active file has an explicit `policy-conflict-artifact` rejection row and no workflow needs to select it implicitly.
+- Default active selection treats ordinary handoff frontmatter fields such as `session_id`, `type`, `project`, `created_at`, `branch`, `commit`, `resumed_from`, or `files` as sufficient runtime provenance for an ignored or untracked legacy file.
+- Default active selection excludes valid provenance-backed ignored or provenance-backed untracked legacy active markdown files during the cutover release without a documented diagnostic that intentionally blocks them.
 - Previous-primary hidden archive files under `.codex/handoffs/.archive/*.md` disappear from history search or explicit archive-load compatibility without a compatibility-ledger decision and tests.
 - A tracked `.codex/handoffs/*.md` source file is moved, archived, suppressed, or otherwise mutated by implicit or explicit primary load.
 - A source-backed operation or target allocation reports only git visibility and omits filesystem status for directory, symlink, non-regular, unreadable, path-escape, or parent-file-conflict cases.
@@ -1183,14 +1458,18 @@ Stop implementation and repair the contract before continuing if any of these oc
 - Handoff edits a host repo's `.gitignore`, `.git/info/exclude`, tracked `.codex/**` content, or index state during normal save/load/list/search/summary/quicksave behavior.
 - Installed-host smoke does not cover no ignore, broad `.codex/` ignore, tracked `.codex/skills/**`, tracked handoff-path collision, tracked primary active source, and non-git project-root cases before claiming installed-host readiness.
 - Installed-host smoke imports or executes Handoff helpers from the source checkout, or fails to assert installed helper and skill-doc realpaths outside the source checkout.
+- Gate 1f source-harness output reports Installed Host Repo Policy Matrix behavior as proved, certified, app-server-installed, or installed-host behavior proof instead of limiting itself to isolated-root layout, cache isolation, manifest identity, realpath separation, cwd isolation, import isolation, and source-checkout leak rejection.
 - A writer still writes current handoffs or chain state under `docs/handoffs/`.
 - Save, summary, or quicksave constructs active output paths outside `allocate-active-path` or writes active markdown outside `write-active-handoff`.
+- Save, summary, or quicksave is rewired before the state-bridge dependency is executable through either Gate 1d's minimal bridge implementation or completed Gate 1e state bridge/recovery.
 - Save, summary, or quicksave reports success after writing active output while chain-state cleanup remains failed, ambiguous, or recoverable-only.
 - Save, summary, or quicksave generates final content before `begin-active-write` has persisted a stable run id, state snapshot, and allocated path.
+- Save, summary, or quicksave derives or changes the active filename slug from generated title/body content after `begin-active-write` has bound the active path.
 - Save, summary, or quicksave skill-flow tests only static-scan helper names and do not execute the begin/generate/write/retry protocol with persisted operation identity.
 - `begin-active-write` holds the project lock across LLM or local content generation instead of releasing it after durable reservation.
 - `write-active-handoff` proceeds after an expired lease, conflicting chain mutation, state snapshot mismatch, transaction watermark mismatch, or ambiguous reservation match.
 - Active-writer idempotency key includes `transaction_id` or generated content hash.
+- Active-writer retry for the same `run_id` or idempotency key can change the bound slug or allocated active path without explicit operator-selected abandonment.
 - Active-writer retry after partial write can create a second active handoff for the same idempotency key.
 - Active-writer retry with the same idempotency key but changed generated bytes proceeds without an explicit `ActiveWriteContentChangedError` or equivalent diagnostic.
 - Default `/list-handoffs` or implicit `/load` hides eligible legacy active files during the cutover release just because primary active files exist.
@@ -1226,15 +1505,38 @@ Stop implementation and repair the contract before continuing if any of these oc
 - `/summary` claims snapshot-bound project-arc synthesis without recording and revalidating a candidate-set manifest hash, or fails to label the arc context `best_effort_not_snapshot_bound`.
 - A preserved public script API or CLI subcommand is removed or silently changes output shape without a compatibility-ledger decision and test.
 - `storage_authority_inventory.py --check` mutates files or lacks a corresponding `--write` update path.
+- `gate_proof_map.py --check` mutates files, omits any required source row class, or allows proof-map rows to drift from the current plan text without failing.
+- `gate_proof_map.py --check` validates hard-stop rows without cross-checking the supplied hard-stop matrix IDs and hashes.
+- `residue_preflight.py --check` mutates files, omits any current `docs/handoffs/**` path, accepts historical plain `bridge-once` evidence after Gate 0r, grants migration eligibility outside delegated legacy-active proof, or fails to reject stale residue-ledger policy-rule drift.
+- `legacy_active_preflight.py --check` mutates files, omits any current top-level active markdown path, classifies archive/state paths as legacy active markdown, or grants active-selection eligibility without accepted external origin proof or exact reviewed opt-in.
+- `write-state`, `clear-state`, or `prune-state` accepts stale `--state-dir "$PROJECT_ROOT/docs/handoffs/.session-state"` as a post-cutover mutation target instead of rejecting it before mutation.
 - Closeout runs `storage_authority_inventory.py --write` instead of check-only verification.
 - A closeout claims live hook behavior when validation helpers remain dormant.
 - A closeout report implies installed-cache currency without installed-cache evidence.
 
 ## Hard Stop Closeout Matrix
 
-Gate 0r must create or update a closeout matrix before source code implementation starts. The matrix may live in this document or in `docs/superpowers/plans/2026-05-13-handoff-storage-hard-stop-closeout.md`, but it must be tracked before Gate 1 source edits.
+Gate 0r must create or update a closeout matrix before source code implementation starts. For this execution, the matrix must live in the separate tracked file `docs/superpowers/plans/2026-05-13-handoff-storage-hard-stop-closeout.md`. Embedding the matrix in this document is not allowed unless a later plan patch also updates the `hard_stop_matrix.py` contract, Gate 0r verification commands, and tracked-file requirements before the embedded form is used.
 
-The matrix must be generated or mechanically checked from the Hard Stop Conditions bullet list. A hand-copied matrix is not sufficient. Gate 0r must add stable `HS-###` identities either by embedding them in the bullet source or by a generator that assigns IDs and stores a checksum of each stop condition. Closeout must run the generator in check mode and prove the committed matrix is current. `manual-review` is exceptional: every manual row must name the reviewer evidence artifact and explain why no test, smoke, static scan, ledger check, or generated inventory can prove the stop.
+The matrix must be generated or mechanically checked from the Hard Stop Conditions bullet list. A hand-copied matrix is not sufficient. Gate 0r must add `plugins/turbo-mode/tools/handoff_storage_reversal/hard_stop_matrix.py` as source-tree control tooling outside the shipped Handoff plugin runtime tree. The script must be stdlib-only, must not import storage implementation modules, and must support:
+
+```bash
+python plugins/turbo-mode/tools/handoff_storage_reversal/hard_stop_matrix.py \
+  --plan docs/superpowers/plans/2026-05-13-handoff-storage-reversal.md \
+  --matrix docs/superpowers/plans/2026-05-13-handoff-storage-hard-stop-closeout.md \
+  --write
+```
+
+```bash
+python plugins/turbo-mode/tools/handoff_storage_reversal/hard_stop_matrix.py \
+  --plan docs/superpowers/plans/2026-05-13-handoff-storage-reversal.md \
+  --matrix docs/superpowers/plans/2026-05-13-handoff-storage-hard-stop-closeout.md \
+  --check
+```
+
+`--write` may create or refresh the tracked matrix during Gate 0r. `--check` must be no-write, fail if the Hard Stop Conditions bullet list and matrix diverge, and leave `git diff --exit-code -- docs/superpowers/plans/2026-05-13-handoff-storage-hard-stop-closeout.md` clean. The script must parse only the bullets under `## Hard Stop Conditions`, assign stable `HS-###` IDs in bullet order, normalize each bullet with a documented whitespace rule, and store `stop_condition_sha256` as SHA256 over the normalized exact stop text. If a bullet is inserted, removed, or changed, `--check` must fail until the matrix is regenerated and reviewed.
+
+Closeout must run the generator in check mode and prove the committed matrix is current. `manual-review` is exceptional: every manual row must name the reviewer evidence artifact and explain why no test, smoke, static scan, ledger check, generated inventory, or helper diagnostic can prove the stop.
 
 The matrix must include one row for every bullet in Hard Stop Conditions with these columns:
 
@@ -1242,6 +1544,7 @@ The matrix must include one row for every bullet in Hard Stop Conditions with th
 |---|---|
 | `stop_id` | Stable identifier, for example `HS-001`, matching the hard-stop bullet order. |
 | `stop_condition` | Exact or checksum-addressable hard-stop text. |
+| `stop_condition_sha256` | SHA256 over the normalized exact stop text emitted by `hard_stop_matrix.py`. |
 | `authority_owner` | `plan`, `source`, `skill-docs`, `refresh`, `installed-host`, or `closeout`. |
 | `enforcing_gate` | The first implementation gate that can prove the stop cannot occur. |
 | `proof_type` | `unit-test`, `integration-test`, `smoke`, `static-scan`, `ledger-check`, `manual-review`, or `not-claimed`. |
@@ -1259,8 +1562,11 @@ Post-review plan authority commits:
 - `4b5f6fc docs: reanchor handoff storage reversal plan`
 - `7effa25 docs: tighten handoff reversal execution semantics`
 - `8fd78af docs: define handoff mutation watermark`
+- `2769186 docs: harden handoff storage reversal plan`
+- `e9b416a docs: stabilize handoff state markers`
+- `688335a docs: clarify state marker helper identity`
 
-As of this revision, `8fd78af` is the latest clean committed authority boundary. Later plan-only correction commits supersede this boundary only after they are committed on this branch with a clean worktree; do not try to self-name a commit hash inside the commit that creates it.
+Before this working-tree patch, `688335a` is the latest clean committed authority boundary observed for this branch. The commit containing this patch supersedes that boundary only after it is committed on this branch with a clean worktree. Do not try to self-name a commit hash inside the commit that creates it; Gate 0r closeout must record the actual committed `HEAD`, branch name, and `git status --short --untracked-files=all` result before source implementation begins.
 
 Final source implementation commit: filled during `gate-4-source-closeout` after source repair verification passes.
 
@@ -1294,8 +1600,8 @@ Historical Gate 0A/0B verification run before `bf83762`:
 - `git check-ignore -v .codex/handoffs/example.md` and the preflight evidence path were positive.
 - `git check-ignore -v .codex/skills/adversarial-review/SKILL.md` returned the expected non-match.
 
-Gate 0r verification remains open until branch hygiene, ignored-evidence visibility, residue preflight, TTL classification, and the hard-stop matrix check are rerun from the current committed plan boundary.
+Gate 0r verification remains open until branch hygiene, ignored-evidence visibility, residue preflight, legacy-active markdown preflight, TTL classification, gate proof-map creation, and the hard-stop matrix check are rerun from the current committed plan boundary.
 
 ### Evidence Status
 
-Gate 0A/0B prep exists historically at `bf83762`. The post-review plan authority lineage is `4b5f6fc` -> `7effa25` -> `8fd78af`, with later clean committed plan corrections superseding that lineage. No primitive proof label or composite publication label exists until the corresponding later gates run and record fresh verification.
+Gate 0A/0B prep exists historically at `bf83762`. The post-review plan authority lineage before this working-tree patch is `4b5f6fc` -> `7effa25` -> `8fd78af` -> `2769186` -> `e9b416a` -> `688335a`, with later clean committed plan corrections superseding that lineage only after commit. No primitive proof label or composite publication label exists until the corresponding later gates run and record fresh verification.
