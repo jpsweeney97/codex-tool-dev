@@ -334,6 +334,7 @@ def main(argv: list[str] | None = None) -> int:
     active_flow_parser.add_argument("--run-id", default=None)
     active_flow_parser.add_argument("--created-at", default=None)
     active_flow_parser.add_argument("--content-note", default=None)
+    active_flow_parser.add_argument("--resume-pending", action="store_true")
     active_flow_parser.add_argument(
         "--field",
         choices=(
@@ -465,33 +466,64 @@ def main(argv: list[str] | None = None) -> int:
         return _emit(payload, args.field)
     if args.command == "active-writer-flow":
         from scripts.active_writes import ActiveWriteError
-        from scripts.storage_authority import begin_active_write, write_active_handoff
+        from scripts.storage_authority import (
+            begin_active_write,
+            list_active_writes,
+            write_active_handoff,
+        )
 
         try:
-            reservation = begin_active_write(
-                Path(args.project_root),
-                project_name=args.project,
-                operation=args.operation,
-                slug=args.slug,
-                run_id=args.run_id,
-                created_at=args.created_at,
-            )
+            project_root = Path(args.project_root)
+            if args.resume_pending:
+                operation_state = _single_pending_active_write(
+                    list_active_writes(
+                        project_root,
+                        project_name=args.project,
+                        operation=args.operation,
+                    )
+                )
+                operation_state_path = Path(str(operation_state["operation_state_path"]))
+            else:
+                reservation = begin_active_write(
+                    project_root,
+                    project_name=args.project,
+                    operation=args.operation,
+                    slug=args.slug,
+                    run_id=args.run_id,
+                    created_at=args.created_at,
+                )
+                operation_state = reservation.to_payload()
+                operation_state_path = reservation.operation_state_path
             content = _deterministic_active_writer_content(
-                reservation.to_payload(),
+                operation_state,
                 content_note=args.content_note,
             )
             content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
             payload = write_active_handoff(
-                Path(args.project_root),
-                operation_state_path=reservation.operation_state_path,
+                project_root,
+                operation_state_path=operation_state_path,
                 content=content,
                 content_sha256=content_hash,
             )
-        except ActiveWriteError as exc:
+        except (ActiveWriteError, RuntimeError) as exc:
             print(exc, file=sys.stderr)
             return 1
         return _emit(payload, args.field)
     return 1
+
+
+def _single_pending_active_write(records: list[dict[str, object]]) -> dict[str, object]:
+    pending = [
+        record
+        for record in records
+        if record.get("status") not in {"committed", "abandoned", "reservation_expired"}
+    ]
+    if len(pending) != 1:
+        raise RuntimeError(
+            "active-writer-flow failed: expected exactly one pending active write. "
+            f"Got: {len(pending)!r:.100}"
+        )
+    return pending[0]
 
 
 def _deterministic_active_writer_content(

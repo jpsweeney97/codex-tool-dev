@@ -128,6 +128,131 @@ def test_active_writer_flow_cli_rejects_changed_content_retry(
     assert state["content_hash"] == first_payload["content_hash"]
 
 
+def test_active_writer_flow_cli_rejects_slug_change_retry(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    command = [
+        sys.executable,
+        str(script),
+        "active-writer-flow",
+        "--project-root",
+        str(tmp_path),
+        "--project",
+        "demo",
+        "--operation",
+        "save",
+        "--run-id",
+        "stable-flow",
+        "--created-at",
+        "2026-05-13T16:45:00Z",
+    ]
+    first = subprocess.run(command, check=True, capture_output=True, text=True)
+
+    changed_slug = subprocess.run(
+        [*command, "--slug", "changed-slug"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert changed_slug.returncode == 1
+    assert "another slug" in changed_slug.stderr
+    first_payload = json.loads(first.stdout)
+    state = json.loads(Path(first_payload["operation_state_path"]).read_text(encoding="utf-8"))
+    assert state["status"] == "committed"
+    assert state["bound_slug"] == "handoff"
+    assert state["active_path"] == first_payload["active_path"]
+
+
+def test_active_writer_flow_cli_recovers_context_loss_from_inventory(
+    tmp_path: Path,
+) -> None:
+    reservation = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="summary",
+        slug="resume-me",
+        created_at="2026-05-13T16:45:00Z",
+    )
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+
+    resumed = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "active-writer-flow",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--operation",
+            "summary",
+            "--resume-pending",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert resumed.returncode == 0, resumed.stderr
+    payload = json.loads(resumed.stdout)
+    assert payload["operation_state_path"] == str(reservation.operation_state_path)
+    assert payload["transaction_id"] == reservation.transaction_id
+    assert payload["status"] == "completed"
+    assert reservation.allocated_active_path.exists()
+
+
+def test_active_writer_flow_cli_fails_on_ambiguous_pending_inventory(
+    tmp_path: Path,
+) -> None:
+    first = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="summary",
+        slug="first",
+        created_at="2026-05-13T16:45:00Z",
+    )
+    state_dir = tmp_path / ".codex" / "handoffs" / ".session-state"
+    chain_state = state_dir / "handoff-demo-resume.json"
+    chain_state.write_text(
+        json.dumps({"project": "demo", "archive_path": "/tmp/archive.md"}),
+        encoding="utf-8",
+    )
+    second = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="summary",
+        slug="second",
+        created_at="2026-05-13T16:46:00Z",
+    )
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+
+    resumed = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "active-writer-flow",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--operation",
+            "summary",
+            "--resume-pending",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert resumed.returncode == 1
+    assert "expected exactly one pending active write" in resumed.stderr
+    assert "Traceback" not in resumed.stderr
+    assert first.allocated_active_path.exists() is False
+    assert second.allocated_active_path.exists() is False
+
+
 def test_begin_active_write_persists_operation_state_before_content_generation(
     tmp_path: Path,
 ) -> None:
