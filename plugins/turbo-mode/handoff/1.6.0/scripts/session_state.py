@@ -217,6 +217,16 @@ def main(argv: list[str] | None = None) -> int:
     prune_parser.add_argument("--state-dir", required=True)
     prune_parser.add_argument("--max-age-hours", type=int, default=24)
 
+    allocate_active_parser = subparsers.add_parser("allocate-active-path")
+    allocate_active_parser.add_argument("--project-root", required=True)
+    allocate_active_parser.add_argument("--slug", required=True)
+    allocate_active_parser.add_argument("--created-at", default=None)
+    allocate_active_parser.add_argument(
+        "--field",
+        choices=("active_path",),
+        default=None,
+    )
+
     begin_active_parser = subparsers.add_parser("begin-active-write")
     begin_active_parser.add_argument("--project-root", required=True)
     begin_active_parser.add_argument("--project", required=True)
@@ -332,6 +342,21 @@ def main(argv: list[str] | None = None) -> int:
         deleted = prune_old_state_files(args.max_age_hours, state_dir=Path(args.state_dir))
         json.dump({"deleted": [str(path) for path in deleted]}, sys.stdout)
         return 0
+
+    if args.command == "allocate-active-path":
+        from scripts.active_writes import ActiveWriteError
+        from scripts.storage_authority import allocate_active_path
+
+        try:
+            active_path = allocate_active_path(
+                Path(args.project_root),
+                slug=args.slug,
+                created_at=args.created_at,
+            )
+        except ActiveWriteError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        return _emit({"active_path": str(active_path)}, args.field)
 
     if args.command == "begin-active-write":
         from scripts.active_writes import ActiveWriteError

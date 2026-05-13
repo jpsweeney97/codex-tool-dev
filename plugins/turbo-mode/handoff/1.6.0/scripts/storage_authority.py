@@ -121,6 +121,22 @@ def begin_active_write(
     )
 
 
+def allocate_active_path(
+    project_root: Path,
+    *,
+    slug: str,
+    created_at: str | None = None,
+) -> Path:
+    """Allocate a primary active handoff path through the storage facade."""
+    from scripts.active_writes import allocate_active_path as _allocate_active_path
+
+    return _allocate_active_path(
+        project_root,
+        slug=slug,
+        created_at=created_at,
+    )
+
+
 def write_active_handoff(
     project_root: Path,
     *,

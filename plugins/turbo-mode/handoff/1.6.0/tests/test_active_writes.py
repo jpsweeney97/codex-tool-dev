@@ -70,6 +70,38 @@ def test_begin_active_write_persists_operation_state_before_content_generation(
     ).exists()
 
 
+def test_allocate_active_path_cli_returns_collision_safe_primary_path(tmp_path: Path) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    existing = tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_repeat.md"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("existing\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "allocate-active-path",
+            "--project-root",
+            str(tmp_path),
+            "--slug",
+            "repeat",
+            "--created-at",
+            "2026-05-13T16:45:00Z",
+            "--field",
+            "active_path",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(
+        tmp_path / ".codex" / "handoffs" / "2026-05-13_16-45_repeat-01.md"
+    )
+    assert existing.read_text(encoding="utf-8") == "existing\n"
+
+
 def test_write_active_handoff_commits_reserved_output(tmp_path: Path) -> None:
     script = Path(__file__).parent.parent / "scripts" / "session_state.py"
     begin = subprocess.run(

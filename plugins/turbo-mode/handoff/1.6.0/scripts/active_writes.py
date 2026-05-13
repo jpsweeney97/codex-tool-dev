@@ -178,6 +178,18 @@ def begin_active_write(
         _release_lock(lock_path)
 
 
+def allocate_active_path(
+    project_root: Path,
+    *,
+    slug: str,
+    created_at: str | None = None,
+) -> Path:
+    """Allocate a collision-safe primary active handoff path."""
+    layout = get_storage_layout(project_root)
+    timestamp = _parse_created_at(created_at)
+    return _allocate_active_path(layout.primary_active_dir, slug, timestamp)
+
+
 def write_active_handoff(
     project_root: Path,
     *,
