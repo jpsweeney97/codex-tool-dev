@@ -10,6 +10,57 @@ import pytest
 import scripts.active_writes as active_writes
 
 
+@pytest.mark.parametrize(
+    ("operation", "expected_slug"),
+    [
+        ("save", "handoff"),
+        ("summary", "summary"),
+        ("quicksave", "checkpoint"),
+    ],
+)
+def test_active_writer_flow_cli_runs_begin_generate_write_protocol(
+    tmp_path: Path,
+    operation: str,
+    expected_slug: str,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "active-writer-flow",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--operation",
+            operation,
+            "--created-at",
+            "2026-05-13T16:45:00Z",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    operation_state_path = Path(payload["operation_state_path"])
+    active_path = Path(payload["active_path"])
+    state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+
+    assert payload["status"] == "completed"
+    assert payload["operation"] == operation
+    assert payload["bound_slug"] == expected_slug
+    assert payload["content_hash"] == state["content_hash"]
+    assert active_path == (
+        tmp_path / ".codex" / "handoffs" / f"2026-05-13_16-45_{operation}-{expected_slug}.md"
+    )
+    assert state["status"] == "committed"
+    assert active_path.read_text(encoding="utf-8").startswith("---\n")
+
+
 def test_begin_active_write_persists_operation_state_before_content_generation(
     tmp_path: Path,
 ) -> None:

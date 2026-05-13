@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -321,6 +322,31 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
     )
 
+    active_flow_parser = subparsers.add_parser("active-writer-flow")
+    active_flow_parser.add_argument("--project-root", required=True)
+    active_flow_parser.add_argument("--project", required=True)
+    active_flow_parser.add_argument(
+        "--operation",
+        choices=("save", "summary", "quicksave"),
+        required=True,
+    )
+    active_flow_parser.add_argument("--slug", default=None)
+    active_flow_parser.add_argument("--run-id", default=None)
+    active_flow_parser.add_argument("--created-at", default=None)
+    active_flow_parser.add_argument(
+        "--field",
+        choices=(
+            "status",
+            "active_path",
+            "operation_state_path",
+            "transaction_id",
+            "transaction_path",
+            "content_hash",
+            "bound_slug",
+        ),
+        default=None,
+    )
+
     args = parser.parse_args(argv)
     if args.command == "archive":
         source = Path(args.source)
@@ -436,7 +462,50 @@ def main(argv: list[str] | None = None) -> int:
             print(exc, file=sys.stderr)
             return 1
         return _emit(payload, args.field)
+    if args.command == "active-writer-flow":
+        from scripts.active_writes import ActiveWriteError
+        from scripts.storage_authority import begin_active_write, write_active_handoff
+
+        try:
+            reservation = begin_active_write(
+                Path(args.project_root),
+                project_name=args.project,
+                operation=args.operation,
+                slug=args.slug,
+                run_id=args.run_id,
+                created_at=args.created_at,
+            )
+            content = _deterministic_active_writer_content(reservation.to_payload())
+            content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            payload = write_active_handoff(
+                Path(args.project_root),
+                operation_state_path=reservation.operation_state_path,
+                content=content,
+                content_sha256=content_hash,
+            )
+        except ActiveWriteError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        return _emit(payload, args.field)
     return 1
+
+
+def _deterministic_active_writer_content(operation_state: dict[str, object]) -> str:
+    """Return deterministic markdown bound to one active-writer operation."""
+    return (
+        "---\n"
+        f"project: {operation_state['project']}\n"
+        f"session_id: {operation_state['run_id']}\n"
+        f"type: {operation_state['operation']}\n"
+        f"title: {operation_state['operation']} {operation_state['bound_slug']}\n"
+        f"active_writer_run_id: {operation_state['run_id']}\n"
+        f"active_writer_transaction_id: {operation_state['transaction_id']}\n"
+        f"active_writer_bound_slug: {operation_state['bound_slug']}\n"
+        f"active_writer_allocated_path: {operation_state['allocated_active_path']}\n"
+        "---\n\n"
+        f"# {operation_state['operation']} {operation_state['bound_slug']}\n\n"
+        "Deterministic active-writer flow content.\n"
+    )
 
 
 if __name__ == "__main__":
