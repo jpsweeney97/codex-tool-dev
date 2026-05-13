@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import time
+import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -271,6 +274,93 @@ def chain_state_recovery_inventory(
     }
 
 
+def mark_chain_state_consumed(
+    project_root: Path,
+    *,
+    project_name: str,
+    state_path: str,
+    expected_payload_sha256: str,
+    reason: str,
+) -> dict[str, object]:
+    """Durably suppress one exact legacy/state-like chain-state candidate."""
+    layout = get_storage_layout(project_root)
+    inventory = chain_state_recovery_inventory(layout.project_root, project_name=project_name)
+    candidate = _select_chain_state_candidate(
+        inventory,
+        selector=state_path,
+    )
+    if candidate["storage_location"] == StorageLocation.PRIMARY_STATE:
+        raise ChainStateDiagnosticError(
+            _operator_error(
+                code="primary-chain-state-not-consumable",
+                message="mark-chain-state-consumed requires a legacy or state-like candidate.",
+                candidate=candidate,
+            )
+        )
+    if candidate["validation_status"] != "valid":
+        raise ChainStateDiagnosticError(
+            _operator_error(
+                code="chain-state-candidate-invalid",
+                message="mark-chain-state-consumed requires a valid chain-state candidate.",
+                candidate=candidate,
+            )
+        )
+    if candidate["payload_sha256"] != expected_payload_sha256:
+        raise ChainStateDiagnosticError(
+            _operator_error(
+                code="chain-state-payload-hash-mismatch",
+                message="Selected chain-state payload hash does not match expected hash.",
+                candidate=candidate,
+            )
+        )
+    marker_path = layout.primary_state_dir / "markers" / "chain-state-consumed.json"
+    transaction_id = uuid.uuid4().hex
+    transaction_path = layout.primary_state_dir / "transactions" / f"{transaction_id}.json"
+    marked_at = datetime.now(UTC).isoformat()
+    stable_key = _chain_state_stable_key(candidate)
+    marker = _read_json_object(marker_path)
+    entries = marker.get("entries")
+    if not isinstance(entries, list):
+        entries = []
+    if not any(
+        isinstance(entry, dict) and entry.get("stable_key") == stable_key
+        for entry in entries
+    ):
+        entries.append({
+            "stable_key": stable_key,
+            "reason": reason,
+            "marked_at": marked_at,
+            "transaction_id": transaction_id,
+            "lexical_path": candidate["lexical_path"],
+            "resolved_path": candidate["resolved_path"],
+        })
+    marker = {
+        "schema_version": 1,
+        "entries": entries,
+    }
+    transaction = {
+        "schema_version": 1,
+        "transaction_id": transaction_id,
+        "operation": "mark-chain-state-consumed",
+        "status": "completed",
+        "project": project_name,
+        "stable_key": stable_key,
+        "reason": reason,
+        "marker_path": str(marker_path),
+        "created_at": marked_at,
+        "completed_at": marked_at,
+    }
+    _write_json_atomic(marker_path, marker)
+    _write_json_atomic(transaction_path, transaction)
+    return {
+        "status": "consumed",
+        "marker_path": str(marker_path),
+        "transaction_path": str(transaction_path),
+        "transaction_id": transaction_id,
+        "stable_key": stable_key,
+    }
+
+
 def read_chain_state(
     project_root: Path,
     *,
@@ -290,6 +380,7 @@ def read_chain_state(
         for candidate in valid
         if candidate["storage_location"]
         in {StorageLocation.LEGACY_STATE, StorageLocation.STATE_LIKE_RESIDUE}
+        and candidate["marker_status"] != "consumed"
     ]
     if len(primary) > 1:
         raise ChainStateDiagnosticError(
@@ -382,6 +473,51 @@ def _chain_state_diagnostic(
     }
 
 
+def _operator_error(
+    *,
+    code: str,
+    message: str,
+    candidate: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "error": {
+            "code": code,
+            "message": message,
+        },
+        "candidates": [candidate],
+    }
+
+
+def _select_chain_state_candidate(
+    inventory: dict[str, object],
+    *,
+    selector: str,
+) -> dict[str, object]:
+    candidates = [
+        candidate
+        for candidate in inventory["candidates"]
+        if isinstance(candidate, dict)
+        and selector
+        in {
+            str(candidate["project_relative_state_path"]),
+            str(candidate["lexical_path"]),
+            str(candidate["resolved_path"]),
+            str(candidate.get("resume_token") or ""),
+        }
+    ]
+    if len(candidates) != 1:
+        raise ChainStateDiagnosticError(
+            _chain_state_diagnostic(
+                code="chain-state-selector-ambiguous",
+                message="Expected exactly one chain-state candidate for selector.",
+                inventory=inventory,
+                candidates=candidates,
+                recovery_choices=["chain-state-recovery-inventory", "abort"],
+            )
+        )
+    return candidates[0]
+
+
 def _state_candidate_paths(root: Path, project_name: str) -> list[Path]:
     if not root.exists() or not root.is_dir():
         return []
@@ -408,7 +544,7 @@ def _chain_state_record(
 ) -> dict[str, object]:
     detected_format = _chain_state_format(path)
     parsed = _parse_chain_state(path, project_name=project_name, detected_format=detected_format)
-    return {
+    record = {
         "source_root": source_root,
         "storage_location": str(storage_location),
         "project_relative_state_path": _project_relative_path(layout.project_root, path),
@@ -427,6 +563,40 @@ def _chain_state_record(
         "source_fs_status": _fs_status(path),
         "marker_status": "unmarked",
         "transaction_status": "none",
+    }
+    record["marker_status"] = _chain_state_marker_status(layout, record)
+    return record
+
+
+def _chain_state_marker_status(
+    layout: StorageLayout,
+    candidate: dict[str, object],
+) -> str:
+    if candidate["validation_status"] != "valid":
+        return "unmarked"
+    marker_path = layout.primary_state_dir / "markers" / "chain-state-consumed.json"
+    marker = _read_json_object(marker_path)
+    entries = marker.get("entries")
+    if not isinstance(entries, list):
+        return "unmarked"
+    stable_key = _chain_state_stable_key(candidate)
+    if any(
+        isinstance(entry, dict) and entry.get("stable_key") == stable_key
+        for entry in entries
+    ):
+        return "consumed"
+    return "unmarked"
+
+
+def _chain_state_stable_key(candidate: dict[str, object]) -> dict[str, object]:
+    return {
+        "source_root": candidate["source_root"],
+        "storage_location": candidate["storage_location"],
+        "project_relative_state_path": candidate["project_relative_state_path"],
+        "project": candidate["project"],
+        "resume_token": candidate["resume_token"],
+        "detected_format": candidate["detected_format"],
+        "payload_sha256": candidate["payload_sha256"],
     }
 
 
@@ -562,6 +732,23 @@ def _age_seconds(path: Path) -> int | None:
         return max(0, int(time.time() - path.stat().st_mtime))
     except OSError:
         return None
+
+
+def _read_json_object(path: Path) -> dict[str, object]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return payload
+
+
+def _write_json_atomic(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    os.replace(temp_path, path)
 
 
 def discover_handoff_inventory(

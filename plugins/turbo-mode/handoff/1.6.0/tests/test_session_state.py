@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -505,6 +506,119 @@ def test_read_chain_state_cli_rejects_primary_with_unresolved_legacy(
         "primary_state",
     ]
     assert not (primary.parent / "markers").exists()
+
+
+def test_mark_chain_state_consumed_suppresses_unresolved_legacy_state(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    legacy = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    primary.write_text(
+        json.dumps({
+            "state_path": str(primary),
+            "project": "demo",
+            "resume_token": "token-a",
+            "archive_path": "/tmp/primary.md",
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+    legacy_payload = {
+        "state_path": str(legacy),
+        "project": "demo",
+        "resume_token": "token-b",
+        "archive_path": "/tmp/legacy.md",
+        "created_at": "2026-05-13T16:01:00Z",
+    }
+    legacy_bytes = json.dumps(legacy_payload)
+    legacy.write_text(legacy_bytes, encoding="utf-8")
+    legacy_hash = hashlib.sha256(legacy_bytes.encode("utf-8")).hexdigest()
+
+    marked = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "mark-chain-state-consumed",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--state-path",
+            "docs/handoffs/.session-state/handoff-demo-token-b.json",
+            "--expected-payload-sha256",
+            legacy_hash,
+            "--reason",
+            "stale duplicate",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert marked.returncode == 0, marked.stderr
+    mark_payload = json.loads(marked.stdout)
+    marker_path = Path(mark_payload["marker_path"])
+    transaction_path = Path(mark_payload["transaction_path"])
+    assert marker_path.exists()
+    assert transaction_path.exists()
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    assert marker["entries"][0]["stable_key"] == {
+        "source_root": "legacy",
+        "storage_location": "legacy_state",
+        "project_relative_state_path": "docs/handoffs/.session-state/handoff-demo-token-b.json",
+        "project": "demo",
+        "resume_token": "token-b",
+        "detected_format": "tokenized-json",
+        "payload_sha256": legacy_hash,
+    }
+    assert json.loads(transaction_path.read_text(encoding="utf-8"))["operation"] == (
+        "mark-chain-state-consumed"
+    )
+    assert legacy.read_text(encoding="utf-8") == legacy_bytes
+
+    read_after = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+    assert read_after.returncode == 0, read_after.stderr
+    read_payload = json.loads(read_after.stdout)
+    assert read_payload["status"] == "found"
+    assert read_payload["source"] == "primary"
+
+    inventory_after = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "list-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+    inventory_payload = json.loads(inventory_after.stdout)
+    legacy_row = next(
+        candidate
+        for candidate in inventory_payload["candidates"]
+        if candidate["storage_location"] == "legacy_state"
+    )
+    assert legacy_row["marker_status"] == "consumed"
 
 
 def test_read_chain_state_cli_reads_single_primary_state(tmp_path: Path) -> None:

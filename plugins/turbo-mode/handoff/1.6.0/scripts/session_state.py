@@ -235,6 +235,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
     )
 
+    mark_chain_parser = subparsers.add_parser("mark-chain-state-consumed")
+    mark_chain_parser.add_argument("--project-root", required=True)
+    mark_chain_parser.add_argument("--project", required=True)
+    mark_chain_parser.add_argument("--state-path", required=True)
+    mark_chain_parser.add_argument("--expected-payload-sha256", required=True)
+    mark_chain_parser.add_argument("--reason", required=True)
+    mark_chain_parser.add_argument(
+        "--field",
+        choices=("status", "marker_path", "transaction_path", "transaction_id"),
+        default=None,
+    )
+
     allocate_active_parser = subparsers.add_parser("allocate-active-path")
     allocate_active_parser.add_argument("--project-root", required=True)
     allocate_active_parser.add_argument(
@@ -420,6 +432,26 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         if payload["status"] == "absent":
             return 1
+        return _emit(payload, args.field)
+
+    if args.command == "mark-chain-state-consumed":
+        from scripts.storage_authority import (
+            ChainStateDiagnosticError,
+            mark_chain_state_consumed,
+        )
+
+        try:
+            payload = mark_chain_state_consumed(
+                Path(args.project_root),
+                project_name=args.project,
+                state_path=args.state_path,
+                expected_payload_sha256=args.expected_payload_sha256,
+                reason=args.reason,
+            )
+        except ChainStateDiagnosticError as exc:
+            json.dump(exc.payload, sys.stdout, indent=2)
+            print()
+            return 2
         return _emit(payload, args.field)
 
     if args.command == "allocate-active-path":
