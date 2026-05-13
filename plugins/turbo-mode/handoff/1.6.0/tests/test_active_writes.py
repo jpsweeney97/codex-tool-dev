@@ -266,3 +266,63 @@ def test_write_active_handoff_changed_content_retry_preserves_committed_state(
     assert state["status"] == "committed"
     assert state["content_hash"] == original_hash
     assert Path(state["active_path"]).read_text(encoding="utf-8") == original
+
+
+def test_abandon_active_write_marks_operation_and_transaction_without_deleting_output(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    begin = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "begin-active-write",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--operation",
+            "save",
+            "--slug",
+            "abandon-me",
+            "--created-at",
+            "2026-05-13T16:45:00Z",
+            "--field",
+            "operation_state_path",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    operation_state_path = Path(begin.stdout.strip())
+    state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    reserved_output = Path(state["allocated_active_path"])
+    reserved_output.write_text("operator-owned bytes\n", encoding="utf-8")
+
+    abandoned = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "abandon-active-write",
+            "--project-root",
+            str(tmp_path),
+            "--operation-state-path",
+            str(operation_state_path),
+            "--reason",
+            "operator selected a new save",
+            "--field",
+            "status",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert abandoned.returncode == 0, abandoned.stderr
+    assert abandoned.stdout.strip() == "abandoned"
+    updated = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    transaction = json.loads(Path(updated["transaction_path"]).read_text(encoding="utf-8"))
+    assert updated["status"] == "abandoned"
+    assert updated["abandon_reason"] == "operator selected a new save"
+    assert transaction["status"] == "abandoned"
+    assert reserved_output.read_text(encoding="utf-8") == "operator-owned bytes\n"

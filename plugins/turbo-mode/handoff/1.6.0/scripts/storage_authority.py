@@ -155,6 +155,22 @@ def list_active_writes(
     )
 
 
+def abandon_active_write(
+    project_root: Path,
+    *,
+    operation_state_path: Path,
+    reason: str,
+) -> dict[str, object]:
+    """Mark an active write abandoned through the storage facade."""
+    from scripts.active_writes import abandon_active_write as _abandon_active_write
+
+    return _abandon_active_write(
+        project_root,
+        operation_state_path=operation_state_path,
+        reason=reason,
+    )
+
+
 def discover_handoff_inventory(
     project_root: Path,
     *,

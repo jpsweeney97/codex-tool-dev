@@ -261,6 +261,43 @@ def list_active_writes(
     return records
 
 
+def abandon_active_write(
+    project_root: Path,
+    *,
+    operation_state_path: Path,
+    reason: str,
+) -> dict[str, object]:
+    """Mark one active-write operation abandoned without deleting active output."""
+    layout = get_storage_layout(project_root)
+    state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    project = str(state.get("project", layout.project_root.name))
+    operation = str(state.get("operation", ""))
+    transaction_id = str(state.get("transaction_id", ""))
+    lock_path = layout.primary_state_dir / "locks" / "active-write.lock"
+    _acquire_lock(lock_path, project=project, operation=operation, transaction_id=transaction_id)
+    try:
+        updated_at = datetime.now(UTC).isoformat()
+        active_path = Path(str(state.get("active_path") or state["allocated_active_path"]))
+        state.update({
+            "status": "abandoned",
+            "active_path": str(active_path),
+            "active_path_exists": active_path.exists(),
+            "active_path_sha256": _sha256_path(active_path) if active_path.exists() else None,
+            "abandon_reason": reason,
+            "updated_at": updated_at,
+        })
+        _write_json_atomic(operation_state_path, state)
+        transaction_path = Path(str(state["transaction_path"]))
+        transaction = {
+            **state,
+            "status": "abandoned",
+        }
+        _write_json_atomic(transaction_path, transaction)
+        return transaction
+    finally:
+        _release_lock(lock_path)
+
+
 def _allocate_active_path(active_dir: Path, slug: str, created_at: datetime) -> Path:
     active_dir.mkdir(parents=True, exist_ok=True)
     prefix = created_at.strftime("%Y-%m-%d_%H-%M")

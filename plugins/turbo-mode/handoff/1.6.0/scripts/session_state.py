@@ -270,6 +270,23 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
     )
 
+    abandon_active_parser = subparsers.add_parser("abandon-active-write")
+    abandon_active_parser.add_argument("--project-root", required=True)
+    abandon_active_parser.add_argument("--operation-state-path", required=True)
+    abandon_active_parser.add_argument("--reason", required=True)
+    abandon_active_parser.add_argument(
+        "--field",
+        choices=(
+            "status",
+            "active_path",
+            "operation_state_path",
+            "transaction_id",
+            "transaction_path",
+            "abandon_reason",
+        ),
+        default=None,
+    )
+
     args = parser.parse_args(argv)
     if args.command == "archive":
         source = Path(args.source)
@@ -342,6 +359,20 @@ def main(argv: list[str] | None = None) -> int:
         json.dump({"total": len(records), "active_writes": records}, sys.stdout, indent=2)
         print()
         return 0
+    if args.command == "abandon-active-write":
+        from scripts.active_writes import ActiveWriteError
+        from scripts.storage_authority import abandon_active_write
+
+        try:
+            payload = abandon_active_write(
+                Path(args.project_root),
+                operation_state_path=Path(args.operation_state_path),
+                reason=args.reason,
+            )
+        except ActiveWriteError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        return _emit(payload, args.field)
     return 1
 
 
