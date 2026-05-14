@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import stat
 import sys
 import tempfile
 import uuid
@@ -24,8 +26,22 @@ from refresh.app_server_inventory import (  # noqa: E402
     rewrite_ticket_hook_manifest,
     write_json_artifact,
 )
-from refresh.manifests import build_manifest, diff_manifests  # noqa: E402
-from refresh.models import DiffEntry, PluginSpec, RefreshError, fail  # noqa: E402
+from refresh.manifests import (  # noqa: E402
+    GENERATED_DIRS,
+    GENERATED_FILES,
+    GENERATED_PATH_FRAGMENTS,
+    diff_manifests,
+    reject_symlink_or_escape,
+)
+from refresh.models import (  # noqa: E402
+    DiffEntry,
+    ManifestEntry,
+    PluginSpec,
+    RefreshError,
+    ResidueIssue,
+    fail,
+)
+from refresh.paths import canonical_key  # noqa: E402
 from refresh.planner import RefreshPaths, build_paths  # noqa: E402
 
 Roundtrip = Callable[..., list[dict[str, object]]]
@@ -153,7 +169,7 @@ def run_dev_refresh(
         codex_home=paths.codex_home,
     )
     _repair_installed_plugin_metadata(codex_home=paths.codex_home, plugin_specs=plugin_specs)
-    diffs = _verify_source_cache_equality(plugin_specs)
+    diffs, ignored_residue = _verify_source_cache_equality(plugin_specs)
     runtime_inventory_state = "not-requested"
     runtime_inventory_summary: dict[str, Any] | None = None
     runtime_inventory_transcript_sha256: str | None = None
@@ -190,6 +206,15 @@ def run_dev_refresh(
         "install_transcript_sha256": authority_digest(transcript),
         "source_cache_diff_count": len(diffs),
         "source_cache_diffs": [diff.canonical_path for diff in diffs],
+        "generated_residue_ignored": [
+            {
+                "root_kind": issue.root_kind,
+                "plugin": issue.plugin,
+                "path": issue.path,
+                "reason": issue.reason,
+            }
+            for issue in ignored_residue
+        ],
         "runtime_inventory_state": runtime_inventory_state,
         "runtime_inventory": runtime_inventory_summary,
         "runtime_inventory_transcript_sha256": runtime_inventory_transcript_sha256,
@@ -302,15 +327,20 @@ def _repair_installed_plugin_metadata(
         rewrite_ticket_hook_manifest(ticket_plugin_root=ticket_root)
 
 
-def _verify_source_cache_equality(plugin_specs: tuple[PluginSpec, ...]) -> tuple[DiffEntry, ...]:
+def _verify_source_cache_equality(
+    plugin_specs: tuple[PluginSpec, ...],
+) -> tuple[tuple[DiffEntry, ...], tuple[ResidueIssue, ...]]:
     diffs: list[DiffEntry] = []
+    ignored_residue: list[ResidueIssue] = []
     for spec in plugin_specs:
         if not spec.source_root.exists():
             fail("verify dev refresh", "missing source root", str(spec.source_root))
         if not spec.cache_root.exists():
             fail("verify dev refresh", "missing cache root", str(spec.cache_root))
-        source_manifest = build_manifest(spec, root_kind="source")
-        cache_manifest = build_manifest(spec, root_kind="cache")
+        source_manifest, source_ignored = _build_dev_manifest(spec, root_kind="source")
+        cache_manifest, cache_ignored = _build_dev_manifest(spec, root_kind="cache")
+        ignored_residue.extend(source_ignored)
+        ignored_residue.extend(cache_ignored)
         diffs.extend(diff_manifests(source_manifest, cache_manifest))
     if diffs:
         fail(
@@ -318,7 +348,64 @@ def _verify_source_cache_equality(plugin_specs: tuple[PluginSpec, ...]) -> tuple
             "source/cache drift remains after dev refresh",
             [diff.canonical_path for diff in diffs[:10]],
         )
-    return tuple(diffs)
+    return tuple(diffs), tuple(ignored_residue)
+
+
+def _build_dev_manifest(
+    spec: PluginSpec,
+    *,
+    root_kind: str,
+) -> tuple[dict[str, ManifestEntry], tuple[ResidueIssue, ...]]:
+    root = _root_for_kind(spec, root_kind=root_kind)
+    manifest: dict[str, ManifestEntry] = {}
+    ignored_residue: list[ResidueIssue] = []
+    if not root.exists():
+        return manifest, tuple(ignored_residue)
+    for path in sorted(root.rglob("*")):
+        rel = path.relative_to(root)
+        if _is_generated_residue(rel):
+            if path.is_file():
+                ignored_residue.append(
+                    ResidueIssue(
+                        root_kind=root_kind,
+                        plugin=spec.name,
+                        path=rel.as_posix(),
+                        reason="generated-residue-ignored",
+                    )
+                )
+            continue
+        reject_symlink_or_escape(path, root=root, root_kind=root_kind)
+        if not path.is_file():
+            continue
+        content = path.read_bytes()
+        file_stat = path.stat()
+        key = canonical_key(spec, path, root=root)
+        manifest[key] = ManifestEntry(
+            canonical_path=key,
+            sha256=hashlib.sha256(content).hexdigest(),
+            size=len(content),
+            mode=stat.S_IMODE(file_stat.st_mode),
+            executable=bool(file_stat.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)),
+            has_shebang=content.startswith(b"#!"),
+        )
+    return manifest, tuple(ignored_residue)
+
+
+def _root_for_kind(spec: PluginSpec, *, root_kind: str) -> Path:
+    if root_kind == "source":
+        return spec.source_root
+    if root_kind == "cache":
+        return spec.cache_root
+    fail("select dev manifest root", "root kind must be source or cache", root_kind)
+
+
+def _is_generated_residue(rel: Path) -> bool:
+    rel_posix = rel.as_posix()
+    return (
+        rel.name in GENERATED_FILES
+        or bool(set(rel.parts) & GENERATED_DIRS)
+        or any(fragment in rel_posix for fragment in GENERATED_PATH_FRAGMENTS)
+    )
 
 
 def _default_run_id() -> str:
