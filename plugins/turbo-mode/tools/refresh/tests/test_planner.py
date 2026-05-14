@@ -10,10 +10,14 @@ from refresh.app_server_inventory import (
     CodexRuntimeIdentity,
     InventoryCollectionError,
 )
+from refresh.classifier import HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS
 from refresh.models import (
     CoverageState,
+    DiffEntry,
     FilesystemState,
+    ManifestEntry,
     PathOutcome,
+    PluginSpec,
     PreflightState,
     RefreshError,
     RuntimeConfigState,
@@ -64,6 +68,35 @@ def test_build_paths_normalizes_relative_repo_root(
 
     assert paths.repo_root == repo_root.resolve(strict=True)
     assert paths.marketplace_path == repo_root / ".agents/plugins/marketplace.json"
+
+
+def test_planner_passes_manifest_hashes_to_exact_storage_contract(tmp_path: Path) -> None:
+    path = "handoff/1.6.0/scripts/storage_authority.py"
+    contract = HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS[path]
+    source = ManifestEntry(
+        canonical_path=path,
+        sha256=contract.source_sha256,
+        size=1,
+        mode=0o644,
+        executable=False,
+        has_shebang=False,
+    )
+    diff = DiffEntry(
+        canonical_path=path,
+        kind=contract.kind,
+        source=source,
+        cache=None,
+    )
+    spec = PluginSpec(
+        name="handoff",
+        version="1.6.0",
+        source_root=tmp_path / "source",
+        cache_root=tmp_path / "cache",
+    )
+
+    result = planner._classify_diff_for_spec(spec, diff)
+
+    assert result.outcome == PathOutcome.GUARDED_ONLY
 
 
 def write_marketplace(

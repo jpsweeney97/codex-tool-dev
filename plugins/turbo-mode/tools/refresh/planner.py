@@ -574,6 +574,8 @@ def _classify_diff_for_spec(spec: PluginSpec, diff: DiffEntry) -> PathClassifica
         source_text=source_text,
         cache_text=cache_text,
         executable=executable,
+        source_sha256=diff.source.sha256 if diff.source is not None else None,
+        cache_sha256=diff.cache.sha256 if diff.cache is not None else None,
     )
 
 

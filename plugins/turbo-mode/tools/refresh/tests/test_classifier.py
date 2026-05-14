@@ -6,7 +6,12 @@ import re
 from pathlib import Path
 
 import pytest
-from refresh.classifier import HANDOFF_STATE_HELPER_DOC_CONTRACTS, classify_diff_path
+from refresh.classifier import (
+    HANDOFF_STATE_HELPER_DOC_CONTRACTS,
+    HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS,
+    HANDOFF_STORAGE_GATE5_REFRESH_SMOKE,
+    classify_diff_path,
+)
 from refresh.command_projection import (
     CommandProjection,
     extract_command_projection,
@@ -42,6 +47,7 @@ EXPECTED_COMMAND_SURFACE_PATHS = (
     "handoff/1.6.0/scripts/session_state.py",
     "handoff/1.6.0/scripts/storage_authority.py",
     "handoff/1.6.0/scripts/storage_authority_inventory.py",
+    "handoff/1.6.0/scripts/storage_primitives.py",
     "handoff/1.6.0/scripts/ticket_parsing.py",
     "handoff/1.6.0/scripts/triage.py",
     "ticket/1.4.0/.codex-plugin/plugin.json",
@@ -753,6 +759,52 @@ def test_nonexistent_ticket_engine_guard_script_is_coverage_gap() -> None:
 
 
 @pytest.mark.parametrize(
+    ("path", "contract"),
+    sorted(HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS.items()),
+)
+def test_handoff_storage_gate5_refresh_contract_is_exact_hash_guarded(
+    path: str,
+    contract,
+) -> None:
+    result = classify_diff_path(
+        path,
+        kind=contract.kind,
+        source_text="",
+        cache_text="",
+        executable=False,
+        source_sha256=contract.source_sha256,
+        cache_sha256=contract.cache_sha256,
+    )
+
+    assert result.outcome == PathOutcome.GUARDED_ONLY
+    assert result.mutation_mode == MutationMode.GUARDED
+    assert result.coverage_status == CoverageStatus.COVERED
+    assert result.reasons == ("handoff-storage-gate5-refresh-coverage",)
+    assert result.smoke == HANDOFF_STORAGE_GATE5_REFRESH_SMOKE
+
+
+def test_handoff_storage_gate5_refresh_contract_rejects_hash_drift() -> None:
+    contract = HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS[
+        "handoff/1.6.0/scripts/storage_authority.py"
+    ]
+
+    result = classify_diff_path(
+        "handoff/1.6.0/scripts/storage_authority.py",
+        kind=contract.kind,
+        source_text="print('changed')\n",
+        cache_text="",
+        executable=False,
+        source_sha256="0" * 64,
+        cache_sha256=contract.cache_sha256,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "added-executable-path" in result.reasons
+
+
+@pytest.mark.parametrize(
     ("path", "outcome"),
     [
         ("handoff/1.6.0/.codex-plugin/plugin.json", PathOutcome.COVERAGE_GAP_FAIL),
@@ -767,6 +819,7 @@ def test_nonexistent_ticket_engine_guard_script_is_coverage_gap() -> None:
         ("handoff/1.6.0/scripts/quality_check.py", PathOutcome.COVERAGE_GAP_FAIL),
         ("handoff/1.6.0/scripts/search.py", PathOutcome.FAST_SAFE_WITH_COVERED_SMOKE),
         ("handoff/1.6.0/scripts/session_state.py", PathOutcome.FAST_SAFE_WITH_COVERED_SMOKE),
+        ("handoff/1.6.0/scripts/storage_primitives.py", PathOutcome.COVERAGE_GAP_FAIL),
         ("handoff/1.6.0/scripts/ticket_parsing.py", PathOutcome.COVERAGE_GAP_FAIL),
         ("handoff/1.6.0/scripts/triage.py", PathOutcome.FAST_SAFE_WITH_COVERED_SMOKE),
         ("ticket/1.4.0/.codex-plugin/plugin.json", PathOutcome.COVERAGE_GAP_FAIL),
