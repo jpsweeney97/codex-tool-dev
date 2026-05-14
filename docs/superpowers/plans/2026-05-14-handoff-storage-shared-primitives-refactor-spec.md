@@ -4,7 +4,7 @@
 
 **Goal:** Extract duplicated Handoff storage filesystem primitives into one internal module without changing runtime behavior, durable JSON shape, lock metadata, CLI output, or exception classes.
 
-**Architecture:** Add a dependency-light `storage_primitives.py` module under the Handoff plugin `scripts/` package. Runtime modules keep their local public/private wrapper names where tests and callers already import them, while delegating implementation to the shared module. The lock extraction must remain caller-policy driven so active-write paths still raise `ActiveWriteError` with `begin-active-write` diagnostics and load paths still raise `LoadTransactionError` with `load-handoff` diagnostics.
+**Architecture:** Add a dependency-light `storage_primitives.py` module under the Handoff plugin `scripts/` package. Runtime modules keep their local public/private wrapper names where tests and callers already import them, while delegating implementation to the shared module. The lock extraction must remain caller-policy driven so active-write paths still raise `ActiveWriteError` with `begin-active-write` diagnostics and load paths still raise `LoadTransactionError` with `load-handoff` diagnostics. The new module is a low-level filesystem primitive boundary, not a new domain layer: atomic JSON writes, content digests, timestamp parsing, and lock recovery live together only because the byte-identical persistence rules are shared across the Handoff storage modules.
 
 **Tech Stack:** Python 3.11+ standard library only; existing Handoff pytest suite; bytecode-free test commands with `PYTHONDONTWRITEBYTECODE=1` and `-p no:cacheprovider`.
 
@@ -66,6 +66,13 @@ Create:
 `plugins/turbo-mode/handoff/1.6.0/scripts/storage_primitives.py`
 
 The module must import only the Python standard library. It must not import `active_writes`, `load_transactions`, `storage_authority`, `session_state`, or any other local Handoff module. This keeps it safe to import from all three mutating/storage modules without introducing another cycle.
+
+Dependency graph after this refactor:
+
+- `active_writes.py` -> `storage_primitives.py`
+- `load_transactions.py` -> `storage_primitives.py`
+- `storage_authority.py` -> `storage_primitives.py`
+- `storage_primitives.py` -> Python standard library only
 
 Required API:
 
@@ -160,6 +167,8 @@ The shared helper must still:
 - Refuse to auto-remove existing recovery claim files.
 - Remove only `path.parent` in `release_lock`, never `.session-state/`.
 - Re-read lock metadata after acquisition and fail with the held-lock diagnostic if `lock_id` does not match `transaction_id`.
+- Preserve `_content_sha256`'s regular-file guard: `sha256_file_or_none` must return `None` when `path.is_file()` is false before attempting to read bytes.
+- Preserve the current post-acquire `lock_check.get("lock_id")` behavior. Do not add a new `isinstance(lock_check, dict)` guard in this branch unless the spec is revised to own that behavior change explicitly.
 
 ## File Changes
 
@@ -223,7 +232,12 @@ def _lock_path(tmp_path: Path) -> Path:
     return tmp_path / ".session-state" / "locks" / "helper.lock"
 
 
-def _valid_lock_metadata(*, created_at: datetime, hostname: str | None = None) -> dict[str, object]:
+def _valid_lock_metadata(
+    *,
+    created_at: datetime,
+    hostname: str | None = None,
+    timeout_seconds: int = 1800,
+) -> dict[str, object]:
     return {
         "project": "demo",
         "operation": "helper",
@@ -232,7 +246,7 @@ def _valid_lock_metadata(*, created_at: datetime, hostname: str | None = None) -
         "pid": os.getpid(),
         "hostname": hostname or socket.gethostname(),
         "created_at": created_at.isoformat(),
-        "timeout_seconds": 1800,
+        "timeout_seconds": timeout_seconds,
     }
 
 
@@ -243,6 +257,11 @@ def test_parse_created_at_normalizes_zulu_and_naive_values() -> None:
     assert parse_created_at("2026-05-14T04:00:00") == datetime(
         2026, 5, 14, 4, 0, tzinfo=UTC
     )
+
+
+def test_parse_created_at_rejects_invalid_values() -> None:
+    with pytest.raises(ValueError):
+        parse_created_at("not-a-date")
 
 
 def test_write_json_atomic_writes_json_and_creates_parent(tmp_path: Path) -> None:
@@ -282,7 +301,10 @@ def test_acquire_lock_recovers_stale_same_host_lock(tmp_path: Path) -> None:
     lock = _lock_path(tmp_path)
     lock.parent.mkdir(parents=True, exist_ok=True)
     lock.write_text(
-        json.dumps(_valid_lock_metadata(created_at=datetime.now(UTC) - timedelta(hours=2))),
+        json.dumps(_valid_lock_metadata(
+            created_at=datetime.now(UTC) - timedelta(hours=2),
+            timeout_seconds=1800,
+        )),
         encoding="utf-8",
     )
     acquire_lock(
@@ -297,6 +319,62 @@ def test_acquire_lock_recovers_stale_same_host_lock(tmp_path: Path) -> None:
     release_lock(lock)
     assert not lock.exists()
     assert (tmp_path / ".session-state").exists()
+
+
+def test_acquire_lock_fails_closed_on_foreign_host_stale_lock(tmp_path: Path) -> None:
+    lock = _lock_path(tmp_path)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(
+        json.dumps(_valid_lock_metadata(
+            created_at=datetime.now(UTC) - timedelta(hours=2),
+            hostname="different-host",
+            timeout_seconds=1800,
+        )),
+        encoding="utf-8",
+    )
+    with pytest.raises(HelperLockError, match="stale lock from another host") as exc_info:
+        acquire_lock(
+            lock,
+            project="demo",
+            operation="helper",
+            transaction_id="new-lock",
+            policy=POLICY,
+        )
+    assert "different-host" in str(exc_info.value)
+    assert lock.exists()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param(["not-a-dict"], id="non-dict"),
+        pytest.param({"created_at": datetime.now(UTC).isoformat()}, id="missing-fields"),
+        pytest.param(
+            {
+                "created_at": 12345,
+                "timeout_seconds": "nope",
+                "hostname": 42,
+            },
+            id="wrong-types",
+        ),
+    ],
+)
+def test_acquire_lock_fails_closed_on_malformed_metadata(
+    tmp_path: Path,
+    payload: object,
+) -> None:
+    lock = _lock_path(tmp_path)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(HelperLockError, match="lock metadata malformed"):
+        acquire_lock(
+            lock,
+            project="demo",
+            operation="helper",
+            transaction_id="new-lock",
+            policy=POLICY,
+        )
+    assert lock.exists()
 
 
 def test_acquire_lock_fails_closed_on_existing_recovery_claim(tmp_path: Path) -> None:
@@ -329,6 +407,19 @@ def test_acquire_lock_fails_closed_on_existing_recovery_claim(tmp_path: Path) ->
     assert claim.exists()
 ```
 
+Coverage of shared-lock branches is split between direct primitive tests and the existing caller tests. Do not remove the caller tests as redundant; they prove exception classes, operation labels, and import paths.
+
+| Branch or behavior | Test of record |
+| --- | --- |
+| Fresh lock is held | `test_storage_primitives.py::test_acquire_lock_blocks_fresh_lock`; caller coverage in `test_active_writes.py::test_active_write_lock_blocks_within_timeout` and `test_load_transactions.py::test_load_lock_blocks_within_timeout` |
+| Stale same-host lock recovers | `test_storage_primitives.py::test_acquire_lock_recovers_stale_same_host_lock`; caller coverage in `test_active_writes.py::test_active_write_lock_recovers_from_stale_lock_same_host_after_timeout` and `test_load_transactions.py::test_load_lock_recovers_from_stale_lock_same_host_after_timeout` |
+| Lock metadata unreadable | caller coverage in `test_active_writes.py::test_active_write_lock_fails_closed_on_unparseable_metadata` and `test_load_transactions.py::test_load_lock_fails_closed_on_unparseable_metadata` |
+| Malformed lock metadata | `test_storage_primitives.py::test_acquire_lock_fails_closed_on_malformed_metadata`; caller coverage in `test_active_writes.py::test_active_write_lock_fails_closed_on_malformed_json_metadata` and `test_load_transactions.py::test_load_lock_fails_closed_on_malformed_json_metadata` |
+| Foreign-host stale lock | `test_storage_primitives.py::test_acquire_lock_fails_closed_on_foreign_host_stale_lock`; caller coverage in `test_active_writes.py::test_active_write_lock_fails_closed_on_foreign_host` and `test_load_transactions.py::test_load_lock_fails_closed_on_foreign_host` |
+| Recovery claim present, live/stale/unreadable hints | `test_storage_primitives.py::test_acquire_lock_fails_closed_on_existing_recovery_claim`; caller coverage in the active-write/load recovery-claim tests |
+| Live two-process contention and preserved wrapper import paths | `test_active_writes.py::test_active_write_lock_live_contention_with_subprocess` and `test_load_transactions.py::test_load_lock_live_contention_with_subprocess` |
+| Recover-then-reacquire race | defensive branch in `storage_primitives.acquire_lock`; add a direct monkeypatch test only if this branch is edited beyond the mechanical extraction |
+
 - [ ] **Step 2: Run the new tests to verify RED**
 
 Run:
@@ -350,7 +441,11 @@ Expected before implementation: fail during collection with `ModuleNotFoundError
 Implement the module with this complete behavior:
 
 ```python
-"""Shared filesystem primitives for Handoff storage scripts."""
+"""Shared filesystem primitives for Handoff storage scripts.
+
+This module is intentionally stdlib-only and must not import local Handoff
+modules. Import direction is scripts.* modules -> storage_primitives only.
+"""
 
 from __future__ import annotations
 
@@ -405,6 +500,8 @@ def sha256_file(path: Path) -> str:
 def sha256_file_or_none(path: Path) -> str | None:
     """Return the SHA256 digest for a readable file, or None on read failure."""
     try:
+        if not path.is_file():
+            return None
         return sha256_file(path)
     except OSError:
         return None
@@ -443,7 +540,7 @@ def acquire_lock(
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
     lock_check = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(lock_check, dict) or lock_check.get("lock_id") != transaction_id:
+    if lock_check.get("lock_id") != transaction_id:
         raise _held_error(path, policy)
 
 
@@ -576,46 +673,94 @@ Expected: all tests in `test_storage_primitives.py` pass.
 
 - [ ] **Step 1: Import shared non-lock helpers with local aliases**
 
-In `active_writes.py`, import:
+In `active_writes.py`, merge the shared imports into the existing direct-execution fallback block. The shape should be concrete, not left to inference:
 
 ```python
-from scripts.storage_primitives import (
-    parse_created_at as _parse_created_at,
-    sha256_file_or_none as _sha256_path,
-    write_json_atomic as _write_json_atomic,
-)
+try:
+    from scripts.storage_authority import (
+        ChainStateDiagnosticError,
+        continue_chain_state,
+        get_storage_layout,
+        read_chain_state,
+    )
+    from scripts.storage_primitives import (
+        parse_created_at as _parse_created_at,
+        sha256_file_or_none as _sha256_path,
+        write_json_atomic as _write_json_atomic,
+    )
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.storage_authority import (  # type: ignore[no-redef]
+        ChainStateDiagnosticError,
+        continue_chain_state,
+        get_storage_layout,
+        read_chain_state,
+    )
+    from scripts.storage_primitives import (  # type: ignore[no-redef]
+        parse_created_at as _parse_created_at,
+        sha256_file_or_none as _sha256_path,
+        write_json_atomic as _write_json_atomic,
+    )
 ```
 
-Mirror the existing direct-execution fallback pattern in the `except ModuleNotFoundError` block:
+In `load_transactions.py`, merge the shared imports into the existing direct-execution fallback block:
 
 ```python
-from scripts.storage_primitives import (  # type: ignore[no-redef]
-    parse_created_at as _parse_created_at,
-    sha256_file_or_none as _sha256_path,
-    write_json_atomic as _write_json_atomic,
-)
+try:
+    from scripts.session_state import allocate_archive_path, write_resume_state
+    from scripts.storage_authority import (
+        HandoffCandidate,
+        SelectionEligibility,
+        StorageLocation,
+        discover_handoff_inventory,
+        eligible_active_candidates,
+        get_storage_layout,
+    )
+    from scripts.storage_primitives import (
+        parse_created_at as _parse_created_at,
+        sha256_file as _sha256_file,
+        write_json_atomic as _write_json_atomic,
+    )
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.session_state import (  # type: ignore[no-redef]
+        allocate_archive_path,
+        write_resume_state,
+    )
+    from scripts.storage_authority import (  # type: ignore[no-redef]
+        HandoffCandidate,
+        SelectionEligibility,
+        StorageLocation,
+        discover_handoff_inventory,
+        eligible_active_candidates,
+        get_storage_layout,
+    )
+    from scripts.storage_primitives import (  # type: ignore[no-redef]
+        parse_created_at as _parse_created_at,
+        sha256_file as _sha256_file,
+        write_json_atomic as _write_json_atomic,
+    )
 ```
 
-In `load_transactions.py`, import:
+In `storage_authority.py`, add the same direct-execution fallback proactively. This file is not a CLI entry point today, but importing it from outside the plugin root should not depend on `active_writes.py` or `load_transactions.py` having already patched `sys.path`:
 
 ```python
-from scripts.storage_primitives import (
-    parse_created_at as _parse_created_at,
-    sha256_file as _sha256_file,
-    write_json_atomic as _write_json_atomic,
-)
+import sys
+
+try:
+    from scripts.storage_primitives import (
+        sha256_file_or_none as _content_sha256,
+        write_json_atomic as _write_json_atomic,
+    )
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.storage_primitives import (  # type: ignore[no-redef]
+        sha256_file_or_none as _content_sha256,
+        write_json_atomic as _write_json_atomic,
+    )
 ```
 
-In `storage_authority.py`, import:
-
-```python
-from scripts.storage_primitives import (
-    sha256_file_or_none as _content_sha256,
-    write_json_atomic as _write_json_atomic,
-)
-```
-
-Because `storage_primitives.py` has no local imports, these imports must not introduce a new cycle. If a direct-execution test exposes a missing `scripts.storage_primitives` import path in `storage_authority.py`, add the same `ModuleNotFoundError` fallback style used by the CLI-facing scripts; do not solve it by importing through `active_writes.py` or `load_transactions.py`.
+Because `storage_primitives.py` has no local imports, these imports must not introduce a new cycle. Do not solve an import-path failure by importing through `active_writes.py` or `load_transactions.py`.
 
 - [ ] **Step 2: Remove duplicate non-lock helper definitions**
 
@@ -625,7 +770,7 @@ Remove these local definitions after the imports are in place:
 - `load_transactions.py`: `_parse_created_at`, `_sha256_file`, `_write_json_atomic`.
 - `storage_authority.py`: `_write_json_atomic`, `_content_sha256`.
 
-Remove now-unused imports only after `ruff` or the targeted test run proves they are unused. Do not remove `hashlib` from `active_writes.py` if `_stable_hash` or content hashing still uses it.
+Remove now-unused imports only after `ruff` or the targeted test run proves they are unused. Do not remove `hashlib` from `active_writes.py` if `_stable_hash` or content hashing still uses it. Remove `hashlib` from `storage_authority.py` if `_content_sha256` was its only remaining use.
 
 - [ ] **Step 3: Run targeted tests**
 
@@ -673,6 +818,8 @@ release_lock as _release_lock,
 ```
 
 - [ ] **Step 2: Add caller-specific policies and preserve local `_acquire_lock` wrappers**
+
+`_acquire_lock` stays as a local wrapper because acquire needs caller-specific policy injection. `_release_lock` can remain an import alias because release has no caller-specific behavior or diagnostics.
 
 In `active_writes.py`, replace the local `_write_claim_metadata`, `_try_recover_stale_lock`, `_CLAIM_TIMEOUT_SECONDS`, `_acquire_lock`, and `_release_lock` implementation block with:
 
@@ -815,7 +962,33 @@ Expected:
 - Shared implementations exist only in `storage_primitives.py`.
 - Local `_acquire_lock` wrappers remain in `active_writes.py` and `load_transactions.py`.
 
-- [ ] **Step 4: Confirm working tree and PR body**
+- [ ] **Step 4: Run import-boundary and direct-import smoke gates**
+
+Run:
+
+```bash
+rg -n "^(from|import) " plugins/turbo-mode/handoff/1.6.0/scripts/storage_primitives.py
+```
+
+Expected: only standard-library imports. The output must not include `scripts.`, `active_writes`, `load_transactions`, `storage_authority`, or `session_state`.
+
+Run:
+
+```bash
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-pycache-shared-primitives uv run python -c "import subprocess, sys; subprocess.run([sys.executable, '-c', 'from scripts.active_writes import _acquire_lock, _release_lock; from scripts.load_transactions import _acquire_lock as load_acquire_lock, _release_lock as load_release_lock; from scripts.storage_authority import HandoffCandidate'], cwd='plugins/turbo-mode/handoff/1.6.0', check=True)"
+```
+
+Expected: exit code 0. This protects the same plugin-root import path used by the subprocess contention tests.
+
+Run:
+
+```bash
+rg -n "^import hashlib$|hashlib\\." plugins/turbo-mode/handoff/1.6.0/scripts/storage_authority.py
+```
+
+Expected: no output if `_content_sha256` was the only previous `hashlib` use in `storage_authority.py`.
+
+- [ ] **Step 5: Confirm working tree and PR body**
 
 Run:
 
