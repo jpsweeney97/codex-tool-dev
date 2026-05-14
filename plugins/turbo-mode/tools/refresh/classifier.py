@@ -498,7 +498,7 @@ HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS = {
     ),
     "handoff/1.6.0/skills/load/SKILL.md": HandoffStorageGate5RefreshContract(
         kind=DiffKind.CHANGED,
-        source_sha256="f657d40d1f700c13ed32c8700011d412cddd9b97406cc2d232fd87f3b147672f",
+        source_sha256="7b63bb75df63d4d0699559987a0775d64dc1166b9417627df8eb456d8e3393a9",
         cache_sha256="ccbc7a20aa346d6d65e3861b62fd551d37ec44a43538685bfd09ef14b16b5698",
     ),
     "handoff/1.6.0/skills/quicksave/SKILL.md": HandoffStorageGate5RefreshContract(
@@ -508,7 +508,7 @@ HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS = {
     ),
     "handoff/1.6.0/skills/save/SKILL.md": HandoffStorageGate5RefreshContract(
         kind=DiffKind.CHANGED,
-        source_sha256="33e76da645b84e6d8487a3309019794960bb8b6ae7802973be94584eccd9ea6f",
+        source_sha256="e493daf679cb63f4ee222440dc22ae8700df4880dc8dc6f1912b53b879aebb1d",
         cache_sha256="377609aefd7bd567c68ee71cbd620b0f03a16bcd4e04dd70a9310cc8132f37ae",
     ),
     "handoff/1.6.0/skills/summary/SKILL.md": HandoffStorageGate5RefreshContract(

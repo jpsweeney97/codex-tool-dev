@@ -783,6 +783,22 @@ def test_handoff_storage_gate5_refresh_contract_is_exact_hash_guarded(
     assert result.smoke == HANDOFF_STORAGE_GATE5_REFRESH_SMOKE
 
 
+@pytest.mark.parametrize(
+    ("path", "contract"),
+    sorted(HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS.items()),
+)
+def test_handoff_storage_gate5_refresh_contract_source_hash_matches_live_file(
+    path: str,
+    contract,
+) -> None:
+    source_path = REPO_ROOT / "plugins/turbo-mode" / path
+    if not source_path.exists():
+        assert contract.kind == DiffKind.REMOVED
+        return
+
+    assert hashlib.sha256(source_path.read_bytes()).hexdigest() == contract.source_sha256
+
+
 def test_handoff_storage_gate5_refresh_contract_rejects_hash_drift() -> None:
     contract = HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS[
         "handoff/1.6.0/scripts/storage_authority.py"
