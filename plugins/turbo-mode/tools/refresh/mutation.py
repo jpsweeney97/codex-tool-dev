@@ -571,16 +571,30 @@ def seed_isolated_rehearsal_home(
             fail("seed isolated rehearsal home", "target already exists", str(target))
 
     _write_seed_config(config_path, repo_root=normalized_repo_root)
+    seed_records = _load_plan05_seed_records()
     for spec in build_plugin_specs(
         repo_root=normalized_repo_root,
         codex_home=normalized_codex_home,
     ):
         if not spec.source_root.exists():
             fail("seed isolated rehearsal home", "source root missing", str(spec.source_root))
-    seed_source = _seed_isolated_cache(
-        repo_root=normalized_repo_root,
-        codex_home=normalized_codex_home,
-    )
+        shutil.copytree(spec.source_root, spec.cache_root)
+
+    for canonical_path in PLAN05_DRIFT_PATHS:
+        record = seed_records.get(canonical_path)
+        if not isinstance(record, dict):
+            fail("seed isolated rehearsal home", "missing seed fixture record", canonical_path)
+        source_path = normalized_repo_root / "plugins/turbo-mode" / canonical_path
+        cache_path = normalized_codex_home / "plugins/cache/turbo-mode" / canonical_path
+        source_text = source_path.read_text(encoding="utf-8")
+        if hashlib.sha256(source_text.encode("utf-8")).hexdigest() != record.get("source_sha256"):
+            fail(
+                "seed isolated rehearsal home",
+                "source seed fixture hash mismatch",
+                canonical_path,
+            )
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(str(record["cache_text"]), encoding="utf-8")
 
     source_manifest_sha256: dict[str, str] = {}
     pre_refresh_cache_manifest_sha256: dict[str, str] = {}
@@ -596,12 +610,11 @@ def seed_isolated_rehearsal_home(
         observed_drift_paths.extend(
             diff.canonical_path for diff in diff_manifests(source_manifest, cache_manifest)
         )
-    canonical_drift_paths = tuple(sorted(observed_drift_paths))
-    if not canonical_drift_paths:
+    if tuple(sorted(observed_drift_paths)) != PLAN05_DRIFT_PATHS:
         fail(
             "seed isolated rehearsal home",
-            "seeded drift set is empty",
-            canonical_drift_paths,
+            "seeded drift set mismatch",
+            sorted(observed_drift_paths),
         )
     isolated_ticket_hook_manifest = rewrite_ticket_hook_manifest(
         ticket_plugin_root=normalized_codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
@@ -652,10 +665,9 @@ def seed_isolated_rehearsal_home(
             "execution_head": source_identity.execution_head,
             "execution_tree": source_identity.execution_tree,
             "requested_codex_home": str(normalized_codex_home),
-            "seed_source": seed_source,
             "isolated_ticket_hook_manifest_path": str(isolated_ticket_hook_manifest),
-            "canonical_drift_paths": canonical_drift_paths,
-            "canonical_drift_paths_sha256": authority_digest(canonical_drift_paths),
+            "canonical_drift_paths": PLAN05_DRIFT_PATHS,
+            "canonical_drift_paths_sha256": authority_digest(PLAN05_DRIFT_PATHS),
             "source_manifest_sha256": authority_digest(source_manifest_sha256),
             "source_manifest_sha256_by_plugin": source_manifest_sha256,
             "pre_refresh_isolated_cache_manifest_sha256": authority_digest(
@@ -677,7 +689,7 @@ def seed_isolated_rehearsal_home(
         post_seed_dry_run_id=post_seed_dry_run_id,
         post_seed_dry_run_path=str(post_seed_dry_run_path),
         terminal_plan_status=post_seed_dry_run.terminal_status.value,
-        canonical_drift_paths=canonical_drift_paths,
+        canonical_drift_paths=PLAN05_DRIFT_PATHS,
     )
 
 
@@ -2437,17 +2449,10 @@ def _validate_seed_manifest(
                 f"seed manifest {key} mismatch",
                 {"expected": expected, "actual": seed.get(key)},
             )
-    canonical_drift_paths = tuple(seed.get("canonical_drift_paths", ()))
-    if not canonical_drift_paths:
+    if tuple(seed.get("canonical_drift_paths", ())) != PLAN05_DRIFT_PATHS:
         fail(
             "validate rehearsal proof",
-            "seed manifest drift path set is empty",
-            seed.get("canonical_drift_paths"),
-        )
-    if authority_digest(canonical_drift_paths) != proof["seed_expected_drift_paths_sha256"]:
-        fail(
-            "validate rehearsal proof",
-            "seed manifest drift path digest mismatch",
+            "seed manifest drift path set mismatch",
             seed.get("canonical_drift_paths"),
         )
 
@@ -2810,54 +2815,6 @@ def _write_seed_config(config_path: Path, *, repo_root: Path) -> None:
             '[plugins."ticket@turbo-mode"]\nenabled = true\n'
         )
     os.chmod(config_path, 0o600)
-
-
-def _seed_isolated_cache(*, repo_root: Path, codex_home: Path) -> str:
-    if _plan05_seed_records_match_source(repo_root):
-        _seed_isolated_cache_from_plan05_fixture(repo_root=repo_root, codex_home=codex_home)
-        return "plan05-fixture"
-    _seed_isolated_cache_from_installed_cache(repo_root=repo_root, codex_home=codex_home)
-    return "installed-cache-readonly"
-
-
-def _plan05_seed_records_match_source(repo_root: Path) -> bool:
-    seed_records = _load_plan05_seed_records()
-    for canonical_path in PLAN05_DRIFT_PATHS:
-        record = seed_records.get(canonical_path)
-        if not isinstance(record, dict):
-            fail("seed isolated rehearsal home", "missing seed fixture record", canonical_path)
-        source_path = repo_root / "plugins/turbo-mode" / canonical_path
-        try:
-            source_text = source_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return False
-        if hashlib.sha256(source_text.encode("utf-8")).hexdigest() != record.get(
-            "source_sha256"
-        ):
-            return False
-    return True
-
-
-def _seed_isolated_cache_from_plan05_fixture(*, repo_root: Path, codex_home: Path) -> None:
-    seed_records = _load_plan05_seed_records()
-    for spec in build_plugin_specs(repo_root=repo_root, codex_home=codex_home):
-        shutil.copytree(spec.source_root, spec.cache_root)
-    for canonical_path in PLAN05_DRIFT_PATHS:
-        record = seed_records.get(canonical_path)
-        if not isinstance(record, dict):
-            fail("seed isolated rehearsal home", "missing seed fixture record", canonical_path)
-        cache_path = codex_home / "plugins/cache/turbo-mode" / canonical_path
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(str(record["cache_text"]), encoding="utf-8")
-
-
-def _seed_isolated_cache_from_installed_cache(*, repo_root: Path, codex_home: Path) -> None:
-    live_cache_root = REAL_CODEX_HOME / "plugins/cache/turbo-mode"
-    for spec in build_plugin_specs(repo_root=repo_root, codex_home=codex_home):
-        source = live_cache_root / spec.name / spec.version
-        if not source.exists():
-            fail("seed isolated rehearsal home", "installed cache source missing", str(source))
-        shutil.copytree(source, spec.cache_root)
 
 
 def _load_plan05_seed_records() -> dict[str, object]:
