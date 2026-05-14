@@ -242,6 +242,65 @@ def test_run_dev_refresh_rejects_source_cache_drift_after_install(
         )
 
 
+def test_run_dev_refresh_ignores_generated_residue_in_dev_manifest(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+    write_marketplace(repo_root)
+    seed_source_marketplace(
+        repo_root,
+        ticket_hook_command=(
+            f"python3 {codex_home}/plugins/cache/turbo-mode/ticket/1.4.0/"
+            "hooks/ticket_engine_guard.py"
+        ),
+    )
+    residue = repo_root / "plugins/turbo-mode/handoff/1.6.0/.pytest_cache/.gitignore"
+    residue.parent.mkdir()
+    residue.write_text("*\n", encoding="utf-8")
+
+    def fake_roundtrip(
+        _requests: list[dict[str, object]],
+        *,
+        env_overrides: dict[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> list[dict[str, object]]:
+        assert env_overrides == {"CODEX_HOME": str(codex_home)}
+        assert cwd is not None
+        for plugin_name, version in (("handoff", "1.6.0"), ("ticket", "1.4.0")):
+            source = repo_root / f"plugins/turbo-mode/{plugin_name}/{version}"
+            cache = codex_home / f"plugins/cache/turbo-mode/{plugin_name}/{version}"
+            shutil.copytree(source, cache, dirs_exist_ok=True)
+        return [
+            {"direction": "recv", "body": {"id": 0, "result": {"codexHome": str(codex_home)}}},
+            {"direction": "recv", "body": {"id": 1, "result": {"authPolicy": "ON_INSTALL"}}},
+            {"direction": "recv", "body": {"id": 2, "result": {"authPolicy": "ON_INSTALL"}}},
+        ]
+
+    summary = run_dev_refresh(
+        repo_root=repo_root,
+        codex_home=codex_home,
+        run_id="unit-dev-refresh-residue",
+        verify=False,
+        roundtrip=fake_roundtrip,
+    )
+
+    assert summary["source_cache_diff_count"] == 0
+    assert {
+        "root_kind": "source",
+        "plugin": "handoff",
+        "path": ".pytest_cache/.gitignore",
+        "reason": "generated-residue-ignored",
+    } in summary["generated_residue_ignored"]
+    assert {
+        "root_kind": "cache",
+        "plugin": "handoff",
+        "path": ".pytest_cache/.gitignore",
+        "reason": "generated-residue-ignored",
+    } in summary["generated_residue_ignored"]
+
+
 def test_package_alias_points_at_dev_refresh_lane() -> None:
     package = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))
     script = package["scripts"]["turbo:dev-refresh"]
