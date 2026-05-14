@@ -68,6 +68,32 @@ def test_parse_created_at_rejects_invalid_values() -> None:
         parse_created_at("not-a-date")
 
 
+def test_lock_policy_rejects_empty_labels() -> None:
+    with pytest.raises(ValueError, match="operation label must be non-empty"):
+        LockPolicy(operation_label="", lock_kind="helper lock", error_factory=HelperLockError)
+    with pytest.raises(ValueError, match="lock kind must be non-empty"):
+        LockPolicy(operation_label="helper-op", lock_kind="", error_factory=HelperLockError)
+
+
+def test_delete_result_validates_cross_field_invariants(tmp_path: Path) -> None:
+    path = str(tmp_path / "state.json")
+    with pytest.raises(ValueError, match="failed delete requires mechanism and error"):
+        storage_primitives.DeleteResult(action="failed", mechanism=None, path=path)
+    with pytest.raises(ValueError, match="successful delete cannot carry error"):
+        storage_primitives.DeleteResult(
+            action="deleted",
+            mechanism="trash",
+            path=path,
+            error="unexpected",
+        )
+    with pytest.raises(ValueError, match="already_absent action cannot carry mechanism"):
+        storage_primitives.DeleteResult(
+            action="already_absent",
+            mechanism="unlink",
+            path=path,
+        )
+
+
 def test_write_json_atomic_writes_json_and_creates_parent(tmp_path: Path) -> None:
     path = tmp_path / "nested" / "payload.json"
     write_json_atomic(path, {"status": "ok", "count": 1})
@@ -169,6 +195,34 @@ def test_acquire_lock_uses_policy_error_on_readback_mismatch(
             transaction_id="new-lock",
             policy=POLICY,
         )
+    assert str(exc_info.value).startswith(
+        f"helper-op failed: helper lock is already held. Got: {str(lock)!r:.100}"
+    )
+
+
+def test_acquire_lock_uses_policy_error_on_readback_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lock = _lock_path(tmp_path)
+    original_read_text = Path.read_text
+
+    def fail_lock_readback(self: Path, *args: object, **kwargs: object) -> str:
+        if self == lock:
+            raise FileNotFoundError("lock disappeared")
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_lock_readback)
+
+    with pytest.raises(HelperLockError) as exc_info:
+        acquire_lock(
+            lock,
+            project="demo",
+            operation="helper",
+            transaction_id="new-lock",
+            policy=POLICY,
+        )
+    assert isinstance(exc_info.value.__cause__, FileNotFoundError)
     assert str(exc_info.value).startswith(
         f"helper-op failed: helper lock is already held. Got: {str(lock)!r:.100}"
     )
@@ -287,6 +341,7 @@ def test_acquire_lock_fails_closed_on_existing_recovery_claim(tmp_path: Path) ->
             transaction_id="new-lock",
             policy=POLICY,
         )
+    assert isinstance(exc_info.value.__cause__, FileExistsError)
     assert "trash" in str(exc_info.value)
     assert lock.exists()
     assert claim.exists()
@@ -396,6 +451,35 @@ def test_write_text_atomic_exclusive_uses_suffix_without_replacing_existing(
     assert not list(tmp_path.glob("*.tmp"))
 
 
+def test_write_text_atomic_exclusive_cleans_temp_before_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "envelope.json"
+    first_temp_path: Path | None = None
+    call_count = 0
+    original_link = storage_primitives.os.link
+
+    def flaky_link(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+        nonlocal first_temp_path, call_count
+        call_count += 1
+        if call_count == 1:
+            first_temp_path = Path(src)
+            raise FileExistsError("simulated collision")
+        assert first_temp_path is not None
+        assert not first_temp_path.exists()
+        original_link(src, dst)
+
+    monkeypatch.setattr(storage_primitives.os, "link", flaky_link)
+
+    written = storage_primitives.write_text_atomic_exclusive(target, "new")
+
+    assert written == tmp_path / "envelope-01.json"
+    assert written.read_text(encoding="utf-8") == "new"
+    assert call_count == 2
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 def test_write_text_atomic_exclusive_exhausts_collision_budget(tmp_path: Path) -> None:
     for index in range(100):
         suffix = "" if index == 0 else f"-{index:02d}"
@@ -415,10 +499,13 @@ def test_safe_delete_uses_trash_when_available(
 
     def fake_run(args: list[str], **kwargs: object) -> object:
         calls.append(args)
-        path.unlink()
         return object()
 
+    def forbid_unlink(self: Path, *args: object, **kwargs: object) -> None:
+        raise AssertionError(f"unlink should not run after successful trash: {self}")
+
     monkeypatch.setattr(storage_primitives.subprocess, "run", fake_run)
+    monkeypatch.setattr(Path, "unlink", forbid_unlink)
 
     result = storage_primitives.safe_delete(path)
 
@@ -426,7 +513,7 @@ def test_safe_delete_uses_trash_when_available(
     assert result.mechanism == "trash"
     assert result.path == str(path)
     assert calls == [["trash", str(path)]]
-    assert not path.exists()
+    assert path.exists()
 
 
 def test_safe_delete_falls_back_to_unlink_when_trash_fails(
@@ -487,3 +574,29 @@ def test_safe_delete_returns_failed_when_trash_and_unlink_both_fail(
     assert result.error is not None
     assert "unlink" in result.error
     assert path.exists()
+
+
+def test_release_lock_prunes_empty_locks_dir(tmp_path: Path) -> None:
+    lock = _lock_path(tmp_path)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("{}", encoding="utf-8")
+
+    release_lock(lock)
+
+    assert not lock.exists()
+    assert not lock.parent.exists()
+    assert lock.parent.parent.exists()
+
+
+def test_release_lock_preserves_locks_dir_with_sibling(tmp_path: Path) -> None:
+    lock = _lock_path(tmp_path)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("{}", encoding="utf-8")
+    sibling = lock.with_name("sibling.lock")
+    sibling.write_text("{}", encoding="utf-8")
+
+    release_lock(lock)
+
+    assert not lock.exists()
+    assert sibling.exists()
+    assert lock.parent.exists()

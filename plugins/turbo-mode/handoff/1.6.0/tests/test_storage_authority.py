@@ -541,7 +541,9 @@ def test_consumed_legacy_active_matches_fails_closed_on_corrupt_registry(
     candidate = next(candidate for candidate in inventory.candidates if candidate.path == legacy)
     assert candidate.artifact_class == "consumed-legacy-active-registry-unreadable"
     assert candidate.selection_eligibility == SelectionEligibility.BLOCKED_POLICY_CONFLICT
-    assert candidate.skip_reason == "consumed legacy active registry unreadable"
+    assert candidate.skip_reason is not None
+    assert candidate.skip_reason.startswith("consumed legacy active registry unreadable")
+    assert "ValueError" in candidate.skip_reason
 
 
 def test_consumed_legacy_active_matches_fails_closed_on_malformed_registry(
@@ -557,7 +559,9 @@ def test_consumed_legacy_active_matches_fails_closed_on_malformed_registry(
     candidate = next(candidate for candidate in inventory.candidates if candidate.path == legacy)
     assert candidate.artifact_class == "consumed-legacy-active-registry-unreadable"
     assert candidate.selection_eligibility == SelectionEligibility.BLOCKED_POLICY_CONFLICT
-    assert candidate.skip_reason == "consumed legacy active registry unreadable"
+    assert candidate.skip_reason is not None
+    assert candidate.skip_reason.startswith("consumed legacy active registry unreadable")
+    assert "entries field is not a list" in candidate.skip_reason
 
 
 def test_read_json_object_fails_closed_on_corrupt_marker(tmp_path: Path) -> None:
@@ -624,7 +628,9 @@ def test_active_inventory_degrades_on_corrupt_consumed_legacy_active_registry(
     candidates = [candidate for candidate in inventory.candidates if candidate.path == legacy.resolve()]
     assert len(candidates) == 1
     assert candidates[0].selection_eligibility == SelectionEligibility.BLOCKED_POLICY_CONFLICT
-    assert candidates[0].skip_reason == "consumed legacy active registry unreadable"
+    assert candidates[0].skip_reason is not None
+    assert candidates[0].skip_reason.startswith("consumed legacy active registry unreadable")
+    assert "ValueError" in candidates[0].skip_reason
 
 
 def test_chain_state_marker_status_returns_unmarked_when_marker_missing(

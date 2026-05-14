@@ -54,8 +54,11 @@ def main() -> int:
     """
     try:
         prune_old_state_files(max_age_hours=24)
-    except Exception:
-        pass  # Never block session start — cleanup is best-effort
+    except Exception as exc:
+        print(
+            f"state cleanup warning: ttl prune failed: {exc}. Got: {24!r:.100}",
+            file=sys.stderr,
+        )
 
     return 0
 

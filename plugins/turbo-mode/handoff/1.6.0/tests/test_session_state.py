@@ -204,6 +204,39 @@ def test_prune_old_state_files_cleans_legacy_state_file(tmp_path: Path) -> None:
     assert legacy in deleted
 
 
+def test_prune_old_state_files_logs_per_file_oserror(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    state_dir = tmp_path / ".session-state"
+    state_dir.mkdir()
+    legacy = state_dir / "handoff-demo"
+    legacy.write_text("/tmp/archive-legacy.md", encoding="utf-8")
+    original_is_file = Path.is_file
+    original_stat = Path.stat
+
+    def fake_is_file(self: Path) -> bool:
+        if self == legacy:
+            return True
+        return original_is_file(self)
+
+    def fail_stat(self: Path, *args: object, **kwargs: object) -> os.stat_result:
+        if self == legacy:
+            raise PermissionError("stat denied")
+        return original_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_file", fake_is_file)
+    monkeypatch.setattr(Path, "stat", fail_stat)
+
+    deleted = prune_old_state_files(state_dir=state_dir)
+
+    captured = capsys.readouterr()
+    assert deleted == []
+    assert "state cleanup warning: ttl prune stat/delete failed: stat denied" in captured.err
+    assert repr(str(legacy))[:100] in captured.err
+
+
 def test_session_state_cli_round_trip(tmp_path: Path) -> None:
     script = Path(__file__).parent.parent / "scripts" / "session_state.py"
     source = tmp_path / "handoff.md"

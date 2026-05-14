@@ -1349,6 +1349,7 @@ def test_list_load_recovery_records_surfaces_corrupt_transaction(tmp_path: Path)
     assert len(records) == 1
     assert records[0]["status"] == "unreadable"
     assert records[0]["transaction_path"] == str(corrupt)
+    assert "JSONDecodeError" in str(records[0]["error"])
 
 
 def test_read_registry_reports_corrupt_json(tmp_path: Path) -> None:

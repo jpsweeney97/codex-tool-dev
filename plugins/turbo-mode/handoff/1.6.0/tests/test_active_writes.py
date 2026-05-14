@@ -149,6 +149,25 @@ def test_active_writer_flow_cli_bridges_legacy_state_and_marks_source_consumed(
     assert read_chain_state(tmp_path, project_name="demo")["status"] == "absent"
 
 
+def test_begin_active_write_rejects_corrupt_resume_state_snapshot(tmp_path: Path) -> None:
+    state_dir = tmp_path / ".codex" / "handoffs" / ".session-state"
+    state_dir.mkdir(parents=True)
+    corrupt = state_dir / "handoff-demo-bad.json"
+    corrupt.write_text("{bad", encoding="utf-8")
+
+    with pytest.raises(active_writes.ActiveWriteError, match="resume state unreadable") as exc_info:
+        active_writes.begin_active_write(
+            tmp_path,
+            project_name="demo",
+            operation="summary",
+            slug="corrupt-state",
+            created_at="2026-05-13T16:45:00Z",
+        )
+
+    assert repr(str(corrupt))[:100] in str(exc_info.value)
+    assert isinstance(exc_info.value.__cause__, json.JSONDecodeError)
+
+
 def test_active_writer_flow_cli_reuses_same_run_retry(
     tmp_path: Path,
 ) -> None:
@@ -999,6 +1018,38 @@ def test_list_active_writes_reports_pending_operation_state_without_mutation(
     assert not Path(payload["active_writes"][0]["allocated_active_path"]).exists()
 
 
+def test_list_active_writes_surfaces_unreadable_operation_state(tmp_path: Path) -> None:
+    active_writes_dir = (
+        tmp_path
+        / ".codex"
+        / "handoffs"
+        / ".session-state"
+        / "active-writes"
+        / "demo"
+    )
+    active_writes_dir.mkdir(parents=True)
+    corrupt = active_writes_dir / "corrupt.json"
+    corrupt.write_text("{bad", encoding="utf-8")
+
+    records = active_writes.list_active_writes(
+        tmp_path,
+        project_name="demo",
+        operation="summary",
+    )
+
+    assert records == [
+        {
+            "operation_state_path": str(corrupt),
+            "status": "unreadable",
+            "operation": "unknown",
+            "requested_operation": "summary",
+            "error": records[0]["error"],
+        }
+    ]
+    assert "active-write operation-state record unreadable" in str(records[0]["error"])
+    assert "JSONDecodeError" in str(records[0]["error"])
+
+
 def test_write_active_handoff_changed_content_retry_preserves_committed_state(
     tmp_path: Path,
 ) -> None:
@@ -1078,6 +1129,42 @@ def test_write_active_handoff_changed_content_retry_preserves_committed_state(
     assert state["status"] == "committed"
     assert state["content_hash"] == original_hash
     assert Path(state["active_path"]).read_text(encoding="utf-8") == original
+
+
+def test_write_active_handoff_reports_unreadable_existing_active_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reservation = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="summary",
+        slug="unreadable-output",
+        created_at="2026-05-13T16:45:00Z",
+    )
+    reservation.allocated_active_path.parent.mkdir(parents=True, exist_ok=True)
+    reservation.allocated_active_path.write_text("existing", encoding="utf-8")
+    content = "---\ntitle: Unreadable\n---\n\n# Handoff\n"
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    original_sha256_file = active_writes._sha256_file
+
+    def fail_active_hash(path: Path) -> str:
+        if path == reservation.allocated_active_path:
+            raise PermissionError("read denied")
+        return original_sha256_file(path)
+
+    monkeypatch.setattr(active_writes, "_sha256_file", fail_active_hash)
+
+    with pytest.raises(active_writes.ActiveWriteError, match="active output unreadable"):
+        active_writes.write_active_handoff(
+            tmp_path,
+            operation_state_path=reservation.operation_state_path,
+            content=content,
+            content_sha256=content_hash,
+        )
+
+    state = json.loads(reservation.operation_state_path.read_text(encoding="utf-8"))
+    assert state["status"] == "content-generated"
 
 
 def test_write_active_handoff_records_content_generated_before_output_write(
@@ -1277,6 +1364,44 @@ def test_active_write_transaction_recover_records_content_mismatch(
     assert updated["status"] == "content_mismatch"
     assert transaction["status"] == "content_mismatch"
     assert transaction["active_path"] == str(reservation.allocated_active_path)
+
+
+def test_active_write_transaction_recover_reports_unreadable_active_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reservation = active_writes.begin_active_write(
+        tmp_path,
+        project_name="demo",
+        operation="summary",
+        slug="unreadable-recover",
+        created_at="2026-05-13T16:45:00Z",
+    )
+    expected = "---\ntitle: Expected\n---\n\n# Expected\n"
+    expected_hash = hashlib.sha256(expected.encode("utf-8")).hexdigest()
+    reservation.allocated_active_path.write_text(expected, encoding="utf-8")
+    state = json.loads(reservation.operation_state_path.read_text(encoding="utf-8"))
+    state["status"] = "written_not_confirmed"
+    state["content_hash"] = expected_hash
+    state["output_sha256"] = expected_hash
+    reservation.operation_state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    original_sha256_file = active_writes._sha256_file
+
+    def fail_active_hash(path: Path) -> str:
+        if path == reservation.allocated_active_path:
+            raise PermissionError("read denied")
+        return original_sha256_file(path)
+
+    monkeypatch.setattr(active_writes, "_sha256_file", fail_active_hash)
+
+    with pytest.raises(active_writes.ActiveWriteError, match="active output unreadable"):
+        active_writes.recover_active_write_transaction(
+            tmp_path,
+            operation_state_path=reservation.operation_state_path,
+        )
+
+    updated = json.loads(reservation.operation_state_path.read_text(encoding="utf-8"))
+    assert updated["status"] == "written_not_confirmed"
 
 
 def test_active_write_transaction_recover_records_pending_before_write(

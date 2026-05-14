@@ -225,7 +225,7 @@ def list_load_recovery_records(project_root: Path) -> list[dict[str, object]]:
                 "transaction_path": str(path),
                 "status": "unreadable",
                 "operation": "load",
-                "error": f"pending transaction record unreadable: {path}",
+                "error": f"pending transaction record unreadable: {path}: {exc!r}",
             })
             continue
         if data.get("operation") == "load" and data.get("status") == "pending":

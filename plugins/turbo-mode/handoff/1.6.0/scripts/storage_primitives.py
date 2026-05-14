@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 
 _CLAIM_TIMEOUT_SECONDS = 60
@@ -30,13 +31,56 @@ class LockPolicy:
     lock_kind: str
     error_factory: Callable[[str], Exception]
 
+    def __post_init__(self) -> None:
+        if not self.operation_label.strip():
+            raise ValueError("lock-policy init failed: operation label must be non-empty. Got: ''")
+        if not self.lock_kind.strip():
+            raise ValueError("lock-policy init failed: lock kind must be non-empty. Got: ''")
+
+
+DeleteAction = Literal["deleted", "already_absent", "failed"]
+DeleteMechanism = Literal["trash", "unlink"]
+
 
 @dataclass(frozen=True)
 class DeleteResult:
-    action: str
-    mechanism: str | None
+    """Structured result from best-effort file deletion."""
+
+    action: DeleteAction
+    mechanism: DeleteMechanism | None
     path: str
     error: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.action not in {"deleted", "already_absent", "failed"}:
+            raise ValueError(
+                f"delete-result init failed: unknown action. Got: {self.action!r:.100}"
+            )
+        if self.mechanism not in {"trash", "unlink", None}:
+            raise ValueError(
+                f"delete-result init failed: unknown mechanism. Got: {self.mechanism!r:.100}"
+            )
+        if self.action == "failed":
+            if self.mechanism is None or self.error is None:
+                raise ValueError(
+                    "delete-result init failed: failed delete requires mechanism and error. "
+                    f"Got: {(self.mechanism, self.error)!r:.100}"
+                )
+            return
+        if self.error is not None:
+            raise ValueError(
+                "delete-result init failed: successful delete cannot carry error. "
+                f"Got: {self.error!r:.100}"
+            )
+        if self.action == "deleted" and self.mechanism is None:
+            raise ValueError(
+                "delete-result init failed: deleted action requires mechanism. Got: None"
+            )
+        if self.action == "already_absent" and self.mechanism is not None:
+            raise ValueError(
+                "delete-result init failed: already_absent action cannot carry mechanism. "
+                f"Got: {self.mechanism!r:.100}"
+            )
 
 
 def parse_created_at(value: str | None) -> datetime:
@@ -63,7 +107,7 @@ def read_json_object(
     *,
     missing: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    """Read a JSON object from disk, optionally returning a missing-file default."""
+    """Read a JSON object from disk; ``missing`` applies only to absent files."""
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -212,8 +256,13 @@ def acquire_lock(
     }
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
-    lock_check = json.loads(path.read_text(encoding="utf-8"))
-    if lock_check.get("lock_id") != transaction_id:
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        lock_check = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        raise _held_error(path, policy) from exc
+    if not isinstance(lock_check, dict) or lock_check.get("lock_id") != transaction_id:
         raise _held_error(path, policy)
 
 
@@ -254,13 +303,13 @@ def _try_recover_stale_lock(path: Path, *, now: datetime, policy: LockPolicy) ->
     claim_path = path.with_name(path.name + ".recovery")
     try:
         claim_fd = os.open(claim_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
+    except FileExistsError as exc:
         claim_age_hint = _claim_age_hint(claim_path, now=now)
         raise policy.error_factory(
             f"{policy.operation_label} failed: recovery claim file present{claim_age_hint}; "
             f"if no process is actively recovering this lock, run `trash {claim_path}` and retry. "
             f"Got: {str(claim_path)!r:.100}"
-        )
+        ) from exc
     try:
         _write_claim_metadata(claim_fd)
         try:

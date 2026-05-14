@@ -69,8 +69,9 @@ def _delete_path(path: Path, *, context: str) -> bool:
         return False
     if result.action in {"deleted", "already_absent"}:
         return True
+    detail = f": {result.error}" if result.error else ""
     print(
-        f"state cleanup warning: {context} failed. Got: {str(path)!r:.100}",
+        f"state cleanup warning: {context} failed{detail}. Got: {str(path)!r:.100}",
         file=sys.stderr,
     )
     return False
@@ -204,11 +205,19 @@ def prune_old_state_files(max_age_hours: int = 24, *, state_dir: Path | None = N
         return []
     deleted: list[Path] = []
     cutoff = time.time() - (max_age_hours * 60 * 60)
-    for state_file in sorted(path for path in state_dir.iterdir() if path.is_file() and path.name.startswith("handoff-")):
+    for state_file in sorted(state_dir.iterdir()):
         try:
-            if state_file.stat().st_mtime < cutoff and _delete_path(state_file, context="ttl prune"):
+            if not state_file.is_file() or not state_file.name.startswith("handoff-"):
+                continue
+            is_expired = state_file.stat().st_mtime < cutoff
+            if is_expired and _delete_path(state_file, context="ttl prune"):
                 deleted.append(state_file)
-        except OSError:
+        except OSError as exc:
+            print(
+                "state cleanup warning: ttl prune stat/delete failed: "
+                f"{exc}. Got: {str(state_file)!r:.100}",
+                file=sys.stderr,
+            )
             continue
     return deleted
 

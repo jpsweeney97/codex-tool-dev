@@ -1,4 +1,10 @@
-"""Import bootstrap for direct Handoff script execution."""
+"""Keep direct Handoff script imports bound to this plugin's scripts package.
+
+Tests and host repositories can already have a ``scripts`` namespace package on
+``sys.path``. Direct entry points load this file by path so local imports such as
+``scripts.storage_primitives`` resolve to the plugin copy before any shadowing
+parent package.
+"""
 
 from __future__ import annotations
 

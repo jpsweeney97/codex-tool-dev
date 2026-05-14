@@ -8,10 +8,12 @@ from scripts.cleanup import main
 class TestMain:
     """Tests for main entry point."""
 
-    def test_always_returns_zero(self) -> None:
+    def test_always_returns_zero(self, capsys) -> None:
         """main() must return 0 even when internals raise."""
         with patch("scripts.cleanup.prune_old_state_files", side_effect=RuntimeError("unexpected")):
             assert main() == 0
+        captured = capsys.readouterr()
+        assert "state cleanup warning: ttl prune failed: unexpected" in captured.err
 
     def test_calls_prune_state_files_only(self) -> None:
         """main() calls prune_old_state_files once. No handoff pruning."""

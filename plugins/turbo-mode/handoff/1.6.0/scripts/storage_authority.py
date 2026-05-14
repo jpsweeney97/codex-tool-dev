@@ -1261,7 +1261,11 @@ def _candidate_for_path(
                 document_profile=document_profile,
                 skip_reason="legacy active source already consumed",
             )
-        if consumed_status == "registry-unreadable":
+        if consumed_status.startswith("registry-unreadable"):
+            detail = consumed_status.partition(": ")[2]
+            skip_reason = "consumed legacy active registry unreadable"
+            if detail:
+                skip_reason = f"{skip_reason}: {detail}"
             return HandoffCandidate(
                 path=path.resolve(),
                 storage_location=location,
@@ -1272,7 +1276,7 @@ def _candidate_for_path(
                 filename_timestamp=filename_timestamp,
                 content_sha256=content_sha256,
                 document_profile=document_profile,
-                skip_reason="consumed legacy active registry unreadable",
+                skip_reason=skip_reason,
             )
     if (
         location == StorageLocation.LEGACY_ACTIVE
@@ -1677,11 +1681,11 @@ def _consumed_legacy_active_status(
     )
     try:
         payload = _read_json_object_primitive(registry_path, missing={"entries": []})
-    except (OSError, ValueError):
-        return "registry-unreadable"
+    except (OSError, ValueError) as exc:
+        return f"registry-unreadable: {exc!r}"
     entries = payload.get("entries")
     if not isinstance(entries, list):
-        return "registry-unreadable"
+        return "registry-unreadable: ValueError('entries field is not a list')"
     expected = {
         "source_root": "project_root",
         "project_relative_source_path": path.relative_to(project_root).as_posix(),
