@@ -90,6 +90,34 @@ class TestParseSections:
         assert sections[0].heading == "## A"
         assert sections[1].heading == "## B"
 
+    def test_parse_sections_ignores_headings_inside_indented_code_fences(self) -> None:
+        text = (
+            "## A\n"
+            "Some content\n"
+            "   ```\n"
+            "## Fake\n"
+            "   ```\n"
+            "## B\n"
+            "Final\n"
+        )
+        sections = parse_sections(text)
+        headings = [section.heading for section in sections]
+        assert headings == ["## A", "## B"]
+
+    def test_parse_sections_does_not_close_backtick_fence_with_tilde_fence(self) -> None:
+        text = (
+            "## A\n"
+            "```\n"
+            "~~~\n"
+            "## inside\n"
+            "```\n"
+            "## B\n"
+            "body\n"
+        )
+        sections = parse_sections(text)
+        headings = [section.heading for section in sections]
+        assert headings == ["## A", "## B"]
+
     def test_empty_text_returns_empty(self) -> None:
         assert parse_sections("") == []
 

@@ -66,26 +66,30 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
 def parse_sections(text: str) -> list[Section]:
     """Split markdown text into ## sections.
 
-    Each section includes everything from its ## heading until the next
-    ## heading or EOF. ### subsections are included within their parent.
-    Code-fenced regions (both backtick ``` and tilde ~~~) are tracked to
-    avoid treating ## lines inside fences as section boundaries. The
-    heading line itself is NOT included in section.content to avoid
-    duplication.
+    Recognizes both backtick (```) and tilde (~~~) fences. Per CommonMark,
+    fences may be indented up to 3 spaces. The closing fence must use the
+    same character as the opening fence; mixed-fence content stays inside
+    the open fence.
     """
     sections: list[Section] = []
     lines = text.splitlines(keepends=True)
     current_heading = ""
     current_lines: list[str] = []
     inside_fence = False
-    fence_marker = ""  # Track which fence type opened (``` or ~~~)
+    fence_marker = ""
 
     for line in lines:
-        stripped = line.rstrip()
-        if not inside_fence and (stripped.startswith("```") or stripped.startswith("~~~")):
+        stripped_left = line.lstrip(" ")
+        indent = len(line) - len(stripped_left)
+        rstripped = stripped_left.rstrip()
+        if (
+            not inside_fence
+            and indent <= 3
+            and (rstripped.startswith("```") or rstripped.startswith("~~~"))
+        ):
             inside_fence = True
-            fence_marker = stripped[:3]
-        elif inside_fence and stripped.startswith(fence_marker):
+            fence_marker = rstripped[:3]
+        elif inside_fence and indent <= 3 and rstripped.startswith(fence_marker):
             inside_fence = False
             fence_marker = ""
         if not inside_fence and line.startswith("## "):

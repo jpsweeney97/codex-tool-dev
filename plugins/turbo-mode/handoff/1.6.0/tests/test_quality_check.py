@@ -328,6 +328,25 @@ class TestParseSections:
         assert "Real Section" in headings
         assert "Another Real Section" in headings
 
+    def test_parse_sections_does_not_close_backtick_fence_with_tilde_fence(self) -> None:
+        content = "\n".join([
+            "---",
+            "type: handoff",
+            "---",
+            "## A",
+            "```",
+            "~~~",
+            "## inside",
+            "```",
+            "## B",
+            "body",
+            "",
+        ])
+
+        sections = parse_sections(content)
+
+        assert [section["heading"] for section in sections] == ["A", "B"]
+
     def test_four_space_indent_not_a_fence(self) -> None:
         """4+ space indent is NOT a valid fence — headings inside should parse."""
         content = (
