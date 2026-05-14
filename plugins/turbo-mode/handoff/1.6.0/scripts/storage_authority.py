@@ -1,4 +1,4 @@
-"""Read-only storage authority for Handoff runtime paths."""
+"""Storage authority for Handoff runtime paths and state transitions."""
 
 from __future__ import annotations
 
