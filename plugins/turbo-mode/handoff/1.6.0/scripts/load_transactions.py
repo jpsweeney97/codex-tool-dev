@@ -25,6 +25,7 @@ try:
     from scripts.storage_primitives import (
         LockPolicy,
         acquire_lock as _acquire_lock_with_policy,
+        read_json_object as _read_json_object,
         release_lock as _release_lock,
         sha256_file as _sha256_file,
         write_json_atomic as _write_json_atomic,
@@ -60,6 +61,7 @@ except ModuleNotFoundError:
     from scripts.storage_primitives import (  # type: ignore[no-redef]
         LockPolicy,
         acquire_lock as _acquire_lock_with_policy,
+        read_json_object as _read_json_object,
         release_lock as _release_lock,
         sha256_file as _sha256_file,
         write_json_atomic as _write_json_atomic,
@@ -910,9 +912,13 @@ def _consume_legacy_active(
 
 
 def _read_registry(path: Path) -> dict[str, object]:
-    if not path.exists():
-        return {"entries": []}
-    data = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        data = _read_json_object(path, missing={"entries": []})
+    except (OSError, ValueError) as exc:
+        raise LoadTransactionError(
+            "load-handoff failed: registry unreadable; manual operator review required. "
+            f"Got: {str(path)!r:.100}"
+        ) from exc
     entries = data.get("entries")
     if not isinstance(entries, list):
         raise LoadTransactionError(

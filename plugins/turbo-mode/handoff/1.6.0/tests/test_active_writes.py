@@ -2008,3 +2008,41 @@ def test_ensure_no_compatible_reservation_fails_closed_on_corrupt_record(
         active_writes.begin_active_write(
             tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
         )
+
+
+def test_existing_reservation_reports_corrupt_operation_state(tmp_path: Path) -> None:
+    state_dir = tmp_path / ".codex" / "handoffs" / ".session-state"
+    operation_state_path = state_dir / "active-writes" / "demo" / "run-1.json"
+    operation_state_path.parent.mkdir(parents=True, exist_ok=True)
+    operation_state_path.write_text("{bad", encoding="utf-8")
+
+    with pytest.raises(active_writes.ActiveWriteError, match="operation state unreadable"):
+        active_writes.begin_active_write(
+            tmp_path,
+            project_name="demo",
+            operation="save",
+            run_id="run-1",
+            created_at="2026-05-14T00:00:00Z",
+        )
+
+
+def test_write_active_handoff_reports_corrupt_operation_state(tmp_path: Path) -> None:
+    operation_state_path = (
+        tmp_path
+        / ".codex"
+        / "handoffs"
+        / ".session-state"
+        / "active-writes"
+        / "demo"
+        / "run-2.json"
+    )
+    operation_state_path.parent.mkdir(parents=True, exist_ok=True)
+    operation_state_path.write_text("{bad", encoding="utf-8")
+
+    with pytest.raises(active_writes.ActiveWriteError, match="operation state unreadable"):
+        active_writes.write_active_handoff(
+            tmp_path,
+            operation_state_path=operation_state_path,
+            content="content",
+            content_sha256=hashlib.sha256(b"content").hexdigest(),
+        )

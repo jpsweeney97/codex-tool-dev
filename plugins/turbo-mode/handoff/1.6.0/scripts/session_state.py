@@ -13,14 +13,21 @@ from pathlib import Path
 
 try:
     from scripts.project_paths import get_state_dir
-    from scripts.storage_primitives import write_json_atomic
+    from scripts.storage_primitives import read_json_object, write_json_atomic
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from scripts.project_paths import get_state_dir  # type: ignore[no-redef]
-    from scripts.storage_primitives import write_json_atomic  # type: ignore[no-redef]
+    from scripts.storage_primitives import (  # type: ignore[no-redef]
+        read_json_object,
+        write_json_atomic,
+    )
 
 
 class AmbiguousResumeStateError(RuntimeError):
+    pass
+
+
+class CorruptResumeStateError(RuntimeError):
     pass
 
 
@@ -95,10 +102,19 @@ def write_resume_state(state_dir: Path, project: str, archive_path: str, resume_
     return state_path
 
 
+def _read_resume_state_payload(path: Path, *, operation: str) -> dict[str, object]:
+    try:
+        return read_json_object(path)
+    except (OSError, ValueError) as exc:
+        raise CorruptResumeStateError(
+            f"{operation} failed: resume state unreadable. Got: {str(path)!r:.100}"
+        ) from exc
+
+
 def list_resume_states(state_dir: Path, project: str) -> list[ResumeState]:
     states: list[ResumeState] = []
     for path in sorted(state_dir.glob(f"handoff-{project}-*.json")):
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = _read_resume_state_payload(path, operation="read-state")
         states.append(ResumeState(**data))
     return states
 
@@ -113,7 +129,7 @@ def migrate_legacy_resume_state(state_dir: Path, project: str) -> ResumeState | 
     state_path = write_resume_state(state_dir, project, archive_path)
     if not _trash_path(legacy_path, context="legacy state migration cleanup"):
         _mark_legacy_state_consumed(legacy_path, state_path)
-    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    payload = _read_resume_state_payload(state_path, operation="read-state")
     return ResumeState(**payload)
 
 
@@ -149,7 +165,7 @@ def clear_resume_state(state_dir: Path, state_path_arg: str) -> bool:
         return True
     legacy_project: str | None = None
     if resolved_state_path.suffix == ".json":
-        payload = json.loads(resolved_state_path.read_text(encoding="utf-8"))
+        payload = _read_resume_state_payload(resolved_state_path, operation="clear-state")
         legacy_project = payload.get("project")
 
     cleared = _trash_path(resolved_state_path, context="clear-state")
@@ -418,16 +434,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "read-state":
         try:
             state = load_resume_state(Path(args.state_dir), args.project)
-        except (AmbiguousResumeStateError, ValueError) as exc:
+        except (AmbiguousResumeStateError, CorruptResumeStateError, ValueError) as exc:
             json.dump({"error": str(exc)}, sys.stdout)
             return 2
         if state is None:
             return 1
         return _emit(asdict(state), args.field)
     if args.command == "clear-state":
-        if clear_resume_state(Path(args.state_dir), args.state_path):
-            return 0
-        return 1
+        try:
+            cleared = clear_resume_state(Path(args.state_dir), args.state_path)
+        except CorruptResumeStateError as exc:
+            json.dump({"error": str(exc)}, sys.stdout)
+            return 2
+        return 0 if cleared else 1
 
     if args.command == "prune-state":
         deleted = prune_old_state_files(args.max_age_hours, state_dir=Path(args.state_dir))

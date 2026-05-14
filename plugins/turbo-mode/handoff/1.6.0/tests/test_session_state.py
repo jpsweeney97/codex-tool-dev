@@ -1178,3 +1178,22 @@ fi
     assert not runtime_env.exists()
     assert _plugin_residue_snapshot(plugin_root) == plugin_before
     assert _project_residue_snapshot(tmp_path) == project_before
+
+
+def test_list_resume_states_reports_corrupt_json(tmp_path: Path) -> None:
+    state_dir = tmp_path / ".session-state"
+    state_dir.mkdir()
+    (state_dir / "handoff-demo-bad.json").write_text("{bad", encoding="utf-8")
+
+    with pytest.raises(session_state.CorruptResumeStateError, match="resume state unreadable"):
+        session_state.list_resume_states(state_dir, "demo")
+
+
+def test_clear_resume_state_reports_corrupt_json(tmp_path: Path) -> None:
+    state_dir = tmp_path / ".session-state"
+    state_dir.mkdir()
+    state_path = state_dir / "handoff-demo-bad.json"
+    state_path.write_text("{bad", encoding="utf-8")
+
+    with pytest.raises(session_state.CorruptResumeStateError, match="resume state unreadable"):
+        session_state.clear_resume_state(state_dir, str(state_path))

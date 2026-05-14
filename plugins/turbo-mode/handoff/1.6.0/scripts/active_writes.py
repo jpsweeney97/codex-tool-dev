@@ -23,6 +23,7 @@ try:
         LockPolicy,
         acquire_lock as _acquire_lock_with_policy,
         parse_created_at as _parse_created_at,
+        read_json_object as _read_json_object,
         release_lock as _release_lock,
         sha256_file_or_none as _sha256_path,
         write_json_atomic as _write_json_atomic,
@@ -53,6 +54,7 @@ except ModuleNotFoundError:
         LockPolicy,
         acquire_lock as _acquire_lock_with_policy,
         parse_created_at as _parse_created_at,
+        read_json_object as _read_json_object,
         release_lock as _release_lock,
         sha256_file_or_none as _sha256_path,
         write_json_atomic as _write_json_atomic,
@@ -283,7 +285,10 @@ def _existing_reservation(
     operation: str,
     slug: str | None,
 ) -> ActiveWriteReservation:
-    payload = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    payload = _read_operation_state(
+        operation_state_path,
+        operation_label="begin-active-write",
+    )
     if payload.get("operation") != operation:
         raise ActiveWriteError(
             "begin-active-write failed: run id belongs to another operation. "
@@ -304,6 +309,16 @@ def _bind_slug(operation: str, slug: str | None) -> tuple[str, str]:
         raise ActiveWriteError("begin-active-write failed: slug must be non-empty. Got: ''")
     _ensure_slug_segment("begin-active-write", slug)
     return slug, "caller-predeclared"
+
+
+def _read_operation_state(path: Path, *, operation_label: str) -> dict[str, object]:
+    try:
+        return _read_json_object(path)
+    except (OSError, ValueError) as exc:
+        raise ActiveWriteError(
+            f"{operation_label} failed: operation state unreadable; manual operator review required. "
+            f"Got: {str(path)!r:.100}"
+        ) from exc
 
 
 def _ensure_slug_segment(operation: str, slug: str) -> None:
@@ -472,7 +487,10 @@ def write_active_handoff(
 ) -> dict[str, object]:
     """Write reserved active handoff content and mark the transaction committed."""
     layout = get_storage_layout(project_root)
-    state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    state = _read_operation_state(
+        operation_state_path,
+        operation_label="write-active-handoff",
+    )
     project = str(state.get("project", layout.project_root.name))
     operation = str(state.get("operation", ""))
     transaction_id = str(state.get("transaction_id", ""))
@@ -631,7 +649,10 @@ def abandon_active_write(
 ) -> dict[str, object]:
     """Mark one active-write operation abandoned without deleting active output."""
     layout = get_storage_layout(project_root)
-    state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    state = _read_operation_state(
+        operation_state_path,
+        operation_label="abandon-active-write",
+    )
     project = str(state.get("project", layout.project_root.name))
     operation = str(state.get("operation", ""))
     transaction_id = str(state.get("transaction_id", ""))
@@ -667,7 +688,10 @@ def recover_active_write_transaction(
 ) -> dict[str, object]:
     """Recover a verifiable active-write transaction without regenerating content."""
     layout = get_storage_layout(project_root)
-    state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    state = _read_operation_state(
+        operation_state_path,
+        operation_label="active-write-transaction-recover",
+    )
     project = str(state.get("project", layout.project_root.name))
     operation = str(state.get("operation", ""))
     transaction_id = str(state.get("transaction_id", ""))
