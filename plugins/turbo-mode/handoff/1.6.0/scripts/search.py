@@ -12,8 +12,8 @@ import re
 import sys
 from pathlib import Path
 
-# Re-exported for backward compatibility — test_search.py imports these from
-# scripts.search. Do not remove without updating downstream imports.
+# Re-exported for backward compatibility with callers that import parser symbols
+# from scripts.search. Do not remove without updating downstream imports.
 try:
     from scripts.handoff_parsing import HandoffFile, Section, parse_handoff
     from scripts.project_paths import (

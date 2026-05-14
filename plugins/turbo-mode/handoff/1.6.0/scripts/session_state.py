@@ -426,8 +426,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return _emit(asdict(state), args.field)
     if args.command == "clear-state":
-        clear_resume_state(Path(args.state_dir), args.state_path)
-        return 0
+        if clear_resume_state(Path(args.state_dir), args.state_path):
+            return 0
+        return 1
 
     if args.command == "prune-state":
         deleted = prune_old_state_files(args.max_age_hours, state_dir=Path(args.state_dir))

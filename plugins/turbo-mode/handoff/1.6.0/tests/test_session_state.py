@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import scripts.session_state as session_state
 from scripts.session_state import (
     AmbiguousResumeStateError,
     allocate_archive_path,
@@ -144,6 +145,31 @@ def test_clear_resume_state_warns_when_trash_fails(
     assert cleared is False
     assert state_path.exists()
     assert "state cleanup warning" in capsys.readouterr().err
+
+
+def test_clear_state_cli_returns_1_when_trash_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    state_dir = tmp_path / ".session-state"
+    state_dir.mkdir()
+    state_path = write_resume_state(state_dir, "demo", "/tmp/archive-a.md", "token-a")
+
+    def _fail(*args: object, **kwargs: object) -> object:
+        raise subprocess.CalledProcessError(returncode=1, cmd=["trash"], stderr="boom")
+
+    monkeypatch.setattr(subprocess, "run", _fail)
+    exit_code = session_state.main(
+        [
+            "clear-state",
+            "--state-dir",
+            str(state_dir),
+            "--state-path",
+            str(state_path),
+        ]
+    )
+    assert exit_code == 1
+    assert state_path.exists()
 
 
 def test_migrated_legacy_marker_prevents_resume_chain_resurrection(
