@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
 import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass
@@ -17,6 +17,18 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from scripts.active_writes import ActiveWriteReservation
+
+try:
+    from scripts.storage_primitives import (
+        sha256_regular_file_or_none as _content_sha256,
+        write_json_atomic as _write_json_atomic,
+    )
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.storage_primitives import (  # type: ignore[no-redef]
+        sha256_regular_file_or_none as _content_sha256,
+        write_json_atomic as _write_json_atomic,
+    )
 
 
 class StorageLocation(StrEnum):
@@ -974,13 +986,6 @@ def _read_json_object(path: Path) -> dict[str, object]:
     return payload
 
 
-def _write_json_atomic(path: Path, payload: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    os.replace(temp_path, path)
-
-
 def discover_handoff_inventory(
     project_root: Path,
     *,
@@ -1551,15 +1556,6 @@ def _history_source_precedence(location: StorageLocation) -> int:
 
 def _absolute_path_key(path: Path) -> str:
     return str(path.resolve())
-
-
-def _content_sha256(path: Path) -> str | None:
-    try:
-        if not path.is_file():
-            return None
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        return None
 
 
 def _document_profile(path: Path, *, location: StorageLocation, scan_mode: str) -> str | None:

@@ -23,6 +23,11 @@ try:
         eligible_active_candidates,
         get_storage_layout,
     )
+    from scripts.storage_primitives import (
+        parse_created_at as _parse_created_at,
+        sha256_file as _sha256_file,
+        write_json_atomic as _write_json_atomic,
+    )
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from scripts.session_state import (  # type: ignore[no-redef]
@@ -36,6 +41,11 @@ except ModuleNotFoundError:
         discover_handoff_inventory,
         eligible_active_candidates,
         get_storage_layout,
+    )
+    from scripts.storage_primitives import (  # type: ignore[no-redef]
+        parse_created_at as _parse_created_at,
+        sha256_file as _sha256_file,
+        write_json_atomic as _write_json_atomic,
     )
 
 
@@ -648,16 +658,6 @@ def _recover_copied_legacy_archive(
     _write_json_atomic(registry_path, registry)
 
 
-def _parse_created_at(value: str | None) -> datetime:
-    if value is None:
-        return datetime.now(UTC)
-    normalized = value.replace("Z", "+00:00")
-    parsed = datetime.fromisoformat(normalized)
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
-
-
 _CLAIM_TIMEOUT_SECONDS = 60
 
 
@@ -1052,19 +1052,6 @@ def _registry_key(entry: dict[str, object]) -> dict[str, str]:
         "storage_location": str(entry.get("storage_location", "")),
         "source_content_sha256": str(entry.get("source_content_sha256", "")),
     }
-
-
-def _sha256_file(path: Path) -> str:
-    import hashlib
-
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def _write_json_atomic(path: Path, payload: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    os.replace(temp_path, path)
 
 
 def _write_transaction(
