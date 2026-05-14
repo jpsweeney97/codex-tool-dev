@@ -15,7 +15,7 @@ This closeout proves source-tree repair only. It does not prove real installed-c
 
 | Label | Status | Evidence |
 |---|---|---|
-| `source storage authority repaired` | proved | `env PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX="$(mktemp -d)" uv run pytest -p no:cacheprovider plugins/turbo-mode/handoff/1.6.0/tests` -> 540 passed, 8 expected warnings. Lock liveness: ordinary stale locks self-recover; orphaned recovery claims fail closed with explicit operator action. |
+| `source storage authority repaired` | proved | `env PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX="$(mktemp -d)" uv run pytest -p no:cacheprovider plugins/turbo-mode/handoff/1.6.0/tests` -> 541 passed, 8 expected warnings. Lock liveness: ordinary stale locks self-recover; orphaned recovery claims fail closed with explicit operator action. |
 | `skill docs reconciled` | proved | Load skill operator contract distinguishes readable pending-load recovery from unreadable/corrupt transaction blocking, recovery-claim cleanup, and foreign-host stale-lock review; proved by full Handoff suite plus `env PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX="$(mktemp -d)" uv run python plugins/turbo-mode/handoff/1.6.0/scripts/storage_authority_inventory.py --check` |
 | `refresh surfaces reconciled` | proved | `env PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX="$(mktemp -d)" uv run pytest -p no:cacheprovider plugins/turbo-mode/tools/refresh/tests/test_classifier.py plugins/turbo-mode/tools/refresh/tests/test_planner.py plugins/turbo-mode/tools/refresh/tests/test_smoke.py` -> 140 passed; proof map check passed |
 | `source-harness-isolation-proof` | proved | Full Handoff suite includes `plugins/turbo-mode/handoff/1.6.0/tests/test_installed_host_harness.py` |

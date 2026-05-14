@@ -185,6 +185,10 @@ def _emit(payload: dict[str, object], field: str | None) -> int:
     value = payload.get(field)
     if value is None:
         return 1
+    if isinstance(value, (dict, list)):
+        json.dump(value, sys.stdout)
+        print()
+        return 0
     print(value)
     return 0
 

@@ -1019,6 +1019,46 @@ def test_read_chain_state_cli_reads_single_primary_state(tmp_path: Path) -> None
     assert payload["state"]["resume_token"] == "token-a"
 
 
+def test_read_chain_state_cli_field_state_outputs_json(tmp_path: Path) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    primary.write_text(
+        json.dumps({
+            "state_path": str(primary),
+            "project": "demo",
+            "resume_token": "token-a",
+            "archive_path": "/tmp/primary.md",
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--field",
+            "state",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["project_relative_state_path"] == (
+        ".codex/handoffs/.session-state/handoff-demo-token-a.json"
+    )
+    assert payload["resume_token"] == "token-a"
+
+
 def _residue_snapshot(root: Path, patterns: list[str]) -> set[str]:
     return {
         str(match.relative_to(root))
