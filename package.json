@@ -6,7 +6,7 @@
   ],
   "scripts": {
     "build": "npm -ws run build",
-    "test": "npm -ws run test"
+    "test": "npm -ws run test",
+    "turbo:dev-refresh": "PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache-dev-refresh python3 plugins/turbo-mode/tools/dev_refresh_turbo_mode.py --verify --json"
   }
 }
-
