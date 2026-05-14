@@ -188,6 +188,8 @@ Modify:
 - `plugins/turbo-mode/handoff/1.6.0/scripts/active_writes.py`
 - `plugins/turbo-mode/handoff/1.6.0/scripts/load_transactions.py`
 - `plugins/turbo-mode/handoff/1.6.0/scripts/storage_authority.py`
+- `plugins/turbo-mode/handoff/1.6.0/tests/test_active_writes.py`
+- `plugins/turbo-mode/handoff/1.6.0/tests/test_load_transactions.py`
 
 No docs or closeout files should be changed in the implementation PR unless a reviewer requests a durable explanation after code review.
 
@@ -923,9 +925,24 @@ Remove these local definitions after the imports are in place:
 - `load_transactions.py`: `_parse_created_at`, `_sha256_file`, `_write_json_atomic`.
 - `storage_authority.py`: `_write_json_atomic`, `_content_sha256`.
 
-Remove now-unused imports only after `ruff` or the targeted test run proves they are unused. Do not remove `hashlib` from `active_writes.py` if `_stable_hash` or content hashing still uses it. Remove `hashlib` from `storage_authority.py` if `_content_sha256` was its only remaining use.
+Remove now-unused imports only after the narrow `F401` Ruff command below proves they are unused. Tests can pass with stale imports and are not evidence for import cleanup. Do not remove `hashlib` from `active_writes.py` if `_stable_hash` or content hashing still uses it. Remove `hashlib` from `storage_authority.py` if `_content_sha256` was its only remaining use.
 
-- [ ] **Step 3: Run targeted tests**
+- [ ] **Step 3: Run narrow unused-import lint**
+
+Run:
+
+```bash
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-pycache-shared-primitives uv run ruff check --select F401 \
+  plugins/turbo-mode/handoff/1.6.0/scripts/storage_primitives.py \
+  plugins/turbo-mode/handoff/1.6.0/scripts/active_writes.py \
+  plugins/turbo-mode/handoff/1.6.0/scripts/load_transactions.py \
+  plugins/turbo-mode/handoff/1.6.0/scripts/storage_authority.py \
+  plugins/turbo-mode/handoff/1.6.0/tests/test_storage_primitives.py
+```
+
+Expected: no unused imports in the files touched by Task 3. Do not run broad Ruff cleanup in this PR.
+
+- [ ] **Step 4: Run targeted tests**
 
 Run:
 
@@ -939,7 +956,7 @@ env PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-pycache-sha
 
 Expected: all selected tests pass.
 
-- [ ] **Step 4: Commit non-lock extraction**
+- [ ] **Step 5: Commit non-lock extraction**
 
 Commit:
 
@@ -959,6 +976,8 @@ git commit -m "refactor: share handoff storage primitives"
 
 - Modify: `plugins/turbo-mode/handoff/1.6.0/scripts/active_writes.py`
 - Modify: `plugins/turbo-mode/handoff/1.6.0/scripts/load_transactions.py`
+- Modify: `plugins/turbo-mode/handoff/1.6.0/tests/test_active_writes.py`
+- Modify: `plugins/turbo-mode/handoff/1.6.0/tests/test_load_transactions.py`
 
 - [ ] **Step 1: Import lock helpers**
 
@@ -1039,7 +1058,127 @@ After replacing the local lock blocks:
 - Remove `os` from either module only if no other code in that module still uses it.
 - Keep `json` in both modules; both still parse operation and transaction records.
 
-- [ ] **Step 4: Run lock-focused tests**
+- [ ] **Step 4: Run narrow unused-import lint**
+
+Run:
+
+```bash
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-pycache-shared-primitives uv run ruff check --select F401 \
+  plugins/turbo-mode/handoff/1.6.0/scripts/storage_primitives.py \
+  plugins/turbo-mode/handoff/1.6.0/scripts/active_writes.py \
+  plugins/turbo-mode/handoff/1.6.0/scripts/load_transactions.py \
+  plugins/turbo-mode/handoff/1.6.0/tests/test_storage_primitives.py \
+  plugins/turbo-mode/handoff/1.6.0/tests/test_active_writes.py \
+  plugins/turbo-mode/handoff/1.6.0/tests/test_load_transactions.py
+```
+
+Expected: no unused imports in the files touched by Task 4. Do not run broad Ruff cleanup in this PR.
+
+- [ ] **Step 5: Strengthen caller-level exact diagnostic tests**
+
+Add exact wrapper diagnostics in the caller test files. These tests must exercise the local wrappers, not `storage_primitives.acquire_lock` directly.
+
+In `test_active_writes.py`, add or strengthen tests equivalent to:
+
+```python
+def test_active_write_lock_held_diagnostic_preserves_wrapper_message(tmp_path: Path) -> None:
+    lock = _stage_lock(tmp_path, _valid_lock_metadata(created_at=datetime.now(UTC)))
+    expected = (
+        "begin-active-write failed: project active-write lock is already held. "
+        f"Got: {str(lock)!r:.100}"
+    )
+    with pytest.raises(active_writes.ActiveWriteError) as exc_info:
+        active_writes._acquire_lock(
+            lock,
+            project="demo",
+            operation="save",
+            transaction_id="new-lock",
+        )
+    assert str(exc_info.value) == expected
+
+
+def test_active_write_recovery_claim_diagnostic_preserves_wrapper_message(
+    tmp_path: Path,
+) -> None:
+    lock = _stage_lock(
+        tmp_path,
+        _valid_lock_metadata(created_at=datetime.now(UTC) - timedelta(hours=2)),
+    )
+    claim_path = lock.with_name(lock.name + ".recovery")
+    claim_payload = {
+        "pid": 12345,
+        "hostname": "test-host",
+        "created_at": datetime.now(UTC).isoformat(),
+        "timeout_seconds": 60,
+    }
+    claim_path.write_text(json.dumps(claim_payload), encoding="utf-8")
+    expected = (
+        "begin-active-write failed: recovery claim file present "
+        "(live recoverer: pid=12345 host='test-host'); "
+        f"if no process is actively recovering this lock, run `trash {claim_path}` and retry. "
+        f"Got: {str(claim_path)!r:.100}"
+    )
+    with pytest.raises(active_writes.ActiveWriteError) as exc_info:
+        active_writes._acquire_lock(
+            lock,
+            project="demo",
+            operation="save",
+            transaction_id="new-lock",
+        )
+    assert str(exc_info.value) == expected
+```
+
+In `test_load_transactions.py`, add the same coverage for the load wrapper:
+
+```python
+def test_load_lock_held_diagnostic_preserves_wrapper_message(tmp_path: Path) -> None:
+    lock = _stage_load_lock(
+        tmp_path,
+        _valid_load_lock_metadata(created_at=datetime.now(UTC)),
+    )
+    expected = (
+        f"load-handoff failed: project load lock is already held. Got: {str(lock)!r:.100}"
+    )
+    with pytest.raises(LoadTransactionError) as exc_info:
+        load_transactions._acquire_lock(
+            lock,
+            project="demo",
+            operation="load",
+            transaction_id="new-lock",
+        )
+    assert str(exc_info.value) == expected
+
+
+def test_load_recovery_claim_diagnostic_preserves_wrapper_message(tmp_path: Path) -> None:
+    lock = _stage_load_lock(
+        tmp_path,
+        _valid_load_lock_metadata(created_at=datetime.now(UTC) - timedelta(hours=2)),
+    )
+    claim_path = lock.with_name(lock.name + ".recovery")
+    claim_payload = {
+        "pid": 12345,
+        "hostname": "test-host",
+        "created_at": datetime.now(UTC).isoformat(),
+        "timeout_seconds": 60,
+    }
+    claim_path.write_text(json.dumps(claim_payload), encoding="utf-8")
+    expected = (
+        "load-handoff failed: recovery claim file present "
+        "(live recoverer: pid=12345 host='test-host'); "
+        f"if no process is actively recovering this lock, run `trash {claim_path}` and retry. "
+        f"Got: {str(claim_path)!r:.100}"
+    )
+    with pytest.raises(LoadTransactionError) as exc_info:
+        load_transactions._acquire_lock(
+            lock,
+            project="demo",
+            operation="load",
+            transaction_id="new-lock",
+        )
+    assert str(exc_info.value) == expected
+```
+
+- [ ] **Step 6: Run lock-focused tests**
 
 Run:
 
@@ -1050,9 +1189,9 @@ env PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-pycache-sha
   plugins/turbo-mode/handoff/1.6.0/tests/test_load_transactions.py
 ```
 
-Expected: all selected tests pass, including the subprocess lock contention tests that import `_acquire_lock` and `_release_lock` from `active_writes.py` and `load_transactions.py`.
+Expected: all selected tests pass, including the subprocess lock contention tests that import `_acquire_lock` and `_release_lock` from `active_writes.py` and `load_transactions.py`, plus exact wrapper diagnostic assertions for held-lock and recovery-claim messages.
 
-- [ ] **Step 5: Commit lock extraction**
+- [ ] **Step 7: Commit lock extraction**
 
 Commit:
 
@@ -1061,7 +1200,9 @@ git add \
   plugins/turbo-mode/handoff/1.6.0/scripts/storage_primitives.py \
   plugins/turbo-mode/handoff/1.6.0/scripts/active_writes.py \
   plugins/turbo-mode/handoff/1.6.0/scripts/load_transactions.py \
-  plugins/turbo-mode/handoff/1.6.0/tests/test_storage_primitives.py
+  plugins/turbo-mode/handoff/1.6.0/tests/test_storage_primitives.py \
+  plugins/turbo-mode/handoff/1.6.0/tests/test_active_writes.py \
+  plugins/turbo-mode/handoff/1.6.0/tests/test_load_transactions.py
 git commit -m "refactor: share handoff lock primitives"
 ```
 
@@ -1120,10 +1261,10 @@ Expected:
 Run:
 
 ```bash
-rg -n "^(from|import) " plugins/turbo-mode/handoff/1.6.0/scripts/storage_primitives.py
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-pycache-shared-primitives uv run python -c "import ast, pathlib, sys; path = pathlib.Path('plugins/turbo-mode/handoff/1.6.0/scripts/storage_primitives.py'); allowed_imports = {'hashlib', 'json', 'os', 'socket', 'uuid'}; allowed_from = {'__future__', 'collections.abc', 'dataclasses', 'datetime', 'pathlib'}; offenders = []; tree = ast.parse(path.read_text(encoding='utf-8')); [offenders.append((node.lineno, alias.name)) for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names if alias.name not in allowed_imports]; [offenders.append((node.lineno, node.module or '')) for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) if (node.module or '') not in allowed_from]; print('\n'.join(f'{line}: {module}' for line, module in offenders)); sys.exit(1 if offenders else 0)"
 ```
 
-Expected: only standard-library imports. The output must not include `scripts.`, `active_writes`, `load_transactions`, `storage_authority`, or `session_state`.
+Expected: no output, exit code 0. This catches top-level and indented imports; `storage_primitives.py` must import only the explicitly allowed standard-library modules.
 
 Run:
 
@@ -1185,7 +1326,7 @@ Stop and ask for review before proceeding if any of these occur:
 
 Before requesting review or opening the PR:
 
-- [ ] The diff is limited to the five intended files plus this spec if it is included in the PR.
+- [ ] The diff is limited to the intended source/test files plus this spec if it is included in the PR.
 - [ ] `storage_primitives.py` imports only standard-library modules.
 - [ ] Active-write lock failures still raise `ActiveWriteError`.
 - [ ] Load lock failures still raise `LoadTransactionError`.
