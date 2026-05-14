@@ -4,7 +4,7 @@ description: Used when continuing from a previous session; when user runs `/load
 allowed-tools: Write, Read, Edit, Glob, Grep, Bash
 ---
 
-**Read [handoff-contract.md](../../references/handoff-contract.md) for:** frontmatter schema, chain protocol, storage conventions.
+**Read [handoff-contract.md](../../references/handoff-contract.md) for:** frontmatter schema, chain protocol, and type semantics. The runtime storage locations below are controlled by the storage-authority scripts during the handoff storage reversal.
 
 # Load
 
@@ -13,7 +13,7 @@ Continue work from a previous handoff.
 **Core Promise:** One action to resume (`/load`).
 
 The plugin writes filesystem artifacts only. It does not add gitignore rules, stage files, or auto-commit files.
-Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
+Whether runtime handoff paths are tracked or ignored is host-repository policy, not a plugin invariant.
 
 ## When to Use
 
@@ -51,11 +51,17 @@ Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a 
 ## Outputs
 
 **Artifacts:**
-- Archived handoff at `<project_root>/docs/handoffs/archive/<filename>`
-- State file at `<project_root>/docs/handoffs/.session-state/handoff-<project>-<resume_token>.json`
+- Archived or copied handoff at `<project_root>/.codex/handoffs/archive/<filename>`
+- State file at `<project_root>/.codex/handoffs/.session-state/handoff-<project>-<resume_token>.json`
+- Transaction record under `<project_root>/.codex/handoffs/.session-state/transactions/`
 
 **Side Effects:**
-- Original handoff moved to archive
+- Primary active handoffs from `<project_root>/.codex/handoffs/*.md` are moved to `.codex/handoffs/archive/`
+- Primary archive loads reuse the existing archive file
+- Reviewed legacy active handoffs from `docs/handoffs/*.md` are copied to `.codex/handoffs/archive/` and marked consumed; the legacy source remains in place
+- Explicit legacy archive loads from `docs/handoffs/archive/` or `.codex/handoffs/.archive/` are copied or reused through the copied-archive registry
+- Readable pending load transactions are recovered before a new load is selected
+- Unreadable or corrupt transaction records block `/load` with a global fail-closed operator diagnostic
 - Context loaded into conversation
 
 **Definition of Done:**
@@ -63,7 +69,7 @@ Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a 
 | Check | Expected |
 |-------|----------|
 | Handoff content displayed | User sees full handoff context |
-| Original archived | File moved to `archive/` |
+| Load transaction completed | Command emits `archive_path`, `state_path`, and `storage_location` |
 | State file created | Path recorded for next handoff's `resumed_from` |
 | Next step offered | "Continue with [next step]?" |
 
@@ -71,34 +77,30 @@ Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a 
 
 | Command | Action |
 |---------|--------|
-| `/load` | Load most recent handoff for this project |
+| `/load` | Load most recent eligible active handoff for this project |
 | `/load <path>` | Load specific handoff by path |
-| `/list-handoffs` | List available handoffs for project |
+| `/list-handoffs` | List eligible active handoffs for project |
 
 ## Decision Points
 
-1. **Path argument provided:**
-   - If path provided: validate file exists, then use that specific handoff.
-   - If path doesn't exist: report "Handoff not found at <path>" and **STOP**.
-   - If no path: search for most recent handoff in project directory.
-
-2. **Handoff availability:**
-   - If handoffs found for project: select most recent by filename timestamp.
-   - If no handoffs found: report "No handoffs found for this project" and **STOP**.
-
-3. **Project detection:**
+1. **Project detection:**
    - If in git repository: use git root directory name as project.
    - If not in git: use current directory name.
-   - If project name ambiguous or undeterminable: ask user to specify.
+   - If project name is ambiguous or undeterminable: ask user to specify.
 
-4. **Archive directory:**
-   - If `archive/` exists: move handoff there.
-   - If `archive/` doesn't exist: create it, then move handoff.
-   - If cannot create `archive/`: warn user but continue (handoff still readable).
+2. **Path argument provided:**
+   - If path provided: validate it exists, then pass it to the load transaction.
+   - If path doesn't exist: report "Handoff not found at <path>" and **STOP**.
+   - If no path: let `load_transactions.py` select the first eligible active candidate from storage authority.
 
-5. **State file creation:**
-   - If `<project_root>/docs/handoffs/.session-state/` writable: write state file with archive path.
-   - If not writable: warn user (next handoff won't have `resumed_from` field).
+3. **Handoff availability:**
+   - If eligible handoffs exist: load the first storage-authority candidate.
+   - If no handoffs are eligible: report "No handoffs found for this project" and **STOP**.
+
+4. **Interrupted load recovery:**
+   - If a readable pending load transaction exists for this project, the load command completes recovery before selecting a new handoff.
+   - Report the recovered `archive_path` and continue from that handoff.
+   - If transaction JSON is unreadable or corrupt, report the stderr diagnostic and **STOP**. Transaction records share one state directory, so unreadable records are treated as global fail-closed until operator review.
 
 ## Procedure
 
@@ -106,80 +108,75 @@ Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a 
 
 When user runs `/load [path]`:
 
-1. **Locate handoff:**
-   - If path provided: validate it exists, use that handoff
-   - If no path:
-     1. Use Bash: `ls "$(git rev-parse --show-toplevel)/docs/handoffs"/*.md 2>/dev/null` (shell glob is non-recursive — unlike the Glob tool, it won't descend into `archive/`)
-     2. If no output from primary location, check legacy location:
-        1. `ls "$(git rev-parse --show-toplevel)/.codex/handoffs"/*.md 2>/dev/null`
-        2. If found, report: "Found handoffs at legacy location `.codex/handoffs/`. Run `/save` to migrate — the next save will write to `docs/handoffs/`."
-        3. Use the legacy file for this load
-     3. If still no output, report "No handoffs found for this project" and **STOP**
-     4. Select most recent by filename (format: `YYYY-MM-DD_HH-MM_*.md`)
-
-2. **Read handoff content**
-
-3. **Display and summarize:**
-   - Show full handoff/checkpoint content
-   - Note the type: "Resuming from **checkpoint**: ...", "Resuming from **summary**: ...", or "Resuming from **handoff**: ..."
-   - Summarize key points: goal/current task, decisions, next steps/next action
-   - Offer: "Continue with [first next step/action]?"
-
-4. **Archive the handoff:**
-   - Define project paths:
+1. **Define project paths:**
    ```bash
    PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
    PROJECT_NAME="$(basename "$PROJECT_ROOT")"
    ```
-   - Resolve plugin root before running state helpers. Set `PLUGIN_ROOT` to the plugin version root, three levels above this `SKILL.md`, not the `skills/` directory. Use a literal absolute value such as `PLUGIN_ROOT="/absolute/path/to/handoff/1.6.0"`. The literal `python` command must resolve to Python >=3.11.
-   - Archive the source with `session_state.py`:
+
+2. **Resolve plugin root before running helpers.**
+   Set `PLUGIN_ROOT` to the plugin version root, three levels above this `SKILL.md`, not the `skills/` directory. Use a literal absolute value such as `PLUGIN_ROOT="/absolute/path/to/handoff/1.6.0"`. The literal `python` command must resolve to Python >=3.11.
+
+3. **Run the load transaction.**
+   For implicit `/load`:
    ```bash
-   ARCHIVED_PATH="$(
-     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
-       archive \
-       --source "$SOURCE_PATH" \
-       --archive-dir "$PROJECT_ROOT/docs/handoffs/archive" \
-       --field archived_path
-   )"
+   PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/load_transactions.py" \
+     load \
+     --project-root "$PROJECT_ROOT" \
+     --project "$PROJECT_NAME"
    ```
 
-5. **Write state file:**
-   - Write archive path to `<project_root>/docs/handoffs/.session-state/handoff-<project>-<resume_token>.json` using the project name from the contract.
+   For explicit `/load <path>`:
    ```bash
-   STATE_PATH="$(
-     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
-       write-state \
-       --state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \
-       --project "$PROJECT_NAME" \
-       --archive-path "$ARCHIVED_PATH" \
-       --field state_path
-   )"
+   SOURCE_PATH="/absolute/path/from-user"
+   PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/load_transactions.py" \
+     load \
+     --project-root "$PROJECT_ROOT" \
+     --project "$PROJECT_NAME" \
+     --explicit-path "$SOURCE_PATH"
    ```
-   During the upgrade window, `read-state` also detects a legacy plain-text state file at `<project_root>/docs/handoffs/.session-state/handoff-<project>` and migrates it to `handoff-<project>-<resume_token>.json`.
 
-If `read-state` exits 2, STOP and ask the user which concurrent resume chain to continue. Do not choose one automatically.
-If `read-state` exits 1, keep `STATE_PATH` empty and skip `clear-state`.
-If `clear-state` warns after the handoff file is already written, report the warning but do not fail save/quicksave/summary.
+   The command emits JSON with `transaction_id`, `transaction_path`, `source_path`, `archive_path`, `state_path`, and `storage_location`. If it exits non-zero, report the stderr message and **STOP**. Do not delete transaction, lock, or recovery-claim files unless the operator explicitly confirms the diagnostic repair path.
+
+4. **Read handoff content from `archive_path`.**
+   Use the `archive_path` returned by the transaction JSON. Do not read from the original source after mutation because primary active handoffs may have been moved.
+
+5. **Display and summarize:**
+   - Show full handoff/checkpoint/summary content
+   - Note the type: "Resuming from **checkpoint**: ...", "Resuming from **summary**: ...", or "Resuming from **handoff**: ..."
+   - Summarize key points: goal/current task, decisions, next steps/next action
+   - Offer: "Continue with [first next step/action]?"
 
 ### List (`/list-handoffs`)
 
 When user runs `/list-handoffs`:
 
-1. Use Bash: `ls "$(git rev-parse --show-toplevel)/docs/handoffs"/*.md 2>/dev/null` (shell glob is non-recursive — unlike the Glob tool, it won't descend into `archive/`)
-2. If no output, report "No handoffs found for this project" and **STOP**
-3. Read frontmatter from each file
-4. Format as table: date, title, type, branch
-   - `type` comes from frontmatter `type` field. If missing, display as `handoff` (backwards compatibility).
+1. **Define project paths and plugin root** using the same setup as `/load`.
+2. **Run the storage-backed listing helper:**
+   ```bash
+   PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/list_handoffs.py" \
+     --project-root "$PROJECT_ROOT"
+   ```
+3. If `total` is `0`, report "No handoffs found for this project" and **STOP**.
+4. Format `handoffs` as a table: date, title, type, branch, storage location, path.
+   - `type` comes from frontmatter `type` field. If missing, display as `handoff` for backwards compatibility.
 
 ## Storage
 
-See [format-reference.md](../../references/format-reference.md) for:
-- Storage location (`<project_root>/docs/handoffs/`)
-- Filename format (`YYYY-MM-DD_HH-MM_<slug>.md`)
-- Archive location (`<project_root>/docs/handoffs/archive/`)
-- Retention policies (No auto-prune)
+Primary runtime storage:
+- Active handoffs: `<project_root>/.codex/handoffs/`
+- Archive: `<project_root>/.codex/handoffs/archive/`
+- Resume state: `<project_root>/.codex/handoffs/.session-state/handoff-<project>-<resume_token>.json`
+- Load transactions: `<project_root>/.codex/handoffs/.session-state/transactions/`
 
-See also [handoff-contract.md](../../references/handoff-contract.md) for storage conventions, retention policies, and filename format.
+Legacy read compatibility:
+- Reviewed legacy active inputs may be read from `<project_root>/docs/handoffs/*.md`
+- Explicit legacy archive inputs may be read from `<project_root>/docs/handoffs/archive/*.md`
+- Previous hidden primary archives may be read from `<project_root>/.codex/handoffs/.archive/*.md`
+
+Legacy sources are not deleted by load. Copies and registry records are written under primary `.codex/handoffs/` state.
+
+See [format-reference.md](../../references/format-reference.md) for filename format and document content expectations. See [handoff-contract.md](../../references/handoff-contract.md) for frontmatter and chain metadata semantics.
 
 ## Background Cleanup
 
@@ -195,12 +192,12 @@ Handoffs and archives are not auto-pruned.
 After loading, verify:
 
 - [ ] Handoff content displayed to user
-- [ ] Original file moved to `archive/`
-- [ ] State file exists at `<project_root>/docs/handoffs/.session-state/handoff-<project>-<resume_token>.json`
+- [ ] Transaction JSON includes `archive_path`, `state_path`, and `storage_location`
+- [ ] State file exists at `<project_root>/.codex/handoffs/.session-state/handoff-<project>-<resume_token>.json`
 - [ ] Type displayed on load ("Resuming from **checkpoint**:", "Resuming from **summary**:", or "Resuming from **handoff**:")
 - [ ] User offered continuation prompt
 
-**Quick check:** `ls "$(git rev-parse --show-toplevel)/docs/handoffs/archive/"` shows the archived file.
+**Quick check:** `PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/list_handoffs.py" --project-root "$PROJECT_ROOT"` shows currently eligible active handoffs.
 
 ## Troubleshooting
 
@@ -209,38 +206,66 @@ After loading, verify:
 **Symptoms:** `/load` says "No handoffs found" or finds wrong handoff
 
 **Likely causes:**
-- Handoff was archived (check `docs/handoffs/archive/`)
+- Handoff was already archived; use `/load <path>` with the archive path
 - Running from different project directory than where handoff was created
-- Handoff saved with different project name
+- Legacy active handoff is not listed in the reviewed opt-in manifest
+- Source is tracked in git and blocked by storage authority
 
 **Next steps:**
-1. Run `/list-handoffs` to see available handoffs for current project
-2. Check handoffs directory directly: `ls "$(git rev-parse --show-toplevel)/docs/handoffs/"`
-3. If found in different project, use `/load <full-path>`
+1. Run `/list-handoffs` to see eligible active handoffs for current project
+2. Check primary runtime storage directly: `<project_root>/.codex/handoffs/`
+3. If found in archive, use `/load <full-path>`
 
-### Archive directory not created
+### Load reports a pending transaction
 
-**Symptoms:** Load fails when trying to archive
+**Symptoms:** `/load` resumes a handoff different from the one expected
 
 **Likely causes:**
-- Permission denied on handoffs directory
-- Disk full
+- A previous load was interrupted after mutating archive/state but before marking the transaction completed
 
 **Next steps:**
-1. Check write permissions on `<project_root>/docs/handoffs/`
-2. Create `archive/` manually if needed: `mkdir "$(git rev-parse --show-toplevel)/docs/handoffs/archive"`
+1. Let the transaction command complete recovery
+2. Read the returned `archive_path`
+3. Continue from the recovered handoff before starting another load
+
+### Load reports corrupt or unreadable transaction state
+
+**Symptoms:** `/load` exits non-zero with "pending transaction record unreadable"
+
+**Likely causes:**
+- A transaction JSON file under `<project_root>/.codex/handoffs/.session-state/transactions/` is truncated, unreadable, or malformed
+- Because the project field is inside the JSON payload, unreadable transaction records are global fail-closed and may block every project using this state directory
+
+**Next steps:**
+1. Report the exact `transaction_path` from stderr
+2. Ask the operator to inspect the file before changing state
+3. Retry `/load` only after the operator repairs or explicitly removes the corrupt record
+
+### Load reports a recovery claim or foreign-host lock
+
+**Symptoms:** `/load` exits non-zero with "recovery claim file present" or "stale lock from another host"
+
+**Likely causes:**
+- A prior stale-lock recovery crashed after creating a `.recovery` claim file
+- The lock was created under a different hostname, or this machine's hostname changed
+
+**Next steps:**
+1. Report the exact claim or lock path from stderr
+2. Ask the operator to confirm no process is actively recovering the lock
+3. For `recovery claim file present`, follow the emitted `trash <claim_path>` command only after operator confirmation
+4. For `stale lock from another host`, require operator review of the lock metadata before any cleanup
 
 ### State file not created
 
 **Symptoms:** Next handoff missing `resumed_from` field
 
 **Likely causes:**
-- Permission denied on `<project_root>/docs/handoffs/.session-state/`
-- Session ended before state file written
+- Permission denied on `<project_root>/.codex/handoffs/.session-state/`
+- Session ended before the transaction completed
 
 **Next steps:**
-1. Check if `<project_root>/docs/handoffs/.session-state/` exists
-2. Create manually if needed: `mkdir -p "$(git rev-parse --show-toplevel)/docs/handoffs/.session-state"`
+1. Check if `<project_root>/.codex/handoffs/.session-state/` exists
+2. Re-run `/load`; readable pending transactions are recovered before new selection, while unreadable records stop with an operator diagnostic
 
 ## Anti-Patterns
 
@@ -250,6 +275,7 @@ After loading, verify:
 | Suggesting old handoffs | Context may be irrelevant | User decides when to load |
 | Loading synthesis guide | Not needed for load, wastes context | Load skill is lightweight |
 | Modifying handoff content | Handoffs are immutable snapshots | Create new handoff if needed |
+| Hand-editing resume state | Breaks transaction recovery | Use `load_transactions.py` |
 
 ## Related Skills
 

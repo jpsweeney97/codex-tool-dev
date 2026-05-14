@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -26,6 +28,29 @@ def test_allocate_archive_path_avoids_overwrite(tmp_path: Path) -> None:
     (archive_dir / source.name).write_text("old", encoding="utf-8")
     path = allocate_archive_path(source, archive_dir)
     assert path.name == "2026-05-02_05-26_summary-test-01.md"
+
+
+def test_write_resume_state_uses_temp_file_before_final_rename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writes: list[Path] = []
+    original_write_text = Path.write_text
+
+    def write_spy(path: Path, *args: object, **kwargs: object) -> int:
+        if path.parent == tmp_path:
+            writes.append(path)
+        return original_write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", write_spy)
+
+    state_path = write_resume_state(tmp_path, "demo", "/tmp/archive.md", "token-a")
+
+    assert writes
+    assert writes[0] != state_path
+    assert writes[0].parent == state_path.parent
+    assert not writes[0].exists()
+    assert json.loads(state_path.read_text(encoding="utf-8"))["archive_path"] == "/tmp/archive.md"
 
 
 def test_load_resume_state_rejects_multiple_pending_states(tmp_path: Path) -> None:
@@ -258,6 +283,780 @@ def test_read_state_returns_1_when_absent(tmp_path: Path) -> None:
         cwd=str(tmp_path),
     )
     assert read_state.returncode == 1
+
+
+def test_chain_state_recovery_inventory_cli_reports_state_identity_without_mutation(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    legacy = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    residue = tmp_path / "docs" / "handoffs" / "handoff-demo"
+    archive = tmp_path / ".codex" / "handoffs" / "archive" / "previous.md"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    residue.parent.mkdir(parents=True, exist_ok=True)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    archive.write_text("---\ntitle: Previous\n---\n", encoding="utf-8")
+    primary.write_text(
+        json.dumps({
+            "state_path": str(primary),
+            "project": "demo",
+            "resume_token": "token-a",
+            "archive_path": str(archive),
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+    legacy_payload = {
+        "state_path": str(legacy),
+        "project": "demo",
+        "resume_token": "token-b",
+        "archive_path": str(archive),
+        "created_at": "2026-05-13T16:01:00Z",
+    }
+    legacy.write_text(json.dumps(legacy_payload), encoding="utf-8")
+    residue.write_text(str(archive), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "chain-state-recovery-inventory",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["project"] == "demo"
+    by_path = {
+        candidate["project_relative_state_path"]: candidate
+        for candidate in payload["candidates"]
+    }
+    primary_row = by_path[".codex/handoffs/.session-state/handoff-demo-token-a.json"]
+    legacy_row = by_path["docs/handoffs/.session-state/handoff-demo-token-b.json"]
+    residue_row = by_path["docs/handoffs/handoff-demo"]
+    assert primary_row["source_root"] == "primary"
+    assert primary_row["storage_location"] == "primary_state"
+    assert primary_row["project"] == "demo"
+    assert primary_row["resume_token"] == "token-a"
+    assert primary_row["detected_format"] == "tokenized-json"
+    assert primary_row["validation_status"] == "valid"
+    assert legacy_row["source_root"] == "legacy"
+    assert legacy_row["storage_location"] == "legacy_state"
+    assert legacy_row["resume_token"] == "token-b"
+    assert residue_row["storage_location"] == "state_like_residue"
+    assert residue_row["detected_format"] == "plain-state"
+    assert residue_row["archive_path"] == str(archive)
+    assert legacy.read_text(encoding="utf-8") == json.dumps(legacy_payload)
+    assert not (tmp_path / ".codex" / "handoffs" / ".session-state" / "markers").exists()
+
+
+def test_list_chain_state_cli_aliases_recovery_inventory(tmp_path: Path) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    primary.write_text(
+        json.dumps({
+            "state_path": str(primary),
+            "project": "demo",
+            "resume_token": "token-a",
+            "archive_path": "/tmp/primary.md",
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "list-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["total"] == 1
+    assert payload["candidates"][0]["project_relative_state_path"] == (
+        ".codex/handoffs/.session-state/handoff-demo-token-a.json"
+    )
+
+
+def test_read_chain_state_cli_fails_ambiguous_primary_with_recovery_inventory(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    state_dir = tmp_path / ".codex" / "handoffs" / ".session-state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    for token in ("token-a", "token-b"):
+        state = state_dir / f"handoff-demo-{token}.json"
+        state.write_text(
+            json.dumps({
+                "state_path": str(state),
+                "project": "demo",
+                "resume_token": token,
+                "archive_path": f"/tmp/{token}.md",
+                "created_at": "2026-05-13T16:00:00Z",
+            }),
+            encoding="utf-8",
+        )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert result.returncode == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "ambiguous-primary-chain-state"
+    assert payload["error"]["recovery_inventory_command"]["command"] == (
+        "chain-state-recovery-inventory"
+    )
+    assert payload["error"]["recovery_choices"] == [
+        "continue-chain-state",
+        "abandon-primary-chain-state",
+        "abort",
+    ]
+    assert len(payload["candidates"]) == 2
+    assert sorted(candidate["resume_token"] for candidate in payload["candidates"]) == [
+        "token-a",
+        "token-b",
+    ]
+    assert not (state_dir / "markers").exists()
+
+
+def test_read_chain_state_cli_rejects_primary_with_unresolved_legacy(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    legacy = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    primary.write_text(
+        json.dumps({
+            "state_path": str(primary),
+            "project": "demo",
+            "resume_token": "token-a",
+            "archive_path": "/tmp/primary.md",
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+    legacy.write_text(
+        json.dumps({
+            "state_path": str(legacy),
+            "project": "demo",
+            "resume_token": "token-b",
+            "archive_path": "/tmp/legacy.md",
+            "created_at": "2026-05-13T16:01:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert result.returncode == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "primary-chain-state-with-unresolved-legacy"
+    assert payload["error"]["recovery_choices"] == [
+        "mark-chain-state-consumed",
+        "abandon-primary-chain-state",
+        "abort",
+    ]
+    assert sorted(candidate["storage_location"] for candidate in payload["candidates"]) == [
+        "legacy_state",
+        "primary_state",
+    ]
+    assert not (primary.parent / "markers").exists()
+
+
+def test_mark_chain_state_consumed_suppresses_unresolved_legacy_state(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    legacy = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    primary.write_text(
+        json.dumps({
+            "state_path": str(primary),
+            "project": "demo",
+            "resume_token": "token-a",
+            "archive_path": "/tmp/primary.md",
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+    legacy_payload = {
+        "state_path": str(legacy),
+        "project": "demo",
+        "resume_token": "token-b",
+        "archive_path": "/tmp/legacy.md",
+        "created_at": "2026-05-13T16:01:00Z",
+    }
+    legacy_bytes = json.dumps(legacy_payload)
+    legacy.write_text(legacy_bytes, encoding="utf-8")
+    legacy_hash = hashlib.sha256(legacy_bytes.encode("utf-8")).hexdigest()
+
+    marked = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "mark-chain-state-consumed",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--state-path",
+            "docs/handoffs/.session-state/handoff-demo-token-b.json",
+            "--expected-payload-sha256",
+            legacy_hash,
+            "--reason",
+            "stale duplicate",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert marked.returncode == 0, marked.stderr
+    mark_payload = json.loads(marked.stdout)
+    marker_path = Path(mark_payload["marker_path"])
+    transaction_path = Path(mark_payload["transaction_path"])
+    assert marker_path.exists()
+    assert transaction_path.exists()
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    assert marker["entries"][0]["stable_key"] == {
+        "source_root": "legacy",
+        "storage_location": "legacy_state",
+        "project_relative_state_path": "docs/handoffs/.session-state/handoff-demo-token-b.json",
+        "project": "demo",
+        "resume_token": "token-b",
+        "detected_format": "tokenized-json",
+        "payload_sha256": legacy_hash,
+    }
+    assert json.loads(transaction_path.read_text(encoding="utf-8"))["operation"] == (
+        "mark-chain-state-consumed"
+    )
+    assert legacy.read_text(encoding="utf-8") == legacy_bytes
+
+    read_after = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+    assert read_after.returncode == 0, read_after.stderr
+    read_payload = json.loads(read_after.stdout)
+    assert read_payload["status"] == "found"
+    assert read_payload["source"] == "primary"
+
+    inventory_after = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "list-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+    inventory_payload = json.loads(inventory_after.stdout)
+    legacy_row = next(
+        candidate
+        for candidate in inventory_payload["candidates"]
+        if candidate["storage_location"] == "legacy_state"
+    )
+    assert legacy_row["marker_status"] == "consumed"
+
+
+def test_continue_chain_state_from_legacy_writes_primary_and_marks_source_consumed(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    legacy = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy_payload = {
+        "state_path": str(legacy),
+        "project": "demo",
+        "resume_token": "token-b",
+        "archive_path": "/tmp/legacy.md",
+        "created_at": "2026-05-13T16:01:00Z",
+    }
+    legacy_bytes = json.dumps(legacy_payload)
+    legacy.write_text(legacy_bytes, encoding="utf-8")
+    legacy_hash = hashlib.sha256(legacy_bytes.encode("utf-8")).hexdigest()
+
+    continued = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "continue-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--state-path",
+            "docs/handoffs/.session-state/handoff-demo-token-b.json",
+            "--expected-payload-sha256",
+            legacy_hash,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert continued.returncode == 0, continued.stderr
+    payload = json.loads(continued.stdout)
+    primary_state_path = Path(payload["state_path"])
+    transaction_path = Path(payload["transaction_path"])
+    marker_path = Path(payload["marker_path"])
+    assert primary_state_path == (
+        tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    )
+    assert transaction_path.exists()
+    assert marker_path.exists()
+    primary_payload = json.loads(primary_state_path.read_text(encoding="utf-8"))
+    assert primary_payload["project"] == "demo"
+    assert primary_payload["resume_token"] == "token-b"
+    assert primary_payload["archive_path"] == "/tmp/legacy.md"
+    assert primary_payload["resumed_from"]["storage_location"] == "legacy_state"
+    assert primary_payload["resumed_from"]["payload_sha256"] == legacy_hash
+    assert json.loads(transaction_path.read_text(encoding="utf-8"))["operation"] == (
+        "continue-chain-state"
+    )
+    assert legacy.read_text(encoding="utf-8") == legacy_bytes
+
+    read_after = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+    assert read_after.returncode == 0, read_after.stderr
+    read_payload = json.loads(read_after.stdout)
+    assert read_payload["status"] == "found"
+    assert read_payload["source"] == "primary"
+    assert read_payload["state"]["resume_token"] == "token-b"
+
+
+def test_abandon_primary_chain_state_moves_exact_primary_and_unblocks_legacy(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    legacy = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    primary_payload = {
+        "state_path": str(primary),
+        "project": "demo",
+        "resume_token": "token-a",
+        "archive_path": "/tmp/primary.md",
+        "created_at": "2026-05-13T16:00:00Z",
+    }
+    legacy_payload = {
+        "state_path": str(legacy),
+        "project": "demo",
+        "resume_token": "token-b",
+        "archive_path": "/tmp/legacy.md",
+        "created_at": "2026-05-13T16:01:00Z",
+    }
+    primary_bytes = json.dumps(primary_payload)
+    legacy_bytes = json.dumps(legacy_payload)
+    primary.write_text(primary_bytes, encoding="utf-8")
+    legacy.write_text(legacy_bytes, encoding="utf-8")
+    primary_hash = hashlib.sha256(primary_bytes.encode("utf-8")).hexdigest()
+
+    abandoned = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "abandon-primary-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--state-path",
+            ".codex/handoffs/.session-state/handoff-demo-token-a.json",
+            "--expected-payload-sha256",
+            primary_hash,
+            "--reason",
+            "continue from legacy",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert abandoned.returncode == 0, abandoned.stderr
+    payload = json.loads(abandoned.stdout)
+    abandoned_path = Path(payload["abandoned_path"])
+    transaction_path = Path(payload["transaction_path"])
+    assert not primary.exists()
+    assert abandoned_path.exists()
+    assert abandoned_path.read_text(encoding="utf-8") == primary_bytes
+    assert legacy.read_text(encoding="utf-8") == legacy_bytes
+    transaction = json.loads(transaction_path.read_text(encoding="utf-8"))
+    assert transaction["operation"] == "abandon-primary-chain-state"
+    assert transaction["source_state_sha256"] == primary_hash
+
+    read_after = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+    assert read_after.returncode == 0, read_after.stderr
+    read_payload = json.loads(read_after.stdout)
+    assert read_payload["status"] == "legacy-bridge-required"
+    assert read_payload["source"] == "legacy"
+    assert read_payload["state"]["resume_token"] == "token-b"
+
+
+def test_read_chain_state_cli_rejects_expired_legacy_state_with_inventory(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    legacy = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(
+        json.dumps({
+            "state_path": str(legacy),
+            "project": "demo",
+            "resume_token": "token-b",
+            "archive_path": "/tmp/legacy.md",
+            "created_at": "2026-05-13T16:01:00Z",
+        }),
+        encoding="utf-8",
+    )
+    old = legacy.stat().st_mtime - (25 * 60 * 60)
+    os.utime(legacy, (old, old))
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert result.returncode == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "expired-chain-state"
+    assert payload["error"]["recovery_choices"] == [
+        "continue-chain-state",
+        "mark-chain-state-consumed",
+        "abort",
+    ]
+    assert len(payload["candidates"]) == 1
+    assert payload["candidates"][0]["validation_status"] == "expired"
+    assert payload["candidates"][0]["validation_error"] == "chain state TTL expired"
+
+
+def test_consumed_legacy_state_marker_survives_copied_project_root(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    source_root = tmp_path / "source"
+    copied_root = tmp_path / "copied"
+    legacy = source_root / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy_payload = {
+        "state_path": str(legacy),
+        "project": "demo",
+        "resume_token": "token-b",
+        "archive_path": "/tmp/legacy.md",
+        "created_at": "2026-05-13T16:01:00Z",
+    }
+    legacy_bytes = json.dumps(legacy_payload)
+    legacy.write_text(legacy_bytes, encoding="utf-8")
+    legacy_hash = hashlib.sha256(legacy_bytes.encode("utf-8")).hexdigest()
+
+    marked = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "mark-chain-state-consumed",
+            "--project-root",
+            str(source_root),
+            "--project",
+            "demo",
+            "--state-path",
+            "docs/handoffs/.session-state/handoff-demo-token-b.json",
+            "--expected-payload-sha256",
+            legacy_hash,
+            "--reason",
+            "stale duplicate",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(source_root),
+    )
+    assert marked.returncode == 0, marked.stderr
+
+    shutil.copytree(source_root, copied_root)
+
+    read_after_copy = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(copied_root),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(copied_root),
+    )
+    assert read_after_copy.returncode == 1
+
+    inventory_after_copy = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "list-chain-state",
+            "--project-root",
+            str(copied_root),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(copied_root),
+    )
+    assert inventory_after_copy.returncode == 0, inventory_after_copy.stderr
+    inventory = json.loads(inventory_after_copy.stdout)
+    legacy_row = inventory["candidates"][0]
+    assert legacy_row["project_relative_state_path"] == (
+        "docs/handoffs/.session-state/handoff-demo-token-b.json"
+    )
+    assert legacy_row["marker_status"] == "consumed"
+    assert legacy_row["payload_sha256"] == legacy_hash
+
+
+def test_continue_chain_state_from_state_like_residue_mints_primary_token(
+    tmp_path: Path,
+) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    residue = tmp_path / "docs" / "handoffs" / "handoff-demo"
+    residue.parent.mkdir(parents=True, exist_ok=True)
+    residue_bytes = "/tmp/legacy-archive.md"
+    residue.write_text(residue_bytes, encoding="utf-8")
+    residue_hash = hashlib.sha256(residue_bytes.encode("utf-8")).hexdigest()
+
+    continued = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "continue-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--state-path",
+            "docs/handoffs/handoff-demo",
+            "--expected-payload-sha256",
+            residue_hash,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert continued.returncode == 0, continued.stderr
+    payload = json.loads(continued.stdout)
+    primary_state_path = Path(payload["state_path"])
+    assert primary_state_path.parent == tmp_path / ".codex" / "handoffs" / ".session-state"
+    assert primary_state_path.name.startswith("handoff-demo-")
+    assert primary_state_path.suffix == ".json"
+    primary_payload = json.loads(primary_state_path.read_text(encoding="utf-8"))
+    assert primary_payload["project"] == "demo"
+    assert primary_payload["resume_token"]
+    assert primary_payload["archive_path"] == residue_bytes
+    assert primary_payload["resumed_from"]["storage_location"] == "state_like_residue"
+    assert primary_payload["resumed_from"]["detected_format"] == "plain-state"
+    assert primary_payload["resumed_from"]["payload_sha256"] == residue_hash
+    assert residue.read_text(encoding="utf-8") == residue_bytes
+
+    inventory_after = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "list-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+    inventory_payload = json.loads(inventory_after.stdout)
+    residue_row = next(
+        candidate
+        for candidate in inventory_payload["candidates"]
+        if candidate["storage_location"] == "state_like_residue"
+    )
+    assert residue_row["marker_status"] == "consumed"
+
+
+def test_read_chain_state_cli_reads_single_primary_state(tmp_path: Path) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    primary.write_text(
+        json.dumps({
+            "state_path": str(primary),
+            "project": "demo",
+            "resume_token": "token-a",
+            "archive_path": "/tmp/primary.md",
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "found"
+    assert payload["source"] == "primary"
+    assert payload["state"]["project_relative_state_path"] == (
+        ".codex/handoffs/.session-state/handoff-demo-token-a.json"
+    )
+    assert payload["state"]["resume_token"] == "token-a"
+
+
+def test_read_chain_state_cli_field_state_outputs_json(tmp_path: Path) -> None:
+    script = Path(__file__).parent.parent / "scripts" / "session_state.py"
+    primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    primary.write_text(
+        json.dumps({
+            "state_path": str(primary),
+            "project": "demo",
+            "resume_token": "token-a",
+            "archive_path": "/tmp/primary.md",
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "read-chain-state",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--field",
+            "state",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["project_relative_state_path"] == (
+        ".codex/handoffs/.session-state/handoff-demo-token-a.json"
+    )
+    assert payload["resume_token"] == "token-a"
 
 
 def _residue_snapshot(root: Path, patterns: list[str]) -> set[str]:

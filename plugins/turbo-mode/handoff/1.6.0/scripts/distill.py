@@ -20,9 +20,18 @@ from typing import Literal, NotRequired, TypedDict
 
 try:
     from scripts.handoff_parsing import parse_handoff, section_name
+    from scripts.project_paths import get_project_root
+    from scripts.storage_authority import (
+        HandoffCandidate,
+        SelectionEligibility,
+        discover_handoff_inventory,
+        eligible_active_candidates,
+    )
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from scripts.handoff_parsing import parse_handoff, section_name  # type: ignore[no-redef]
+    from scripts.project_paths import get_project_root  # type: ignore[no-redef]
+    from scripts.storage_authority import HandoffCandidate, SelectionEligibility, discover_handoff_inventory, eligible_active_candidates  # type: ignore[no-redef]
 
 
 DedupStatus = Literal["NEW", "EXACT_DUP_SOURCE", "EXACT_DUP_CONTENT", "UPDATED_SOURCE"]
@@ -65,6 +74,11 @@ class ExtractionResultDict(TypedDict):
     error: str | None
     error_code: ErrorCode | None
     warnings: list[str]
+    source_path: NotRequired[str]
+    source_storage_location: NotRequired[str]
+    source_document_profile: NotRequired[str]
+    source_git_visibility: NotRequired[str]
+    source_fs_status: NotRequired[str]
 
 
 @dataclass(frozen=True)
@@ -499,11 +513,52 @@ def extract_candidates(
     }
 
 
+def resolve_handoff_candidate(
+    project_root: Path,
+    handoff_path: str | None,
+) -> tuple[Path | None, HandoffCandidate | None, str | None]:
+    """Resolve default or explicit distill input through storage authority."""
+    if handoff_path:
+        path = Path(handoff_path)
+        inventory = discover_handoff_inventory(
+            project_root,
+            scan_mode="explicit-path",
+            explicit_path=path,
+        )
+        candidate = inventory.candidates[0]
+        if candidate.selection_eligibility != SelectionEligibility.ELIGIBLE:
+            reason = candidate.skip_reason or candidate.selection_eligibility
+            return None, candidate, f"Handoff file is not selectable: {reason}"
+        return candidate.path, candidate, None
+
+    inventory = discover_handoff_inventory(project_root, scan_mode="active-selection")
+    candidates = eligible_active_candidates(inventory)
+    if not candidates:
+        return None, None, "No active handoff candidates found"
+    candidate = candidates[0]
+    return candidate.path, candidate, None
+
+
+def _attach_source_provenance(
+    result: ExtractionResultDict,
+    candidate: HandoffCandidate | None,
+) -> ExtractionResultDict:
+    if candidate is None:
+        return result
+    result["source_path"] = str(candidate.path)
+    result["source_storage_location"] = candidate.storage_location
+    result["source_document_profile"] = candidate.document_profile
+    result["source_git_visibility"] = candidate.source_git_visibility
+    result["source_fs_status"] = candidate.source_fs_status
+    return result
+
+
 def main(argv: list[str] | None = None) -> str:
     """CLI entry point. Returns JSON string."""
     parser = argparse.ArgumentParser(description="Extract knowledge candidates from a handoff")
-    parser.add_argument("handoff", help="Path to handoff markdown file")
+    parser.add_argument("handoff", nargs="?", help="Path to handoff markdown file")
     parser.add_argument("--learnings", help="Path to learnings.md for dedup checking", default="")
+    parser.add_argument("--project-root", type=Path, default=None)
     parser.add_argument(
         "--include-section",
         action="append",
@@ -512,7 +567,28 @@ def main(argv: list[str] | None = None) -> str:
     )
     args = parser.parse_args(argv)
 
-    handoff_path = args.handoff
+    source_candidate: HandoffCandidate | None = None
+    if args.project_root is not None or args.handoff is None:
+        project_root = args.project_root.resolve() if args.project_root else get_project_root()[0]
+        resolved_path, source_candidate, resolve_error = resolve_handoff_candidate(
+            project_root,
+            args.handoff,
+        )
+        if resolve_error is not None or resolved_path is None:
+            return json_mod.dumps({
+                "handoff_path": args.handoff or "",
+                "handoff_date": "",
+                "handoff_title": "",
+                "candidates": [],
+                "output_version": 1,
+                "error": resolve_error,
+                "error_code": "HANDOFF_NOT_FOUND",
+                "warnings": [],
+            })
+        handoff_path = str(resolved_path)
+    else:
+        handoff_path = args.handoff
+
     if not Path(handoff_path).exists():
         return json_mod.dumps({
             "handoff_path": handoff_path,
@@ -549,6 +625,7 @@ def main(argv: list[str] | None = None) -> str:
         handoff_path, learnings_content,
         extra_sections=tuple(args.include_section),
     )
+    result = _attach_source_provenance(result, source_candidate)
 
     # Propagate CLI-level warnings
     if args.learnings and not Path(args.learnings).exists():

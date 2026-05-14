@@ -13,7 +13,7 @@ Create comprehensive session reports that preserve the full context future Codex
 **Core Promise:** One action to save (`/save`).
 
 The plugin writes filesystem artifacts only. It does not add gitignore rules, stage files, or auto-commit files.
-Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
+Whether `.codex/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
 
 ## When to Use
 
@@ -51,15 +51,15 @@ Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a 
 | Assumption | Required? | Fallback |
 |------------|-----------|----------|
 | Git repository | No | Omit `branch` and `commit` fields from frontmatter |
-| Write access to `<project_root>/docs/handoffs/` | Yes | **STOP** and ask for alternative path. If `docs/handoffs/` doesn't exist, create it with `mkdir -p`. |
+| Write access to `<project_root>/.codex/handoffs/` | Yes | **STOP** and report the active-writer error. Do not write to `docs/handoffs/` as a fallback. |
 | Project root determinable | No | Use current directory; if ambiguous, ask user |
 
-**STOP:** If `<project_root>/docs/handoffs/` doesn't exist and cannot be created, ask: "I can't write to docs/handoffs/. Where should I save handoffs?"
+**STOP:** If active-writer reservation or write fails, report the helper error and do not write the final handoff manually.
 
 ## Outputs
 
 **Artifacts:**
-- Markdown file at `<project_root>/docs/handoffs/YYYY-MM-DD_HH-MM_<slug>.md`
+- Markdown file at `<project_root>/.codex/handoffs/YYYY-MM-DD_HH-MM_save-<slug>.md`
 - Frontmatter with session metadata (date, time, created_at, project, title, files)
 - Body with all 13 required sections (placeholder content when not applicable)
 
@@ -67,7 +67,7 @@ Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a 
 
 | Check | Expected |
 |-------|----------|
-| File exists at expected path | `ls $(git rev-parse --show-toplevel)/docs/handoffs/YYYY-MM-DD_HH-MM_*.md` returns file |
+| File exists at expected path | `write-active-handoff` returns `status=completed` and `active_path` under `<project_root>/.codex/handoffs/` |
 | Frontmatter parses as valid YAML | No YAML syntax errors |
 | Required fields present | `date`, `time`, `created_at`, `session_id`, `project`, `title`, `type` all have values |
 | Body line count | >=400 for all sessions, >=500 for complex |
@@ -105,9 +105,9 @@ Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a 
    - Generate `created_at` as ISO 8601 UTC timestamp (e.g., `2026-01-12T14:30:00Z`)
    - Use the current time when the handoff is created
 
-5. **Write permission check:**
-   - If `<project_root>/docs/handoffs/` is writable (or can be created), write handoff there.
-   - Otherwise, **STOP** and ask: "Can't write to docs/handoffs/. Where should I save this handoff?"
+5. **Active-writer reservation:**
+   - Use `begin-active-write` for storage permission, collision, lock, and chain-state checks.
+   - If reservation fails, **STOP** and report the helper error. Do not probe by manually creating files under a handoff directory.
 
 ## Procedure
 
@@ -140,72 +140,62 @@ When user runs `/save [title]` or confirms a signal phrase offer:
    - If estimate is under 400, you are almost certainly under-capturing. Re-examine: implicit decisions, codebase knowledge gained, conversation dynamics, exploration arc, files read that produced understanding.
    - **Default to inclusion.** If you're unsure whether something belongs, include it.
 
-6. **Determine output path:**
+6. **Reserve output path:**
    - Resolve project root: `$(git rev-parse --show-toplevel)` (falls back to cwd if not in a git repo)
-   - If `<project_root>/docs/handoffs/` is not writable, **STOP** and ask for alternative path
+   - Resolve plugin root before running state helpers. Set `PLUGIN_ROOT` to the plugin version root, three levels above this `SKILL.md`, not the `skills/` directory. Use a literal absolute value such as `PLUGIN_ROOT="/absolute/path/to/handoff/1.6.0"`. The literal `python` command must resolve to Python >=3.11.
+   - Run `begin-active-write` with `--operation save` before generating final markdown. Pass `--slug` only when a title-specific slug was chosen; otherwise let the helper bind the default slug. Use its `allocated_active_path` as the only final destination.
+   - If the returned JSON field `resumed_from_path` is non-empty, include `resumed_from: <resumed_from_path>` in frontmatter.
+   ```bash
+   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+   PROJECT_NAME="$(basename "$PROJECT_ROOT")"
+   SLUG_ARGS=()
+   if [ -n "${SLUG:-}" ]; then
+     SLUG_ARGS=(--slug "$SLUG")
+   fi
+   BEGIN_OUTPUT="$(
+     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
+       begin-active-write \
+       --project-root "$PROJECT_ROOT" \
+       --project "$PROJECT_NAME" \
+       --operation save \
+       "${SLUG_ARGS[@]}" \
+       2>&1
+   )" || { printf '%s\n' "$BEGIN_OUTPUT" >&2; exit 1; }
+   OPERATION_STATE_PATH="$(printf '%s\n' "$BEGIN_OUTPUT" | python -c 'import json,sys; print(json.load(sys.stdin)["operation_state_path"])')"
+   ALLOCATED_ACTIVE_PATH="$(printf '%s\n' "$BEGIN_OUTPUT" | python -c 'import json,sys; print(json.load(sys.stdin)["allocated_active_path"])')"
+   RESUMED_FROM="$(printf '%s\n' "$BEGIN_OUTPUT" | python -c 'import json,sys; value=json.load(sys.stdin).get("resumed_from_path"); print(value or "")')"
+   ```
 
 7. **Generate markdown** with frontmatter per [format-reference.md](../../references/format-reference.md) and [handoff-contract.md](../../references/handoff-contract.md):
    - Include `session_id:` with the generated UUID from step 2
    - Include `type: handoff` in frontmatter
-   - Per chain protocol in [handoff-contract.md](../../references/handoff-contract.md): read `<project_root>/docs/handoffs/.session-state/handoff-<project>-<resume_token>.json` with `session_state.py`; if state exists, set `resumed_from` to its archive path
-   - Resolve plugin root before running state helpers. Set `PLUGIN_ROOT` to the plugin version root, three levels above this `SKILL.md`, not the `skills/` directory. Use a literal absolute value such as `PLUGIN_ROOT="/absolute/path/to/handoff/1.6.0"`. The literal `python` command must resolve to Python >=3.11.
+   - If `RESUMED_FROM` was set by `begin-active-write`, include `resumed_from: "$RESUMED_FROM"`
+   - Write generated markdown to a temporary content file, not to `ALLOCATED_ACTIVE_PATH`; `write-active-handoff` owns the final write.
    ```bash
-   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-   PROJECT_NAME="$(basename "$PROJECT_ROOT")"
-   READ_STATE_OUTPUT="$(
-     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
-       read-state \
-       --state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \
-       --project "$PROJECT_NAME" \
-       --field state_path \
-       2>&1
-   )"
-   READ_STATE_STATUS=$?
-   case "$READ_STATE_STATUS" in
-     0) STATE_PATH="$READ_STATE_OUTPUT" ;;
-     1) STATE_PATH="" ;;
-     2) printf '%s\n' "$READ_STATE_OUTPUT" >&2; exit 2 ;;
-     *) printf '%s\n' "$READ_STATE_OUTPUT" >&2; exit "$READ_STATE_STATUS" ;;
-   esac
-   READ_ARCHIVE_OUTPUT="$(
-     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
-       read-state \
-       --state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \
-       --project "$PROJECT_NAME" \
-       --field archive_path \
-       2>&1
-   )"
-   READ_ARCHIVE_STATUS=$?
-   case "$READ_ARCHIVE_STATUS" in
-     0) RESUMED_FROM="$READ_ARCHIVE_OUTPUT" ;;
-     1) RESUMED_FROM="" ;;
-     2) printf '%s\n' "$READ_ARCHIVE_OUTPUT" >&2; exit 2 ;;
-     *) printf '%s\n' "$READ_ARCHIVE_OUTPUT" >&2; exit "$READ_ARCHIVE_STATUS" ;;
-   esac
+   CONTENT_FILE="$(mktemp)"
+   # Write the complete markdown body to "$CONTENT_FILE" before committing it.
+   CONTENT_SHA256="$(python -c 'import hashlib,pathlib,sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$CONTENT_FILE")"
    ```
-   During the upgrade window, `read-state` also detects a legacy plain-text state file at `<project_root>/docs/handoffs/.session-state/handoff-<project>` and migrates it to `handoff-<project>-<resume_token>.json`.
    - Use fallbacks for optional fields (see Inputs → Constraints/Assumptions)
 
-8. **Write file** to `<project_root>/docs/handoffs/YYYY-MM-DD_HH-MM_<slug>.md`
+8. **Commit file** through the active writer:
 
-   The plugin writes filesystem artifacts only. It does not add gitignore rules, stage files, or auto-commit files. Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
-
-9. **Cleanup state file** per chain protocol in [handoff-contract.md](../../references/handoff-contract.md):
-   - Clear the JSON state file after a successful write:
    ```bash
-   if [ -n "$STATE_PATH" ]; then
-     PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+   WRITE_OUTPUT="$(
      PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
-       clear-state \
-       --state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \
-       --state-path "$STATE_PATH"
-   fi
+       write-active-handoff \
+       --project-root "$PROJECT_ROOT" \
+       --operation-state-path "$OPERATION_STATE_PATH" \
+       --content-file "$CONTENT_FILE" \
+       --content-sha256 "$CONTENT_SHA256" \
+       2>&1
+   )" || { printf '%s\n' "$WRITE_OUTPUT" >&2; exit 1; }
+   ACTIVE_PATH="$(printf '%s\n' "$WRITE_OUTPUT" | python -c 'import json,sys; print(json.load(sys.stdin)["active_path"])')"
    ```
-   When `clear-state` receives a JSON state path, it best-effort clears both the JSON file and any matching legacy plain-text state file bridge.
 
-If `read-state` exits 2, STOP and ask the user which concurrent resume chain to continue. Do not choose one automatically.
-If `read-state` exits 1, keep `STATE_PATH` empty and skip `clear-state`.
-If `clear-state` warns after the handoff file is already written, report the warning but do not fail save/quicksave/summary.
+   The plugin writes filesystem artifacts only. It does not add gitignore rules, stage files, or auto-commit files. Whether `.codex/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
+
+If `begin-active-write` reports chain-state recovery, ambiguity, lock, collision, or cleanup errors, **STOP** and report the helper error. Do not manually choose a chain state and do not write final content outside `write-active-handoff`.
 
 10. **Verify and confirm (brief summary only):**
     - Check file exists and frontmatter is valid
@@ -216,14 +206,14 @@ If `clear-state` warns after the handoff file is already written, report the war
 
 After creating handoff, verify:
 
-- [ ] File exists at `<project_root>/docs/handoffs/YYYY-MM-DD_HH-MM_<slug>.md`
+- [ ] File exists at `<project_root>/.codex/handoffs/YYYY-MM-DD_HH-MM_save-<slug>.md`
 - [ ] Frontmatter parses as valid YAML
 - [ ] Required fields present and non-blank: date, time, created_at, session_id, project, title, type (hook-enforced)
 - [ ] All 13 required sections present (hook-enforced)
 - [ ] At least 1 of {Decisions, Changes, Learnings} has substantive content (hook-enforced)
 - [ ] Body line count >= 400 (hook-enforced)
 
-**Quick check:** Run `ls "$(git rev-parse --show-toplevel)/docs/handoffs/"` and confirm new file appears. If not, check write permissions.
+**Quick check:** Confirm `ACTIVE_PATH` exists under `<project_root>/.codex/handoffs/`. If not, check the `write-active-handoff` error.
 
 **If verification fails:** Do not report success. Check Troubleshooting section and resolve before confirming.
 
@@ -231,17 +221,17 @@ After creating handoff, verify:
 
 ### Handoff file not created
 
-**Symptoms:** `/save` completes but no file appears at `<project_root>/docs/handoffs/`
+**Symptoms:** `/save` completes but no file appears at `<project_root>/.codex/handoffs/`
 
 **Likely causes:**
-- Permission denied on project `docs/` directory
+- Permission denied on project `.codex/` directory
 - Project root couldn't be determined (not in git, ambiguous directory)
 - Disk full or path too long
 
 **Next steps:**
-1. Check if `docs/handoffs/` exists: `ls -la "$(git rev-parse --show-toplevel)/docs/handoffs/"`
-2. Check write permissions: `touch "$(git rev-parse --show-toplevel)/docs/handoffs/test" && trash "$(git rev-parse --show-toplevel)/docs/handoffs/test"`
-3. If permissions issue, ask user for alternative path
+1. Check the operation-state JSON returned by `begin-active-write`
+2. Retry with `write-active-handoff` if content was generated and the operation state is still pending
+3. If permissions block `.codex/handoffs/`, report the helper error
 4. If project root undetermined, ask user to specify
 
 ### Handoff content missing key decisions
@@ -256,7 +246,7 @@ After creating handoff, verify:
 **Next steps:**
 1. Review session history for decisions made after handoff
 2. Create new handoff with more complete context
-3. Consider adding to existing handoff manually if file still accessible
+3. Do not edit committed active-writer output in place; create a replacement handoff if the saved content is materially incomplete
 
 ## Anti-Patterns
 

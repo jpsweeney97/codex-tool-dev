@@ -25,6 +25,22 @@ from scripts.distill import (
 )
 
 
+def _current_distill_handoff(session_id: str, title: str) -> str:
+    return (
+        "---\n"
+        f"title: {title}\n"
+        "date: 2026-02-27\n"
+        'created_at: "2026-02-27T00:00:00Z"\n'
+        f"session_id: {session_id}\n"
+        "project: test-project\n"
+        "type: handoff\n"
+        "---\n\n"
+        "## Decisions\n\n"
+        "### Chose A\n\n"
+        "**Choice:** A over B.\n"
+    )
+
+
 class TestParseSubsections:
     """Tests for parse_subsections — ### splitting within a ## section."""
 
@@ -543,6 +559,33 @@ class TestDistillCLI:
         result = json.loads(output)
         assert result["handoff_path"] == str(handoff)
         assert len(result["candidates"]) == 1
+
+    def test_project_root_defaults_to_newest_active_handoff(self, tmp_path: Path) -> None:
+        active = tmp_path / ".codex" / "handoffs"
+        active.mkdir(parents=True)
+        older = active / "2026-02-27_10-00_old.md"
+        newer = active / "2026-02-27_11-00_new.md"
+        older.write_text(_current_distill_handoff("old-session", "Old"))
+        newer.write_text(_current_distill_handoff("new-session", "New"))
+
+        output = distill_main(["--project-root", str(tmp_path)])
+        result = json.loads(output)
+
+        assert result["handoff_path"] == str(newer)
+        assert result["source_storage_location"] == "primary_active"
+
+    def test_project_root_explicit_path_reports_storage_provenance(self, tmp_path: Path) -> None:
+        archive = tmp_path / ".codex" / "handoffs" / "archive"
+        archive.mkdir(parents=True)
+        handoff = archive / "2026-02-27_10-00_archived.md"
+        handoff.write_text(_current_distill_handoff("archived-session", "Archived"))
+
+        output = distill_main([str(handoff), "--project-root", str(tmp_path)])
+        result = json.loads(output)
+
+        assert result["handoff_path"] == str(handoff)
+        assert result["source_storage_location"] == "primary_archive"
+        assert result["source_document_profile"] == "current_contract"
 
     def test_with_learnings_file(self, tmp_path: Path) -> None:
         handoff = tmp_path / "test.md"

@@ -31,7 +31,6 @@ from scripts.quality_check import (
     validate_sections,
 )
 
-
 # --- Test helpers ---
 
 
@@ -119,7 +118,7 @@ def _make_hook_input(file_path: str, content: str) -> dict:
 
 HANDOFF_PATH = str(
     Path("/tmp/test-project")
-    / "docs"
+    / ".codex"
     / "handoffs"
     / "2026-02-26_16-00_test.md"
 )
@@ -627,7 +626,9 @@ class TestValidate:
             frontmatter=_make_frontmatter(overrides={"type": "foo"}),
         )
         issues = validate(content)
-        assert len(issues) == 1, f"Expected exactly 1 issue (type error), got {len(issues)}: {issues}"
+        assert len(issues) == 1, (
+            f"Expected exactly 1 issue (type error), got {len(issues)}: {issues}"
+        )
         assert issues[0].severity == "error"
         assert "foo" in issues[0].message
         assert all(t in issues[0].message for t in sorted(VALID_TYPES))
@@ -699,23 +700,23 @@ class TestIsHandoffPath:
         assert is_handoff_path(HANDOFF_PATH) is True
 
     def test_valid_any_project_root(self) -> None:
-        path = "/Users/jp/Projects/myproject/docs/handoffs/2026-02-26_test.md"
+        path = "/Users/jp/Projects/myproject/.codex/handoffs/2026-02-26_test.md"
         assert is_handoff_path(path) is True
 
     def test_valid_archived_handoff(self) -> None:
-        path = "/tmp/proj/docs/handoffs/archive/test.md"
+        path = "/tmp/proj/.codex/handoffs/archive/test.md"
         assert is_handoff_path(path) is True
 
     def test_non_handoff_directory(self) -> None:
         assert is_handoff_path("/tmp/random/file.md") is False
 
     def test_non_md_file(self) -> None:
-        path = "/tmp/proj/docs/handoffs/file.txt"
+        path = "/tmp/proj/.codex/handoffs/file.txt"
         assert is_handoff_path(path) is False
 
     def test_nested_too_deep(self) -> None:
         """File nested under a subdirectory of handoffs/ is rejected."""
-        path = "/tmp/proj/docs/handoffs/subdir/deep/file.md"
+        path = "/tmp/proj/.codex/handoffs/subdir/deep/file.md"
         assert is_handoff_path(path) is False
 
     def test_no_docs_parent_rejected(self) -> None:
@@ -725,12 +726,12 @@ class TestIsHandoffPath:
 
     def test_handoffs_without_file_rejected(self) -> None:
         """Path ending at handoffs/ directory itself is rejected."""
-        path = "/tmp/proj/docs/handoffs/"
+        path = "/tmp/proj/.codex/handoffs/"
         assert is_handoff_path(path) is False
 
     def test_handoffs_variant_rejected(self) -> None:
         """handoffs-v2 is not handoffs."""
-        path = "/tmp/proj/docs/handoffs-v2/foo.md"
+        path = "/tmp/proj/.codex/handoffs-v2/foo.md"
         assert is_handoff_path(path) is False
 
     def test_other_docs_variant_rejected(self) -> None:
@@ -739,8 +740,8 @@ class TestIsHandoffPath:
         assert is_handoff_path(path) is False
 
     def test_legacy_path_rejected(self) -> None:
-        """Old .codex/handoffs/ path should not match."""
-        path = "/tmp/proj/.codex/handoffs/test.md"
+        """Legacy docs/handoffs/ path should not match current quality hook."""
+        path = "/tmp/proj/docs/handoffs/test.md"
         assert is_handoff_path(path) is False
 
 

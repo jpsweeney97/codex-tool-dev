@@ -13,7 +13,7 @@ Capture what happened this session and where the project stands. Moderate depth 
 **Core Promise:** One action to summarize (`/summary`).
 
 The plugin writes filesystem artifacts only. It does not add gitignore rules, stage files, or auto-commit files.
-Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
+Whether `.codex/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
 
 ## When to Use
 
@@ -44,13 +44,13 @@ Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a 
 | Assumption | Required? | Fallback |
 |------------|-----------|----------|
 | Git repository | No | Omit `branch` and `commit` fields from frontmatter |
-| Write access to `<project_root>/docs/handoffs/` | Yes | **STOP** and ask for alternative path. If `docs/handoffs/` doesn't exist, create it with `mkdir -p`. |
+| Write access to `<project_root>/.codex/handoffs/` | Yes | **STOP** and report the active-writer error. Do not write to `docs/handoffs/` as a fallback. |
 | Project root determinable | No | Use current directory; if ambiguous, ask user |
 
 ## Outputs
 
 **Artifacts:**
-- Markdown file at `<project_root>/docs/handoffs/YYYY-MM-DD_HH-MM_summary-<slug>.md`
+- Markdown file at `<project_root>/.codex/handoffs/YYYY-MM-DD_HH-MM_summary-<slug>.md`
 - Frontmatter with session metadata
 - Body with 8 required sections
 
@@ -84,7 +84,7 @@ When user runs `/summary [title]` or confirms an offer:
 2. **Generate a session ID** as a fresh UUID for this summary.
 
 3. **Gather arc context:**
-   - List files in `<project_root>/docs/handoffs/archive/` — scan titles and dates to identify relevant prior handoffs
+   - List files in `<project_root>/.codex/handoffs/archive/` — scan titles and dates to identify relevant prior handoffs
    - Read any archived handoffs/checkpoints/summaries that appear relevant to the current project arc. Use judgment — not all archived files may be relevant, especially in repos with multiple workstreams.
    - Check recent git history: `git log --oneline -30` or similar. Look at commit messages for what's been done across sessions.
    - Combine with: conversation context, any loaded handoff from the current session, and general awareness of the project.
@@ -109,77 +109,63 @@ When user runs `/summary [title]` or confirms an offer:
 
    **IMPORTANT:** The synthesis work is internal reasoning. Do NOT present synthesis answers in chat. Only the final summary file is the deliverable.
 
-5. **Determine output path:**
+5. **Reserve output path:**
    - Resolve project root: `$(git rev-parse --show-toplevel)` (falls back to cwd if not in a git repo)
-   - If `<project_root>/docs/handoffs/` is not writable, **STOP** and ask for alternative path
-
-6. **Check state file** per chain protocol in [handoff-contract.md](../../references/handoff-contract.md):
-   - Read `<project_root>/docs/handoffs/.session-state/handoff-<project>-<resume_token>.json` with `session_state.py`; if state exists, set `resumed_from` to its archive path.
    - Resolve plugin root before running state helpers. Set `PLUGIN_ROOT` to the plugin version root, three levels above this `SKILL.md`, not the `skills/` directory. Use a literal absolute value such as `PLUGIN_ROOT="/absolute/path/to/handoff/1.6.0"`. The literal `python` command must resolve to Python >=3.11.
+   - Run `begin-active-write` with `--operation summary` before generating final markdown. Pass `--slug` only when a title-specific slug was chosen; otherwise let the helper bind the default slug. Use its `allocated_active_path` as the only final destination.
    ```bash
    PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
    PROJECT_NAME="$(basename "$PROJECT_ROOT")"
-   READ_STATE_OUTPUT="$(
+   SLUG_ARGS=()
+   if [ -n "${SLUG:-}" ]; then
+     SLUG_ARGS=(--slug "$SLUG")
+   fi
+   BEGIN_OUTPUT="$(
      PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
-       read-state \
-       --state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \
+       begin-active-write \
+       --project-root "$PROJECT_ROOT" \
        --project "$PROJECT_NAME" \
-       --field state_path \
+       --operation summary \
+       "${SLUG_ARGS[@]}" \
        2>&1
-   )"
-   READ_STATE_STATUS=$?
-   case "$READ_STATE_STATUS" in
-     0) STATE_PATH="$READ_STATE_OUTPUT" ;;
-     1) STATE_PATH="" ;;
-     2) printf '%s\n' "$READ_STATE_OUTPUT" >&2; exit 2 ;;
-     *) printf '%s\n' "$READ_STATE_OUTPUT" >&2; exit "$READ_STATE_STATUS" ;;
-   esac
-   READ_ARCHIVE_OUTPUT="$(
-     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
-       read-state \
-       --state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \
-       --project "$PROJECT_NAME" \
-       --field archive_path \
-       2>&1
-   )"
-   READ_ARCHIVE_STATUS=$?
-   case "$READ_ARCHIVE_STATUS" in
-     0) RESUMED_FROM="$READ_ARCHIVE_OUTPUT" ;;
-     1) RESUMED_FROM="" ;;
-     2) printf '%s\n' "$READ_ARCHIVE_OUTPUT" >&2; exit 2 ;;
-     *) printf '%s\n' "$READ_ARCHIVE_OUTPUT" >&2; exit "$READ_ARCHIVE_STATUS" ;;
-   esac
+   )" || { printf '%s\n' "$BEGIN_OUTPUT" >&2; exit 1; }
+   OPERATION_STATE_PATH="$(printf '%s\n' "$BEGIN_OUTPUT" | python -c 'import json,sys; print(json.load(sys.stdin)["operation_state_path"])')"
+   ALLOCATED_ACTIVE_PATH="$(printf '%s\n' "$BEGIN_OUTPUT" | python -c 'import json,sys; print(json.load(sys.stdin)["allocated_active_path"])')"
+   RESUMED_FROM="$(printf '%s\n' "$BEGIN_OUTPUT" | python -c 'import json,sys; value=json.load(sys.stdin).get("resumed_from_path"); print(value or "")')"
    ```
-   During the upgrade window, `read-state` also detects a legacy plain-text state file at `<project_root>/docs/handoffs/.session-state/handoff-<project>` and migrates it to `handoff-<project>-<resume_token>.json`.
 
-7. **Generate markdown** with frontmatter per [handoff-contract.md](../../references/handoff-contract.md):
+6. **Generate markdown** with frontmatter per [handoff-contract.md](../../references/handoff-contract.md):
    - Include `session_id:` with the generated UUID from step 2
    - Include `type: summary` in frontmatter
    - Title: `"Summary: <descriptive-title>"`
    - Populate frontmatter `files:` from file paths mentioned in Changes and Codebase Knowledge sections
-
-8. **Write file** to `<project_root>/docs/handoffs/YYYY-MM-DD_HH-MM_summary-<slug>.md`
-
-   The plugin writes filesystem artifacts only. It does not add gitignore rules, stage files, or auto-commit files. Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
-
-9. **Cleanup state file** per chain protocol in [handoff-contract.md](../../references/handoff-contract.md):
-   - Clear state after a successful summary:
+   - If `RESUMED_FROM` was set by `begin-active-write`, include `resumed_from: "$RESUMED_FROM"`
+   - Write generated markdown to a temporary content file, not to `ALLOCATED_ACTIVE_PATH`; `write-active-handoff` owns the final write.
    ```bash
-   if [ -n "$STATE_PATH" ]; then
-     PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
-       clear-state \
-       --state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \
-       --state-path "$STATE_PATH"
-   fi
+   CONTENT_FILE="$(mktemp)"
+   # Write the complete markdown body to "$CONTENT_FILE" before committing it.
+   CONTENT_SHA256="$(python -c 'import hashlib,pathlib,sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$CONTENT_FILE")"
    ```
-   When `clear-state` receives a JSON state path, it best-effort clears both the JSON file and any matching legacy plain-text state file bridge.
 
-If `read-state` exits 2, STOP and ask the user which concurrent resume chain to continue. Do not choose one automatically.
-If `read-state` exits 1, keep `STATE_PATH` empty and skip `clear-state`.
-If `clear-state` warns after the handoff file is already written, report the warning but do not fail save/quicksave/summary.
+7. **Commit file** through the active writer:
+   ```bash
+   WRITE_OUTPUT="$(
+     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
+       write-active-handoff \
+       --project-root "$PROJECT_ROOT" \
+       --operation-state-path "$OPERATION_STATE_PATH" \
+       --content-file "$CONTENT_FILE" \
+       --content-sha256 "$CONTENT_SHA256" \
+       2>&1
+   )" || { printf '%s\n' "$WRITE_OUTPUT" >&2; exit 1; }
+   ACTIVE_PATH="$(printf '%s\n' "$WRITE_OUTPUT" | python -c 'import json,sys; print(json.load(sys.stdin)["active_path"])')"
+   ```
 
-10. **Verify and confirm (brief summary only):**
+   The plugin writes filesystem artifacts only. It does not add gitignore rules, stage files, or auto-commit files. Whether `.codex/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
+
+If `begin-active-write` reports chain-state recovery, ambiguity, lock, collision, or cleanup errors, **STOP** and report the helper error. Do not manually choose a chain state and do not write final content outside `write-active-handoff`.
+
+8. **Verify and confirm (brief summary only):**
     - Check file exists and frontmatter is valid
     - Confirm briefly: "Summary saved: `<path>` — <title>"
     - **Do NOT** reproduce summary content or synthesis answers in chat. The file is the deliverable.
@@ -213,7 +199,7 @@ If `clear-state` warns after the handoff file is already written, report the war
 
 After creating summary, verify:
 
-- [ ] File exists at `<project_root>/docs/handoffs/YYYY-MM-DD_HH-MM_summary-<slug>.md`
+- [ ] File exists at `<project_root>/.codex/handoffs/YYYY-MM-DD_HH-MM_summary-<slug>.md`
 - [ ] Frontmatter parses as valid YAML
 - [ ] Required fields present and non-blank: date, time, created_at, session_id, project, title, type (hook-enforced)
 - [ ] All 8 required sections present (hook-enforced)
@@ -221,7 +207,7 @@ After creating summary, verify:
 - [ ] Body line count 120-250 (hook-enforced)
 - [ ] Project Arc contains arc context, not just session context
 
-**Quick check:** Run `ls "$(git rev-parse --show-toplevel)/docs/handoffs/"` and confirm new file appears.
+**Quick check:** Confirm `ACTIVE_PATH` exists under `<project_root>/.codex/handoffs/`.
 
 ## Anti-Patterns
 
@@ -238,16 +224,16 @@ After creating summary, verify:
 
 ### Summary file not created
 
-**Symptoms:** `/summary` completes but no file appears at `<project_root>/docs/handoffs/`
+**Symptoms:** `/summary` completes but no file appears at `<project_root>/.codex/handoffs/`
 
 **Likely causes:**
-- Permission denied on project `docs/` directory
+- Permission denied on project `.codex/` directory
 - Project root couldn't be determined (not in git, ambiguous directory)
 
 **Next steps:**
-1. Check if `docs/handoffs/` exists: `ls -la "$(git rev-parse --show-toplevel)/docs/handoffs/"`
-2. Check write permissions: `touch "$(git rev-parse --show-toplevel)/docs/handoffs/test" && trash "$(git rev-parse --show-toplevel)/docs/handoffs/test"`
-3. If permissions issue, ask user for alternative path
+1. Check the operation-state JSON returned by `begin-active-write`
+2. Retry with `write-active-handoff` if content was generated and the operation state is still pending
+3. If permissions block `.codex/handoffs/`, report the helper error
 
 ### Summary body exceeds 250 lines
 

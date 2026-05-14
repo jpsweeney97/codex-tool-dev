@@ -7,10 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
-- **BREAKING:** Handoff storage moved from `<project_root>/.codex/handoffs/` to `<project_root>/docs/handoffs/`. Handoffs remain local-only working memory — gitignored and never auto-committed. Archive renamed from `.archive/` to `archive/`. No auto-pruning — handoffs are ephemeral by design.
+- **BREAKING:** Handoff storage moved from `<project_root>/docs/handoffs/` to `<project_root>/.codex/handoffs/`. The plugin still does not add gitignore rules, stage files, or auto-commit files; host-repository tracking policy remains external to the plugin. Archive remains `archive/`. No auto-pruning is applied to handoff files.
 - Cleanup hook (`cleanup.py`) prunes session-state files only (24h TTL); handoff files are never auto-pruned.
-- `is_handoff_path()` now matches `docs/handoffs/` (active and archived) instead of `.codex/handoffs/`.
-- `search.py` and `triage.py` check legacy `.codex/handoffs/` location as fallback.
+- `is_handoff_path()` now matches `.codex/handoffs/` (active and archived) instead of `docs/handoffs/`.
+- `search.py` and `triage.py` keep controlled legacy `docs/handoffs/` fallback discovery for pre-cutover files.
 
 ### Added
 - `get_legacy_handoffs_dir()` in `project_paths.py` for fallback discovery.

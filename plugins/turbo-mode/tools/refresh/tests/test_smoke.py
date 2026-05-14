@@ -42,6 +42,25 @@ def test_standard_smoke_derives_installed_plugin_roots_from_codex_home(
     assert "ticket-audit-repair-dry-run" in summary["smoke_labels"]
 
 
+def test_standard_smoke_uses_current_handoff_storage_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runner = FakeSmokeRunner()
+    monkeypatch.setattr(smoke_module.subprocess, "run", runner.run)
+
+    run_standard_smoke(
+        local_only_run_root=tmp_path / "home/local-only/turbo-mode-refresh/run-1",
+        codex_home=tmp_path / "home",
+        repo_root=tmp_path / "repo",
+    )
+
+    command_text = "\n".join(runner.command_texts)
+    assert "/.codex/handoffs/archive" in command_text
+    assert "/.codex/handoffs/.session-state" in command_text
+    assert "/docs/handoffs" not in command_text
+
+
 def test_isolated_smoke_rejects_real_home_command_paths_before_execution(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

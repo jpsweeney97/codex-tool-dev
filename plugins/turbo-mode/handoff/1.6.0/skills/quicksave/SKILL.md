@@ -9,10 +9,10 @@ allowed-tools: Write, Read, Bash
 
 Fast state capture for context-pressure session cycling. Produces 22-55 line documents — the minimum needed to resume without re-exploration.
 
-**Read [handoff-contract.md](../../references/handoff-contract.md) for:** frontmatter schema, chain protocol (state file read/write/cleanup), storage conventions. Follow the contract exactly.
+**Read [handoff-contract.md](../../references/handoff-contract.md) for:** frontmatter schema and storage conventions. Use the active-writer protocol below for reservation, chain-state bridging, final write, and cleanup.
 
 The plugin writes filesystem artifacts only. It does not add gitignore rules, stage files, or auto-commit files.
-Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
+Whether `.codex/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
 
 ## When to Use
 
@@ -30,7 +30,7 @@ Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a 
 
 1. **Check prerequisites:**
    - Determine project name per [handoff-contract.md](../../references/handoff-contract.md) (git root name or cwd name).
-   - Verify `<project_root>/docs/handoffs/` is writable. If not writable and cannot be created, **STOP** per contract Write Permission section.
+   - Resolve plugin root before running state helpers. Set `PLUGIN_ROOT` to the plugin version root, three levels above this `SKILL.md`, not the `skills/` directory. Use a literal absolute value such as `PLUGIN_ROOT="/absolute/path/to/handoff/1.6.0"`. The literal `python` command must resolve to Python >=3.11.
    - If session has no work done (no files read, no changes, no progress), ask: "Nothing to quicksave — create one anyway?"
    - If user declines, **STOP**.
 
@@ -42,45 +42,28 @@ Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a 
    - What failed or surprised me? → Don't Retry + Key Finding (if applicable)
    - Were any decisions made? → Decisions (if applicable)
 
-4. **Check state file** per chain protocol in [handoff-contract.md](../../references/handoff-contract.md):
-   - Read `<project_root>/docs/handoffs/.session-state/handoff-<project>-<resume_token>.json` with `session_state.py`.
-   - If state exists, set `resumed_from` to its archive path.
-   - Resolve plugin root before running state helpers. Set `PLUGIN_ROOT` to the plugin version root, three levels above this `SKILL.md`, not the `skills/` directory. Use a literal absolute value such as `PLUGIN_ROOT="/absolute/path/to/handoff/1.6.0"`. The literal `python` command must resolve to Python >=3.11.
+4. **Reserve output path:**
+   - Run `begin-active-write` with `--operation quicksave` before generating final markdown. Pass `--slug` only when a title-specific slug was chosen; otherwise let the helper bind the default slug. Use its `allocated_active_path` as the only final destination.
    ```bash
    PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
    PROJECT_NAME="$(basename "$PROJECT_ROOT")"
-   READ_STATE_OUTPUT="$(
+   SLUG_ARGS=()
+   if [ -n "${SLUG:-}" ]; then
+     SLUG_ARGS=(--slug "$SLUG")
+   fi
+   BEGIN_OUTPUT="$(
      PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
-       read-state \
-       --state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \
+       begin-active-write \
+       --project-root "$PROJECT_ROOT" \
        --project "$PROJECT_NAME" \
-       --field state_path \
+       --operation quicksave \
+       "${SLUG_ARGS[@]}" \
        2>&1
-   )"
-   READ_STATE_STATUS=$?
-   case "$READ_STATE_STATUS" in
-     0) STATE_PATH="$READ_STATE_OUTPUT" ;;
-     1) STATE_PATH="" ;;
-     2) printf '%s\n' "$READ_STATE_OUTPUT" >&2; exit 2 ;;
-     *) printf '%s\n' "$READ_STATE_OUTPUT" >&2; exit "$READ_STATE_STATUS" ;;
-   esac
-   READ_ARCHIVE_OUTPUT="$(
-     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
-       read-state \
-       --state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \
-       --project "$PROJECT_NAME" \
-       --field archive_path \
-       2>&1
-   )"
-   READ_ARCHIVE_STATUS=$?
-   case "$READ_ARCHIVE_STATUS" in
-     0) RESUMED_FROM="$READ_ARCHIVE_OUTPUT" ;;
-     1) RESUMED_FROM="" ;;
-     2) printf '%s\n' "$READ_ARCHIVE_OUTPUT" >&2; exit 2 ;;
-     *) printf '%s\n' "$READ_ARCHIVE_OUTPUT" >&2; exit "$READ_ARCHIVE_STATUS" ;;
-   esac
+   )" || { printf '%s\n' "$BEGIN_OUTPUT" >&2; exit 1; }
+   OPERATION_STATE_PATH="$(printf '%s\n' "$BEGIN_OUTPUT" | python -c 'import json,sys; print(json.load(sys.stdin)["operation_state_path"])')"
+   ALLOCATED_ACTIVE_PATH="$(printf '%s\n' "$BEGIN_OUTPUT" | python -c 'import json,sys; print(json.load(sys.stdin)["allocated_active_path"])')"
+   RESUMED_FROM="$(printf '%s\n' "$BEGIN_OUTPUT" | python -c 'import json,sys; value=json.load(sys.stdin).get("resumed_from_path"); print(value or "")')"
    ```
-   During the upgrade window, `read-state` also detects a legacy plain-text state file at `<project_root>/docs/handoffs/.session-state/handoff-<project>` and migrates it to `handoff-<project>-<resume_token>.json`.
 
 5. **Check consecutive checkpoint count via chain walk:**
    - Initialize `prior_checkpoint_count = 0`
@@ -93,32 +76,38 @@ Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a 
    - If user wants full handoff, **STOP** and suggest they run `/save`.
    - **Scope limitation:** The guardrail only detects consecutive checkpoints within a single resume chain (connected via `resumed_from`). Cross-session checkpoints without `/load` between them do not trigger the guardrail.
 
-6. **Write file** to `<project_root>/docs/handoffs/YYYY-MM-DD_HH-MM_checkpoint-<slug>.md`
+6. **Generate markdown** in a temporary content file:
    - Use frontmatter from [handoff-contract.md](../../references/handoff-contract.md) with `type: checkpoint`
    - Title: `"Checkpoint: <descriptive-title>"`
    - Populate frontmatter `files:` from file paths listed in the Active Files section
+   - If `RESUMED_FROM` was set by `begin-active-write`, include `resumed_from: "$RESUMED_FROM"`
    - Required sections (5) are always included — use placeholder content for thin sessions (e.g., "No commands run yet" for Verification Snapshot). Conditional sections (3) are omitted when not applicable.
-
-   The plugin writes filesystem artifacts only. It does not add gitignore rules, stage files, or auto-commit files. Whether `docs/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
-
-7. **Cleanup state file** per chain protocol:
-   - Clear state after a successful checkpoint:
+   - Write generated markdown to a temporary content file, not to `ALLOCATED_ACTIVE_PATH`; `write-active-handoff` owns the final write.
    ```bash
-   if [ -n "$STATE_PATH" ]; then
-     PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
-       clear-state \
-       --state-dir "$PROJECT_ROOT/docs/handoffs/.session-state" \
-       --state-path "$STATE_PATH"
-   fi
+   CONTENT_FILE="$(mktemp)"
+   # Write the complete markdown body to "$CONTENT_FILE" before committing it.
+   CONTENT_SHA256="$(python -c 'import hashlib,pathlib,sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$CONTENT_FILE")"
    ```
-   When `clear-state` receives a JSON state path, it best-effort clears both the JSON file and any matching legacy plain-text state file bridge.
 
-If `read-state` exits 2, STOP and ask the user which concurrent resume chain to continue. Do not choose one automatically.
-If `read-state` exits 1, keep `STATE_PATH` empty and skip `clear-state`.
-If `clear-state` warns after the handoff file is already written, report the warning but do not fail save/quicksave/summary.
+7. **Commit file** through the active writer:
+   ```bash
+   WRITE_OUTPUT="$(
+     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
+       write-active-handoff \
+       --project-root "$PROJECT_ROOT" \
+       --operation-state-path "$OPERATION_STATE_PATH" \
+       --content-file "$CONTENT_FILE" \
+       --content-sha256 "$CONTENT_SHA256" \
+       2>&1
+   )" || { printf '%s\n' "$WRITE_OUTPUT" >&2; exit 1; }
+   ACTIVE_PATH="$(printf '%s\n' "$WRITE_OUTPUT" | python -c 'import json,sys; print(json.load(sys.stdin)["active_path"])')"
+   ```
 
-8. **Verify:** Confirm file exists and frontmatter is valid (required fields present per contract). Report: "Quicksave saved: `<path>`"
+   The plugin writes filesystem artifacts only. It does not add gitignore rules, stage files, or auto-commit files. Whether `.codex/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
+
+If `begin-active-write` reports chain-state recovery, ambiguity, lock, collision, or cleanup errors, **STOP** and report the helper error. Do not manually choose a chain state and do not write final content outside `write-active-handoff`.
+
+8. **Verify:** Confirm `ACTIVE_PATH` exists under `<project_root>/.codex/handoffs/` and frontmatter is valid (required fields present per contract). Report: "Quicksave saved: `<path>`"
    - Do NOT reproduce content in chat. The file is the deliverable.
 
 ## Sections
@@ -153,12 +142,12 @@ If `clear-state` warns after the handoff file is already written, report the war
 
 **Likely causes:**
 - Project name detection failed (not in a git repo, ambiguous directory)
-- Write permission denied on `<project_root>/docs/handoffs/`
+- Write permission denied on `<project_root>/.codex/handoffs/`
 
 **Next steps:**
 1. Check project detection: `git rev-parse --show-toplevel 2>/dev/null || pwd`
-2. Check permissions: `ls -la "$(git rev-parse --show-toplevel)/docs/handoffs/"`
-3. Create directory manually if needed: `mkdir -p "$(git rev-parse --show-toplevel)/docs/handoffs"`
+2. Check the operation-state JSON returned by `begin-active-write`
+3. Retry with `write-active-handoff` if content was generated and the operation state is still pending
 
 ### Missing resumed_from
 

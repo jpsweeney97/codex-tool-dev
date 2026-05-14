@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -88,7 +90,9 @@ def write_resume_state(state_dir: Path, project: str, archive_path: str, resume_
         archive_path=archive_path,
         created_at=datetime.now(timezone.utc).isoformat(),
     )
-    state_path.write_text(json.dumps(asdict(payload), indent=2), encoding="utf-8")
+    temp_path = state_path.with_name(f".{state_path.name}.{uuid.uuid4().hex}.tmp")
+    temp_path.write_text(json.dumps(asdict(payload), indent=2), encoding="utf-8")
+    os.replace(temp_path, state_path)
     return state_path
 
 
@@ -181,6 +185,10 @@ def _emit(payload: dict[str, object], field: str | None) -> int:
     value = payload.get(field)
     if value is None:
         return 1
+    if isinstance(value, (dict, list)):
+        json.dump(value, sys.stdout)
+        print()
+        return 0
     print(value)
     return 0
 
@@ -214,6 +222,189 @@ def main(argv: list[str] | None = None) -> int:
     prune_parser.add_argument("--state-dir", required=True)
     prune_parser.add_argument("--max-age-hours", type=int, default=24)
 
+    chain_inventory_parser = subparsers.add_parser("chain-state-recovery-inventory")
+    chain_inventory_parser.add_argument("--project-root", required=True)
+    chain_inventory_parser.add_argument("--project", required=True)
+
+    list_chain_parser = subparsers.add_parser("list-chain-state")
+    list_chain_parser.add_argument("--project-root", required=True)
+    list_chain_parser.add_argument("--project", required=True)
+
+    read_chain_parser = subparsers.add_parser("read-chain-state")
+    read_chain_parser.add_argument("--project-root", required=True)
+    read_chain_parser.add_argument("--project", required=True)
+    read_chain_parser.add_argument(
+        "--field",
+        choices=("status", "source", "state"),
+        default=None,
+    )
+
+    mark_chain_parser = subparsers.add_parser("mark-chain-state-consumed")
+    mark_chain_parser.add_argument("--project-root", required=True)
+    mark_chain_parser.add_argument("--project", required=True)
+    mark_chain_parser.add_argument("--state-path", required=True)
+    mark_chain_parser.add_argument("--expected-payload-sha256", required=True)
+    mark_chain_parser.add_argument("--reason", required=True)
+    mark_chain_parser.add_argument(
+        "--field",
+        choices=("status", "marker_path", "transaction_path", "transaction_id"),
+        default=None,
+    )
+
+    continue_chain_parser = subparsers.add_parser("continue-chain-state")
+    continue_chain_parser.add_argument("--project-root", required=True)
+    continue_chain_parser.add_argument("--project", required=True)
+    continue_chain_parser.add_argument("--state-path", required=True)
+    continue_chain_parser.add_argument("--expected-payload-sha256", required=True)
+    continue_chain_parser.add_argument(
+        "--field",
+        choices=("status", "state_path", "marker_path", "transaction_path", "transaction_id"),
+        default=None,
+    )
+
+    abandon_chain_parser = subparsers.add_parser("abandon-primary-chain-state")
+    abandon_chain_parser.add_argument("--project-root", required=True)
+    abandon_chain_parser.add_argument("--project", required=True)
+    abandon_chain_parser.add_argument("--state-path", required=True)
+    abandon_chain_parser.add_argument("--expected-payload-sha256", required=True)
+    abandon_chain_parser.add_argument("--reason", required=True)
+    abandon_chain_parser.add_argument(
+        "--field",
+        choices=("status", "state_path", "abandoned_path", "transaction_path", "transaction_id"),
+        default=None,
+    )
+
+    allocate_active_parser = subparsers.add_parser("allocate-active-path")
+    allocate_active_parser.add_argument("--project-root", required=True)
+    allocate_active_parser.add_argument(
+        "--operation",
+        choices=("save", "summary", "quicksave"),
+        required=True,
+    )
+    allocate_active_parser.add_argument("--slug", required=True)
+    allocate_active_parser.add_argument("--created-at", default=None)
+    allocate_active_parser.add_argument(
+        "--field",
+        choices=("active_path",),
+        default=None,
+    )
+
+    begin_active_parser = subparsers.add_parser("begin-active-write")
+    begin_active_parser.add_argument("--project-root", required=True)
+    begin_active_parser.add_argument("--project", required=True)
+    begin_active_parser.add_argument(
+        "--operation",
+        choices=("save", "summary", "quicksave"),
+        required=True,
+    )
+    begin_active_parser.add_argument("--slug", default=None)
+    begin_active_parser.add_argument("--run-id", default=None)
+    begin_active_parser.add_argument("--created-at", default=None)
+    begin_active_parser.add_argument(
+        "--field",
+        choices=(
+            "operation_state_path",
+            "run_id",
+            "transaction_id",
+            "transaction_path",
+            "allocated_active_path",
+            "bound_slug",
+            "slug_source",
+            "state_snapshot_hash",
+            "idempotency_key",
+        ),
+        default=None,
+    )
+
+    write_active_parser = subparsers.add_parser("write-active-handoff")
+    write_active_parser.add_argument("--project-root", required=True)
+    write_active_parser.add_argument("--operation-state-path", required=True)
+    write_active_parser.add_argument("--content-file", required=True)
+    write_active_parser.add_argument("--content-sha256", required=True)
+    write_active_parser.add_argument(
+        "--field",
+        choices=(
+            "active_path",
+            "operation_state_path",
+            "transaction_id",
+            "transaction_path",
+            "content_hash",
+            "output_sha256",
+            "status",
+        ),
+        default=None,
+    )
+
+    list_active_parser = subparsers.add_parser("list-active-writes")
+    list_active_parser.add_argument("--project-root", required=True)
+    list_active_parser.add_argument("--project", required=True)
+    list_active_parser.add_argument(
+        "--operation",
+        choices=("save", "summary", "quicksave"),
+        default=None,
+    )
+
+    abandon_active_parser = subparsers.add_parser("abandon-active-write")
+    abandon_active_parser.add_argument("--project-root", required=True)
+    abandon_active_parser.add_argument("--operation-state-path", required=True)
+    abandon_active_parser.add_argument("--reason", required=True)
+    abandon_active_parser.add_argument(
+        "--field",
+        choices=(
+            "status",
+            "active_path",
+            "operation_state_path",
+            "transaction_id",
+            "transaction_path",
+            "abandon_reason",
+        ),
+        default=None,
+    )
+
+    recover_active_parser = subparsers.add_parser("active-write-transaction-recover")
+    recover_active_parser.add_argument("--project-root", required=True)
+    recover_active_parser.add_argument("--operation-state-path", required=True)
+    recover_active_parser.add_argument(
+        "--field",
+        choices=(
+            "status",
+            "active_path",
+            "operation_state_path",
+            "transaction_id",
+            "transaction_path",
+            "content_hash",
+            "output_sha256",
+        ),
+        default=None,
+    )
+
+    active_flow_parser = subparsers.add_parser("active-writer-flow")
+    active_flow_parser.add_argument("--project-root", required=True)
+    active_flow_parser.add_argument("--project", required=True)
+    active_flow_parser.add_argument(
+        "--operation",
+        choices=("save", "summary", "quicksave"),
+        required=True,
+    )
+    active_flow_parser.add_argument("--slug", default=None)
+    active_flow_parser.add_argument("--run-id", default=None)
+    active_flow_parser.add_argument("--created-at", default=None)
+    active_flow_parser.add_argument("--content-note", default=None)
+    active_flow_parser.add_argument("--resume-pending", action="store_true")
+    active_flow_parser.add_argument(
+        "--field",
+        choices=(
+            "status",
+            "active_path",
+            "operation_state_path",
+            "transaction_id",
+            "transaction_path",
+            "content_hash",
+            "bound_slug",
+        ),
+        default=None,
+    )
+
     args = parser.parse_args(argv)
     if args.command == "archive":
         source = Path(args.source)
@@ -238,9 +429,263 @@ def main(argv: list[str] | None = None) -> int:
         clear_resume_state(Path(args.state_dir), args.state_path)
         return 0
 
-    deleted = prune_old_state_files(args.max_age_hours, state_dir=Path(args.state_dir))
-    json.dump({"deleted": [str(path) for path in deleted]}, sys.stdout)
-    return 0
+    if args.command == "prune-state":
+        deleted = prune_old_state_files(args.max_age_hours, state_dir=Path(args.state_dir))
+        json.dump({"deleted": [str(path) for path in deleted]}, sys.stdout)
+        return 0
+
+    if args.command in {"chain-state-recovery-inventory", "list-chain-state"}:
+        from scripts.storage_authority import chain_state_recovery_inventory
+
+        payload = chain_state_recovery_inventory(
+            Path(args.project_root),
+            project_name=args.project,
+        )
+        json.dump(payload, sys.stdout, indent=2)
+        print()
+        return 0
+
+    if args.command == "read-chain-state":
+        from scripts.storage_authority import ChainStateDiagnosticError, read_chain_state
+
+        try:
+            payload = read_chain_state(
+                Path(args.project_root),
+                project_name=args.project,
+            )
+        except ChainStateDiagnosticError as exc:
+            json.dump(exc.payload, sys.stdout, indent=2)
+            print()
+            return 2
+        if payload["status"] == "absent":
+            return 1
+        return _emit(payload, args.field)
+
+    if args.command == "mark-chain-state-consumed":
+        from scripts.storage_authority import (
+            ChainStateDiagnosticError,
+            mark_chain_state_consumed,
+        )
+
+        try:
+            payload = mark_chain_state_consumed(
+                Path(args.project_root),
+                project_name=args.project,
+                state_path=args.state_path,
+                expected_payload_sha256=args.expected_payload_sha256,
+                reason=args.reason,
+            )
+        except ChainStateDiagnosticError as exc:
+            json.dump(exc.payload, sys.stdout, indent=2)
+            print()
+            return 2
+        return _emit(payload, args.field)
+
+    if args.command == "continue-chain-state":
+        from scripts.storage_authority import ChainStateDiagnosticError, continue_chain_state
+
+        try:
+            payload = continue_chain_state(
+                Path(args.project_root),
+                project_name=args.project,
+                state_path=args.state_path,
+                expected_payload_sha256=args.expected_payload_sha256,
+            )
+        except ChainStateDiagnosticError as exc:
+            json.dump(exc.payload, sys.stdout, indent=2)
+            print()
+            return 2
+        return _emit(payload, args.field)
+
+    if args.command == "abandon-primary-chain-state":
+        from scripts.storage_authority import (
+            ChainStateDiagnosticError,
+            abandon_primary_chain_state,
+        )
+
+        try:
+            payload = abandon_primary_chain_state(
+                Path(args.project_root),
+                project_name=args.project,
+                state_path=args.state_path,
+                expected_payload_sha256=args.expected_payload_sha256,
+                reason=args.reason,
+            )
+        except ChainStateDiagnosticError as exc:
+            json.dump(exc.payload, sys.stdout, indent=2)
+            print()
+            return 2
+        return _emit(payload, args.field)
+
+    if args.command == "allocate-active-path":
+        from scripts.active_writes import ActiveWriteError
+        from scripts.storage_authority import allocate_active_path
+
+        try:
+            active_path = allocate_active_path(
+                Path(args.project_root),
+                operation=args.operation,
+                slug=args.slug,
+                created_at=args.created_at,
+            )
+        except ActiveWriteError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        return _emit({"active_path": str(active_path)}, args.field)
+
+    if args.command == "begin-active-write":
+        from scripts.active_writes import ActiveWriteError
+        from scripts.storage_authority import begin_active_write
+
+        try:
+            reservation = begin_active_write(
+                Path(args.project_root),
+                project_name=args.project,
+                operation=args.operation,
+                slug=args.slug,
+                run_id=args.run_id,
+                created_at=args.created_at,
+            )
+        except ActiveWriteError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        return _emit(reservation.to_payload(), args.field)
+    if args.command == "write-active-handoff":
+        from scripts.active_writes import ActiveWriteError
+        from scripts.storage_authority import write_active_handoff
+
+        try:
+            payload = write_active_handoff(
+                Path(args.project_root),
+                operation_state_path=Path(args.operation_state_path),
+                content=Path(args.content_file).read_text(encoding="utf-8"),
+                content_sha256=args.content_sha256,
+            )
+        except ActiveWriteError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        return _emit(payload, args.field)
+    if args.command == "list-active-writes":
+        from scripts.storage_authority import list_active_writes
+
+        records = list_active_writes(
+            Path(args.project_root),
+            project_name=args.project,
+            operation=args.operation,
+        )
+        json.dump({"total": len(records), "active_writes": records}, sys.stdout, indent=2)
+        print()
+        return 0
+    if args.command == "abandon-active-write":
+        from scripts.active_writes import ActiveWriteError
+        from scripts.storage_authority import abandon_active_write
+
+        try:
+            payload = abandon_active_write(
+                Path(args.project_root),
+                operation_state_path=Path(args.operation_state_path),
+                reason=args.reason,
+            )
+        except ActiveWriteError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        return _emit(payload, args.field)
+    if args.command == "active-write-transaction-recover":
+        from scripts.active_writes import ActiveWriteError
+        from scripts.storage_authority import recover_active_write_transaction
+
+        try:
+            payload = recover_active_write_transaction(
+                Path(args.project_root),
+                operation_state_path=Path(args.operation_state_path),
+            )
+        except ActiveWriteError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        return _emit(payload, args.field)
+    if args.command == "active-writer-flow":
+        from scripts.active_writes import ActiveWriteError
+        from scripts.storage_authority import (
+            begin_active_write,
+            list_active_writes,
+            write_active_handoff,
+        )
+
+        try:
+            project_root = Path(args.project_root)
+            if args.resume_pending:
+                operation_state = _single_pending_active_write(
+                    list_active_writes(
+                        project_root,
+                        project_name=args.project,
+                        operation=args.operation,
+                    )
+                )
+                operation_state_path = Path(str(operation_state["operation_state_path"]))
+            else:
+                reservation = begin_active_write(
+                    project_root,
+                    project_name=args.project,
+                    operation=args.operation,
+                    slug=args.slug,
+                    run_id=args.run_id,
+                    created_at=args.created_at,
+                )
+                operation_state = reservation.to_payload()
+                operation_state_path = reservation.operation_state_path
+            content = _deterministic_active_writer_content(
+                operation_state,
+                content_note=args.content_note,
+            )
+            content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            payload = write_active_handoff(
+                project_root,
+                operation_state_path=operation_state_path,
+                content=content,
+                content_sha256=content_hash,
+            )
+        except (ActiveWriteError, RuntimeError) as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        return _emit(payload, args.field)
+    return 1
+
+
+def _single_pending_active_write(records: list[dict[str, object]]) -> dict[str, object]:
+    pending = [
+        record
+        for record in records
+        if record.get("status") not in {"committed", "abandoned", "reservation_expired"}
+    ]
+    if len(pending) != 1:
+        raise RuntimeError(
+            "active-writer-flow failed: expected exactly one pending active write. "
+            f"Got: {len(pending)!r:.100}"
+        )
+    return pending[0]
+
+
+def _deterministic_active_writer_content(
+    operation_state: dict[str, object],
+    *,
+    content_note: str | None = None,
+) -> str:
+    """Return deterministic markdown bound to one active-writer operation."""
+    note = content_note or "Deterministic active-writer flow content."
+    return (
+        "---\n"
+        f"project: {operation_state['project']}\n"
+        f"session_id: {operation_state['run_id']}\n"
+        f"type: {operation_state['operation']}\n"
+        f"title: {operation_state['operation']} {operation_state['bound_slug']}\n"
+        f"active_writer_run_id: {operation_state['run_id']}\n"
+        f"active_writer_transaction_id: {operation_state['transaction_id']}\n"
+        f"active_writer_bound_slug: {operation_state['bound_slug']}\n"
+        f"active_writer_allocated_path: {operation_state['allocated_active_path']}\n"
+        "---\n\n"
+        f"# {operation_state['operation']} {operation_state['bound_slug']}\n\n"
+        f"{note}\n"
+    )
 
 
 if __name__ == "__main__":

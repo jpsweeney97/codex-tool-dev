@@ -84,13 +84,13 @@ class TestGetProjectName:
 class TestGetHandoffsDir:
     """Tests for get_handoffs_dir."""
 
-    def test_returns_docs_handoffs_path(self) -> None:
+    def test_returns_primary_codex_handoffs_path(self) -> None:
         with patch(
             "scripts.project_paths.get_project_root",
             return_value=(Path("/Users/jp/Projects/myproject"), "git"),
         ):
             result = get_handoffs_dir()
-        assert result == Path("/Users/jp/Projects/myproject") / "docs" / "handoffs"
+        assert result == Path("/Users/jp/Projects/myproject") / ".codex" / "handoffs"
 
 
 class TestGetArchiveDir:
@@ -108,10 +108,10 @@ class TestGetArchiveDir:
 class TestGetLegacyHandoffsDir:
     """Tests for get_legacy_handoffs_dir — fallback path for pre-migration files."""
 
-    def test_returns_codex_handoffs_path(self) -> None:
+    def test_returns_docs_handoffs_path(self) -> None:
         with patch(
             "scripts.project_paths.get_project_root",
             return_value=(Path("/Users/jp/Projects/myproject"), "git"),
         ):
             result = get_legacy_handoffs_dir()
-        assert result == Path("/Users/jp/Projects/myproject") / ".codex" / "handoffs"
+        assert result == Path("/Users/jp/Projects/myproject") / "docs" / "handoffs"
