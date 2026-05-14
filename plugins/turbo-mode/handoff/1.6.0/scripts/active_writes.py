@@ -335,8 +335,11 @@ def _ensure_no_compatible_reservation(
     for path in sorted(active_writes_dir.glob("*.json")):
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ActiveWriteError(
+                "begin-active-write failed: active-write record unreadable; manual operator review required. "
+                f"Got: {str(path)!r:.100}"
+            ) from exc
         if record.get("operation") != operation:
             continue
         if record.get("state_snapshot_hash") != state_snapshot_hash:

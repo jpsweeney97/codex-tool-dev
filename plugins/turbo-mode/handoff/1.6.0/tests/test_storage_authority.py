@@ -5,14 +5,20 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from scripts.storage_authority import (
+    ChainStateDiagnosticError,
     SelectionEligibility,
     StorageLocation,
+    abandon_primary_chain_state,
     chain_state_recovery_inventory,
+    continue_chain_state,
     discover_handoff_inventory,
     eligible_active_candidates,
     eligible_history_candidates,
     get_storage_layout,
+    mark_chain_state_consumed,
 )
 
 
@@ -393,3 +399,172 @@ def test_chain_state_recovery_inventory_reports_token_mismatch_as_invalid(
     assert candidate["detected_format"] == "tokenized-json"
     assert candidate["validation_status"] == "invalid"
     assert candidate["validation_error"] == "payload resume token does not match filename token"
+
+
+# ── Chain-state diagnostic guard tests ──────────────────────────────
+
+
+def _seed_legacy_state(tmp_path: Path, *, project: str = "demo") -> tuple[Path, str]:
+    """Seed a valid legacy chain-state file and return (path, sha256)."""
+    state = tmp_path / "docs" / "handoffs" / ".session-state" / f"handoff-{project}"
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(
+        str(tmp_path / ".codex" / "handoffs" / "archive" / "old.md"),
+        encoding="utf-8",
+    )
+    return state, hashlib.sha256(state.read_bytes()).hexdigest()
+
+
+def _seed_primary_state(tmp_path: Path, *, project: str = "demo") -> tuple[Path, str]:
+    """Seed a valid primary chain-state file and return (path, sha256)."""
+    state = tmp_path / ".codex" / "handoffs" / ".session-state" / f"handoff-{project}-token-a.json"
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(
+        json.dumps({
+            "state_path": str(state),
+            "project": project,
+            "resume_token": "token-a",
+            "archive_path": str(tmp_path / ".codex" / "handoffs" / "archive" / "old.md"),
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+    return state, hashlib.sha256(state.read_bytes()).hexdigest()
+
+
+def test_mark_chain_state_consumed_raises_payload_hash_mismatch(tmp_path: Path) -> None:
+    state, _sha = _seed_legacy_state(tmp_path)
+    rel = state.relative_to(tmp_path).as_posix()
+    with pytest.raises(ChainStateDiagnosticError) as exc_info:
+        mark_chain_state_consumed(
+            tmp_path, project_name="demo", state_path=rel,
+            expected_payload_sha256="0" * 64, reason="test",
+        )
+    assert exc_info.value.payload["error"]["code"] == "chain-state-payload-hash-mismatch"
+
+
+def test_continue_chain_state_raises_payload_hash_mismatch(tmp_path: Path) -> None:
+    state, _sha = _seed_legacy_state(tmp_path)
+    rel = state.relative_to(tmp_path).as_posix()
+    with pytest.raises(ChainStateDiagnosticError) as exc_info:
+        continue_chain_state(
+            tmp_path, project_name="demo", state_path=rel,
+            expected_payload_sha256="0" * 64,
+        )
+    assert exc_info.value.payload["error"]["code"] == "chain-state-payload-hash-mismatch"
+
+
+def test_abandon_primary_chain_state_raises_payload_hash_mismatch(tmp_path: Path) -> None:
+    state, _sha = _seed_primary_state(tmp_path)
+    rel = state.relative_to(tmp_path).as_posix()
+    with pytest.raises(ChainStateDiagnosticError) as exc_info:
+        abandon_primary_chain_state(
+            tmp_path, project_name="demo", state_path=rel,
+            expected_payload_sha256="0" * 64, reason="test",
+        )
+    assert exc_info.value.payload["error"]["code"] == "chain-state-payload-hash-mismatch"
+
+
+def test_mark_chain_state_consumed_raises_primary_chain_state_not_consumable(
+    tmp_path: Path,
+) -> None:
+    state, sha = _seed_primary_state(tmp_path)
+    rel = state.relative_to(tmp_path).as_posix()
+    with pytest.raises(ChainStateDiagnosticError) as exc_info:
+        mark_chain_state_consumed(
+            tmp_path, project_name="demo", state_path=rel,
+            expected_payload_sha256=sha, reason="test",
+        )
+    assert exc_info.value.payload["error"]["code"] == "primary-chain-state-not-consumable"
+
+
+def test_abandon_primary_chain_state_raises_chain_state_candidate_not_primary(
+    tmp_path: Path,
+) -> None:
+    state, sha = _seed_legacy_state(tmp_path)
+    rel = state.relative_to(tmp_path).as_posix()
+    with pytest.raises(ChainStateDiagnosticError) as exc_info:
+        abandon_primary_chain_state(
+            tmp_path, project_name="demo", state_path=rel,
+            expected_payload_sha256=sha, reason="test",
+        )
+    assert exc_info.value.payload["error"]["code"] == "chain-state-candidate-not-primary"
+
+
+def test_select_chain_state_candidate_raises_selector_ambiguous(tmp_path: Path) -> None:
+    state_a = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
+    state_a.parent.mkdir(parents=True, exist_ok=True)
+    state_a.write_text(
+        json.dumps({
+            "state_path": str(state_a),
+            "project": "demo",
+            "resume_token": "token-a",
+            "archive_path": str(tmp_path / ".codex" / "handoffs" / "archive" / "old-a.md"),
+            "created_at": "2026-05-13T16:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+    state_b = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
+    state_b.write_text(
+        json.dumps({
+            "state_path": str(state_b),
+            "project": "demo",
+            "resume_token": "token-b",
+            "archive_path": str(tmp_path / ".codex" / "handoffs" / "archive" / "old-b.md"),
+            "created_at": "2026-05-13T16:01:00Z",
+        }),
+        encoding="utf-8",
+    )
+    sha_a = hashlib.sha256(state_a.read_bytes()).hexdigest()
+    with pytest.raises(ChainStateDiagnosticError) as exc_info:
+        continue_chain_state(
+            tmp_path, project_name="demo",
+            state_path=".codex/handoffs/.session-state",
+            expected_payload_sha256=sha_a,
+        )
+    assert exc_info.value.payload["error"]["code"] == "chain-state-selector-ambiguous"
+
+
+# ── Corruption fail-closed tests ────────────────────────────────────
+
+
+def test_consumed_legacy_active_matches_fails_closed_on_corrupt_registry(
+    tmp_path: Path,
+) -> None:
+    legacy = _handoff(tmp_path / "docs" / "handoffs" / "2026-05-13_12-01_legacy.md", "Legacy")
+    _write_legacy_active_opt_in(tmp_path, legacy)
+    registry = tmp_path / ".codex" / "handoffs" / ".session-state" / "consumed-legacy-active.json"
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text("{truncated", encoding="utf-8")
+
+    with pytest.raises(ChainStateDiagnosticError) as exc_info:
+        discover_handoff_inventory(tmp_path, scan_mode="active-selection")
+    assert exc_info.value.payload["error"]["code"] == "consumed-legacy-active-registry-unreadable"
+
+
+def test_consumed_legacy_active_matches_fails_closed_on_malformed_registry(
+    tmp_path: Path,
+) -> None:
+    legacy = _handoff(tmp_path / "docs" / "handoffs" / "2026-05-13_12-01_legacy.md", "Legacy")
+    _write_legacy_active_opt_in(tmp_path, legacy)
+    registry = tmp_path / ".codex" / "handoffs" / ".session-state" / "consumed-legacy-active.json"
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text(json.dumps({"entries": "not-a-list"}), encoding="utf-8")
+
+    with pytest.raises(ChainStateDiagnosticError) as exc_info:
+        discover_handoff_inventory(tmp_path, scan_mode="active-selection")
+    assert exc_info.value.payload["error"]["code"] == "consumed-legacy-active-registry-malformed"
+
+
+def test_read_json_object_fails_closed_on_corrupt_marker(tmp_path: Path) -> None:
+    state, sha = _seed_legacy_state(tmp_path)
+    marker_path = tmp_path / ".codex" / "handoffs" / ".session-state" / "markers" / "chain-state-consumed.json"
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    marker_path.write_text("garbage{{{", encoding="utf-8")
+    rel = state.relative_to(tmp_path).as_posix()
+    with pytest.raises(ChainStateDiagnosticError) as exc_info:
+        mark_chain_state_consumed(
+            tmp_path, project_name="demo", state_path=rel,
+            expected_payload_sha256=sha, reason="test",
+        )
+    assert exc_info.value.payload["error"]["code"] == "chain-state-marker-unreadable"

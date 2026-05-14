@@ -1941,3 +1941,21 @@ except Exception as exc:
     assert result_b2.returncode == 0, (
         f"Process B should succeed after A released. stderr={result_b2.stderr}"
     )
+
+
+# ── Corruption fail-closed tests ────────────────────────────────────
+
+
+def test_ensure_no_compatible_reservation_fails_closed_on_corrupt_record(
+    tmp_path: Path,
+) -> None:
+    corrupt_dir = (
+        tmp_path / ".codex" / "handoffs" / ".session-state" / "active-writes" / "demo"
+    )
+    corrupt_dir.mkdir(parents=True, exist_ok=True)
+    corrupt_file = corrupt_dir / "garbage.json"
+    corrupt_file.write_text("not-json{{{", encoding="utf-8")
+    with pytest.raises(active_writes.ActiveWriteError, match="active-write record unreadable"):
+        active_writes.begin_active_write(
+            tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
+        )

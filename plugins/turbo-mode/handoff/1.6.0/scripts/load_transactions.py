@@ -208,7 +208,13 @@ def list_load_recovery_records(project_root: Path) -> list[dict[str, object]]:
     for path in sorted(transactions_dir.glob("*.json")):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError) as exc:
+            records.append({
+                "transaction_path": str(path),
+                "status": "unreadable",
+                "operation": "load",
+                "error": f"pending transaction record unreadable: {path}",
+            })
             continue
         if data.get("operation") == "load" and data.get("status") == "pending":
             records.append(data)
@@ -283,8 +289,11 @@ def _recover_pending_load(layout, *, project: str) -> LoadResult | None:
     for transaction_path in sorted(transactions_dir.glob("*.json")):
         try:
             record = json.loads(transaction_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
+        except (OSError, json.JSONDecodeError) as exc:
+            raise LoadTransactionError(
+                "load-handoff failed: pending transaction record unreadable; manual operator review required. "
+                f"Got: {str(transaction_path)!r:.100}"
+            ) from exc
         if record.get("operation") != "load" or record.get("status") != "pending":
             continue
         if record.get("project") != project:

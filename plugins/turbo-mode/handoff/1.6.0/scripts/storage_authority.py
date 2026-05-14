@@ -953,10 +953,24 @@ def _age_seconds(path: Path) -> int | None:
 def _read_json_object(path: Path) -> dict[str, object]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except FileNotFoundError:
         return {}
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ChainStateDiagnosticError({
+            "error": {
+                "code": "chain-state-marker-unreadable",
+                "message": f"chain-state marker unreadable: {path}",
+            },
+            "marker_path": str(path),
+        }) from exc
     if not isinstance(payload, dict):
-        return {}
+        raise ChainStateDiagnosticError({
+            "error": {
+                "code": "chain-state-marker-malformed",
+                "message": f"chain-state marker malformed: {path}",
+            },
+            "marker_path": str(path),
+        })
     return payload
 
 
@@ -1630,11 +1644,33 @@ def _consumed_legacy_active_matches(
     )
     try:
         payload = json.loads(registry_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except FileNotFoundError:
         return False
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ChainStateDiagnosticError({
+            "error": {
+                "code": "consumed-legacy-active-registry-unreadable",
+                "message": f"consumed-legacy-active registry unreadable: {registry_path}",
+            },
+            "registry_path": str(registry_path),
+        }) from exc
+    if not isinstance(payload, dict):
+        raise ChainStateDiagnosticError({
+            "error": {
+                "code": "consumed-legacy-active-registry-malformed",
+                "message": f"consumed-legacy-active registry malformed: {registry_path}",
+            },
+            "registry_path": str(registry_path),
+        })
     entries = payload.get("entries")
     if not isinstance(entries, list):
-        return False
+        raise ChainStateDiagnosticError({
+            "error": {
+                "code": "consumed-legacy-active-registry-malformed",
+                "message": f"consumed-legacy-active registry malformed: {registry_path}",
+            },
+            "registry_path": str(registry_path),
+        })
     expected = {
         "source_root": "project_root",
         "project_relative_source_path": path.relative_to(project_root).as_posix(),

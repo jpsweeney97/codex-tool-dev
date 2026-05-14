@@ -1265,3 +1265,45 @@ except Exception as exc:
     assert result_b2.returncode == 0, (
         f"Process B should succeed after A released. stderr={result_b2.stderr}"
     )
+
+
+# ── Corruption fail-closed tests ────────────────────────────────────
+
+
+def test_recover_pending_load_fails_closed_on_corrupt_transaction(tmp_path: Path) -> None:
+    _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_corrupt-test.md")
+    transactions_dir = (
+        tmp_path / ".codex" / "handoffs" / ".session-state" / "transactions"
+    )
+    transactions_dir.mkdir(parents=True, exist_ok=True)
+    corrupt = transactions_dir / "garbage.json"
+    corrupt.write_text("not-json{{{", encoding="utf-8")
+    with pytest.raises(LoadTransactionError, match="pending transaction record unreadable"):
+        load_handoff(tmp_path, project_name="demo")
+
+
+def test_recover_pending_load_fails_closed_on_corrupt_foreign_transaction(
+    tmp_path: Path,
+) -> None:
+    _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_corrupt-foreign.md")
+    transactions_dir = (
+        tmp_path / ".codex" / "handoffs" / ".session-state" / "transactions"
+    )
+    transactions_dir.mkdir(parents=True, exist_ok=True)
+    corrupt = transactions_dir / "foreign-corrupt.json"
+    corrupt.write_text("not-json{{{", encoding="utf-8")
+    with pytest.raises(LoadTransactionError, match="pending transaction record unreadable"):
+        load_handoff(tmp_path, project_name="demo")
+
+
+def test_list_load_recovery_records_surfaces_corrupt_transaction(tmp_path: Path) -> None:
+    transactions_dir = (
+        tmp_path / ".codex" / "handoffs" / ".session-state" / "transactions"
+    )
+    transactions_dir.mkdir(parents=True, exist_ok=True)
+    corrupt = transactions_dir / "garbage.json"
+    corrupt.write_text("not-json{{{", encoding="utf-8")
+    records = list_load_recovery_records(tmp_path)
+    assert len(records) == 1
+    assert records[0]["status"] == "unreadable"
+    assert records[0]["transaction_path"] == str(corrupt)
