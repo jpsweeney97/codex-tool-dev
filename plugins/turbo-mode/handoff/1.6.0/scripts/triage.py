@@ -13,24 +13,36 @@ import warnings
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
-try:
-    from scripts.ticket_parsing import parse_ticket
-    from scripts.provenance import read_provenance, session_matches
-    from scripts.handoff_parsing import parse_frontmatter, parse_sections, section_name
-    from scripts.project_paths import get_handoffs_dir, get_legacy_handoffs_dir, get_project_root
-    from scripts.storage_authority import (
-        HandoffCandidate,
-        StorageLocation,
-        discover_handoff_inventory,
-        eligible_history_candidates,
-    )
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from scripts.ticket_parsing import parse_ticket  # type: ignore[no-redef]
-    from scripts.provenance import read_provenance, session_matches  # type: ignore[no-redef]
-    from scripts.handoff_parsing import parse_frontmatter, parse_sections, section_name  # type: ignore[no-redef]
-    from scripts.project_paths import get_handoffs_dir, get_legacy_handoffs_dir, get_project_root  # type: ignore[no-redef]
-    from scripts.storage_authority import HandoffCandidate, StorageLocation, discover_handoff_inventory, eligible_history_candidates  # type: ignore[no-redef]
+def _load_bootstrap_by_path() -> None:
+    import importlib.util
+
+    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
+    if "scripts._bootstrap" in sys.modules:
+        return
+    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
+            f"Got: {str(bootstrap_path)!r:.100}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["scripts._bootstrap"] = module
+    spec.loader.exec_module(module)
+
+
+_load_bootstrap_by_path()
+del _load_bootstrap_by_path
+
+from scripts.handoff_parsing import parse_frontmatter, parse_sections, section_name
+from scripts.project_paths import get_handoffs_dir, get_legacy_handoffs_dir, get_project_root
+from scripts.provenance import read_provenance, session_matches
+from scripts.storage_authority import (
+    HandoffCandidate,
+    StorageLocation,
+    discover_handoff_inventory,
+    eligible_history_candidates,
+)
+from scripts.ticket_parsing import parse_ticket
 
 
 class OpenTicket(TypedDict):

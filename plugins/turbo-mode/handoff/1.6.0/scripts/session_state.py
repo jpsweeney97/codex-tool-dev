@@ -10,13 +10,28 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-try:
-    from scripts.project_paths import get_state_dir
-    from scripts import storage_primitives
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from scripts.project_paths import get_state_dir  # type: ignore[no-redef]
-    from scripts import storage_primitives  # type: ignore[no-redef]
+def _load_bootstrap_by_path() -> None:
+    import importlib.util
+
+    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
+    if "scripts._bootstrap" in sys.modules:
+        return
+    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
+            f"Got: {str(bootstrap_path)!r:.100}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["scripts._bootstrap"] = module
+    spec.loader.exec_module(module)
+
+
+_load_bootstrap_by_path()
+del _load_bootstrap_by_path
+
+from scripts import storage_primitives
+from scripts.project_paths import get_state_dir
 
 
 class AmbiguousResumeStateError(RuntimeError):

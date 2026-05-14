@@ -12,60 +12,43 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-try:
-    from scripts.session_state import allocate_archive_path, write_resume_state
-    from scripts.storage_authority import (
-        HandoffCandidate,
-        SelectionEligibility,
-        StorageLocation,
-        discover_handoff_inventory,
-        eligible_active_candidates,
-        get_storage_layout,
-    )
-    from scripts.storage_primitives import (
-        LockPolicy,
-        acquire_lock as _acquire_lock_with_policy,
-        read_json_object as _read_json_object,
-        release_lock as _release_lock,
-        sha256_file as _sha256_file,
-        write_json_atomic as _write_json_atomic,
-    )
-except ModuleNotFoundError:
-    import types
+def _load_bootstrap_by_path() -> None:
+    import importlib.util
 
-    _script_dir = Path(__file__).resolve().parent
-    sys.path.insert(0, str(_script_dir.parent))
-    scripts_pkg = sys.modules.get("scripts")
-    if scripts_pkg is None or not hasattr(scripts_pkg, "__path__"):
-        scripts_pkg = types.ModuleType("scripts")
-        scripts_pkg.__path__ = [str(_script_dir)]  # type: ignore[attr-defined]
-        sys.modules["scripts"] = scripts_pkg
-    else:
-        package_path = list(scripts_pkg.__path__)  # type: ignore[attr-defined]
-        if str(_script_dir) not in package_path:
-            package_path.insert(0, str(_script_dir))
-            scripts_pkg.__path__ = package_path  # type: ignore[attr-defined]
+    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
+    if "scripts._bootstrap" in sys.modules:
+        return
+    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
+            f"Got: {str(bootstrap_path)!r:.100}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["scripts._bootstrap"] = module
+    spec.loader.exec_module(module)
 
-    from scripts.session_state import (  # type: ignore[no-redef]
-        allocate_archive_path,
-        write_resume_state,
-    )
-    from scripts.storage_authority import (  # type: ignore[no-redef]
-        HandoffCandidate,
-        SelectionEligibility,
-        StorageLocation,
-        discover_handoff_inventory,
-        eligible_active_candidates,
-        get_storage_layout,
-    )
-    from scripts.storage_primitives import (  # type: ignore[no-redef]
-        LockPolicy,
-        acquire_lock as _acquire_lock_with_policy,
-        read_json_object as _read_json_object,
-        release_lock as _release_lock,
-        sha256_file as _sha256_file,
-        write_json_atomic as _write_json_atomic,
-    )
+
+_load_bootstrap_by_path()
+del _load_bootstrap_by_path
+
+from scripts.session_state import allocate_archive_path, write_resume_state
+from scripts.storage_authority import (
+    HandoffCandidate,
+    SelectionEligibility,
+    StorageLocation,
+    discover_handoff_inventory,
+    eligible_active_candidates,
+    get_storage_layout,
+)
+from scripts.storage_primitives import (
+    LockPolicy,
+    acquire_lock as _acquire_lock_with_policy,
+    read_json_object as _read_json_object,
+    release_lock as _release_lock,
+    sha256_file as _sha256_file,
+    write_json_atomic as _write_json_atomic,
+)
 
 
 class LoadTransactionError(RuntimeError):

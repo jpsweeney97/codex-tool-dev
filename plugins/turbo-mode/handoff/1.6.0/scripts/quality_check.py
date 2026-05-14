@@ -25,19 +25,31 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-try:
-    from scripts.handoff_parsing import (
-        parse_frontmatter as _parse_handoff_frontmatter,
-        parse_sections as _parse_handoff_sections,
-        section_name as _section_name,
-    )
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from scripts.handoff_parsing import (  # type: ignore[no-redef]
-        parse_frontmatter as _parse_handoff_frontmatter,
-        parse_sections as _parse_handoff_sections,
-        section_name as _section_name,
-    )
+def _load_bootstrap_by_path() -> None:
+    import importlib.util
+
+    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
+    if "scripts._bootstrap" in sys.modules:
+        return
+    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
+            f"Got: {str(bootstrap_path)!r:.100}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["scripts._bootstrap"] = module
+    spec.loader.exec_module(module)
+
+
+_load_bootstrap_by_path()
+del _load_bootstrap_by_path
+
+from scripts.handoff_parsing import (
+    parse_frontmatter as _parse_handoff_frontmatter,
+    parse_sections as _parse_handoff_sections,
+    section_name as _section_name,
+)
 
 # --- Constants ---
 

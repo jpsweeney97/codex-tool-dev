@@ -18,33 +18,31 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from scripts.active_writes import ActiveWriteReservation
 
-try:
-    from scripts.storage_primitives import (
-        read_json_object as _read_json_object_primitive,
-        sha256_regular_file_or_none as _content_sha256,
-        write_json_atomic as _write_json_atomic,
-    )
-except ModuleNotFoundError:
-    import types
+def _load_bootstrap_by_path() -> None:
+    import importlib.util
 
-    _script_dir = Path(__file__).resolve().parent
-    sys.path.insert(0, str(_script_dir.parent))
-    scripts_pkg = sys.modules.get("scripts")
-    if scripts_pkg is None or not hasattr(scripts_pkg, "__path__"):
-        scripts_pkg = types.ModuleType("scripts")
-        scripts_pkg.__path__ = [str(_script_dir)]  # type: ignore[attr-defined]
-        sys.modules["scripts"] = scripts_pkg
-    else:
-        package_path = list(scripts_pkg.__path__)  # type: ignore[attr-defined]
-        if str(_script_dir) not in package_path:
-            package_path.insert(0, str(_script_dir))
-            scripts_pkg.__path__ = package_path  # type: ignore[attr-defined]
+    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
+    if "scripts._bootstrap" in sys.modules:
+        return
+    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
+            f"Got: {str(bootstrap_path)!r:.100}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["scripts._bootstrap"] = module
+    spec.loader.exec_module(module)
 
-    from scripts.storage_primitives import (  # type: ignore[no-redef]
-        read_json_object as _read_json_object_primitive,
-        sha256_regular_file_or_none as _content_sha256,
-        write_json_atomic as _write_json_atomic,
-    )
+
+_load_bootstrap_by_path()
+del _load_bootstrap_by_path
+
+from scripts.storage_primitives import (
+    read_json_object as _read_json_object_primitive,
+    sha256_regular_file_or_none as _content_sha256,
+    write_json_atomic as _write_json_atomic,
+)
 
 
 class StorageLocation(StrEnum):

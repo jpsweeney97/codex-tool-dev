@@ -9,15 +9,29 @@ import sys
 from pathlib import Path
 from typing import Any
 
-try:
-    from scripts.handoff_parsing import parse_handoff
-    from scripts.project_paths import get_project_root
-    from scripts.storage_authority import discover_handoff_inventory, eligible_active_candidates
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from scripts.handoff_parsing import parse_handoff  # type: ignore[no-redef]
-    from scripts.project_paths import get_project_root  # type: ignore[no-redef]
-    from scripts.storage_authority import discover_handoff_inventory, eligible_active_candidates  # type: ignore[no-redef]
+def _load_bootstrap_by_path() -> None:
+    import importlib.util
+
+    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
+    if "scripts._bootstrap" in sys.modules:
+        return
+    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
+            f"Got: {str(bootstrap_path)!r:.100}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["scripts._bootstrap"] = module
+    spec.loader.exec_module(module)
+
+
+_load_bootstrap_by_path()
+del _load_bootstrap_by_path
+
+from scripts.handoff_parsing import parse_handoff
+from scripts.project_paths import get_project_root
+from scripts.storage_authority import discover_handoff_inventory, eligible_active_candidates
 
 
 def list_handoffs(project_root: Path) -> list[dict[str, Any]]:
