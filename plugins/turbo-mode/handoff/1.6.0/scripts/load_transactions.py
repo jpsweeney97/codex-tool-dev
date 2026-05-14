@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import socket
 import sys
 import uuid
 from argparse import ArgumentParser
@@ -24,7 +23,9 @@ try:
         get_storage_layout,
     )
     from scripts.storage_primitives import (
-        parse_created_at as _parse_created_at,
+        LockPolicy,
+        acquire_lock as _acquire_lock_with_policy,
+        release_lock as _release_lock,
         sha256_file as _sha256_file,
         write_json_atomic as _write_json_atomic,
     )
@@ -43,7 +44,9 @@ except ModuleNotFoundError:
         get_storage_layout,
     )
     from scripts.storage_primitives import (  # type: ignore[no-redef]
-        parse_created_at as _parse_created_at,
+        LockPolicy,
+        acquire_lock as _acquire_lock_with_policy,
+        release_lock as _release_lock,
         sha256_file as _sha256_file,
         write_json_atomic as _write_json_atomic,
     )
@@ -658,97 +661,11 @@ def _recover_copied_legacy_archive(
     _write_json_atomic(registry_path, registry)
 
 
-_CLAIM_TIMEOUT_SECONDS = 60
-
-
-def _write_claim_metadata(claim_fd: int) -> None:
-    payload = {
-        "pid": os.getpid(),
-        "hostname": socket.gethostname(),
-        "created_at": datetime.now(UTC).isoformat(),
-        "timeout_seconds": _CLAIM_TIMEOUT_SECONDS,
-    }
-    try:
-        os.write(claim_fd, json.dumps(payload).encode("utf-8"))
-        os.fsync(claim_fd)
-    finally:
-        os.close(claim_fd)
-
-
-def _try_recover_stale_lock(path: Path, *, now: datetime) -> bool:
-    claim_path = path.with_name(path.name + ".recovery")
-    try:
-        claim_fd = os.open(claim_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
-        claim_age_hint = ""
-        try:
-            claim_payload = json.loads(claim_path.read_text(encoding="utf-8"))
-            if isinstance(claim_payload, dict):
-                c_pid = claim_payload.get("pid")
-                c_host = claim_payload.get("hostname")
-                c_created = claim_payload.get("created_at")
-                c_timeout = claim_payload.get("timeout_seconds")
-                if isinstance(c_created, str):
-                    try:
-                        age = (now - _parse_created_at(c_created)).total_seconds()
-                        if isinstance(c_timeout, (int, float)) and age > c_timeout:
-                            claim_age_hint = f" (likely stale: pid={c_pid!r} host={c_host!r} age={age:.0f}s)"
-                        else:
-                            claim_age_hint = f" (live recoverer: pid={c_pid!r} host={c_host!r})"
-                    except ValueError:
-                        pass
-        except (OSError, json.JSONDecodeError, ValueError):
-            claim_age_hint = " (claim metadata unreadable)"
-        raise LoadTransactionError(
-            f"load-handoff failed: recovery claim file present{claim_age_hint}; "
-            f"if no process is actively recovering this lock, run `trash {claim_path}` and retry. "
-            f"Got: {str(claim_path)!r:.100}"
-        )
-    try:
-        _write_claim_metadata(claim_fd)
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return True
-        except (OSError, json.JSONDecodeError, ValueError) as exc:
-            raise LoadTransactionError(
-                "load-handoff failed: lock metadata unreadable; manual operator review required. "
-                f"Got: {str(path)!r:.100}"
-            ) from exc
-        if not isinstance(payload, dict):
-            raise LoadTransactionError(
-                "load-handoff failed: lock metadata malformed; manual operator review required. "
-                f"Got: {str(path)!r:.100}"
-            )
-        created_at = payload.get("created_at")
-        timeout = payload.get("timeout_seconds")
-        hostname = payload.get("hostname")
-        if not isinstance(created_at, str) or not isinstance(timeout, (int, float)) or not isinstance(hostname, str):
-            raise LoadTransactionError(
-                "load-handoff failed: lock metadata malformed; manual operator review required. "
-                f"Got: {str(path)!r:.100}"
-            )
-        try:
-            created = _parse_created_at(created_at)
-        except ValueError as exc:
-            raise LoadTransactionError(
-                "load-handoff failed: lock metadata malformed; manual operator review required. "
-                f"Got: {str(path)!r:.100}"
-            ) from exc
-        if (now - created).total_seconds() <= timeout:
-            return False
-        if hostname != socket.gethostname():
-            raise LoadTransactionError(
-                "load-handoff failed: stale lock from another host; manual operator review required. "
-                f"Got: {(hostname, str(path))!r:.100}"
-            )
-        os.unlink(path)
-        return True
-    finally:
-        try:
-            os.unlink(claim_path)
-        except FileNotFoundError:
-            pass
+_LOAD_LOCK_POLICY = LockPolicy(
+    operation_label="load-handoff",
+    lock_kind="project load lock",
+    error_factory=LoadTransactionError,
+)
 
 
 def _acquire_lock(
@@ -758,50 +675,13 @@ def _acquire_lock(
     operation: str,
     transaction_id: str,
 ) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        if _try_recover_stale_lock(path, now=datetime.now(UTC)):
-            try:
-                fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            except FileExistsError as exc2:
-                raise LoadTransactionError(
-                    f"load-handoff failed: project load lock is already held. Got: {str(path)!r:.100}"
-                ) from exc2
-        else:
-            raise LoadTransactionError(
-                f"load-handoff failed: project load lock is already held. Got: {str(path)!r:.100}"
-            )
-    metadata = {
-        "project": project,
-        "operation": operation,
-        "transaction_id": transaction_id,
-        "lock_id": transaction_id,
-        "pid": os.getpid(),
-        "hostname": socket.gethostname(),
-        "created_at": datetime.now(UTC).isoformat(),
-        "timeout_seconds": 1800,
-    }
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        json.dump(metadata, handle, indent=2)
-    lock_check = json.loads(path.read_text(encoding="utf-8"))
-    if lock_check.get("lock_id") != transaction_id:
-        raise LoadTransactionError(
-            f"load-handoff failed: project load lock is already held. Got: {str(path)!r:.100}"
-        )
-
-
-def _release_lock(path: Path) -> None:
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
-    for directory in (path.parent,):
-        try:
-            directory.rmdir()
-        except OSError:
-            pass
+    _acquire_lock_with_policy(
+        path,
+        project=project,
+        operation=operation,
+        transaction_id=transaction_id,
+        policy=_LOAD_LOCK_POLICY,
+    )
 
 
 def _select_candidate(project_root: Path, *, explicit_path: Path | None) -> HandoffCandidate:
