@@ -32,6 +32,9 @@
       "Resume the latest handoff",
       "Search handoffs for a decision"
     ],
+    "websiteURL": "https://github.com/jpsweeney97/codex-tool-dev/tree/main/plugins/turbo-mode/handoff/1.6.0",
+    "privacyPolicyURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/handoff/1.6.0/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/handoff/1.6.0/TERMS.md",
     "brandColor": "#2563EB",
     "screenshots": []
   }

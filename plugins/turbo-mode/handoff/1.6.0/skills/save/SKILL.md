@@ -1,6 +1,6 @@
 ---
 name: save
-description: Used when user says "wrap this up", "new session", "almost out of context", "save", "next session", or "handoff"; when stopping work with context to preserve.
+description: Use when user says "wrap this up", "new session", "almost out of context", "save", "next session", or "handoff"; use when stopping work with context to preserve.
 allowed-tools: Write, Read, Edit, Glob, Grep, Bash
 ---
 
