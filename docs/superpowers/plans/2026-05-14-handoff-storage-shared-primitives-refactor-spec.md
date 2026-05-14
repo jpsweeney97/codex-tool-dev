@@ -108,6 +108,10 @@ def sha256_file_or_none(path: Path) -> str | None:
     ...
 
 
+def sha256_regular_file_or_none(path: Path) -> str | None:
+    ...
+
+
 def acquire_lock(
     path: Path,
     *,
@@ -167,7 +171,9 @@ The shared helper must still:
 - Refuse to auto-remove existing recovery claim files.
 - Remove only `path.parent` in `release_lock`, never `.session-state/`.
 - Re-read lock metadata after acquisition and fail with the held-lock diagnostic if `lock_id` does not match `transaction_id`.
-- Preserve `_content_sha256`'s regular-file guard: `sha256_file_or_none` must return `None` when `path.is_file()` is false before attempting to read bytes.
+- Preserve active-write `_sha256_path` semantics separately from storage-authority `_content_sha256` semantics:
+  - `sha256_file_or_none` must attempt `path.read_bytes()` and return `None` only on `OSError`.
+  - `sha256_regular_file_or_none` must preserve `_content_sha256`'s regular-file guard by returning `None` when `path.is_file()` is false before attempting to read bytes.
 - Preserve the current post-acquire `lock_check.get("lock_id")` behavior. Do not add a new `isinstance(lock_check, dict)` guard in this branch unless the spec is revised to own that behavior change explicitly.
 
 ## File Changes
@@ -206,6 +212,7 @@ from pathlib import Path
 
 import pytest
 
+import scripts.storage_primitives as storage_primitives
 from scripts.storage_primitives import (
     LockPolicy,
     acquire_lock,
@@ -213,6 +220,7 @@ from scripts.storage_primitives import (
     release_lock,
     sha256_file,
     sha256_file_or_none,
+    sha256_regular_file_or_none,
     write_json_atomic,
 )
 
@@ -276,7 +284,52 @@ def test_sha256_file_variants(tmp_path: Path) -> None:
     path.write_text("abc", encoding="utf-8")
     assert sha256_file(path) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     assert sha256_file_or_none(path) == sha256_file(path)
+    assert sha256_regular_file_or_none(path) == sha256_file(path)
     assert sha256_file_or_none(tmp_path / "missing.txt") is None
+    assert sha256_regular_file_or_none(tmp_path / "missing.txt") is None
+    assert sha256_regular_file_or_none(tmp_path) is None
+
+
+def test_sha256_helpers_preserve_distinct_regular_file_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "payload.txt"
+    path.write_text("abc", encoding="utf-8")
+    monkeypatch.setattr(Path, "is_file", lambda self: False)
+    assert sha256_file_or_none(path) == sha256_file(path)
+    assert sha256_regular_file_or_none(path) is None
+
+
+def test_acquire_lock_writes_expected_metadata_shape(tmp_path: Path) -> None:
+    lock = _lock_path(tmp_path)
+    acquire_lock(
+        lock,
+        project="demo",
+        operation="helper",
+        transaction_id="new-lock",
+        policy=POLICY,
+    )
+    metadata = json.loads(lock.read_text(encoding="utf-8"))
+    assert set(metadata) == {
+        "project",
+        "operation",
+        "transaction_id",
+        "lock_id",
+        "pid",
+        "hostname",
+        "created_at",
+        "timeout_seconds",
+    }
+    assert metadata["project"] == "demo"
+    assert metadata["operation"] == "helper"
+    assert metadata["transaction_id"] == "new-lock"
+    assert metadata["lock_id"] == "new-lock"
+    assert isinstance(metadata["pid"], int)
+    assert isinstance(metadata["hostname"], str)
+    assert isinstance(metadata["created_at"], str)
+    assert metadata["timeout_seconds"] == 1800
+    release_lock(lock)
 
 
 def test_acquire_lock_blocks_fresh_lock(tmp_path: Path) -> None:
@@ -295,6 +348,29 @@ def test_acquire_lock_blocks_fresh_lock(tmp_path: Path) -> None:
             policy=POLICY,
         )
     assert lock.exists()
+
+
+def test_acquire_lock_uses_policy_error_on_readback_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lock = _lock_path(tmp_path)
+    monkeypatch.setattr(
+        storage_primitives.json,
+        "loads",
+        lambda _: {"lock_id": "other-lock"},
+    )
+    with pytest.raises(HelperLockError) as exc_info:
+        acquire_lock(
+            lock,
+            project="demo",
+            operation="helper",
+            transaction_id="new-lock",
+            policy=POLICY,
+        )
+    assert str(exc_info.value).startswith(
+        f"helper-op failed: helper lock is already held. Got: {str(lock)!r:.100}"
+    )
 
 
 def test_acquire_lock_recovers_stale_same_host_lock(tmp_path: Path) -> None:
@@ -405,18 +481,84 @@ def test_acquire_lock_fails_closed_on_existing_recovery_claim(tmp_path: Path) ->
     assert "trash" in str(exc_info.value)
     assert lock.exists()
     assert claim.exists()
+
+
+def test_acquire_lock_existing_claim_invalid_created_at_has_no_age_hint(tmp_path: Path) -> None:
+    lock = _lock_path(tmp_path)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(
+        json.dumps(_valid_lock_metadata(created_at=datetime.now(UTC) - timedelta(hours=2))),
+        encoding="utf-8",
+    )
+    claim = lock.with_name(lock.name + ".recovery")
+    claim.write_text(
+        json.dumps({
+            "pid": os.getpid(),
+            "hostname": socket.gethostname(),
+            "created_at": "not-a-date",
+            "timeout_seconds": 60,
+        }),
+        encoding="utf-8",
+    )
+    with pytest.raises(HelperLockError, match="recovery claim file present") as exc_info:
+        acquire_lock(
+            lock,
+            project="demo",
+            operation="helper",
+            transaction_id="new-lock",
+            policy=POLICY,
+        )
+    message = str(exc_info.value)
+    assert "recovery claim file present; if no process" in message
+    assert "claim metadata unreadable" not in message
+    assert "live recoverer" not in message
+    assert "likely stale" not in message
+    assert lock.exists()
+    assert claim.exists()
+
+
+def test_acquire_lock_writes_claim_metadata_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lock = _lock_path(tmp_path)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("not-json", encoding="utf-8")
+    captured_claim: dict[str, object] = {}
+    original_unlink = storage_primitives.os.unlink
+
+    def capture_claim_before_unlink(path: str | os.PathLike[str]) -> None:
+        unlink_path = Path(path)
+        if unlink_path.name.endswith(".recovery") and unlink_path.exists():
+            captured_claim.update(json.loads(unlink_path.read_text(encoding="utf-8")))
+        original_unlink(path)
+
+    monkeypatch.setattr(storage_primitives.os, "unlink", capture_claim_before_unlink)
+    with pytest.raises(HelperLockError, match="lock metadata unreadable"):
+        acquire_lock(
+            lock,
+            project="demo",
+            operation="helper",
+            transaction_id="new-lock",
+            policy=POLICY,
+        )
+    assert captured_claim["timeout_seconds"] == 60
+    assert set(captured_claim) == {"pid", "hostname", "created_at", "timeout_seconds"}
 ```
 
 Coverage of shared-lock branches is split between direct primitive tests and the existing caller tests. Do not remove the caller tests as redundant; they prove exception classes, operation labels, and import paths.
 
 | Branch or behavior | Test of record |
 | --- | --- |
+| Active-write digest vs storage-authority digest semantics | `test_storage_primitives.py::test_sha256_helpers_preserve_distinct_regular_file_preflight` |
 | Fresh lock is held | `test_storage_primitives.py::test_acquire_lock_blocks_fresh_lock`; caller coverage in `test_active_writes.py::test_active_write_lock_blocks_within_timeout` and `test_load_transactions.py::test_load_lock_blocks_within_timeout` |
 | Stale same-host lock recovers | `test_storage_primitives.py::test_acquire_lock_recovers_stale_same_host_lock`; caller coverage in `test_active_writes.py::test_active_write_lock_recovers_from_stale_lock_same_host_after_timeout` and `test_load_transactions.py::test_load_lock_recovers_from_stale_lock_same_host_after_timeout` |
 | Lock metadata unreadable | caller coverage in `test_active_writes.py::test_active_write_lock_fails_closed_on_unparseable_metadata` and `test_load_transactions.py::test_load_lock_fails_closed_on_unparseable_metadata` |
 | Malformed lock metadata | `test_storage_primitives.py::test_acquire_lock_fails_closed_on_malformed_metadata`; caller coverage in `test_active_writes.py::test_active_write_lock_fails_closed_on_malformed_json_metadata` and `test_load_transactions.py::test_load_lock_fails_closed_on_malformed_json_metadata` |
 | Foreign-host stale lock | `test_storage_primitives.py::test_acquire_lock_fails_closed_on_foreign_host_stale_lock`; caller coverage in `test_active_writes.py::test_active_write_lock_fails_closed_on_foreign_host` and `test_load_transactions.py::test_load_lock_fails_closed_on_foreign_host` |
-| Recovery claim present, live/stale/unreadable hints | `test_storage_primitives.py::test_acquire_lock_fails_closed_on_existing_recovery_claim`; caller coverage in the active-write/load recovery-claim tests |
+| Recovery claim present, live/stale/unreadable/invalid-timestamp hints | `test_storage_primitives.py::test_acquire_lock_fails_closed_on_existing_recovery_claim` and `test_storage_primitives.py::test_acquire_lock_existing_claim_invalid_created_at_has_no_age_hint`; caller coverage in the active-write/load recovery-claim tests |
+| Lock and claim metadata timeout fields | `test_storage_primitives.py::test_acquire_lock_writes_expected_metadata_shape` and `test_storage_primitives.py::test_acquire_lock_writes_claim_metadata_timeout` |
+| Post-acquire readback mismatch | `test_storage_primitives.py::test_acquire_lock_uses_policy_error_on_readback_mismatch` |
 | Live two-process contention and preserved wrapper import paths | `test_active_writes.py::test_active_write_lock_live_contention_with_subprocess` and `test_load_transactions.py::test_load_lock_live_contention_with_subprocess` |
 | Recover-then-reacquire race | defensive branch in `storage_primitives.acquire_lock`; add a direct monkeypatch test only if this branch is edited beyond the mechanical extraction |
 
@@ -499,6 +641,14 @@ def sha256_file(path: Path) -> str:
 
 def sha256_file_or_none(path: Path) -> str | None:
     """Return the SHA256 digest for a readable file, or None on read failure."""
+    try:
+        return sha256_file(path)
+    except OSError:
+        return None
+
+
+def sha256_regular_file_or_none(path: Path) -> str | None:
+    """Return the SHA256 digest for a regular file, or None otherwise."""
     try:
         if not path.is_file():
             return None
@@ -630,20 +780,23 @@ def _try_recover_stale_lock(path: Path, *, now: datetime, policy: LockPolicy) ->
 def _claim_age_hint(claim_path: Path, *, now: datetime) -> str:
     try:
         claim_payload = json.loads(claim_path.read_text(encoding="utf-8"))
-        if not isinstance(claim_payload, dict):
-            return ""
-        c_pid = claim_payload.get("pid")
-        c_host = claim_payload.get("hostname")
-        c_created = claim_payload.get("created_at")
-        c_timeout = claim_payload.get("timeout_seconds")
-        if not isinstance(c_created, str):
-            return ""
-        age = (now - parse_created_at(c_created)).total_seconds()
-        if isinstance(c_timeout, (int, float)) and age > c_timeout:
-            return f" (likely stale: pid={c_pid!r} host={c_host!r} age={age:.0f}s)"
-        return f" (live recoverer: pid={c_pid!r} host={c_host!r})"
     except (OSError, json.JSONDecodeError, ValueError):
         return " (claim metadata unreadable)"
+    if not isinstance(claim_payload, dict):
+        return ""
+    c_pid = claim_payload.get("pid")
+    c_host = claim_payload.get("hostname")
+    c_created = claim_payload.get("created_at")
+    c_timeout = claim_payload.get("timeout_seconds")
+    if not isinstance(c_created, str):
+        return ""
+    try:
+        age = (now - parse_created_at(c_created)).total_seconds()
+    except ValueError:
+        return ""
+    if isinstance(c_timeout, (int, float)) and age > c_timeout:
+        return f" (likely stale: pid={c_pid!r} host={c_host!r} age={age:.0f}s)"
+    return f" (live recoverer: pid={c_pid!r} host={c_host!r})"
 
 
 def _malformed_error(path: Path, policy: LockPolicy) -> Exception:
@@ -749,13 +902,13 @@ import sys
 
 try:
     from scripts.storage_primitives import (
-        sha256_file_or_none as _content_sha256,
+        sha256_regular_file_or_none as _content_sha256,
         write_json_atomic as _write_json_atomic,
     )
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from scripts.storage_primitives import (  # type: ignore[no-redef]
-        sha256_file_or_none as _content_sha256,
+        sha256_regular_file_or_none as _content_sha256,
         write_json_atomic as _write_json_atomic,
     )
 ```
@@ -979,6 +1132,14 @@ env PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-pycache-sha
 ```
 
 Expected: exit code 0. This protects the same plugin-root import path used by the subprocess contention tests.
+
+Run:
+
+```bash
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-pycache-shared-primitives uv run python -c "import runpy; runpy.run_path('plugins/turbo-mode/handoff/1.6.0/scripts/active_writes.py'); runpy.run_path('plugins/turbo-mode/handoff/1.6.0/scripts/load_transactions.py'); runpy.run_path('plugins/turbo-mode/handoff/1.6.0/scripts/storage_authority.py')"
+```
+
+Expected: exit code 0. This exercises the direct-script fallback path where the repository root, not the plugin root, is on `sys.path`.
 
 Run:
 
