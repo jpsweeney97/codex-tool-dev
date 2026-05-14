@@ -357,3 +357,133 @@ def test_acquire_lock_writes_claim_metadata_timeout(
         )
     assert captured_claim["timeout_seconds"] == 60
     assert set(captured_claim) == {"pid", "hostname", "created_at", "timeout_seconds"}
+
+
+def test_read_json_object_returns_default_for_missing_path(tmp_path: Path) -> None:
+    assert storage_primitives.read_json_object(
+        tmp_path / "missing.json",
+        missing={"entries": []},
+    ) == {"entries": []}
+
+
+def test_read_json_object_rejects_unreadable_json(tmp_path: Path) -> None:
+    path = tmp_path / "bad.json"
+    path.write_text("{bad", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="JSON object unreadable"):
+        storage_primitives.read_json_object(path)
+
+
+def test_read_json_object_rejects_non_object_json(tmp_path: Path) -> None:
+    path = tmp_path / "list.json"
+    path.write_text("[]", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="JSON object malformed"):
+        storage_primitives.read_json_object(path)
+
+
+def test_write_text_atomic_exclusive_uses_suffix_without_replacing_existing(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "envelope.json"
+    first.write_text("existing", encoding="utf-8")
+
+    written = storage_primitives.write_text_atomic_exclusive(first, "new")
+
+    assert written == tmp_path / "envelope-01.json"
+    assert first.read_text(encoding="utf-8") == "existing"
+    assert written.read_text(encoding="utf-8") == "new"
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_write_text_atomic_exclusive_exhausts_collision_budget(tmp_path: Path) -> None:
+    for index in range(100):
+        suffix = "" if index == 0 else f"-{index:02d}"
+        (tmp_path / f"envelope{suffix}.json").write_text("existing", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="collision budget exhausted"):
+        storage_primitives.write_text_atomic_exclusive(tmp_path / "envelope.json", "new")
+
+
+def test_safe_delete_uses_trash_when_available(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "state.json"
+    path.write_text("{}", encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], **kwargs: object) -> object:
+        calls.append(args)
+        path.unlink()
+        return object()
+
+    monkeypatch.setattr(storage_primitives.subprocess, "run", fake_run)
+
+    result = storage_primitives.safe_delete(path)
+
+    assert result.action == "deleted"
+    assert result.mechanism == "trash"
+    assert result.path == str(path)
+    assert calls == [["trash", str(path)]]
+    assert not path.exists()
+
+
+def test_safe_delete_falls_back_to_unlink_when_trash_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "state.json"
+    path.write_text("{}", encoding="utf-8")
+
+    def fail_trash(*args: object, **kwargs: object) -> object:
+        raise FileNotFoundError("trash")
+
+    monkeypatch.setattr(storage_primitives.subprocess, "run", fail_trash)
+
+    result = storage_primitives.safe_delete(path)
+
+    assert result.action == "deleted"
+    assert result.mechanism == "unlink"
+    assert result.path == str(path)
+    assert not path.exists()
+
+
+def test_safe_delete_reports_already_absent(tmp_path: Path) -> None:
+    path = tmp_path / "missing.json"
+
+    result = storage_primitives.safe_delete(path)
+
+    assert result.action == "already_absent"
+    assert result.mechanism is None
+    assert result.path == str(path)
+
+
+def test_safe_delete_returns_failed_when_trash_and_unlink_both_fail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "state.json"
+    path.write_text("{}", encoding="utf-8")
+
+    def fail_trash(*args: object, **kwargs: object) -> object:
+        raise FileNotFoundError("trash")
+
+    original_unlink = Path.unlink
+
+    def fail_unlink(self: Path, *args: object, **kwargs: object) -> None:
+        if self == path:
+            raise PermissionError("unlink denied")
+        return original_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(storage_primitives.subprocess, "run", fail_trash)
+    monkeypatch.setattr(Path, "unlink", fail_unlink)
+
+    result = storage_primitives.safe_delete(path)
+
+    assert result.action == "failed"
+    assert result.mechanism == "unlink"
+    assert result.path == str(path)
+    assert result.error is not None
+    assert "unlink" in result.error
+    assert path.exists()

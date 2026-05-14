@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import socket
+import subprocess
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -30,6 +31,14 @@ class LockPolicy:
     error_factory: Callable[[str], Exception]
 
 
+@dataclass(frozen=True)
+class DeleteResult:
+    action: str
+    mechanism: str | None
+    path: str
+    error: str | None = None
+
+
 def parse_created_at(value: str | None) -> datetime:
     """Parse an ISO timestamp as UTC, treating missing timezone as UTC."""
     if value is None:
@@ -47,6 +56,101 @@ def write_json_atomic(path: Path, payload: dict[str, object]) -> None:
     temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     os.replace(temp_path, path)
+
+
+def read_json_object(
+    path: Path,
+    *,
+    missing: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Read a JSON object from disk, optionally returning a missing-file default."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        if missing is not None:
+            return dict(missing)
+        raise
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(
+            f"read-json-object failed: JSON object unreadable. Got: {str(path)!r:.100}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"read-json-object failed: JSON object malformed. Got: {str(path)!r:.100}"
+        )
+    return payload
+
+
+def write_text_atomic_exclusive(
+    path: Path,
+    payload: str,
+    *,
+    max_attempts: int = 100,
+) -> Path:
+    """Write text through a sibling temp file and publish via exclusive hard link."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stem = path.stem
+    suffix = path.suffix
+    for attempt in range(max_attempts):
+        retry_suffix = "" if attempt == 0 else f"-{attempt:02d}"
+        candidate = path.with_name(f"{stem}{retry_suffix}{suffix}")
+        temp_path = candidate.with_name(f".{candidate.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temp_path.write_text(payload, encoding="utf-8")
+            try:
+                os.link(temp_path, candidate)
+            except FileExistsError:
+                continue
+            return candidate
+        finally:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
+    raise FileExistsError(
+        f"write-text-atomic-exclusive failed: collision budget exhausted. Got: {str(path)!r:.100}"
+    )
+
+
+def safe_delete(path: Path) -> DeleteResult:
+    """Delete one file by preferring trash, then unlink, then reporting failure.
+
+    Returns a DeleteResult with action in {"deleted", "already_absent", "failed"}.
+    Never raises for trash or unlink errors; callers inspect ``action`` to decide
+    whether to enter their own recovery flow. ``mechanism`` records which delete
+    path was attempted on success or partial-attempt; ``error`` carries the last
+    underlying exception string on failure so callers can surface it in
+    operator-actionable messages.
+    """
+    if not path.exists():
+        return DeleteResult(action="already_absent", mechanism=None, path=str(path))
+    try:
+        subprocess.run(
+            ["trash", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        return DeleteResult(action="deleted", mechanism="trash", path=str(path))
+    except (
+        OSError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        FileNotFoundError,
+    ) as trash_exc:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return DeleteResult(action="already_absent", mechanism=None, path=str(path))
+        except OSError as unlink_exc:
+            return DeleteResult(
+                action="failed",
+                mechanism="unlink",
+                path=str(path),
+                error=f"trash: {trash_exc!r}; unlink: {unlink_exc!r}",
+            )
+        return DeleteResult(action="deleted", mechanism="unlink", path=str(path))
 
 
 def sha256_file(path: Path) -> str:
