@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 try:
+    from scripts import storage_primitives as _storage_primitives
     from scripts.storage_authority import (
         ChainStateDiagnosticError,
         continue_chain_state,
@@ -50,6 +51,7 @@ except ModuleNotFoundError:
         get_storage_layout,
         read_chain_state,
     )
+    from scripts import storage_primitives as _storage_primitives  # type: ignore[no-redef]
     from scripts.storage_primitives import (  # type: ignore[no-redef]
         LockPolicy,
         acquire_lock as _acquire_lock_with_policy,
@@ -581,7 +583,7 @@ def write_active_handoff(
             },
         )
         try:
-            cleanup_action, cleanup_path = _clear_snapshotted_primary_state(state)
+            cleanup_action, cleanup_path, cleanup_mechanism = _clear_snapshotted_primary_state(state)
         except ActiveWriteError:
             failed_at = datetime.now(UTC).isoformat()
             state.update({
@@ -604,6 +606,7 @@ def write_active_handoff(
             "status": "committed",
             "state_cleanup_action": cleanup_action,
             "state_cleanup_path": cleanup_path,
+            "state_cleanup_mechanism": cleanup_mechanism,
             "updated_at": datetime.now(UTC).isoformat(),
         })
         _write_json_atomic(operation_state_path, state)
@@ -739,7 +742,7 @@ def recover_active_write_transaction(
                 f"Got: {str(active_path)!r:.100}"
             )
         updated_at = datetime.now(UTC).isoformat()
-        cleanup_action, cleanup_path = _clear_snapshotted_primary_state(state)
+        cleanup_action, cleanup_path, cleanup_mechanism = _clear_snapshotted_primary_state(state)
         state.update({
             "status": "committed",
             "active_path": str(active_path),
@@ -748,6 +751,7 @@ def recover_active_write_transaction(
             "recovered_from_status": recovered_from_status,
             "state_cleanup_action": cleanup_action,
             "state_cleanup_path": cleanup_path,
+            "state_cleanup_mechanism": cleanup_mechanism,
             "updated_at": updated_at,
         })
         _write_json_atomic(operation_state_path, state)
@@ -834,30 +838,26 @@ def _state_snapshot(
     return "primary-state", _stable_hash(payload_parts), state_paths, resumed_path, resumed_hash
 
 
-def _clear_snapshotted_primary_state(state: dict[str, object]) -> tuple[str, str | None]:
+def _clear_snapshotted_primary_state(
+    state: dict[str, object],
+) -> tuple[str, str | None, str | None]:
     paths = [Path(str(path)) for path in state.get("state_snapshot_paths", [])]
     if not paths:
-        return "none", None
+        return "none", None, None
     if len(paths) > 1:
         raise ActiveWriteError(
             f"write-active-handoff failed: ambiguous state cleanup. Got: {len(paths)!r:.100}"
         )
     path = paths[0]
     if not path.exists():
-        return "already-cleared-primary-state", str(path)
-    try:
-        subprocess.run(["trash", str(path)], capture_output=True, text=True, timeout=5, check=True)
-    except (
-        OSError,
-        subprocess.CalledProcessError,
-        subprocess.TimeoutExpired,
-        FileNotFoundError,
-    ) as exc:
+        return "already-cleared-primary-state", str(path), None
+    delete_result = _storage_primitives.safe_delete(path)
+    if delete_result.action not in {"deleted", "already_absent"}:
         raise ActiveWriteError(
-            "write-active-handoff failed: state cleanup failed. "
-            f"Got: {str(path)!r:.100}"
-        ) from exc
-    return "cleared-primary-state", str(path)
+            f"write-active-handoff failed: state cleanup failed via {delete_result.mechanism}. "
+            f"Got: ({delete_result.error!r}, {str(path)!r:.100})"
+        )
+    return "cleared-primary-state", str(path), delete_result.mechanism
 
 
 def _ensure_reservation_is_fresh(

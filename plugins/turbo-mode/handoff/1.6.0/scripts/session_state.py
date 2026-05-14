@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import subprocess
 import sys
 import time
 import uuid
@@ -13,14 +12,11 @@ from pathlib import Path
 
 try:
     from scripts.project_paths import get_state_dir
-    from scripts.storage_primitives import read_json_object, write_json_atomic
+    from scripts import storage_primitives
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from scripts.project_paths import get_state_dir  # type: ignore[no-redef]
-    from scripts.storage_primitives import (  # type: ignore[no-redef]
-        read_json_object,
-        write_json_atomic,
-    )
+    from scripts import storage_primitives  # type: ignore[no-redef]
 
 
 class AmbiguousResumeStateError(RuntimeError):
@@ -47,16 +43,22 @@ def _legacy_state_path(state_dir: Path, project: str) -> Path:
     return state_dir / f"handoff-{project}"
 
 
-def _trash_path(path: Path, *, context: str) -> bool:
+def _delete_path(path: Path, *, context: str) -> bool:
     try:
-        subprocess.run(["trash", str(path)], capture_output=True, text=True, timeout=5, check=True)
-        return True
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        result = storage_primitives.safe_delete(path)
+    except OSError as exc:
         print(
             f"state cleanup warning: {context} failed: {exc}. Got: {str(path)!r:.100}",
             file=sys.stderr,
         )
         return False
+    if result.action in {"deleted", "already_absent"}:
+        return True
+    print(
+        f"state cleanup warning: {context} failed. Got: {str(path)!r:.100}",
+        file=sys.stderr,
+    )
+    return False
 
 
 def _mark_legacy_state_consumed(legacy_path: Path, migrated_state_path: Path) -> None:
@@ -98,13 +100,13 @@ def write_resume_state(state_dir: Path, project: str, archive_path: str, resume_
         archive_path=archive_path,
         created_at=datetime.now(timezone.utc).isoformat(),
     )
-    write_json_atomic(state_path, asdict(payload))
+    storage_primitives.write_json_atomic(state_path, asdict(payload))
     return state_path
 
 
 def _read_resume_state_payload(path: Path, *, operation: str) -> dict[str, object]:
     try:
-        return read_json_object(path)
+        return storage_primitives.read_json_object(path)
     except (OSError, ValueError) as exc:
         raise CorruptResumeStateError(
             f"{operation} failed: resume state unreadable. Got: {str(path)!r:.100}"
@@ -127,7 +129,7 @@ def migrate_legacy_resume_state(state_dir: Path, project: str) -> ResumeState | 
     if archive_path is None:
         return None
     state_path = write_resume_state(state_dir, project, archive_path)
-    if not _trash_path(legacy_path, context="legacy state migration cleanup"):
+    if not _delete_path(legacy_path, context="legacy state migration cleanup"):
         _mark_legacy_state_consumed(legacy_path, state_path)
     payload = _read_resume_state_payload(state_path, operation="read-state")
     return ResumeState(**payload)
@@ -168,11 +170,14 @@ def clear_resume_state(state_dir: Path, state_path_arg: str) -> bool:
         payload = _read_resume_state_payload(resolved_state_path, operation="clear-state")
         legacy_project = payload.get("project")
 
-    cleared = _trash_path(resolved_state_path, context="clear-state")
+    cleared = _delete_path(resolved_state_path, context="clear-state")
     if legacy_project:
         legacy_path = _legacy_state_path(state_dir, legacy_project)
         if legacy_path.exists():
-            legacy_cleared = _trash_path(legacy_path, context="legacy state cleanup after clear-state")
+            legacy_cleared = _delete_path(
+                legacy_path,
+                context="legacy state cleanup after clear-state",
+            )
             cleared = cleared and legacy_cleared
     return cleared
 
@@ -186,7 +191,7 @@ def prune_old_state_files(max_age_hours: int = 24, *, state_dir: Path | None = N
     cutoff = time.time() - (max_age_hours * 60 * 60)
     for state_file in sorted(path for path in state_dir.iterdir() if path.is_file() and path.name.startswith("handoff-")):
         try:
-            if state_file.stat().st_mtime < cutoff and _trash_path(state_file, context="ttl prune"):
+            if state_file.stat().st_mtime < cutoff and _delete_path(state_file, context="ttl prune"):
                 deleted.append(state_file)
         except OSError:
             continue

@@ -416,3 +416,24 @@ class TestMainEmitsEnvelopes:
             assert "PermissionError" in output["errors"][0]["error"]
         finally:
             envelopes_dir.chmod(0o755)
+
+
+def test_write_envelope_payload_uses_atomic_exclusive_writer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import scripts.defer as defer_module
+
+    calls: list[tuple[Path, str]] = []
+
+    def fake_write(path: Path, payload: str) -> Path:
+        calls.append((path, payload))
+        path.write_text(payload, encoding="utf-8")
+        return path
+
+    monkeypatch.setattr(defer_module, "write_text_atomic_exclusive", fake_write)
+
+    written = defer_module._write_envelope_payload(tmp_path, "stem", '{"ok": true}')
+
+    assert written == tmp_path / "stem.json"
+    assert calls == [(tmp_path / "stem.json", '{"ok": true}')]

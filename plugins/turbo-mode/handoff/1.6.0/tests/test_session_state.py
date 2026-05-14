@@ -128,26 +128,7 @@ def test_clear_resume_state_rejects_non_state_filename(tmp_path: Path) -> None:
         clear_resume_state(state_dir, str(rogue))
 
 
-def test_clear_resume_state_warns_when_trash_fails(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    state_dir = tmp_path / ".session-state"
-    state_dir.mkdir()
-    state_path = write_resume_state(state_dir, "demo", "/tmp/archive-a.md", "token-a")
-
-    def _fail(*args: object, **kwargs: object) -> object:
-        raise subprocess.CalledProcessError(returncode=1, cmd=["trash"], stderr="boom")
-
-    monkeypatch.setattr(subprocess, "run", _fail)
-    cleared = clear_resume_state(state_dir, str(state_path))
-    assert cleared is False
-    assert state_path.exists()
-    assert "state cleanup warning" in capsys.readouterr().err
-
-
-def test_clear_state_cli_returns_1_when_trash_fails(
+def test_clear_resume_state_falls_back_to_unlink_when_trash_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -156,9 +137,25 @@ def test_clear_state_cli_returns_1_when_trash_fails(
     state_path = write_resume_state(state_dir, "demo", "/tmp/archive-a.md", "token-a")
 
     def _fail(*args: object, **kwargs: object) -> object:
-        raise subprocess.CalledProcessError(returncode=1, cmd=["trash"], stderr="boom")
+        raise FileNotFoundError("trash")
 
-    monkeypatch.setattr(subprocess, "run", _fail)
+    monkeypatch.setattr(session_state.storage_primitives.subprocess, "run", _fail)
+    assert clear_resume_state(state_dir, str(state_path)) is True
+    assert not state_path.exists()
+
+
+def test_clear_state_cli_returns_0_when_trash_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    state_dir = tmp_path / ".session-state"
+    state_dir.mkdir()
+    state_path = write_resume_state(state_dir, "demo", "/tmp/archive-a.md", "token-a")
+
+    def _fail(*args: object, **kwargs: object) -> object:
+        raise FileNotFoundError("trash")
+
+    monkeypatch.setattr(session_state.storage_primitives.subprocess, "run", _fail)
     exit_code = session_state.main(
         [
             "clear-state",
@@ -168,8 +165,8 @@ def test_clear_state_cli_returns_1_when_trash_fails(
             str(state_path),
         ]
     )
-    assert exit_code == 1
-    assert state_path.exists()
+    assert exit_code == 0
+    assert not state_path.exists()
 
 
 def test_migrated_legacy_marker_prevents_resume_chain_resurrection(
@@ -184,13 +181,13 @@ def test_migrated_legacy_marker_prevents_resume_chain_resurrection(
     def _fail_for_legacy(command: list[str], **kwargs: object) -> object:
         target = command[-1]
         if target.endswith("handoff-demo"):
-            raise subprocess.CalledProcessError(returncode=1, cmd=command, stderr="boom")
+            raise FileNotFoundError("trash")
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(subprocess, "run", _fail_for_legacy)
+    monkeypatch.setattr(session_state.storage_primitives.subprocess, "run", _fail_for_legacy)
     state = load_resume_state(state_dir, "demo")
     assert state is not None
-    assert legacy.read_text(encoding="utf-8").startswith("MIGRATED:")
+    assert not legacy.exists()
     state_again = load_resume_state(state_dir, "demo")
     assert state_again is not None
     assert state_again.state_path == state.state_path

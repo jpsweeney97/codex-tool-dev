@@ -12,6 +12,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    from scripts.storage_primitives import write_text_atomic_exclusive
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.storage_primitives import (  # type: ignore[no-redef]
+        write_text_atomic_exclusive,
+    )
+
 
 def _slug(title: str) -> str:
     """Generate a filename slug from a title.
@@ -78,23 +86,8 @@ def _prepare_envelope(candidate: dict[str, Any]) -> tuple[str, str]:
 
 
 def _write_envelope_payload(envelopes_dir: Path, stem: str, payload: str) -> Path:
-    """Write pre-serialized envelope payload to disk.
-
-    Uses exclusive create mode. Retries with -01 through -99 suffixes.
-    Raises FileExistsError after 100 collision attempts (candidate-local).
-    Raises OSError on I/O failure (operational — abort batch).
-    """
-    for attempt in range(100):
-        suffix = "" if attempt == 0 else f"-{attempt:02d}"
-        path = envelopes_dir / f"{stem}{suffix}.json"
-        try:
-            with path.open("x", encoding="utf-8") as handle:
-                handle.write(payload)
-        except FileExistsError:
-            continue
-        return path
-
-    raise FileExistsError(f"Envelope filename collision after 100 attempts for stem: {stem}")
+    """Write pre-serialized envelope payload to disk atomically."""
+    return write_text_atomic_exclusive(envelopes_dir / f"{stem}.json", payload)
 
 
 def emit_envelope(candidate: dict[str, Any], envelopes_dir: Path) -> Path:
