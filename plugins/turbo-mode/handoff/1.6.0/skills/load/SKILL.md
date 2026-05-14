@@ -60,7 +60,8 @@ Whether runtime handoff paths are tracked or ignored is host-repository policy, 
 - Primary archive loads reuse the existing archive file
 - Reviewed legacy active handoffs from `docs/handoffs/*.md` are copied to `.codex/handoffs/archive/` and marked consumed; the legacy source remains in place
 - Explicit legacy archive loads from `docs/handoffs/archive/` or `.codex/handoffs/.archive/` are copied or reused through the copied-archive registry
-- Pending interrupted loads are recovered before a new load is selected
+- Readable pending load transactions are recovered before a new load is selected
+- Unreadable or corrupt transaction records block `/load` with a global fail-closed operator diagnostic
 - Context loaded into conversation
 
 **Definition of Done:**
@@ -97,8 +98,9 @@ Whether runtime handoff paths are tracked or ignored is host-repository policy, 
    - If no handoffs are eligible: report "No handoffs found for this project" and **STOP**.
 
 4. **Interrupted load recovery:**
-   - If a pending load transaction exists, the load command completes recovery before selecting a new handoff.
+   - If a readable pending load transaction exists for this project, the load command completes recovery before selecting a new handoff.
    - Report the recovered `archive_path` and continue from that handoff.
+   - If transaction JSON is unreadable or corrupt, report the stderr diagnostic and **STOP**. Transaction records share one state directory, so unreadable records are treated as global fail-closed until operator review.
 
 ## Procedure
 
@@ -134,7 +136,7 @@ When user runs `/load [path]`:
      --explicit-path "$SOURCE_PATH"
    ```
 
-   The command emits JSON with `transaction_id`, `transaction_path`, `source_path`, `archive_path`, `state_path`, and `storage_location`. If it exits non-zero, report the stderr message and **STOP**.
+   The command emits JSON with `transaction_id`, `transaction_path`, `source_path`, `archive_path`, `state_path`, and `storage_location`. If it exits non-zero, report the stderr message and **STOP**. Do not delete transaction, lock, or recovery-claim files unless the operator explicitly confirms the diagnostic repair path.
 
 4. **Read handoff content from `archive_path`.**
    Use the `archive_path` returned by the transaction JSON. Do not read from the original source after mutation because primary active handoffs may have been moved.
@@ -226,6 +228,33 @@ After loading, verify:
 2. Read the returned `archive_path`
 3. Continue from the recovered handoff before starting another load
 
+### Load reports corrupt or unreadable transaction state
+
+**Symptoms:** `/load` exits non-zero with "pending transaction record unreadable"
+
+**Likely causes:**
+- A transaction JSON file under `<project_root>/.codex/handoffs/.session-state/transactions/` is truncated, unreadable, or malformed
+- Because the project field is inside the JSON payload, unreadable transaction records are global fail-closed and may block every project using this state directory
+
+**Next steps:**
+1. Report the exact `transaction_path` from stderr
+2. Ask the operator to inspect the file before changing state
+3. Retry `/load` only after the operator repairs or explicitly removes the corrupt record
+
+### Load reports a recovery claim or foreign-host lock
+
+**Symptoms:** `/load` exits non-zero with "recovery claim file present" or "stale lock from another host"
+
+**Likely causes:**
+- A prior stale-lock recovery crashed after creating a `.recovery` claim file
+- The lock was created under a different hostname, or this machine's hostname changed
+
+**Next steps:**
+1. Report the exact claim or lock path from stderr
+2. Ask the operator to confirm no process is actively recovering the lock
+3. For `recovery claim file present`, follow the emitted `trash <claim_path>` command only after operator confirmation
+4. For `stale lock from another host`, require operator review of the lock metadata before any cleanup
+
 ### State file not created
 
 **Symptoms:** Next handoff missing `resumed_from` field
@@ -236,7 +265,7 @@ After loading, verify:
 
 **Next steps:**
 1. Check if `<project_root>/.codex/handoffs/.session-state/` exists
-2. Re-run `/load`; pending transactions are recovered before new selection
+2. Re-run `/load`; readable pending transactions are recovered before new selection, while unreadable records stop with an operator diagnostic
 
 ## Anti-Patterns
 

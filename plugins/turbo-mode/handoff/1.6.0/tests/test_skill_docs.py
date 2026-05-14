@@ -85,6 +85,19 @@ def test_load_skill_uses_load_transaction_and_listing_scripts() -> None:
     assert "--archive-dir \"$PROJECT_ROOT/docs/handoffs/archive\"" not in text
 
 
+def test_load_skill_documents_fail_closed_operator_recovery_boundaries() -> None:
+    text = LOAD_SKILL.read_text(encoding="utf-8")
+
+    assert "Readable pending load transactions are recovered before a new load is selected" in text
+    assert "Unreadable or corrupt transaction records block `/load`" in text
+    assert "global fail-closed" in text
+    assert "recovery claim file present" in text
+    assert "stale lock from another host" in text
+    assert "operator review" in text
+    assert "Pending interrupted loads are recovered before a new load is selected" not in text
+    assert "Re-run `/load`; pending transactions are recovered before new selection" not in text
+
+
 def test_defer_skill_uses_plugin_siblings_plain_field() -> None:
     text = (PLUGIN_ROOT / "skills" / "defer" / "SKILL.md").read_text(encoding="utf-8")
     assert (
