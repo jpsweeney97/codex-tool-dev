@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 try:
     from scripts.storage_primitives import (
+        read_json_object as _read_json_object_primitive,
         sha256_regular_file_or_none as _content_sha256,
         write_json_atomic as _write_json_atomic,
     )
@@ -40,6 +41,7 @@ except ModuleNotFoundError:
             scripts_pkg.__path__ = package_path  # type: ignore[attr-defined]
 
     from scripts.storage_primitives import (  # type: ignore[no-redef]
+        read_json_object as _read_json_object_primitive,
         sha256_regular_file_or_none as _content_sha256,
         write_json_atomic as _write_json_atomic,
     )
@@ -798,10 +800,19 @@ def _chain_state_marker_status(
     if candidate["validation_status"] not in {"valid", "expired"}:
         return "unmarked"
     marker_path = layout.primary_state_dir / "markers" / "chain-state-consumed.json"
-    marker = _read_json_object(marker_path)
+    if not marker_path.exists():
+        return "unmarked"
+    try:
+        marker = _read_json_object(marker_path)
+    except ChainStateDiagnosticError as exc:
+        error = exc.payload.get("error", {})
+        code = error.get("code") if isinstance(error, dict) else ""
+        if code in {"chain-state-marker-unreadable", "chain-state-marker-malformed"}:
+            return "marker-unreadable"
+        raise
     entries = marker.get("entries")
     if not isinstance(entries, list):
-        return "unmarked"
+        return "marker-unreadable"
     stable_key = _chain_state_stable_key(candidate)
     if any(
         isinstance(entry, dict) and entry.get("stable_key") == stable_key
@@ -1237,20 +1248,34 @@ def _candidate_for_path(
         scan_mode == "active-selection"
         and location == StorageLocation.LEGACY_ACTIVE
         and content_sha256 is not None
-        and _consumed_legacy_active_matches(project_root, path, content_sha256)
     ):
-        return HandoffCandidate(
-            path=path.resolve(),
-            storage_location=location,
-            artifact_class="consumed-legacy-active",
-            selection_eligibility=SelectionEligibility.NOT_ACTIVE_SELECTION_INPUT,
-            source_git_visibility=git_visibility,
-            source_fs_status=fs_status,
-            filename_timestamp=filename_timestamp,
-            content_sha256=content_sha256,
-            document_profile=document_profile,
-            skip_reason="legacy active source already consumed",
-        )
+        consumed_status = _consumed_legacy_active_status(project_root, path, content_sha256)
+        if consumed_status == "consumed":
+            return HandoffCandidate(
+                path=path.resolve(),
+                storage_location=location,
+                artifact_class="consumed-legacy-active",
+                selection_eligibility=SelectionEligibility.NOT_ACTIVE_SELECTION_INPUT,
+                source_git_visibility=git_visibility,
+                source_fs_status=fs_status,
+                filename_timestamp=filename_timestamp,
+                content_sha256=content_sha256,
+                document_profile=document_profile,
+                skip_reason="legacy active source already consumed",
+            )
+        if consumed_status == "registry-unreadable":
+            return HandoffCandidate(
+                path=path.resolve(),
+                storage_location=location,
+                artifact_class="consumed-legacy-active-registry-unreadable",
+                selection_eligibility=SelectionEligibility.BLOCKED_POLICY_CONFLICT,
+                source_git_visibility=git_visibility,
+                source_fs_status=fs_status,
+                filename_timestamp=filename_timestamp,
+                content_sha256=content_sha256,
+                document_profile=document_profile,
+                skip_reason="consumed legacy active registry unreadable",
+            )
     if (
         location == StorageLocation.LEGACY_ACTIVE
         and content_sha256 is not None
@@ -1644,50 +1669,31 @@ def _reviewed_legacy_active_opt_in_matches(
     return False
 
 
-def _consumed_legacy_active_matches(
+def _consumed_legacy_active_status(
     project_root: Path,
     path: Path,
     content_sha256: str,
-) -> bool:
+) -> str:
     registry_path = (
         get_storage_layout(project_root).primary_state_dir / "consumed-legacy-active.json"
     )
     try:
-        payload = json.loads(registry_path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return False
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ChainStateDiagnosticError({
-            "error": {
-                "code": "consumed-legacy-active-registry-unreadable",
-                "message": f"consumed-legacy-active registry unreadable: {registry_path}",
-            },
-            "registry_path": str(registry_path),
-        }) from exc
-    if not isinstance(payload, dict):
-        raise ChainStateDiagnosticError({
-            "error": {
-                "code": "consumed-legacy-active-registry-malformed",
-                "message": f"consumed-legacy-active registry malformed: {registry_path}",
-            },
-            "registry_path": str(registry_path),
-        })
+        payload = _read_json_object_primitive(registry_path, missing={"entries": []})
+    except (OSError, ValueError):
+        return "registry-unreadable"
     entries = payload.get("entries")
     if not isinstance(entries, list):
-        raise ChainStateDiagnosticError({
-            "error": {
-                "code": "consumed-legacy-active-registry-malformed",
-                "message": f"consumed-legacy-active registry malformed: {registry_path}",
-            },
-            "registry_path": str(registry_path),
-        })
+        return "registry-unreadable"
     expected = {
         "source_root": "project_root",
         "project_relative_source_path": path.relative_to(project_root).as_posix(),
         "storage_location": StorageLocation.LEGACY_ACTIVE,
         "source_content_sha256": content_sha256,
     }
-    return any(_registry_key(entry) == expected for entry in entries if isinstance(entry, dict))
+    for entry in entries:
+        if isinstance(entry, dict) and _registry_key(entry) == expected:
+            return "consumed"
+    return "not-consumed"
 
 
 def _read_markdown_table(path: Path) -> list[dict[str, str]]:

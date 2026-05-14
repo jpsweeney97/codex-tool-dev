@@ -537,9 +537,11 @@ def test_consumed_legacy_active_matches_fails_closed_on_corrupt_registry(
     registry.parent.mkdir(parents=True, exist_ok=True)
     registry.write_text("{truncated", encoding="utf-8")
 
-    with pytest.raises(ChainStateDiagnosticError) as exc_info:
-        discover_handoff_inventory(tmp_path, scan_mode="active-selection")
-    assert exc_info.value.payload["error"]["code"] == "consumed-legacy-active-registry-unreadable"
+    inventory = discover_handoff_inventory(tmp_path, scan_mode="active-selection")
+    candidate = next(candidate for candidate in inventory.candidates if candidate.path == legacy)
+    assert candidate.artifact_class == "consumed-legacy-active-registry-unreadable"
+    assert candidate.selection_eligibility == SelectionEligibility.BLOCKED_POLICY_CONFLICT
+    assert candidate.skip_reason == "consumed legacy active registry unreadable"
 
 
 def test_consumed_legacy_active_matches_fails_closed_on_malformed_registry(
@@ -551,9 +553,11 @@ def test_consumed_legacy_active_matches_fails_closed_on_malformed_registry(
     registry.parent.mkdir(parents=True, exist_ok=True)
     registry.write_text(json.dumps({"entries": "not-a-list"}), encoding="utf-8")
 
-    with pytest.raises(ChainStateDiagnosticError) as exc_info:
-        discover_handoff_inventory(tmp_path, scan_mode="active-selection")
-    assert exc_info.value.payload["error"]["code"] == "consumed-legacy-active-registry-malformed"
+    inventory = discover_handoff_inventory(tmp_path, scan_mode="active-selection")
+    candidate = next(candidate for candidate in inventory.candidates if candidate.path == legacy)
+    assert candidate.artifact_class == "consumed-legacy-active-registry-unreadable"
+    assert candidate.selection_eligibility == SelectionEligibility.BLOCKED_POLICY_CONFLICT
+    assert candidate.skip_reason == "consumed legacy active registry unreadable"
 
 
 def test_read_json_object_fails_closed_on_corrupt_marker(tmp_path: Path) -> None:
@@ -568,3 +572,113 @@ def test_read_json_object_fails_closed_on_corrupt_marker(tmp_path: Path) -> None
             expected_payload_sha256=sha, reason="test",
         )
     assert exc_info.value.payload["error"]["code"] == "chain-state-marker-unreadable"
+
+
+def test_chain_state_recovery_inventory_degrades_on_corrupt_marker(tmp_path: Path) -> None:
+    state_dir = tmp_path / ".codex" / "handoffs" / ".session-state"
+    state_dir.mkdir(parents=True)
+    state_path = state_dir / "handoff-demo-token.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "project": "demo",
+                "resume_token": "token",
+                "archive_path": str(tmp_path / "archive.md"),
+                "created_at": "2026-05-14T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    marker_path = state_dir / "markers" / "chain-state-consumed.json"
+    marker_path.parent.mkdir()
+    marker_path.write_text("{bad", encoding="utf-8")
+
+    inventory = chain_state_recovery_inventory(
+        tmp_path,
+        project_name="demo",
+    )
+
+    assert inventory["total"] == 1
+    assert inventory["candidates"][0]["marker_status"] == "marker-unreadable"
+
+
+def test_active_inventory_degrades_on_corrupt_consumed_legacy_active_registry(
+    tmp_path: Path,
+) -> None:
+    legacy_dir = tmp_path / "docs" / "handoffs"
+    legacy_dir.mkdir(parents=True)
+    legacy = legacy_dir / "2026-05-14_00-00_demo.md"
+    legacy.write_text(
+        "---\nproject: demo\ncreated_at: 2026-05-14T00:00:00Z\nsession_id: s\ntype: handoff\n---\n\n## Goal\nbody\n",
+        encoding="utf-8",
+    )
+    registry = tmp_path / ".codex" / "handoffs" / ".session-state" / "consumed-legacy-active.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text("{bad", encoding="utf-8")
+
+    inventory = discover_handoff_inventory(
+        tmp_path,
+        scan_mode="active-selection",
+    )
+
+    candidates = [candidate for candidate in inventory.candidates if candidate.path == legacy.resolve()]
+    assert len(candidates) == 1
+    assert candidates[0].selection_eligibility == SelectionEligibility.BLOCKED_POLICY_CONFLICT
+    assert candidates[0].skip_reason == "consumed legacy active registry unreadable"
+
+
+def test_chain_state_marker_status_returns_unmarked_when_marker_missing(
+    tmp_path: Path,
+) -> None:
+    state_dir = tmp_path / ".codex" / "handoffs" / ".session-state"
+    state_dir.mkdir(parents=True)
+    state_path = state_dir / "handoff-demo-token.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "project": "demo",
+                "resume_token": "token",
+                "archive_path": str(tmp_path / "archive.md"),
+                "created_at": "2026-05-14T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = chain_state_recovery_inventory(
+        tmp_path,
+        project_name="demo",
+    )
+
+    assert payload["total"] == 1
+    assert payload["candidates"][0]["marker_status"] == "unmarked"
+
+
+def test_chain_state_marker_status_returns_marker_unreadable_when_payload_malformed(
+    tmp_path: Path,
+) -> None:
+    state_dir = tmp_path / ".codex" / "handoffs" / ".session-state"
+    state_dir.mkdir(parents=True)
+    state_path = state_dir / "handoff-demo-token.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "project": "demo",
+                "resume_token": "token",
+                "archive_path": str(tmp_path / "archive.md"),
+                "created_at": "2026-05-14T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    marker_path = state_dir / "markers" / "chain-state-consumed.json"
+    marker_path.parent.mkdir()
+    marker_path.write_text(json.dumps({"entries": "not-a-list"}), encoding="utf-8")
+
+    payload = chain_state_recovery_inventory(
+        tmp_path,
+        project_name="demo",
+    )
+
+    assert payload["total"] == 1
+    assert payload["candidates"][0]["marker_status"] == "marker-unreadable"
