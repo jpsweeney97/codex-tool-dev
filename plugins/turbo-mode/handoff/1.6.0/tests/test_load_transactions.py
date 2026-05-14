@@ -945,6 +945,19 @@ def test_load_lock_blocks_within_timeout(tmp_path: Path) -> None:
     assert lock.exists()
 
 
+def test_load_lock_held_diagnostic_preserves_wrapper_message(tmp_path: Path) -> None:
+    lock = _stage_load_lock(tmp_path, _valid_load_lock_metadata(created_at=datetime.now(UTC)))
+    expected = f"load-handoff failed: project load lock is already held. Got: {str(lock)!r:.100}"
+    with pytest.raises(LoadTransactionError) as exc_info:
+        load_transactions._acquire_lock(
+            lock,
+            project="demo",
+            operation="load",
+            transaction_id="new-lock",
+        )
+    assert str(exc_info.value) == expected
+
+
 def test_load_lock_recovers_from_stale_lock_same_host_after_timeout(tmp_path: Path) -> None:
     source = _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_lock-test.md")
     stale_time = datetime.now(UTC) - timedelta(hours=2)
@@ -1072,6 +1085,35 @@ def test_load_lock_recovery_claim_present_fails_closed_with_live_hint(
     assert "trash" in str(exc_info.value)
     assert lock.exists()
     assert claim_path.exists()
+
+
+def test_load_recovery_claim_diagnostic_preserves_wrapper_message(tmp_path: Path) -> None:
+    lock = _stage_load_lock(
+        tmp_path,
+        _valid_load_lock_metadata(created_at=datetime.now(UTC) - timedelta(hours=2)),
+    )
+    claim_path = lock.with_name(lock.name + ".recovery")
+    claim_payload = {
+        "pid": 12345,
+        "hostname": "test-host",
+        "created_at": datetime.now(UTC).isoformat(),
+        "timeout_seconds": 60,
+    }
+    claim_path.write_text(json.dumps(claim_payload), encoding="utf-8")
+    expected = (
+        "load-handoff failed: recovery claim file present "
+        "(live recoverer: pid=12345 host='test-host'); "
+        f"if no process is actively recovering this lock, run `trash {claim_path}` and retry. "
+        f"Got: {str(claim_path)!r:.100}"
+    )
+    with pytest.raises(LoadTransactionError) as exc_info:
+        load_transactions._acquire_lock(
+            lock,
+            project="demo",
+            operation="load",
+            transaction_id="new-lock",
+        )
+    assert str(exc_info.value) == expected
 
 
 def test_load_lock_recovery_claim_present_fails_closed_with_stale_hint(

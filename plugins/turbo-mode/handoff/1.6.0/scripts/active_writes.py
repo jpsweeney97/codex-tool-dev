@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import socket
 import subprocess
 import sys
 import uuid
@@ -20,13 +19,43 @@ try:
         get_storage_layout,
         read_chain_state,
     )
+    from scripts.storage_primitives import (
+        LockPolicy,
+        acquire_lock as _acquire_lock_with_policy,
+        parse_created_at as _parse_created_at,
+        release_lock as _release_lock,
+        sha256_file_or_none as _sha256_path,
+        write_json_atomic as _write_json_atomic,
+    )
 except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import types
+
+    _script_dir = Path(__file__).resolve().parent
+    sys.path.insert(0, str(_script_dir.parent))
+    scripts_pkg = sys.modules.get("scripts")
+    if scripts_pkg is None or not hasattr(scripts_pkg, "__path__"):
+        scripts_pkg = types.ModuleType("scripts")
+        scripts_pkg.__path__ = [str(_script_dir)]  # type: ignore[attr-defined]
+        sys.modules["scripts"] = scripts_pkg
+    else:
+        package_path = list(scripts_pkg.__path__)  # type: ignore[attr-defined]
+        if str(_script_dir) not in package_path:
+            package_path.insert(0, str(_script_dir))
+            scripts_pkg.__path__ = package_path  # type: ignore[attr-defined]
+
     from scripts.storage_authority import (  # type: ignore[no-redef]
         ChainStateDiagnosticError,
         continue_chain_state,
         get_storage_layout,
         read_chain_state,
+    )
+    from scripts.storage_primitives import (  # type: ignore[no-redef]
+        LockPolicy,
+        acquire_lock as _acquire_lock_with_policy,
+        parse_created_at as _parse_created_at,
+        release_lock as _release_lock,
+        sha256_file_or_none as _sha256_path,
+        write_json_atomic as _write_json_atomic,
     )
 
 
@@ -929,107 +958,11 @@ def _transaction_watermark(state_dir: Path, *, exclude_path: Path | None = None)
     return _stable_hash(parts or ["no-transactions"])
 
 
-def _parse_created_at(value: str | None) -> datetime:
-    if value is None:
-        return datetime.now(UTC)
-    normalized = value.replace("Z", "+00:00")
-    parsed = datetime.fromisoformat(normalized)
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
-
-
-_CLAIM_TIMEOUT_SECONDS = 60
-
-
-def _write_claim_metadata(claim_fd: int) -> None:
-    payload = {
-        "pid": os.getpid(),
-        "hostname": socket.gethostname(),
-        "created_at": datetime.now(UTC).isoformat(),
-        "timeout_seconds": _CLAIM_TIMEOUT_SECONDS,
-    }
-    try:
-        os.write(claim_fd, json.dumps(payload).encode("utf-8"))
-        os.fsync(claim_fd)
-    finally:
-        os.close(claim_fd)
-
-
-def _try_recover_stale_lock(path: Path, *, now: datetime) -> bool:
-    claim_path = path.with_name(path.name + ".recovery")
-    try:
-        claim_fd = os.open(claim_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
-        claim_age_hint = ""
-        try:
-            claim_payload = json.loads(claim_path.read_text(encoding="utf-8"))
-            if isinstance(claim_payload, dict):
-                c_pid = claim_payload.get("pid")
-                c_host = claim_payload.get("hostname")
-                c_created = claim_payload.get("created_at")
-                c_timeout = claim_payload.get("timeout_seconds")
-                if isinstance(c_created, str):
-                    try:
-                        age = (now - _parse_created_at(c_created)).total_seconds()
-                        if isinstance(c_timeout, (int, float)) and age > c_timeout:
-                            claim_age_hint = f" (likely stale: pid={c_pid!r} host={c_host!r} age={age:.0f}s)"
-                        else:
-                            claim_age_hint = f" (live recoverer: pid={c_pid!r} host={c_host!r})"
-                    except ValueError:
-                        pass
-        except (OSError, json.JSONDecodeError, ValueError):
-            claim_age_hint = " (claim metadata unreadable)"
-        raise ActiveWriteError(
-            f"begin-active-write failed: recovery claim file present{claim_age_hint}; "
-            f"if no process is actively recovering this lock, run `trash {claim_path}` and retry. "
-            f"Got: {str(claim_path)!r:.100}"
-        )
-    try:
-        _write_claim_metadata(claim_fd)
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return True
-        except (OSError, json.JSONDecodeError, ValueError) as exc:
-            raise ActiveWriteError(
-                "begin-active-write failed: lock metadata unreadable; manual operator review required. "
-                f"Got: {str(path)!r:.100}"
-            ) from exc
-        if not isinstance(payload, dict):
-            raise ActiveWriteError(
-                "begin-active-write failed: lock metadata malformed; manual operator review required. "
-                f"Got: {str(path)!r:.100}"
-            )
-        created_at = payload.get("created_at")
-        timeout = payload.get("timeout_seconds")
-        hostname = payload.get("hostname")
-        if not isinstance(created_at, str) or not isinstance(timeout, (int, float)) or not isinstance(hostname, str):
-            raise ActiveWriteError(
-                "begin-active-write failed: lock metadata malformed; manual operator review required. "
-                f"Got: {str(path)!r:.100}"
-            )
-        try:
-            created = _parse_created_at(created_at)
-        except ValueError as exc:
-            raise ActiveWriteError(
-                "begin-active-write failed: lock metadata malformed; manual operator review required. "
-                f"Got: {str(path)!r:.100}"
-            ) from exc
-        if (now - created).total_seconds() <= timeout:
-            return False
-        if hostname != socket.gethostname():
-            raise ActiveWriteError(
-                "begin-active-write failed: stale lock from another host; manual operator review required. "
-                f"Got: {(hostname, str(path))!r:.100}"
-            )
-        os.unlink(path)
-        return True
-    finally:
-        try:
-            os.unlink(claim_path)
-        except FileNotFoundError:
-            pass
+_ACTIVE_WRITE_LOCK_POLICY = LockPolicy(
+    operation_label="begin-active-write",
+    lock_kind="project active-write lock",
+    error_factory=ActiveWriteError,
+)
 
 
 def _acquire_lock(
@@ -1039,60 +972,13 @@ def _acquire_lock(
     operation: str,
     transaction_id: str,
 ) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        if _try_recover_stale_lock(path, now=datetime.now(UTC)):
-            try:
-                fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            except FileExistsError as exc2:
-                raise ActiveWriteError(
-                    "begin-active-write failed: project active-write lock is already held. "
-                    f"Got: {str(path)!r:.100}"
-                ) from exc2
-        else:
-            raise ActiveWriteError(
-                "begin-active-write failed: project active-write lock is already held. "
-                f"Got: {str(path)!r:.100}"
-            )
-    metadata = {
-        "project": project,
-        "operation": operation,
-        "transaction_id": transaction_id,
-        "lock_id": transaction_id,
-        "pid": os.getpid(),
-        "hostname": socket.gethostname(),
-        "created_at": datetime.now(UTC).isoformat(),
-        "timeout_seconds": 1800,
-    }
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        json.dump(metadata, handle, indent=2)
-    lock_check = json.loads(path.read_text(encoding="utf-8"))
-    if lock_check.get("lock_id") != transaction_id:
-        raise ActiveWriteError(
-            "begin-active-write failed: project active-write lock is already held. "
-            f"Got: {str(path)!r:.100}"
-        )
-
-
-def _release_lock(path: Path) -> None:
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
-    for directory in (path.parent,):
-        try:
-            directory.rmdir()
-        except OSError:
-            pass
-
-
-def _write_json_atomic(path: Path, payload: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    os.replace(temp_path, path)
+    _acquire_lock_with_policy(
+        path,
+        project=project,
+        operation=operation,
+        transaction_id=transaction_id,
+        policy=_ACTIVE_WRITE_LOCK_POLICY,
+    )
 
 
 def _stable_hash(parts: list[str]) -> str:
@@ -1101,10 +987,3 @@ def _stable_hash(parts: list[str]) -> str:
         digest.update(part.encode("utf-8"))
         digest.update(b"\0")
     return digest.hexdigest()
-
-
-def _sha256_path(path: Path) -> str | None:
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        return None
