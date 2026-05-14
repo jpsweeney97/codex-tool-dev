@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import socket
 import subprocess
+import sys
+import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -398,14 +403,26 @@ def test_tracked_primary_active_load_fails_before_mutation(tmp_path: Path) -> No
     assert source.exists()
     assert source.read_text(encoding="utf-8") == before
     assert not (tmp_path / ".codex" / "handoffs" / "archive").exists()
-    assert not (tmp_path / ".codex" / "handoffs" / ".session-state").exists()
+    assert not (tmp_path / ".codex" / "handoffs" / ".session-state" / "locks" / "load.lock").exists()
 
 
 def test_load_lock_blocks_concurrent_attempt_before_mutation(tmp_path: Path) -> None:
     source = _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_locked.md")
     lock = tmp_path / ".codex" / "handoffs" / ".session-state" / "locks" / "load.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text("busy", encoding="utf-8")
+    lock.write_text(
+        json.dumps({
+            "lock_id": "other-writer",
+            "project": "demo",
+            "operation": "load",
+            "transaction_id": "other-writer",
+            "pid": os.getpid(),
+            "hostname": socket.gethostname(),
+            "created_at": datetime.now(UTC).isoformat(),
+            "timeout_seconds": 1800,
+        }),
+        encoding="utf-8",
+    )
 
     with pytest.raises(LoadTransactionError, match="lock is already held"):
         load_handoff(tmp_path, project_name="demo")
@@ -884,4 +901,367 @@ def test_load_retry_abandons_legacy_archive_without_registry_entry(
         / "copied-legacy-archives.json"
     )
     assert registry_path.exists()
-    assert list_load_recovery_records(tmp_path) == []
+    final_records = list_load_recovery_records(tmp_path)
+    assert final_records == []
+
+
+# ── Lock liveness tests ─────────────────────────────────────────────
+
+
+def _load_lock_path(tmp_path: Path) -> Path:
+    return tmp_path / ".codex" / "handoffs" / ".session-state" / "locks" / "load.lock"
+
+
+def _valid_load_lock_metadata(
+    *,
+    created_at: datetime | None = None,
+    timeout_seconds: int = 1800,
+    hostname: str | None = None,
+) -> dict[str, object]:
+    return {
+        "project": "demo",
+        "operation": "load",
+        "transaction_id": "existing-lock",
+        "lock_id": "existing-lock",
+        "pid": os.getpid(),
+        "hostname": hostname or socket.gethostname(),
+        "created_at": (created_at or datetime.now(UTC)).isoformat(),
+        "timeout_seconds": timeout_seconds,
+    }
+
+
+def _stage_load_lock(tmp_path: Path, metadata: dict[str, object]) -> Path:
+    lock = _load_lock_path(tmp_path)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(json.dumps(metadata), encoding="utf-8")
+    return lock
+
+
+def test_load_lock_blocks_within_timeout(tmp_path: Path) -> None:
+    _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_lock-test.md")
+    lock = _stage_load_lock(tmp_path, _valid_load_lock_metadata(created_at=datetime.now(UTC)))
+    with pytest.raises(LoadTransactionError, match="lock is already held"):
+        load_handoff(tmp_path, project_name="demo")
+    assert lock.exists()
+
+
+def test_load_lock_recovers_from_stale_lock_same_host_after_timeout(tmp_path: Path) -> None:
+    source = _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_lock-test.md")
+    stale_time = datetime.now(UTC) - timedelta(hours=2)
+    _stage_load_lock(tmp_path, _valid_load_lock_metadata(created_at=stale_time))
+    result = load_handoff(tmp_path, project_name="demo")
+    lock = _load_lock_path(tmp_path)
+    assert not lock.exists()
+    assert result.transaction_id != "existing-lock"
+
+
+def test_load_lock_fails_closed_on_unparseable_metadata(tmp_path: Path) -> None:
+    _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_lock-test.md")
+    lock = _load_lock_path(tmp_path)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("not-json", encoding="utf-8")
+    with pytest.raises(LoadTransactionError, match="lock metadata unreadable"):
+        load_handoff(tmp_path, project_name="demo")
+    assert lock.exists()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param([1, 2, 3], id="non-dict"),
+        pytest.param({"project": "demo"}, id="missing-created_at"),
+        pytest.param(
+            {"created_at": "2026-01-01T00:00:00Z", "hostname": socket.gethostname()},
+            id="missing-timeout_seconds",
+        ),
+        pytest.param(
+            {"created_at": "2026-01-01T00:00:00Z", "timeout_seconds": 1800},
+            id="missing-hostname",
+        ),
+        pytest.param(
+            {"created_at": 12345, "timeout_seconds": 1800, "hostname": socket.gethostname()},
+            id="wrong-type-created_at",
+        ),
+        pytest.param(
+            {"created_at": "2026-01-01T00:00:00Z", "timeout_seconds": "nope", "hostname": socket.gethostname()},
+            id="wrong-type-timeout_seconds",
+        ),
+        pytest.param(
+            {"created_at": "2026-01-01T00:00:00Z", "timeout_seconds": 1800, "hostname": 42},
+            id="wrong-type-hostname",
+        ),
+        pytest.param(
+            {"created_at": "not-a-date", "timeout_seconds": 1800, "hostname": socket.gethostname()},
+            id="unparsable-created_at",
+        ),
+    ],
+)
+def test_load_lock_fails_closed_on_malformed_json_metadata(
+    tmp_path: Path,
+    payload: object,
+) -> None:
+    _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_lock-test.md")
+    lock = _load_lock_path(tmp_path)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(LoadTransactionError, match="lock metadata malformed"):
+        load_handoff(tmp_path, project_name="demo")
+    assert lock.exists()
+
+
+def test_load_lock_fails_closed_on_foreign_host(tmp_path: Path) -> None:
+    _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_lock-test.md")
+    stale_time = datetime.now(UTC) - timedelta(hours=2)
+    lock = _stage_load_lock(
+        tmp_path, _valid_load_lock_metadata(created_at=stale_time, hostname="different-host"),
+    )
+    with pytest.raises(LoadTransactionError, match="stale lock from another host"):
+        load_handoff(tmp_path, project_name="demo")
+    assert lock.exists()
+
+
+def test_load_lock_records_new_owner_during_critical_section(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_lock-test.md")
+    stale_time = datetime.now(UTC) - timedelta(hours=2)
+    _stage_load_lock(tmp_path, _valid_load_lock_metadata(created_at=stale_time))
+    lock = _load_lock_path(tmp_path)
+    observed: dict[str, object] = {}
+
+    def inspect_lock(
+        project_root: Path,
+        *,
+        candidate: object,
+        project_name: str | None,
+        resume_token: str | None,
+        transaction_id: str,
+    ) -> load_transactions.LoadResult:
+        if lock.exists():
+            observed["metadata"] = json.loads(lock.read_text(encoding="utf-8"))
+        observed["transaction_id"] = transaction_id
+        raise RuntimeError("stop after lock inspection")
+
+    monkeypatch.setattr(load_transactions, "_load_handoff_locked", inspect_lock)
+    with pytest.raises(RuntimeError, match="stop after lock inspection"):
+        load_handoff(tmp_path, project_name="demo")
+    assert observed["metadata"]["lock_id"] == observed["transaction_id"]  # type: ignore[index]
+    assert observed["metadata"]["lock_id"] != "existing-lock"  # type: ignore[index]
+
+
+def test_load_lock_recovery_claim_present_fails_closed_with_live_hint(
+    tmp_path: Path,
+) -> None:
+    _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_lock-test.md")
+    stale_time = datetime.now(UTC) - timedelta(hours=2)
+    lock = _stage_load_lock(tmp_path, _valid_load_lock_metadata(created_at=stale_time))
+    claim_path = lock.with_name(lock.name + ".recovery")
+    claim_path.write_text(
+        json.dumps({
+            "pid": os.getpid(),
+            "hostname": socket.gethostname(),
+            "created_at": datetime.now(UTC).isoformat(),
+            "timeout_seconds": 60,
+        }),
+        encoding="utf-8",
+    )
+    with pytest.raises(LoadTransactionError, match="recovery claim file present") as exc_info:
+        load_handoff(tmp_path, project_name="demo")
+    assert "(live recoverer:" in str(exc_info.value)
+    assert "trash" in str(exc_info.value)
+    assert lock.exists()
+    assert claim_path.exists()
+
+
+def test_load_lock_recovery_claim_present_fails_closed_with_stale_hint(
+    tmp_path: Path,
+) -> None:
+    _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_lock-test.md")
+    stale_time = datetime.now(UTC) - timedelta(hours=2)
+    lock = _stage_load_lock(tmp_path, _valid_load_lock_metadata(created_at=stale_time))
+    claim_path = lock.with_name(lock.name + ".recovery")
+    stale_claim_time = datetime.now(UTC) - timedelta(minutes=5)
+    claim_path.write_text(
+        json.dumps({
+            "pid": os.getpid(),
+            "hostname": socket.gethostname(),
+            "created_at": stale_claim_time.isoformat(),
+            "timeout_seconds": 60,
+        }),
+        encoding="utf-8",
+    )
+    with pytest.raises(LoadTransactionError, match="recovery claim file present") as exc_info:
+        load_handoff(tmp_path, project_name="demo")
+    assert "(likely stale:" in str(exc_info.value)
+    assert "trash" in str(exc_info.value)
+    assert lock.exists()
+    assert claim_path.exists()
+
+
+def test_load_lock_recovery_claim_unparseable_fails_closed(tmp_path: Path) -> None:
+    _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_lock-test.md")
+    stale_time = datetime.now(UTC) - timedelta(hours=2)
+    lock = _stage_load_lock(tmp_path, _valid_load_lock_metadata(created_at=stale_time))
+    claim_path = lock.with_name(lock.name + ".recovery")
+    claim_path.write_text("not-json", encoding="utf-8")
+    with pytest.raises(LoadTransactionError, match="recovery claim file present") as exc_info:
+        load_handoff(tmp_path, project_name="demo")
+    assert "(claim metadata unreadable)" in str(exc_info.value)
+    assert "trash" in str(exc_info.value)
+    assert lock.exists()
+    assert claim_path.exists()
+
+
+def test_load_lock_recovery_claim_malformed_fails_closed(tmp_path: Path) -> None:
+    _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_lock-test.md")
+    stale_time = datetime.now(UTC) - timedelta(hours=2)
+    lock = _stage_load_lock(tmp_path, _valid_load_lock_metadata(created_at=stale_time))
+    claim_path = lock.with_name(lock.name + ".recovery")
+    claim_path.write_text(
+        json.dumps({"created_at": 12345, "timeout_seconds": "nope"}),
+        encoding="utf-8",
+    )
+    with pytest.raises(LoadTransactionError, match="recovery claim file present"):
+        load_handoff(tmp_path, project_name="demo")
+    assert lock.exists()
+    assert claim_path.exists()
+
+
+def test_load_lock_recovery_claim_removed_then_operation_succeeds(tmp_path: Path) -> None:
+    source = _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_lock-test.md")
+    stale_time = datetime.now(UTC) - timedelta(hours=2)
+    lock = _stage_load_lock(tmp_path, _valid_load_lock_metadata(created_at=stale_time))
+    claim_path = lock.with_name(lock.name + ".recovery")
+    stale_claim_time = datetime.now(UTC) - timedelta(minutes=5)
+    claim_path.write_text(
+        json.dumps({
+            "pid": os.getpid(),
+            "hostname": socket.gethostname(),
+            "created_at": stale_claim_time.isoformat(),
+            "timeout_seconds": 60,
+        }),
+        encoding="utf-8",
+    )
+    with pytest.raises(LoadTransactionError, match="recovery claim file present"):
+        load_handoff(tmp_path, project_name="demo")
+    claim_path.unlink()
+    result = load_handoff(tmp_path, project_name="demo")
+    assert not _load_lock_path(tmp_path).exists()
+    assert result.transaction_id != "existing-lock"
+
+
+def test_load_release_lock_preserves_session_state_dir(tmp_path: Path) -> None:
+    source = _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_lock-test.md")
+    result = load_handoff(tmp_path, project_name="demo")
+    session_state_dir = tmp_path / ".codex" / "handoffs" / ".session-state"
+    assert session_state_dir.exists()
+    assert not _load_lock_path(tmp_path).exists()
+
+
+def test_recover_pending_load_filters_by_project(tmp_path: Path) -> None:
+    source = _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_filter-test.md")
+    transactions_dir = (
+        tmp_path / ".codex" / "handoffs" / ".session-state" / "transactions"
+    )
+    transactions_dir.mkdir(parents=True, exist_ok=True)
+    foreign_record = {
+        "project": "other-project",
+        "operation": "load",
+        "status": "pending",
+        "transaction_id": "foreign-tx",
+        "storage_location": "primary_archive",
+        "source_path": str(source),
+        "archive_path": str(tmp_path / ".codex" / "handoffs" / "archive" / source.name),
+    }
+    foreign_path = transactions_dir / "foreign.json"
+    foreign_path.write_text(json.dumps(foreign_record), encoding="utf-8")
+    result = load_handoff(tmp_path, project_name="demo")
+    assert result.transaction_id != "foreign-tx"
+    foreign_after = json.loads(foreign_path.read_text(encoding="utf-8"))
+    assert foreign_after["status"] == "pending"
+
+
+def test_load_lock_live_contention_with_subprocess(tmp_path: Path) -> None:
+    _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_contention-test.md")
+    plugin_root = str(Path(__file__).resolve().parent.parent)
+
+    lock_path = tmp_path / ".codex" / "handoffs" / ".session-state" / "locks" / "load.lock"
+    lock_path_repr = repr(str(lock_path))
+
+    ready_marker = tmp_path / "ready.marker"
+    release_marker = tmp_path / "release.marker"
+    ready_marker_repr = repr(str(ready_marker))
+    release_marker_repr = repr(str(release_marker))
+
+    code_a = f"""\
+import sys, time
+from pathlib import Path
+from scripts.load_transactions import _acquire_lock, _release_lock
+lock_path = Path({lock_path_repr})
+ready = Path({ready_marker_repr})
+release = Path({release_marker_repr})
+lock_path.parent.mkdir(parents=True, exist_ok=True)
+_acquire_lock(lock_path, project="demo", operation="load", transaction_id="A")
+ready.write_text("ready", encoding="utf-8")
+deadline = time.monotonic() + 30.0
+while not release.exists() and time.monotonic() < deadline:
+    time.sleep(0.01)
+if not release.exists():
+    sys.exit(2)
+_release_lock(lock_path)
+"""
+
+    code_b = f"""\
+import sys
+from pathlib import Path
+from scripts.load_transactions import _acquire_lock
+lock_path = Path({lock_path_repr})
+try:
+    _acquire_lock(lock_path, project="demo", operation="load", transaction_id="B")
+except Exception as exc:
+    print(str(exc), file=sys.stderr)
+    sys.exit(1)
+"""
+
+    proc_a = subprocess.Popen(
+        [sys.executable, "-c", code_a],
+        stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        cwd=plugin_root,
+    )
+    deadline = time.monotonic() + 30.0
+    while not ready_marker.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert ready_marker.exists(), (
+        f"Process A did not become ready. "
+        f"stderr={proc_a.stderr.read().decode() if proc_a.stderr else 'N/A'}"
+    )
+
+    result_b = subprocess.run(
+        [sys.executable, "-c", code_b],
+        capture_output=True,
+        text=True,
+        cwd=plugin_root,
+    )
+    assert result_b.returncode != 0, f"Process B should have failed. stdout={result_b.stdout}"
+    assert "lock is already held" in result_b.stderr, (
+        f"Expected 'lock is already held' in stderr. stderr={result_b.stderr}"
+    )
+
+    release_marker.write_text("release", encoding="utf-8")
+    exit_code = proc_a.wait(timeout=10)
+    assert exit_code == 0, (
+        f"Process A exited with {exit_code}. "
+        f"stderr={proc_a.stderr.read().decode() if proc_a.stderr else 'N/A'}"
+    )
+
+    result_b2 = subprocess.run(
+        [sys.executable, "-c", code_b],
+        capture_output=True,
+        text=True,
+        cwd=plugin_root,
+    )
+    assert result_b2.returncode == 0, (
+        f"Process B should succeed after A released. stderr={result_b2.stderr}"
+    )
