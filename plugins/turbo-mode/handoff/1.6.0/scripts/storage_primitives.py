@@ -51,7 +51,11 @@ def write_json_atomic(path: Path, payload: dict[str, object]) -> None:
 
 def sha256_file(path: Path) -> str:
     """Return the SHA256 digest for a readable file."""
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def sha256_file_or_none(path: Path) -> str | None:
@@ -115,11 +119,10 @@ def release_lock(path: Path) -> None:
         path.unlink()
     except FileNotFoundError:
         pass
-    for directory in (path.parent,):
-        try:
-            directory.rmdir()
-        except OSError:
-            pass
+    try:
+        path.parent.rmdir()
+    except OSError:
+        pass
 
 
 def _held_error(path: Path, policy: LockPolicy) -> Exception:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -10,6 +9,12 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+
+try:
+    from scripts.storage_primitives import sha256_file
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.storage_primitives import sha256_file  # type: ignore[no-redef]
 
 
 class InstalledHostHarnessError(RuntimeError):
@@ -49,8 +54,8 @@ def run_source_harness_isolation_proof(
     manifest_identity = {
         "name": installed_manifest_payload["name"],
         "version": installed_manifest_payload["version"],
-        "source_sha256": _sha256_path(source_manifest),
-        "installed_sha256": _sha256_path(installed_manifest),
+        "source_sha256": sha256_file(source_manifest),
+        "installed_sha256": sha256_file(installed_manifest),
     }
     if source_manifest_payload != installed_manifest_payload:
         raise InstalledHostHarnessError(
@@ -254,10 +259,6 @@ def _reject_real_codex_home(codex_home: Path) -> None:
             "source-harness-isolation-proof failed: real CODEX_HOME mutation blocked. "
             f"Got: {str(codex_home)!r:.100}"
         )
-
-
-def _sha256_path(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _payload_path(payload: dict[str, object], key: str) -> Path:

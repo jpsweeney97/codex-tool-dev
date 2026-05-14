@@ -644,7 +644,7 @@ def abandon_active_write(
             "status": "abandoned",
             "active_path": str(active_path),
             "active_path_exists": active_path.exists(),
-            "active_path_sha256": _sha256_path(active_path) if active_path.exists() else None,
+            "active_path_sha256": _sha256_path(active_path),
             "abandon_reason": reason,
             "updated_at": updated_at,
         })

@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import subprocess
 import sys
 import time
@@ -14,9 +13,11 @@ from pathlib import Path
 
 try:
     from scripts.project_paths import get_state_dir
+    from scripts.storage_primitives import write_json_atomic
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from scripts.project_paths import get_state_dir  # type: ignore[no-redef]
+    from scripts.storage_primitives import write_json_atomic  # type: ignore[no-redef]
 
 
 class AmbiguousResumeStateError(RuntimeError):
@@ -90,9 +91,7 @@ def write_resume_state(state_dir: Path, project: str, archive_path: str, resume_
         archive_path=archive_path,
         created_at=datetime.now(timezone.utc).isoformat(),
     )
-    temp_path = state_path.with_name(f".{state_path.name}.{uuid.uuid4().hex}.tmp")
-    temp_path.write_text(json.dumps(asdict(payload), indent=2), encoding="utf-8")
-    os.replace(temp_path, state_path)
+    write_json_atomic(state_path, asdict(payload))
     return state_path
 
 
