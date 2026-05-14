@@ -28,7 +28,21 @@ try:
         write_json_atomic as _write_json_atomic,
     )
 except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import types
+
+    _script_dir = Path(__file__).resolve().parent
+    sys.path.insert(0, str(_script_dir.parent))
+    scripts_pkg = sys.modules.get("scripts")
+    if scripts_pkg is None or not hasattr(scripts_pkg, "__path__"):
+        scripts_pkg = types.ModuleType("scripts")
+        scripts_pkg.__path__ = [str(_script_dir)]  # type: ignore[attr-defined]
+        sys.modules["scripts"] = scripts_pkg
+    else:
+        package_path = list(scripts_pkg.__path__)  # type: ignore[attr-defined]
+        if str(_script_dir) not in package_path:
+            package_path.insert(0, str(_script_dir))
+            scripts_pkg.__path__ = package_path  # type: ignore[attr-defined]
+
     from scripts.storage_authority import (  # type: ignore[no-redef]
         ChainStateDiagnosticError,
         continue_chain_state,
