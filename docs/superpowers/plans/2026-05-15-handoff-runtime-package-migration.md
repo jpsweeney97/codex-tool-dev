@@ -294,11 +294,29 @@ Run:
 
 ```bash
 mkdir -p plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime
-cp plugins/turbo-mode/handoff/1.6.0/scripts/*.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/active_writes.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/cleanup.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/defer.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/distill.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/handoff_parsing.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/installed_host_harness.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/list_handoffs.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/load_transactions.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/plugin_siblings.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/project_paths.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/provenance.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/quality_check.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/search.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/session_state.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/storage_authority.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/storage_authority_inventory.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/storage_primitives.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/ticket_parsing.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
+cp plugins/turbo-mode/handoff/1.6.0/scripts/triage.py plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/
 touch plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/__init__.py
 ```
 
-Expected: the runtime directory contains copies of all current script modules. Do not commit yet.
+Expected: the runtime directory contains copies of the planned runtime modules only. It must not contain `_bootstrap.py`, because `_bootstrap.py` is a deleted script-package compatibility shim, not a runtime module. Do not commit yet.
 
 - [ ] **Step 2: Remove runtime bootstrap preludes and direct-entrypoint blocks**
 
@@ -311,7 +329,7 @@ In every copied runtime module:
 - Delete `if __name__ == "__main__":` blocks.
 - Keep each module's `main()` function when it already has one.
 
-Expected: runtime modules are import-only, but CLI-capable modules still expose `main()`.
+Expected: runtime modules are import-only, but CLI-capable modules still expose `main()`. `turbo_mode_handoff_runtime/_bootstrap.py` must not exist.
 
 - [ ] **Step 3: Rewrite runtime imports**
 
@@ -572,6 +590,14 @@ Expected: tests fail if the harness proves old `scripts.*` imports or keeps stal
 
 - [ ] **Step 7: Run focused Handoff tests before deleting old scripts**
 
+Before running tests, prove the test import rewrite is complete enough that Task 4 will not discover stale implementation imports after deleting script modules:
+
+```bash
+rg -n "from scripts\.|import scripts\.|patch\(\"scripts\." plugins/turbo-mode/handoff/1.6.0/tests
+```
+
+Expected: no matches outside `tests/test_bootstrap.py` and direct CLI path strings such as `"$PLUGIN_ROOT/scripts/session_state.py"`. If implementation-level imports remain in files such as `test_active_writes.py`, `test_defer.py`, `test_distill.py`, `test_search.py`, or `test_triage.py`, rewrite them before committing this task.
+
 Run:
 
 ```bash
@@ -587,7 +613,7 @@ uv run --directory plugins/turbo-mode/handoff/1.6.0 pytest \
   -q
 ```
 
-Expected: all selected tests pass with runtime-based implementation tests while old scripts still exist.
+Expected: all selected tests pass with runtime-based implementation tests while old scripts still exist, and the stale-import check above has no unexpected matches.
 
 - [ ] **Step 8: Commit the test migration**
 
@@ -900,7 +926,8 @@ Expected: commit contains only docs, inventory, and metadata-test updates.
 - Modify: `plugins/turbo-mode/tools/refresh/tests/test_planner.py`
 - Modify: `plugins/turbo-mode/tools/refresh/smoke.py`
 - Modify: `plugins/turbo-mode/tools/migration/cache_refresh_wrapper.py`
-- Modify: fixtures only if tests require it
+- Modify: `plugins/turbo-mode/tools/refresh/tests/fixtures/handoff_state_helper_doc_migration.json`
+- Modify: other fixtures only if tests prove additional fixture drift
 
 - [ ] **Step 1: Classify runtime modules as Handoff source surface**
 
@@ -950,6 +977,7 @@ Update tests so:
 - `turbo_mode_handoff_runtime/*.py` is not executable or command-bearing.
 - `scripts/active_writes.py`, `scripts/storage_authority.py`, `scripts/quality_check.py`, and other deleted script paths are no longer expected live surfaces.
 - first-refresh added runtime package files classify as `coverage-gap-blocked`.
+- `handoff_state_helper_doc_migration.json` embedded source/cache text no longer contains implementation-level `from scripts.*` imports that would fail the final stale-reference gate. If the fixture intentionally preserves a historical `scripts.*` reference, add a specific explanatory exception to the final stale-reference expected output instead of relying on the generic docs exception.
 
 - [ ] **Step 6: Run refresh test slice**
 
