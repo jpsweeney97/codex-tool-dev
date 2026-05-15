@@ -14,20 +14,20 @@ codex plugin install handoff@turbo-mode
 Or install directly from the development repo:
 
 ```bash
-codex plugin install ./packages/plugins/handoff
+codex plugin install ./plugins/turbo-mode/handoff/1.6.0
 ```
 
-**Requirements:** Python 3.11+, PyYAML 6.0+, `trash` command (for cleanup).
+**Requirements:** Python 3.11+, PyYAML 6.0+. The optional `trash` command is used for recoverable cleanup when available; cleanup falls back to `unlink` with warnings if `trash` is unavailable or fails.
 
 ## What It Does
 
 | Capability | Skills | Description |
 |------------|--------|-------------|
-| **Session save/resume** | `/save`, `/load`, `/quicksave` | Create structured handoff documents capturing session state. Resume later with full context. Quicksave for fast checkpoints under context pressure. |
+| **Session save/resume** | `/save`, `/load`, `/quicksave`, `/summary` | Create structured handoff documents capturing session state. Resume later with full context. Quicksave for fast checkpoints and summary for medium-depth session capture. |
 | **Deferred work tracking** | `/defer`, `/triage` | Extract work items from conversation into structured tickets. Audit ticket health, detect orphaned items, organize by priority. |
 | **Knowledge extraction** | `/distill` | Synthesize durable insights from handoff documents into a project learnings file with deduplication. |
 | **Handoff search** | `/search` | Query past handoffs by keyword or regex across active and archived files. |
-| **State maintenance** | `/load`, `/save`, `/quicksave` | Manage chain state files during explicit handoff workflows. |
+| **State maintenance** | `/load`, `/save`, `/quicksave`, `/summary` | Manage chain state files during explicit handoff workflows. |
 
 ## Components
 
@@ -38,6 +38,7 @@ codex plugin install ./packages/plugins/handoff
 | **save** | `/save`, "wrap this up", "new session", "handoff" | Full session report (13 sections, 400+ lines). Writes to `<project_root>/.codex/handoffs/`. |
 | **load** | `/load`, "continue from where we left off" | Resume from a previous handoff. Archives the source file, writes a state file for chain linking. |
 | **quicksave** | `/quicksave`, "checkpoint", "save state" | Lightweight checkpoint (22-55 lines, 5 sections). Warns on 3rd consecutive checkpoint. |
+| **summary** | `/summary`, "summary", "summarize" | Medium-depth session summary with project arc context. Writes to `<project_root>/.codex/handoffs/`. |
 | **defer** | `/defer`, "track these for later", "create tickets" | Extract deferred work items from conversation into ticket files in `docs/tickets/`. |
 | **triage** | `/triage`, "what's in the backlog", "any open tickets" | Audit open tickets by priority. Detect orphaned handoff items not tracked by tickets. |
 | **distill** | `/distill`, "extract knowledge", "graduate knowledge" | Extract durable insights from handoffs into `docs/learnings/learnings.md` with SHA256 deduplication. |
@@ -91,7 +92,7 @@ Every handoff/checkpoint uses YAML frontmatter with these fields:
 | `session_id` | Yes | UUID | Session that created the document |
 | `project` | Yes | string | Project name |
 | `title` | Yes | string | Descriptive title |
-| `type` | Yes | `handoff` or `checkpoint` | Document type |
+| `type` | Yes | `handoff`, `checkpoint`, or `summary` | Document type |
 | `branch` | No | string | Git branch name |
 | `commit` | No | string | Git commit hash |
 | `resumed_from` | No | path | Previous handoff (chain protocol) |
@@ -248,24 +249,28 @@ Add new implementation under `turbo_mode_handoff_runtime/<name>.py`, and keep ru
 ### Setup
 
 ```bash
-cd packages/plugins/handoff
+cd plugins/turbo-mode/handoff/1.6.0
 uv sync
 ```
 
 ### Testing
 
-354 tests across 10 test modules (2:1 test-to-code ratio):
+To inspect the current test inventory:
 
 ```bash
-uv run pytest                          # All tests
-uv run pytest tests/test_defer.py      # Single module
-uv run pytest tests/test_defer.py -v   # Verbose
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/handoff/1.6.0 pytest --collect-only -q -p no:cacheprovider
 ```
 
-Or from the repo root:
+To run the suite from the repo root:
 
 ```bash
-uv run --package handoff-plugin pytest
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/handoff/1.6.0 pytest -q -p no:cacheprovider
+```
+
+To run a single module from the plugin directory:
+
+```bash
+uv run pytest tests/test_defer.py -q
 ```
 
 ### Linting

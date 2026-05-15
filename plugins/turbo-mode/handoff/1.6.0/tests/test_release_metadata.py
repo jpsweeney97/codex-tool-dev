@@ -44,6 +44,20 @@ def test_versions_are_aligned() -> None:
     assert pyproject["project"]["version"] == "1.6.0"
 
 
+def test_readme_documents_current_summary_and_development_commands() -> None:
+    text = (PLUGIN_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "codex plugin install ./plugins/turbo-mode/handoff/1.6.0" in text
+    assert "cd plugins/turbo-mode/handoff/1.6.0" in text
+    assert "uv run --directory plugins/turbo-mode/handoff/1.6.0 pytest" in text
+    assert "pytest --collect-only -q" in text
+    assert "/summary" in text
+    assert "`handoff`, `checkpoint`, or `summary`" in text
+    assert "./packages/plugins/handoff" not in text
+    assert "cd packages/plugins/handoff" not in text
+    assert "uv run --package handoff-plugin pytest" not in text
+    assert "354 tests across 10 test modules" not in text
+
+
 def test_docs_do_not_claim_universal_gitignore_policy() -> None:
     for path in POLICY_DOCS:
         text = path.read_text(encoding="utf-8")
