@@ -710,7 +710,7 @@ def test_allocate_active_path_treats_tracked_missing_path_as_occupied(tmp_path: 
         capture_output=True,
         text=True,
     )
-    subprocess.run(["trash", str(existing)], check=True, capture_output=True, text=True)
+    existing.unlink()
 
     active_path = active_writes.allocate_active_path(
         tmp_path,
