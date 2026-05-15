@@ -49,7 +49,7 @@ def test_runtime_modules_do_not_import_scripts_namespace() -> None:
                 for alias in node.names:
                     assert not alias.name.startswith("scripts"), path
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                assert not node.value.startswith("scripts."), path
+                assert not node.value.startswith("turbo_mode_handoff_runtime."), path
 
 
 def test_runtime_modules_are_import_only() -> None:

@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-import scripts.session_state as session_state
-from scripts.session_state import (
+import turbo_mode_handoff_runtime.session_state as session_state
+from turbo_mode_handoff_runtime.session_state import (
     AmbiguousResumeStateError,
     allocate_archive_path,
     clear_resume_state,

@@ -11,9 +11,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-import scripts.active_writes as active_writes
-import scripts.session_state as session_state
-from scripts.storage_authority import chain_state_recovery_inventory, read_chain_state
+import turbo_mode_handoff_runtime.active_writes as active_writes
+import turbo_mode_handoff_runtime.session_state as session_state
+from turbo_mode_handoff_runtime.storage_authority import chain_state_recovery_inventory, read_chain_state
 
 
 @pytest.mark.parametrize(
@@ -2077,7 +2077,7 @@ def test_active_write_lock_live_contention_with_subprocess(tmp_path: Path) -> No
     code_a = f"""\
 import sys, time
 from pathlib import Path
-from scripts.active_writes import _acquire_lock, _release_lock
+from turbo_mode_handoff_runtime.active_writes import _acquire_lock, _release_lock
 lock_path = Path({lock_path_repr})
 ready = Path({ready_marker_repr})
 release = Path({release_marker_repr})
@@ -2095,7 +2095,7 @@ _release_lock(lock_path)
     code_b = f"""\
 import sys
 from pathlib import Path
-from scripts.active_writes import _acquire_lock
+from turbo_mode_handoff_runtime.active_writes import _acquire_lock
 lock_path = Path({lock_path_repr})
 try:
     _acquire_lock(lock_path, project="demo", operation="save", transaction_id="B")

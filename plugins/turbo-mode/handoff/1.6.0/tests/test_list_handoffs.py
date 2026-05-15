@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scripts.list_handoffs import main as list_main
+from turbo_mode_handoff_runtime.list_handoffs import main as list_main
 
 
 def _handoff(path: Path, title: str, branch: str = "main") -> Path:

@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import scripts.load_transactions as load_transactions
-from scripts.load_transactions import (
+import turbo_mode_handoff_runtime.load_transactions as load_transactions
+from turbo_mode_handoff_runtime.load_transactions import (
     LoadTransactionError,
     TrackedRuntimeSourceError,
     list_load_recovery_records,
@@ -1239,7 +1239,7 @@ def test_load_lock_live_contention_with_subprocess(tmp_path: Path) -> None:
     code_a = f"""\
 import sys, time
 from pathlib import Path
-from scripts.load_transactions import _acquire_lock, _release_lock
+from turbo_mode_handoff_runtime.load_transactions import _acquire_lock, _release_lock
 lock_path = Path({lock_path_repr})
 ready = Path({ready_marker_repr})
 release = Path({release_marker_repr})
@@ -1257,7 +1257,7 @@ _release_lock(lock_path)
     code_b = f"""\
 import sys
 from pathlib import Path
-from scripts.load_transactions import _acquire_lock
+from turbo_mode_handoff_runtime.load_transactions import _acquire_lock
 lock_path = Path({lock_path_repr})
 try:
     _acquire_lock(lock_path, project="demo", operation="load", transaction_id="B")
