@@ -29,8 +29,19 @@ def _load_bootstrap_by_path() -> None:
     import importlib.util
 
     bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
-    if "scripts._bootstrap" in sys.modules:
-        return
+    cached = sys.modules.get("scripts._bootstrap")
+    if cached is not None:
+        cached_file = getattr(cached, "__file__", None)
+        try:
+            cached_path = Path(cached_file).resolve() if cached_file is not None else None
+        except (OSError, TypeError):
+            cached_path = None
+        if cached_path == bootstrap_path:
+            ensure = getattr(cached, "ensure_plugin_scripts_package", None)
+            if callable(ensure):
+                ensure()
+                return
+        sys.modules.pop("scripts._bootstrap", None)
     spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
     if spec is None or spec.loader is None:
         raise ImportError(
