@@ -1,7 +1,7 @@
 # Tech Debt Audit — Handoff Plugin 1.6.0
 
 **Target:** `plugins/turbo-mode/handoff/1.6.0/` · **Date:** 2026-05-15 · **Scope:** subsystem · **Stakes:** medium
-**Method:** 6 parallel category-scoped auditors (code-health, architecture-drift, dependency, test-debt, operational, knowledge) + lead synthesis.
+**Method:** 6 parallel category-scoped auditors (code-health, architecture-drift, dependency, test-debt, operational, knowledge) + lead synthesis. The per-auditor raw findings and synthesis ledger lived in `.tech-debt-audit-workspace/`, which is **gitignored, untracked scratch — not part of this tracked record**. Every claim that matters is restated with `file:line` anchors in this self-contained report; the report does not depend on the scratch directory existing.
 
 ---
 
@@ -11,8 +11,8 @@
 |---|---|
 | Raw findings | 38 |
 | Canonical findings | 20 (10 merge clusters) |
-| Severity | **P0: 0** · P1: 7 · P2: 11 · P3: 2 |
-| Buckets | quick-wins: 5 · high-leverage: 2 · strategic: 1 · watch: 12 |
+| Severity | **P0: 0** · P1: 6 · P2: 11 · P3: 3 |
+| Buckets | quick-wins: 4 · high-leverage: 2 · strategic: 1 · watch: 13 |
 | Corroborated | 6 (independent or cross-lens) |
 | Contradictions | 3 resolved, 0 escalated |
 | Auditors failed | 0 (6/6 delivered) |
@@ -22,7 +22,7 @@
 
 **Why the watch list is 60% (and why that's not inflation):** The rubric flags >40% watch as "logging observations." Here it is the opposite — it is an accurate portrait of a clean codebase. The P0/P1 surface is genuinely small; most real debt is latent (P2) and several watch items are *cheap companions* to the quick-wins (test-suite-readiness pairs with the CI fix; runbook/ADR pair with the bus-factor fix). The watch list below is grouped by companion relationship, not dumped flat.
 
-**Severity inflation check:** 0% P0, 35% P1 — within tolerance. Two silent-failure findings (SY-12, SY-13) were *raised* P2→P1 with explicit rationale, not inflated; one structural finding (SY-1) raised P2→P1 on corroboration.
+**Severity inflation check:** 0% P0, 30% P1 — within tolerance. One silent-failure finding (SY-13) was *raised* P2→P1 with explicit rationale; one structural finding (SY-1) raised P2→P1 on corroboration. **Correction:** SY-12's earlier P2→P1 raise has been **retracted** and the finding demoted to P3/watch — see QW5. `quality_check.py` is not a wired gate in 1.6.0, so the "fails open" rationale that justified the raise does not apply at this version.
 
 ---
 
@@ -54,17 +54,17 @@
 ### QW1 — Add CI to run the existing test suite `[SY-3]`
 - **category:** test-debt + operational (independent convergence — two auditors, two framings)
 - **anchor:** repo: no `.github/workflows/` anywhere
-- **problem:** 579 tests / ~12k LOC covering the data-integrity paths, with **zero** automation. The runtime-package migration (6 commits) and two BREAKING changes shipped with no regression gate.
+- **problem:** A substantial pytest suite covering the data-integrity paths, with **zero** automation. *(Do not hard-code a count here: it drifts. As of this audit, `pytest --collect-only -q` reports ~600 tests across 23 modules; the README's "354 / 10 modules" is already stale — see QW3. The exact number is whatever `--collect-only` currently returns.)* The runtime-package migration (6 commits) and two BREAKING changes shipped with no regression gate.
 - **impact:** Every change to `active_writes.py` / `load_transactions.py` / `storage_authority.py` is unverified until someone runs pytest by hand. Highest-leverage gap in the audit — it gates safe execution of every refactor below.
 - **recommendation:** GitHub Actions workflow running the bytecode-safe form `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/... uv run --directory plugins/turbo-mode/handoff/1.6.0 pytest -q` on push/PR for the subtree. Bundle the cheap companions WL7/WL8/WL9 (markers, flake-hardening, coverage) so the pipeline is actually useful.
 - **effort:** small · **leverage:** high (unblocks regression detection for all data-integrity findings; safety net for SY-1/SY-2)
 
 ### QW2 — Reconcile `plugin.json` version with the `[Unreleased]` CHANGELOG `[SY-4]`
 - **category:** dependency + operational + knowledge (triple independent convergence)
-- **anchor:** `.codex-plugin/plugin.json:3`, `CHANGELOG.md:7-19`
+- **anchor:** `.codex-plugin/plugin.json:3`, `pyproject.toml:3`, `uv.lock:16`, `CHANGELOG.md:7-19`, `tests/test_release_metadata.py:38-44`
 - **problem:** `plugin.json` says `1.6.0` while `[Unreleased]` carries two BREAKING changes (storage path move, module namespace move) already present in source.
 - **impact:** A *published* plugin whose version label misrepresents shipped behavior. Any version-gated tooling (refresh tooling, marketplace gates) draws wrong conclusions; rollback has no clean baseline.
-- **recommendation:** Cut `1.7.0` (semantically correct — these are BREAKING), stamp the CHANGELOG section, bump `plugin.json` + `uv.lock`. Or, if truly unshipped, roll source back. Do not leave BREAKING changes stranded under an unbumped published version.
+- **recommendation:** Cut `1.7.0` (semantically correct — these are BREAKING) and bump it **consistently across all version surfaces**: `.codex-plugin/plugin.json`, `pyproject.toml`, the `handoff-plugin` entry in `uv.lock`, plus a stamped `CHANGELOG` section. **Critical second-order effect:** `tests/test_release_metadata.py::test_versions_are_aligned()` hard-codes `== "1.6.0"` for *both* `plugin.json` and `pyproject.toml`, so any bump turns that test **red** unless the assertions are updated in the same change. A partial bump (e.g. `plugin.json` + `uv.lock` only, as an earlier draft of this item suggested) leaves `pyproject.toml` stale **and** breaks the suite. Or, if truly unshipped, roll source back. Do not leave BREAKING changes stranded under an unbumped published version, and do not bump partially.
 - **effort:** small · **leverage:** medium
 
 ### QW3 — Fix the broken README install/dev paths (+ missing `/summary`, stale count) `[SY-5]`
@@ -83,13 +83,14 @@
 - **recommendation:** Define once (export from `storage_primitives.py`), import in both sites. ~5 minutes. Add a one-line test asserting both sites resolve to the same value.
 - **effort:** small · **leverage:** medium · *(severity raised P2→P1: compounding correctness debt in a published data tool with no guarding test)*
 
-### QW5 — Make the `quality_check.py` gating hook fail loud on its own errors `[SY-12]`
-- **category:** code-health (silent failure)
+### QW5 — *(Reclassified → Watch / P3)* `quality_check.py` swallows its own validation errors `[SY-12]`
+- **category:** code-health (silent failure) — **latent, conditional on future hook wiring**
 - **anchor:** `quality_check.py:419-426, 431-443`
-- **problem:** Two `except Exception: return 0` blocks mean the handoff-quality gate returns *success* when the validator itself raises or serialization fails.
-- **impact:** The gate currently cannot distinguish "validated clean" from "validator crashed" — its correctness guarantee is already void. Malformed handoffs pass silently → unrecoverable context loss with no signal.
-- **recommendation:** Let unexpected `validate()` exceptions propagate (or re-raise as a named error); emit a fallback plain-text error on serialization failure. Reserve `except Exception: return 0` for the intentional `cleanup.py` never-block pattern only.
-- **effort:** small · **leverage:** medium · *(severity raised P2→P1: a gate that fails open is compounding correctness debt, not "fine today")*
+- **correction:** The original entry called this "the handoff-quality gate," claimed its "correctness guarantee is already void," and raised it P2→P1 as "a gate that fails open." **That framing is wrong for 1.6.0 and is retracted.** `quality_check.py` is *not* a wired gate: `hooks/hooks.json` is `{"hooks": {}}`; `README.md` (§Hooks, §Runtime-only Helpers, Design Principles) states it is non-gating and not wired into any skill or hook; no `SKILL.md` or `hooks.json` references it; and `tests/test_release_metadata.py::test_readme_does_not_publish_bundled_hook_launcher_contract` *actively enforces* that it is not published as a hook. There is no gate to fail open in this release.
+- **problem (still true, as latent code debt):** Two `except Exception: return 0` blocks mean that *if this helper is ever wired as a PostToolUse gate*, a raising `validate()` or a serialization failure would return success and let malformed handoffs pass silently.
+- **impact:** None at 1.6.0 — dormant and unreachable as a gate. The risk is purely conditional: it materializes only if a future release wires this helper into a hook without first hardening it.
+- **recommendation:** Track as a watch item paired with any future hook-enablement work. When/if wired: let unexpected `validate()` exceptions propagate (or re-raise as a named error) and emit a fallback plain-text error on serialization failure. **No action required for 1.6.0.**
+- **effort:** small · **leverage:** low (latent) · **severity:** P3 · *(retained in this section under its original QW5 reference for traceability; it is no longer a quick win and is counted under the Watch List in the snapshot)*
 
 ---
 
@@ -152,6 +153,7 @@
 - **WL2 `[SY-7]`** Brittle tests — 108 exact JSON-field asserts + a full-string error equality. *Trigger: before the next operation-state schema change / `schema_version` bump.*
 - **WL4 `[SY-10]`** Unbounded growth — `transactions/`/`markers/` dirs + `rglob` scans, no pruning. *Trigger: when any project's `.session-state/transactions/` exceeds ~hundreds of files or `/load` latency becomes perceptible.*
 - **WL12 `[SY-15]`** Legacy `docs/handoffs/` fallback has no exit condition (P3). *Trigger: add the 5-min removal-condition comment now; remove the shim at 2.0 or when no user repos retain `docs/handoffs/`.*
+- **WL13 `[SY-12]`** `quality_check.py` swallows its own `validate()`/serialization exceptions and returns 0 (P3) — **reclassified from QW5**; dormant because it is *not* a wired gate in 1.6.0 (`hooks.json` empty; README/tests enforce non-wiring). *Trigger: only if a future release wires this helper into a PostToolUse hook — harden it in the same change. No action for 1.6.0.*
 
 ---
 
@@ -172,10 +174,10 @@ HL2's cure (CONTRIBUTING, architecture docs, eventual non-author review on `stor
 
 ## 8. Open Questions / Next Probes
 
-1. **Is the `[Unreleased]` block actually shipped or genuinely pending?** QW2's remediation forks on this. The git history (runtime migration landed 2026-05-15, after the 1.6.0 tag) suggests shipped — confirm before choosing "cut 1.7.0" vs "roll back source."
+1. **Is the `[Unreleased]` block actually shipped or genuinely pending?** QW2's remediation forks on this. Note: there is **no `1.6.0` git tag in this checkout** (`git tag --list` is empty), so "after the 1.6.0 tag" is not a usable signal — the earlier draft's tag-based dating was unsupported. What *is* observable: the BREAKING source changes (storage-path move, module-namespace move) are already present in the working tree and the changelog, which points toward shipped. Confirm against the actual release/publish record before choosing "cut 1.7.0" vs "roll back source."
 2. **Is the facade (HL1) intentional API isolation or migration residue?** AD-7's naming-drift evidence points to residue. A 1-line confirmation from the author changes HL1 from "remove" to "enforce" — worth resolving before the work starts.
 3. **What is the real handoff-history scale in practice?** SY-10's severity (watch vs promote) depends on whether any real project has hundreds of sessions. If long-lived projects are the norm, the unbounded-growth cliff moves up.
 4. **Should `docs/audits/` be the durable home for these reports?** This used the skill default. The repo treats `docs/superpowers/plans/` and `docs/tickets/` as tracked control docs — confirm the audit artifact location fits the repo's documentation policy.
 
 ---
-*Workspace artifacts (scratch): `.tech-debt-audit-workspace/` — per-auditor findings, framing, and synthesis ledger. Safe to delete after reviewing this report.*
+*Workspace artifacts: `.tech-debt-audit-workspace/` is **gitignored, untracked, local-only scratch** (per-auditor findings, framing, synthesis ledger). It is not a durable evidence bundle, will not exist in a fresh clone, and must not be cited as audit evidence — this report stands alone on its own anchored claims. The scratch directory is safe to delete.*
