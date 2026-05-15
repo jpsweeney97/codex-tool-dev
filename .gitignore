@@ -9,6 +9,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 tmp/
+.tech-debt-audit-workspace/
 *settings*.json
 # Handoff plugin runtime/resume artifacts are local by default.
 docs/handoffs/.session-state/
