@@ -97,6 +97,21 @@ def test_storage_layout_uses_codex_handoffs_as_primary(tmp_path: Path) -> None:
     )
 
 
+def test_storage_authority_does_not_export_active_write_facade() -> None:
+    import turbo_mode_handoff_runtime.storage_authority as storage_authority
+
+    removed_exports = {
+        "begin_active_write",
+        "allocate_active_path",
+        "write_active_handoff",
+        "list_active_writes",
+        "abandon_active_write",
+        "recover_active_write_transaction",
+    }
+    for name in removed_exports:
+        assert not hasattr(storage_authority, name)
+
+
 def test_active_selection_blocks_unproven_legacy_active_markdown(tmp_path: Path) -> None:
     _git_init(tmp_path)
     primary = _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_primary.md", "Primary")
