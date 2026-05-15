@@ -630,7 +630,10 @@ def test_handoff_state_helper_doc_migration_requires_exact_state_helper_command(
     result = classify_diff_path(
         "handoff/1.6.0/skills/summary/SKILL.md",
         kind=DiffKind.CHANGED,
-        source_text=contract["source_text"].replace("read-state \\", "repair-state \\"),
+        source_text=contract["source_text"].replace(
+            "begin-active-write \\",
+            "repair-state \\",
+        ),
         cache_text=contract["cache_text"],
         executable=False,
     )

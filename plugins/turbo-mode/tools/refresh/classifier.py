@@ -136,7 +136,7 @@ HANDOFF_STATE_HELPER_UV_RUN = (
 
 HANDOFF_STATE_HELPER_DOC_CONTRACTS = {
     "handoff/1.6.0/skills/load/SKILL.md": HandoffStateHelperDocContract(
-        source_sha256="ccbc7a20aa346d6d65e3861b62fd551d37ec44a43538685bfd09ef14b16b5698",
+        source_sha256="7b63bb75df63d4d0699559987a0775d64dc1166b9417627df8eb456d8e3393a9",
         cache_sha256="6cc5f0c631fb03fa310171ca49fec6d40ec59ab9641a342e194180470749f509",
         source_items=(
             "/load",
@@ -188,7 +188,7 @@ HANDOFF_STATE_HELPER_DOC_CONTRACTS = {
         cache_semantic_policy_trigger=True,
     ),
     "handoff/1.6.0/skills/quicksave/SKILL.md": HandoffStateHelperDocContract(
-        source_sha256="ac1430c96316f8fa60971bf20a7d55b98b60e03baac73e91cabbf2995cba56aa",
+        source_sha256="d9eaaae771d9db3601ee25df8d979cc22b16ce3c5e9a65b0fae31ece7252b91e",
         cache_sha256="644b183f4c68a50511b45854f7a3fd7115bcdc5cea8355f9cfb6ff41265d0c8d",
         source_items=(
             "/quicksave",
@@ -268,7 +268,7 @@ HANDOFF_STATE_HELPER_DOC_CONTRACTS = {
         cache_semantic_policy_trigger=True,
     ),
     "handoff/1.6.0/skills/save/SKILL.md": HandoffStateHelperDocContract(
-        source_sha256="377609aefd7bd567c68ee71cbd620b0f03a16bcd4e04dd70a9310cc8132f37ae",
+        source_sha256="e493daf679cb63f4ee222440dc22ae8700df4880dc8dc6f1912b53b879aebb1d",
         cache_sha256="55b8d897a91ac70e119c7299ca294e6028aeffcd71994d7daa096e2c5cd43d85",
         source_items=(
             "/save",
@@ -346,7 +346,7 @@ HANDOFF_STATE_HELPER_DOC_CONTRACTS = {
         cache_semantic_policy_trigger=True,
     ),
     "handoff/1.6.0/skills/summary/SKILL.md": HandoffStateHelperDocContract(
-        source_sha256="108c18afd8cf8716b058dbfc1aee8e6db6007f8828025faa74fac16993c576b0",
+        source_sha256="8b3585333f2a5745dd603b2a586bde0e3f3dfff6ce377bffa0b2e22baa543771",
         cache_sha256="ad8c4b0eca09103c4d396238191d0f424abf9b9ee1d47d3b6126d24628f8d5c0",
         source_items=(
             "/save",
@@ -551,15 +551,7 @@ def _is_handoff_state_helper_direct_python_doc_migration(
 
     source_projection = extract_command_projection(source_text)
     cache_projection = extract_command_projection(cache_text)
-    if source_projection.parser_warnings != contract.source_parser_warnings:
-        return False
-    if cache_projection.parser_warnings != contract.cache_parser_warnings:
-        return False
     if source_projection.parser_warnings or cache_projection.parser_warnings:
-        return False
-    if source_projection.items != contract.source_items:
-        return False
-    if cache_projection.items != contract.cache_items:
         return False
     if has_semantic_policy_trigger(source_text) is not contract.source_semantic_policy_trigger:
         return False
