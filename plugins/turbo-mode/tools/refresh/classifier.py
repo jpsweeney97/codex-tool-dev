@@ -22,10 +22,15 @@ DOC_ROOT_PATTERNS = (
     "ticket/1.4.0/references/**",
 )
 
+HANDOFF_RUNTIME_SOURCE_PATTERNS = (
+    "handoff/1.6.0/turbo_mode_handoff_runtime/*.py",
+)
+
 GUARDED_ONLY_PATTERNS = (
     "handoff/1.6.0/hooks/hooks.json",
     "handoff/1.6.0/hooks/*.py",
     "handoff/1.6.0/scripts/defer.py",
+    *HANDOFF_RUNTIME_SOURCE_PATTERNS,
     "ticket/1.4.0/hooks/hooks.json",
     "ticket/1.4.0/hooks/*.py",
     "ticket/1.4.0/scripts/ticket_engine_runner.py",
@@ -65,7 +70,6 @@ FAST_SAFE_PATTERNS = (
 COVERAGE_GAP_PATTERNS = (
     "handoff/1.6.0/.codex-plugin/plugin.json",
     "handoff/1.6.0/scripts/distill.py",
-    "handoff/1.6.0/scripts/ticket_parsing.py",
     "ticket/1.4.0/.codex-plugin/plugin.json",
 )
 
@@ -428,12 +432,12 @@ HANDOFF_STATE_HELPER_DOC_CONTRACTS = {
 HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS = {
     "handoff/1.6.0/CHANGELOG.md": HandoffStorageGate5RefreshContract(
         kind=DiffKind.CHANGED,
-        source_sha256="eac73d2d3e8189d2bc4d5fcbf7f82cf4a9602efce8d9fb495f56461e339e973c",
+        source_sha256="e845865ad7e42bbb2a2de97ad9cc41c97df22b7f72ec56e6960e43612276d128",
         cache_sha256="0ddec803b46490b5fbc73e19b5f3a02854d47329ff22c5f74ec47b3d049f7f9d",
     ),
     "handoff/1.6.0/README.md": HandoffStorageGate5RefreshContract(
         kind=DiffKind.CHANGED,
-        source_sha256="86a2ead8d5c598613394921989a0add333211cac875fdd53d598ad454cf03615",
+        source_sha256="413f53d6c13e7bf5a688adb58f55ccf3e0c3140ed889014155e76d2d885d3529",
         cache_sha256="00c3a9bce7a07ccff1ac6a138609045882662d04c059811ff16fbd24862d1aa8",
     ),
     "handoff/1.6.0/references/format-reference.md": HandoffStorageGate5RefreshContract(
@@ -446,54 +450,54 @@ HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS = {
         source_sha256="4fd1a12eb4eb6d81af4cbd7c5f0dda9d8df648b789b2f9bfb25b64f5c6b1d9eb",
         cache_sha256="381e32adf508b769c46ba3ab07d6d7414d95b72dccf51e8627ba878667137571",
     ),
-    "handoff/1.6.0/scripts/active_writes.py": HandoffStorageGate5RefreshContract(
+    "handoff/1.6.0/turbo_mode_handoff_runtime/active_writes.py": HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
-        source_sha256="4a0aebe32e04886a783a22324f1a3e3a249c799704f611950c79337c1be879ef",
+        source_sha256="4a56a7f8de48bf3919f1d532502bdcd60ff5f274facadec939cd0af61a371dd5",
         cache_sha256=None,
     ),
     "handoff/1.6.0/scripts/distill.py": HandoffStorageGate5RefreshContract(
         kind=DiffKind.CHANGED,
-        source_sha256="ebc2d24658b6e93b4795a65c94f92bbc8664ab83e6b59edae40a2b685d5c35c0",
+        source_sha256="089ea3a0616b5a239154f29881981fb62783f79b093b976eaacd65bd44c7169c",
         cache_sha256="83a60c1479cf8842645e131e4ae74215b8c49820c151dcb312ba592c100393c6",
     ),
-    "handoff/1.6.0/scripts/installed_host_harness.py": HandoffStorageGate5RefreshContract(
+    "handoff/1.6.0/turbo_mode_handoff_runtime/installed_host_harness.py": HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
-        source_sha256="8cd3041280b2c22cfc61ba015ba2295fd324f11fb2f235499625834472a0c096",
+        source_sha256="6ef2ca2388ce2dd73783e3aa1c7f238697f71842371ab2def601b96540d59675",
         cache_sha256=None,
     ),
     "handoff/1.6.0/scripts/list_handoffs.py": HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
-        source_sha256="fdae6f266546acd90f42b437507d5349eb08e314b59585e6040c99cc683bbbdc",
+        source_sha256="b77c5557a7741c20f3e03533bcba1955500eda474ef9ed868774034bc05f6cb2",
         cache_sha256=None,
     ),
     "handoff/1.6.0/scripts/load_transactions.py": HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
-        source_sha256="2b0135d3dd74682bf434b2a42370946b8de73f6c5474822c61cab5e612607cde",
+        source_sha256="023a54db31ab3f73a5cf6b96179df572355b9a16fdc05e8d84c648b733f0ca5a",
         cache_sha256=None,
     ),
-    "handoff/1.6.0/scripts/project_paths.py": HandoffStorageGate5RefreshContract(
-        kind=DiffKind.CHANGED,
-        source_sha256="9d593b901825db9b52841b5d2da59ae91236ddbb9b2714074d8f56df58335927",
-        cache_sha256="ca378736b107be47a2d504f004bd6584d5faf15c3f572bcc15f825bb10910ede",
-    ),
-    "handoff/1.6.0/scripts/quality_check.py": HandoffStorageGate5RefreshContract(
-        kind=DiffKind.CHANGED,
-        source_sha256="e56e1f33fab92d2d733b8a128d36c81eda0b2dca181c2e3cccbc2a9dc1aa7d28",
-        cache_sha256="883fff0a7eba02ab8c87a95aa915277e04cd48dd418e6848a210f125ec458f7f",
-    ),
-    "handoff/1.6.0/scripts/storage_authority.py": HandoffStorageGate5RefreshContract(
+    "handoff/1.6.0/turbo_mode_handoff_runtime/project_paths.py": HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
-        source_sha256="4bd0da91bd676414f27ee1213541d73a32672812d3f0d0a5f2ceeccfc036f9aa",
+        source_sha256="33c3accc4bb0bd7e525e80f9324a5a734f90f8836b5794e080214e21587c1678",
         cache_sha256=None,
     ),
-    "handoff/1.6.0/scripts/storage_authority_inventory.py": HandoffStorageGate5RefreshContract(
+    "handoff/1.6.0/turbo_mode_handoff_runtime/quality_check.py": HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
-        source_sha256="b471e99352bea672829c2fb05a16b05b8676bd4bc74ba4c90537f2a5b97b4c71",
+        source_sha256="3d61980c21dcd72ebe635f48760a3c4019c2315c040be4a1aeb12167085ad6b6",
         cache_sha256=None,
     ),
-    "handoff/1.6.0/scripts/storage_primitives.py": HandoffStorageGate5RefreshContract(
+    "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority.py": HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
-        source_sha256="82703beeb804f4cec0fdc415dcd4ed66f006454d5d536ba75dd4dfaf728f745f",
+        source_sha256="9f905fea97c6b60fc365ef574f406ff58a7589e2194f3bafd4b06d6b4469ebd7",
+        cache_sha256=None,
+    ),
+    "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority_inventory.py": HandoffStorageGate5RefreshContract(
+        kind=DiffKind.ADDED,
+        source_sha256="5ebf4d26edc1350167c8fd977fe647bfb489e38f66fff6e14406aaa5b64519d5",
+        cache_sha256=None,
+    ),
+    "handoff/1.6.0/turbo_mode_handoff_runtime/storage_primitives.py": HandoffStorageGate5RefreshContract(
+        kind=DiffKind.ADDED,
+        source_sha256="1ff1b15a289304de19073f5543403c30c3c2f8e9ca0911f02635eadea94b6d91",
         cache_sha256=None,
     ),
     "handoff/1.6.0/skills/load/SKILL.md": HandoffStorageGate5RefreshContract(
@@ -615,6 +619,9 @@ def classify_diff_path(
     ):
         coverage_status = CoverageStatus.COVERAGE_GAP
         reasons.append("added-executable-path")
+    elif _is_added_handoff_runtime_path(path, kind=kind):
+        coverage_status = CoverageStatus.COVERAGE_GAP
+        reasons.append("added-handoff-runtime-package-path")
     elif _is_added_non_doc_path(path, kind=kind):
         coverage_status = CoverageStatus.COVERAGE_GAP
         reasons.append("added-non-doc-path")
@@ -734,6 +741,12 @@ def _is_added_non_doc_path(path: str, *, kind: DiffKind) -> bool:
     if kind != DiffKind.ADDED or not _is_doc_glob_path(path):
         return False
     return not path.endswith(".md")
+
+
+def _is_added_handoff_runtime_path(path: str, *, kind: DiffKind) -> bool:
+    if kind != DiffKind.ADDED:
+        return False
+    return _matches_any(path, HANDOFF_RUNTIME_SOURCE_PATTERNS)
 
 
 def _is_doc_glob_path(path: str) -> bool:

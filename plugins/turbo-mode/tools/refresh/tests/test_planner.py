@@ -71,7 +71,7 @@ def test_build_paths_normalizes_relative_repo_root(
 
 
 def test_planner_passes_manifest_hashes_to_exact_storage_contract(tmp_path: Path) -> None:
-    path = "handoff/1.6.0/scripts/storage_authority.py"
+    path = "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority.py"
     contract = HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS[path]
     source = ManifestEntry(
         canonical_path=path,
