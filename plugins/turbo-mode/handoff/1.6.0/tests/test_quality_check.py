@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.quality_check import (
+from turbo_mode_handoff_runtime.quality_check import (
     CHECKPOINT_MAX_LINES,
     CHECKPOINT_MIN_LINES,
     CONTENT_REQUIRED_SECTIONS,
@@ -904,7 +904,7 @@ class TestMain:
     def test_validate_exception_swallowed(self) -> None:
         """Internal validation crash is caught — hook exits 0, no stdout."""
         with patch(
-            "scripts.quality_check.validate", side_effect=RuntimeError("boom")
+            "turbo_mode_handoff_runtime.quality_check.validate", side_effect=RuntimeError("boom")
         ):
             result, output = _run_main(
                 _make_hook_input(HANDOFF_PATH, "---\ntype: handoff\n---\ncontent")
@@ -931,7 +931,7 @@ class TestMain:
             ))),
             patch("sys.stdout", new_callable=io.StringIO),
             patch("sys.stderr", new_callable=io.StringIO) as mock_stderr,
-            patch("scripts.quality_check.validate", side_effect=RuntimeError("boom")),
+            patch("turbo_mode_handoff_runtime.quality_check.validate", side_effect=RuntimeError("boom")),
         ):
             result = main()
         assert result == 0

@@ -12,45 +12,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-def _load_bootstrap_by_path() -> None:
-    import importlib.util
 
-    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
-    cached = sys.modules.get("scripts._bootstrap")
-    if cached is not None:
-        cached_file = getattr(cached, "__file__", None)
-        try:
-            cached_path = Path(cached_file).resolve() if cached_file is not None else None
-        except (OSError, TypeError):
-            cached_path = None
-        if cached_path == bootstrap_path:
-            ensure = getattr(cached, "ensure_plugin_scripts_package", None)
-            if callable(ensure):
-                ensure()
-                return
-        sys.modules.pop("scripts._bootstrap", None)
-    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(
-            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
-            f"Got: {str(bootstrap_path)!r:.100}"
-        )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["scripts._bootstrap"] = module
-    spec.loader.exec_module(module)
-
-
-_load_bootstrap_by_path()
-del _load_bootstrap_by_path
-
-from scripts import storage_primitives as _storage_primitives
-from scripts.storage_authority import (
+from turbo_mode_handoff_runtime import storage_primitives as _storage_primitives
+from turbo_mode_handoff_runtime.storage_authority import (
     ChainStateDiagnosticError,
     continue_chain_state,
     get_storage_layout,
     read_chain_state,
 )
-from scripts.storage_primitives import (
+from turbo_mode_handoff_runtime.storage_primitives import (
     LockPolicy,
     acquire_lock as _acquire_lock_with_policy,
     parse_created_at as _parse_created_at,

@@ -10,38 +10,8 @@ import sys
 import textwrap
 from pathlib import Path
 
-def _load_bootstrap_by_path() -> None:
-    import importlib.util
 
-    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
-    cached = sys.modules.get("scripts._bootstrap")
-    if cached is not None:
-        cached_file = getattr(cached, "__file__", None)
-        try:
-            cached_path = Path(cached_file).resolve() if cached_file is not None else None
-        except (OSError, TypeError):
-            cached_path = None
-        if cached_path == bootstrap_path:
-            ensure = getattr(cached, "ensure_plugin_scripts_package", None)
-            if callable(ensure):
-                ensure()
-                return
-        sys.modules.pop("scripts._bootstrap", None)
-    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(
-            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
-            f"Got: {str(bootstrap_path)!r:.100}"
-        )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["scripts._bootstrap"] = module
-    spec.loader.exec_module(module)
-
-
-_load_bootstrap_by_path()
-del _load_bootstrap_by_path
-
-from scripts.storage_primitives import sha256_file
+from turbo_mode_handoff_runtime.storage_primitives import sha256_file
 
 
 class InstalledHostHarnessError(RuntimeError):
@@ -137,12 +107,34 @@ def verify_source_harness_payload(payload: dict[str, object]) -> None:
     if installed_plugin.is_relative_to(source_checkout):
         raise _source_leakage("installed plugin root", installed_plugin)
 
-    _require_inside_installed(payload, "resolved_helper_path", installed_plugin, source_checkout)
+    _reject_legacy_payload_keys(payload)
+
+    resolved_facade_path = _payload_path(payload, "resolved_facade_path")
+    _require_path_inside_installed(
+        resolved_facade_path,
+        installed_plugin,
+        source_checkout,
+    )
+    _require_path_inside_root(
+        resolved_facade_path,
+        installed_plugin / "scripts",
+        "resolved facade path",
+    )
     _require_inside_installed(payload, "resolved_skill_doc_path", installed_plugin, source_checkout)
-    for path in _payload_path_list(payload, "helper_subprocess_command_paths"):
+    for path in _payload_path_list(payload, "facade_subprocess_command_paths"):
         _require_path_inside_installed(path, installed_plugin, source_checkout)
-    for path in _payload_path_list(payload, "loaded_handoff_module_files"):
+        _require_path_inside_root(
+            path,
+            installed_plugin / "scripts",
+            "facade subprocess command path",
+        )
+    for path in _payload_path_list(payload, "loaded_runtime_module_files"):
         _require_path_inside_installed(path, installed_plugin, source_checkout)
+        _require_path_inside_root(
+            path,
+            installed_plugin / "turbo_mode_handoff_runtime",
+            "loaded runtime module file",
+        )
 
     helper_cwd = _payload_path(payload, "helper_process_cwd")
     if helper_cwd.is_relative_to(source_checkout):
@@ -192,6 +184,7 @@ def _run_helper_probe(
         import inspect
         import json
         import os
+        import subprocess
         import sys
         from pathlib import Path
 
@@ -219,9 +212,9 @@ def _run_helper_probe(
                 if not is_relative_to(normalize_path(entry), source_checkout)
             ],
         ]
-        modules = [
-            importlib.import_module("scripts.session_state"),
-            importlib.import_module("scripts.storage_authority"),
+        runtime_modules = [
+            importlib.import_module("turbo_mode_handoff_runtime.session_state"),
+            importlib.import_module("turbo_mode_handoff_runtime.storage_authority"),
         ]
         sys_path_entries = [str(normalize_path(entry)) for entry in sys.path]
         source_sys_path_entries = [
@@ -229,21 +222,31 @@ def _run_helper_probe(
             for entry in sys_path_entries
             if is_relative_to(Path(entry), source_checkout)
         ]
-        helper_path = installed_plugin / "scripts" / "session_state.py"
+        session_state_facade_path = installed_plugin / "scripts" / "session_state.py"
+        facade_completed = subprocess.run(
+            [sys.executable, str(session_state_facade_path), "--help"],
+            cwd=cwd,
+            env=os.environ.copy(),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if facade_completed.returncode != 0:
+            raise SystemExit(facade_completed.stderr)
         skill_doc_path = installed_plugin / "skills" / "save" / "SKILL.md"
         payload = {
-            "resolved_helper_path": str(helper_path.resolve()),
+            "resolved_facade_path": str(session_state_facade_path.resolve()),
             "resolved_skill_doc_path": str(skill_doc_path.resolve()),
-            "helper_subprocess_command_paths": [
-                str(helper_path.resolve())
+            "facade_subprocess_command_paths": [
+                str(session_state_facade_path.resolve())
             ],
             "helper_process_cwd": str(cwd),
             "helper_process_pythonpath": os.environ.get("PYTHONPATH"),
             "helper_process_sys_path": sys_path_entries,
             "source_checkout_sys_path_entries": source_sys_path_entries,
-            "loaded_handoff_module_files": [
+            "loaded_runtime_module_files": [
                 str(Path(inspect.getfile(module)).resolve())
-                for module in modules
+                for module in runtime_modules
             ],
         }
         print(json.dumps(payload, sort_keys=True))
@@ -324,6 +327,22 @@ def _require_path_inside_installed(
         raise _source_leakage("source checkout leakage", path)
     if not path.is_relative_to(installed_plugin):
         raise _invalid_payload("path is outside installed plugin root", str(path))
+
+
+def _require_path_inside_root(path: Path, root: Path, context: str) -> None:
+    if not path.is_relative_to(root):
+        raise _invalid_payload(f"{context} is outside expected root", str(path))
+
+
+def _reject_legacy_payload_keys(payload: dict[str, object]) -> None:
+    legacy_keys = (
+        "resolved_helper_path",
+        "helper_subprocess_command_paths",
+        "loaded_handoff_module_files",
+    )
+    for key in legacy_keys:
+        if key in payload:
+            raise _invalid_payload("legacy payload key present", key)
 
 
 def _path_list_has_source_entry(entries: list[str], source_checkout: Path, *, base: Path) -> bool:

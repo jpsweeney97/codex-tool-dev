@@ -47,22 +47,22 @@ codex plugin install ./packages/plugins/handoff
 
 Handoff `1.6.0` does not ship plugin-bundled command hooks. The dormant hook-compatible scripts are retained in source, but the installed plugin manifest exposes no bundled hook command contract. Plugin-bundled command hooks are deferred from `1.6.0` until Codex provides a documented portable launcher contract or a separate generated-config architecture is approved.
 
-### Scripts
+### Runtime Package and CLI Facades
 
-Core logic lives in `scripts/`. Skills handle UX and judgment; scripts handle deterministic work.
+Core logic lives in `turbo_mode_handoff_runtime/`. The `scripts/` directory now contains only thin executable CLI facades for skill-facing command paths. `scripts.*` is not a supported library import API.
 
-| Script | Purpose | Called By |
-|--------|---------|-----------|
-| `cleanup.py` | State file TTL cleanup helper | Dormant hook-compatible entry point; not wired into the `1.6.0` plugin manifest |
-| `quality_check.py` | Handoff/checkpoint format validation helper | Dormant hook-compatible entry point; not wired into the `1.6.0` plugin manifest |
+| Script Facade | Purpose | Called By |
+|---------------|---------|-----------|
 | `defer.py` | Ticket ID allocation, rendering, writing | `/defer` skill |
 | `distill.py` | Candidate extraction, dedup, metadata | `/distill` skill |
-| `triage.py` | Ticket scanning, orphan detection, matching | `/triage` skill |
+| `list_handoffs.py` | Enumerate active handoff candidates | `/load` skill |
+| `load_transactions.py` | Load transaction lifecycle management | `/load` skill |
+| `plugin_siblings.py` | Resolve sibling plugin roots | `/defer` skill |
 | `search.py` | Section-aware handoff search | `/search` skill |
-| `handoff_parsing.py` | Frontmatter and section parsing | Shared by distill, triage, search |
-| `ticket_parsing.py` | Ticket YAML parsing and validation | Shared by defer, triage |
-| `project_paths.py` | Project name and directory resolution | Shared by all scripts |
-| `provenance.py` | Source tracking and dedup metadata | Shared by defer, distill, triage |
+| `session_state.py` | Chain and active-writer state operations | `/save`, `/quicksave`, `/summary` skills |
+| `triage.py` | Ticket scanning, orphan detection, matching | `/triage` skill |
+
+Runtime-only helpers such as `turbo_mode_handoff_runtime/quality_check.py`, `turbo_mode_handoff_runtime/cleanup.py`, and `turbo_mode_handoff_runtime/storage_authority_inventory.py` remain source utilities and are not wired into Handoff `1.6.0` skill entrypoints or hooks.
 
 ## Configuration
 
@@ -173,13 +173,14 @@ Session 2:
 ┌─ Skills (User Entry Points) ──────────────────────┐
 │  /save  /quicksave  /load  /defer                  │
 │  /search  /distill  /triage                        │
-├─ Scripts (Deterministic Work) ────────────────────┤
-│  Core:    project_paths, handoff_parsing           │
-│  Domain:  defer, distill, triage, search           │
-│  Audit:   provenance, ticket_parsing               │
-│  Maint:   cleanup                                  │
-├─ Hook-Compatible Helpers (Deferred) ───────────────┤
-│  cleanup, quality_check (not manifest-wired in 1.6)│
+├─ Runtime Package (Implementation) ─────────────────┤
+│  turbo_mode_handoff_runtime/*                      │
+├─ CLI Facades (Executable Paths) ───────────────────┤
+│  scripts/defer.py, distill.py, list_handoffs.py    │
+│  scripts/load_transactions.py, plugin_siblings.py  │
+│  scripts/search.py, session_state.py, triage.py    │
+├─ Runtime-only Helpers (Not Skill/Hook-wired) ──────┤
+│  cleanup, quality_check, storage_authority_inventory│
 ├─ Storage ─────────────────────────────────────────┤
 │  Active:  <project_root>/.codex/handoffs/         │
 │  Archive: <project_root>/.codex/handoffs/archive/ │
@@ -208,8 +209,8 @@ State files are JSON records under `.codex/handoffs/.session-state/handoff-<proj
 
 ### Design Principles
 
-- **Skills handle judgment, scripts handle computation.** Skills analyze conversation and prompt users. Scripts parse files, allocate IDs, and validate structure.
-- **JSON contracts between layers.** Scripts communicate with skills via JSON on stdin/stdout.
+- **Skills handle judgment, runtime modules handle computation.** Skills analyze conversation and prompt users. Runtime modules parse files, allocate IDs, and validate structure.
+- **JSON contracts between layers.** CLI facades communicate with skills via JSON on stdin/stdout and delegate to runtime modules.
 - **Provenance tracking.** Tickets and learnings include metadata (`defer-meta`, `distill-meta`) for source tracing and dedup.
 - **Validation helpers are non-gating in 1.6.0.** Hook-compatible validation code remains in source, but installed Handoff does not expose plugin-bundled command hooks in this release.
 - **Safety-first I/O.** Uses `trash` instead of `rm`. Graceful degradation on read errors. TTL cleanup for orphaned files.
@@ -238,14 +239,9 @@ See `skills/save/SKILL.md` for a comprehensive example.
 
 Handoff plugin-bundled command hooks are deferred from 1.6.0 until Codex exposes a documented plugin-root launcher contract or a generated-config architecture is designed and proven.
 
-### Adding a Script
+### Adding Runtime Code
 
-Create `scripts/<name>.py` following the existing pattern:
-
-- Implement `main(argv=None) -> int` for CLI compatibility
-- Use `project_paths.get_project_name()` for project detection
-- Return JSON on stdout, diagnostics on stderr
-- Exit 0 on success, non-zero on failure
+Add new implementation under `turbo_mode_handoff_runtime/<name>.py`, and keep runtime modules import-only (no shebang, no `if __name__ == "__main__":` block). If the behavior must be skill-invokable, add or update one of the approved `scripts/*.py` facades to call the runtime module's `main()`.
 
 ## Development
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.storage_authority import (
+from turbo_mode_handoff_runtime.storage_authority import (
     ChainStateDiagnosticError,
     SelectionEligibility,
     StorageLocation,

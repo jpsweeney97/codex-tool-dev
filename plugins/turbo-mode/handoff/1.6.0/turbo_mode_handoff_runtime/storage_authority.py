@@ -16,40 +16,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from scripts.active_writes import ActiveWriteReservation
-
-def _load_bootstrap_by_path() -> None:
-    import importlib.util
-
-    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
-    cached = sys.modules.get("scripts._bootstrap")
-    if cached is not None:
-        cached_file = getattr(cached, "__file__", None)
-        try:
-            cached_path = Path(cached_file).resolve() if cached_file is not None else None
-        except (OSError, TypeError):
-            cached_path = None
-        if cached_path == bootstrap_path:
-            ensure = getattr(cached, "ensure_plugin_scripts_package", None)
-            if callable(ensure):
-                ensure()
-                return
-        sys.modules.pop("scripts._bootstrap", None)
-    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(
-            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
-            f"Got: {str(bootstrap_path)!r:.100}"
-        )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["scripts._bootstrap"] = module
-    spec.loader.exec_module(module)
+    from turbo_mode_handoff_runtime.active_writes import ActiveWriteReservation
 
 
-_load_bootstrap_by_path()
-del _load_bootstrap_by_path
-
-from scripts.storage_primitives import (
+from turbo_mode_handoff_runtime.storage_primitives import (
     read_json_object as _read_json_object_primitive,
     sha256_regular_file_or_none as _content_sha256,
     write_json_atomic as _write_json_atomic,
@@ -165,7 +135,7 @@ def begin_active_write(
     lease_seconds: int = 1800,
 ) -> ActiveWriteReservation:
     """Reserve a primary active handoff write through the storage facade."""
-    from scripts.active_writes import begin_active_write as _begin_active_write
+    from turbo_mode_handoff_runtime.active_writes import begin_active_write as _begin_active_write
 
     return _begin_active_write(
         project_root,
@@ -186,7 +156,7 @@ def allocate_active_path(
     created_at: str | None = None,
 ) -> Path:
     """Allocate a primary active handoff path through the storage facade."""
-    from scripts.active_writes import allocate_active_path as _allocate_active_path
+    from turbo_mode_handoff_runtime.active_writes import allocate_active_path as _allocate_active_path
 
     return _allocate_active_path(
         project_root,
@@ -204,7 +174,7 @@ def write_active_handoff(
     content_sha256: str,
 ) -> dict[str, object]:
     """Write a reserved primary active handoff through the storage facade."""
-    from scripts.active_writes import write_active_handoff as _write_active_handoff
+    from turbo_mode_handoff_runtime.active_writes import write_active_handoff as _write_active_handoff
 
     return _write_active_handoff(
         project_root,
@@ -221,7 +191,7 @@ def list_active_writes(
     operation: str | None = None,
 ) -> list[dict[str, object]]:
     """List active write operation-state records through the storage facade."""
-    from scripts.active_writes import list_active_writes as _list_active_writes
+    from turbo_mode_handoff_runtime.active_writes import list_active_writes as _list_active_writes
 
     return _list_active_writes(
         project_root,
@@ -237,7 +207,7 @@ def abandon_active_write(
     reason: str,
 ) -> dict[str, object]:
     """Mark an active write abandoned through the storage facade."""
-    from scripts.active_writes import abandon_active_write as _abandon_active_write
+    from turbo_mode_handoff_runtime.active_writes import abandon_active_write as _abandon_active_write
 
     return _abandon_active_write(
         project_root,
@@ -252,7 +222,7 @@ def recover_active_write_transaction(
     operation_state_path: Path,
 ) -> dict[str, object]:
     """Recover an active write transaction through the storage facade."""
-    from scripts.active_writes import (
+    from turbo_mode_handoff_runtime.active_writes import (
         recover_active_write_transaction as _recover_active_write_transaction,
     )
 

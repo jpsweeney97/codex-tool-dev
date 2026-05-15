@@ -31,25 +31,33 @@ HANDOFF_STATE_HELPER_DOC_FIXTURES = json.loads(
 EXPECTED_COMMAND_SURFACE_PATHS = (
     "handoff/1.6.0/.codex-plugin/plugin.json",
     "handoff/1.6.0/hooks/hooks.json",
-    "handoff/1.6.0/scripts/active_writes.py",
-    "handoff/1.6.0/scripts/cleanup.py",
     "handoff/1.6.0/scripts/defer.py",
     "handoff/1.6.0/scripts/distill.py",
-    "handoff/1.6.0/scripts/handoff_parsing.py",
-    "handoff/1.6.0/scripts/installed_host_harness.py",
     "handoff/1.6.0/scripts/list_handoffs.py",
     "handoff/1.6.0/scripts/load_transactions.py",
     "handoff/1.6.0/scripts/plugin_siblings.py",
-    "handoff/1.6.0/scripts/project_paths.py",
-    "handoff/1.6.0/scripts/provenance.py",
-    "handoff/1.6.0/scripts/quality_check.py",
     "handoff/1.6.0/scripts/search.py",
     "handoff/1.6.0/scripts/session_state.py",
-    "handoff/1.6.0/scripts/storage_authority.py",
-    "handoff/1.6.0/scripts/storage_authority_inventory.py",
-    "handoff/1.6.0/scripts/storage_primitives.py",
-    "handoff/1.6.0/scripts/ticket_parsing.py",
     "handoff/1.6.0/scripts/triage.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/active_writes.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/cleanup.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/defer.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/distill.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/handoff_parsing.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/installed_host_harness.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/list_handoffs.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/load_transactions.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/plugin_siblings.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/project_paths.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/provenance.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/quality_check.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/search.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/session_state.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority_inventory.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/storage_primitives.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/ticket_parsing.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/triage.py",
     "ticket/1.4.0/.codex-plugin/plugin.json",
     "ticket/1.4.0/hooks/hooks.json",
     "ticket/1.4.0/hooks/ticket_engine_guard.py",
@@ -142,6 +150,12 @@ def _discover_command_surface_paths() -> list[str]:
             f"{prefix}/{path.relative_to(plugin_root).as_posix()}"
             for path in sorted((plugin_root / "scripts").glob("*.py"))
         )
+        if prefix == "handoff/1.6.0":
+            paths.extend(
+                f"{prefix}/{path.relative_to(plugin_root).as_posix()}"
+                for path in sorted((plugin_root / "turbo_mode_handoff_runtime").glob("*.py"))
+                if path.name != "__init__.py"
+            )
     return sorted(paths)
 
 
@@ -186,6 +200,21 @@ def test_new_executable_path_is_coverage_gap_not_guarded_only() -> None:
         mutation_mode=MutationMode.BLOCKED,
         coverage_status=CoverageStatus.COVERAGE_GAP,
     )
+
+
+def test_added_handoff_runtime_module_path_is_coverage_gap() -> None:
+    result = classify_diff_path(
+        "handoff/1.6.0/turbo_mode_handoff_runtime/new_module.py",
+        kind=DiffKind.ADDED,
+        source_text="from __future__ import annotations\n",
+        cache_text="",
+        executable=False,
+    )
+
+    assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
+    assert result.mutation_mode == MutationMode.BLOCKED
+    assert result.coverage_status == CoverageStatus.COVERAGE_GAP
+    assert "added-handoff-runtime-package-path" in result.reasons
 
 
 @pytest.mark.parametrize(
@@ -601,7 +630,10 @@ def test_handoff_state_helper_doc_migration_requires_exact_state_helper_command(
     result = classify_diff_path(
         "handoff/1.6.0/skills/summary/SKILL.md",
         kind=DiffKind.CHANGED,
-        source_text=contract["source_text"].replace("read-state \\", "repair-state \\"),
+        source_text=contract["source_text"].replace(
+            "begin-active-write \\",
+            "repair-state \\",
+        ),
         cache_text=contract["cache_text"],
         executable=False,
     )
@@ -801,11 +833,11 @@ def test_handoff_storage_gate5_refresh_contract_source_hash_matches_live_file(
 
 def test_handoff_storage_gate5_refresh_contract_rejects_hash_drift() -> None:
     contract = HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS[
-        "handoff/1.6.0/scripts/storage_authority.py"
+        "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority.py"
     ]
 
     result = classify_diff_path(
-        "handoff/1.6.0/scripts/storage_authority.py",
+        "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority.py",
         kind=contract.kind,
         source_text="print('changed')\n",
         cache_text="",
@@ -817,7 +849,7 @@ def test_handoff_storage_gate5_refresh_contract_rejects_hash_drift() -> None:
     assert result.outcome == PathOutcome.COVERAGE_GAP_FAIL
     assert result.mutation_mode == MutationMode.BLOCKED
     assert result.coverage_status == CoverageStatus.COVERAGE_GAP
-    assert "added-executable-path" in result.reasons
+    assert "added-handoff-runtime-package-path" in result.reasons
 
 
 @pytest.mark.parametrize(
@@ -825,18 +857,18 @@ def test_handoff_storage_gate5_refresh_contract_rejects_hash_drift() -> None:
     [
         ("handoff/1.6.0/.codex-plugin/plugin.json", PathOutcome.COVERAGE_GAP_FAIL),
         ("handoff/1.6.0/hooks/hooks.json", PathOutcome.GUARDED_ONLY),
-        ("handoff/1.6.0/scripts/cleanup.py", PathOutcome.COVERAGE_GAP_FAIL),
+        ("handoff/1.6.0/turbo_mode_handoff_runtime/cleanup.py", PathOutcome.GUARDED_ONLY),
         ("handoff/1.6.0/scripts/defer.py", PathOutcome.GUARDED_ONLY),
         ("handoff/1.6.0/scripts/distill.py", PathOutcome.COVERAGE_GAP_FAIL),
-        ("handoff/1.6.0/scripts/handoff_parsing.py", PathOutcome.COVERAGE_GAP_FAIL),
+        ("handoff/1.6.0/turbo_mode_handoff_runtime/handoff_parsing.py", PathOutcome.GUARDED_ONLY),
         ("handoff/1.6.0/scripts/plugin_siblings.py", PathOutcome.COVERAGE_GAP_FAIL),
-        ("handoff/1.6.0/scripts/project_paths.py", PathOutcome.COVERAGE_GAP_FAIL),
-        ("handoff/1.6.0/scripts/provenance.py", PathOutcome.COVERAGE_GAP_FAIL),
-        ("handoff/1.6.0/scripts/quality_check.py", PathOutcome.COVERAGE_GAP_FAIL),
+        ("handoff/1.6.0/turbo_mode_handoff_runtime/project_paths.py", PathOutcome.GUARDED_ONLY),
+        ("handoff/1.6.0/turbo_mode_handoff_runtime/provenance.py", PathOutcome.GUARDED_ONLY),
+        ("handoff/1.6.0/turbo_mode_handoff_runtime/quality_check.py", PathOutcome.GUARDED_ONLY),
         ("handoff/1.6.0/scripts/search.py", PathOutcome.FAST_SAFE_WITH_COVERED_SMOKE),
         ("handoff/1.6.0/scripts/session_state.py", PathOutcome.FAST_SAFE_WITH_COVERED_SMOKE),
-        ("handoff/1.6.0/scripts/storage_primitives.py", PathOutcome.COVERAGE_GAP_FAIL),
-        ("handoff/1.6.0/scripts/ticket_parsing.py", PathOutcome.COVERAGE_GAP_FAIL),
+        ("handoff/1.6.0/turbo_mode_handoff_runtime/storage_primitives.py", PathOutcome.GUARDED_ONLY),
+        ("handoff/1.6.0/turbo_mode_handoff_runtime/ticket_parsing.py", PathOutcome.GUARDED_ONLY),
         ("handoff/1.6.0/scripts/triage.py", PathOutcome.FAST_SAFE_WITH_COVERED_SMOKE),
         ("ticket/1.4.0/.codex-plugin/plugin.json", PathOutcome.COVERAGE_GAP_FAIL),
         ("ticket/1.4.0/hooks/hooks.json", PathOutcome.GUARDED_ONLY),

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Hook-compatible helper for handoff/checkpoint/summary quality checks.
 
 Handoff 1.6.0 does not wire plugin-bundled command hooks into the installed
@@ -25,38 +24,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-def _load_bootstrap_by_path() -> None:
-    import importlib.util
 
-    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
-    cached = sys.modules.get("scripts._bootstrap")
-    if cached is not None:
-        cached_file = getattr(cached, "__file__", None)
-        try:
-            cached_path = Path(cached_file).resolve() if cached_file is not None else None
-        except (OSError, TypeError):
-            cached_path = None
-        if cached_path == bootstrap_path:
-            ensure = getattr(cached, "ensure_plugin_scripts_package", None)
-            if callable(ensure):
-                ensure()
-                return
-        sys.modules.pop("scripts._bootstrap", None)
-    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(
-            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
-            f"Got: {str(bootstrap_path)!r:.100}"
-        )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["scripts._bootstrap"] = module
-    spec.loader.exec_module(module)
-
-
-_load_bootstrap_by_path()
-del _load_bootstrap_by_path
-
-from scripts.handoff_parsing import (
+from turbo_mode_handoff_runtime.handoff_parsing import (
     parse_frontmatter as _parse_handoff_frontmatter,
     parse_sections as _parse_handoff_sections,
     section_name as _section_name,
@@ -474,7 +443,3 @@ def main() -> int:
         )
 
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

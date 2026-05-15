@@ -30,8 +30,8 @@ STATE_WRITER_DOCS = [
     PLUGIN_ROOT / "skills" / "load" / "SKILL.md",
 ]
 POLICY_CODE_COMMENTS = [
-    PLUGIN_ROOT / "scripts" / "cleanup.py",
-    PLUGIN_ROOT / "scripts" / "project_paths.py",
+    PLUGIN_ROOT / "turbo_mode_handoff_runtime" / "cleanup.py",
+    PLUGIN_ROOT / "turbo_mode_handoff_runtime" / "project_paths.py",
 ]
 
 

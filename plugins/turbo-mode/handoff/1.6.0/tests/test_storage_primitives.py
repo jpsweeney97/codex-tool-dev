@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-import scripts.storage_primitives as storage_primitives
-from scripts.storage_primitives import (
+import turbo_mode_handoff_runtime.storage_primitives as storage_primitives
+from turbo_mode_handoff_runtime.storage_primitives import (
     LockPolicy,
     acquire_lock,
     parse_created_at,

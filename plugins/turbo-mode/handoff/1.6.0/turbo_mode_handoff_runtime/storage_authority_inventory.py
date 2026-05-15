@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Generate and check current-facing Handoff storage authority text."""
 
 from __future__ import annotations
@@ -54,7 +53,7 @@ PLUGIN_SPECS = (
         forbidden=(LEGACY_STORAGE_ROOT, "local-only working memory"),
     ),
     InventorySpec(
-        path="scripts/quality_check.py",
+        path="turbo_mode_handoff_runtime/quality_check.py",
         root="plugin",
         required=("<project_root>/.codex/handoffs/",),
         forbidden=("<project_root>/docs/handoffs/",),
@@ -186,7 +185,3 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 1
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
