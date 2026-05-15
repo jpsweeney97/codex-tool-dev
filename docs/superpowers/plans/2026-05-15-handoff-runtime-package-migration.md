@@ -172,26 +172,55 @@ cat /tmp/handoff-runtime-ignored-baseline.txt
 
 Expected: no unrelated tracked edits. If unrelated tracked edits exist, pause and resolve ownership before continuing.
 
-- [ ] **Step 2: Create the feature branch**
+- [ ] **Step 2: Establish the implementation branch idempotently**
 
 Run:
 
 ```bash
-git switch -c chore/handoff-runtime-package-migration
+git branch --show-current
+git log --oneline -3 -- docs/superpowers/plans/2026-05-15-handoff-runtime-package-migration.md
 ```
 
-Expected: current branch is `chore/handoff-runtime-package-migration`.
+Then use exactly one of these branch actions:
+
+- If already on `chore/handoff-runtime-package-migration`, continue.
+- If `chore/handoff-runtime-package-migration` already exists, run:
+
+  ```bash
+  git switch chore/handoff-runtime-package-migration
+  ```
+
+- If the current branch is the plan-only branch that already contains the latest committed version of this plan, run:
+
+  ```bash
+  git switch -c chore/handoff-runtime-package-migration
+  ```
+
+- Otherwise, switch to the intended base branch first, then run:
+
+  ```bash
+  git switch -c chore/handoff-runtime-package-migration
+  ```
+
+Expected: current branch is `chore/handoff-runtime-package-migration`, and the branch contains the latest committed version of this plan. Do not create the implementation branch blindly from an unknown current branch.
 
 - [ ] **Step 3: Commit this rewritten plan if it is uncommitted**
 
-Run:
+Check whether the plan has uncommitted changes:
+
+```bash
+git diff -- docs/superpowers/plans/2026-05-15-handoff-runtime-package-migration.md
+git diff --cached -- docs/superpowers/plans/2026-05-15-handoff-runtime-package-migration.md
+```
+
+If the plan has uncommitted changes, run:
 
 ```bash
 git add docs/superpowers/plans/2026-05-15-handoff-runtime-package-migration.md
 git commit -m "docs: simplify handoff runtime migration plan"
 ```
 
-Expected: the plan lands as a docs-only commit.
+Expected: either the plan was already committed and no docs commit is created, or the plan lands as a docs-only commit. Do not treat a no-op commit as a migration failure.
 
 ## Task 1: Add Runtime Namespace Guard Tests
 
@@ -764,38 +793,35 @@ Expected: passes.
 
 - [ ] **Step 5: Smoke each facade by direct file execution**
 
-Run:
+Run the stdlib-only state facade with literal direct Python:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python plugins/turbo-mode/handoff/1.6.0/scripts/session_state.py --help
-PYTHONDONTWRITEBYTECODE=1 python plugins/turbo-mode/handoff/1.6.0/scripts/load_transactions.py --help
-PYTHONDONTWRITEBYTECODE=1 python plugins/turbo-mode/handoff/1.6.0/scripts/list_handoffs.py --help
-PYTHONDONTWRITEBYTECODE=1 python plugins/turbo-mode/handoff/1.6.0/scripts/search.py --help
-PYTHONDONTWRITEBYTECODE=1 python plugins/turbo-mode/handoff/1.6.0/scripts/triage.py --help
-PYTHONDONTWRITEBYTECODE=1 python plugins/turbo-mode/handoff/1.6.0/scripts/distill.py --help
-PYTHONDONTWRITEBYTECODE=1 python plugins/turbo-mode/handoff/1.6.0/scripts/defer.py --help
-PYTHONDONTWRITEBYTECODE=1 python plugins/turbo-mode/handoff/1.6.0/scripts/plugin_siblings.py --help
 ```
 
-Expected: each command exits 0 and prints usage/help text.
+Run the remaining facades through the plugin project environment so dependency-bearing imports such as PyYAML are tested against the declared plugin dependencies, not the developer's global Python:
 
-- [ ] **Step 6: Run focused Handoff tests after deleting old scripts**
+```bash
+PYTHONDONTWRITEBYTECODE=1 uv run --project plugins/turbo-mode/handoff/1.6.0/pyproject.toml python plugins/turbo-mode/handoff/1.6.0/scripts/load_transactions.py --help
+PYTHONDONTWRITEBYTECODE=1 uv run --project plugins/turbo-mode/handoff/1.6.0/pyproject.toml python plugins/turbo-mode/handoff/1.6.0/scripts/list_handoffs.py --help
+PYTHONDONTWRITEBYTECODE=1 uv run --project plugins/turbo-mode/handoff/1.6.0/pyproject.toml python plugins/turbo-mode/handoff/1.6.0/scripts/search.py --help
+PYTHONDONTWRITEBYTECODE=1 uv run --project plugins/turbo-mode/handoff/1.6.0/pyproject.toml python plugins/turbo-mode/handoff/1.6.0/scripts/triage.py --help
+PYTHONDONTWRITEBYTECODE=1 uv run --project plugins/turbo-mode/handoff/1.6.0/pyproject.toml python plugins/turbo-mode/handoff/1.6.0/scripts/distill.py --help
+PYTHONDONTWRITEBYTECODE=1 uv run --project plugins/turbo-mode/handoff/1.6.0/pyproject.toml python plugins/turbo-mode/handoff/1.6.0/scripts/defer.py --help
+PYTHONDONTWRITEBYTECODE=1 uv run --project plugins/turbo-mode/handoff/1.6.0/pyproject.toml python plugins/turbo-mode/handoff/1.6.0/scripts/plugin_siblings.py --help
+```
+
+Expected: each command exits 0 and prints usage/help text. A missing global `yaml` package must not block this source migration.
+
+- [ ] **Step 6: Run Handoff tests after deleting old scripts**
 
 Run:
 
 ```bash
-uv run --directory plugins/turbo-mode/handoff/1.6.0 pytest \
-  tests/test_runtime_namespace.py \
-  tests/test_cli_commands.py \
-  tests/test_skill_docs.py \
-  tests/test_session_state.py \
-  tests/test_load_transactions.py \
-  tests/test_storage_authority_inventory.py \
-  tests/test_installed_host_harness.py \
-  -q
+uv run --directory plugins/turbo-mode/handoff/1.6.0 pytest -q
 ```
 
-Expected: all selected tests pass without `tests/test_bootstrap.py`, and the installed-host harness now exercises the actual facade files produced in this task.
+Expected: the full Handoff plugin suite passes without `tests/test_bootstrap.py`, and the installed-host harness now exercises the actual facade files produced in this task. Do not commit this task from a narrow subset only; deleted library-only script files affect tests beyond the direct CLI and installed-host harness slice.
 
 - [ ] **Step 7: Commit the facade reduction**
 
