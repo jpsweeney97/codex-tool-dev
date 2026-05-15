@@ -21,7 +21,7 @@ def test_storage_authority_inventory_covers_current_surfaces() -> None:
     assert "README.md" in row_paths
     assert "references/handoff-contract.md" in row_paths
     assert "references/format-reference.md" in row_paths
-    assert "scripts/quality_check.py" in row_paths
+    assert "turbo_mode_handoff_runtime/quality_check.py" in row_paths
     assert "plugins/turbo-mode/tools/refresh/smoke.py" in row_paths
 
 

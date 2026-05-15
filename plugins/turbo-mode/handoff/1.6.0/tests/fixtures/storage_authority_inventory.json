@@ -16,7 +16,7 @@
       ],
       "required_missing": [],
       "root": "plugin",
-      "sha256": "86a2ead8d5c598613394921989a0add333211cac875fdd53d598ad454cf03615",
+      "sha256": "413f53d6c13e7bf5a688adb58f55ccf3e0c3140ed889014155e76d2d885d3529",
       "status": "passed"
     },
     {
@@ -31,7 +31,7 @@
       ],
       "required_missing": [],
       "root": "plugin",
-      "sha256": "eac73d2d3e8189d2bc4d5fcbf7f82cf4a9602efce8d9fb495f56461e339e973c",
+      "sha256": "e845865ad7e42bbb2a2de97ad9cc41c97df22b7f72ec56e6960e43612276d128",
       "status": "passed"
     },
     {
@@ -70,13 +70,13 @@
         "<project_root>/docs/handoffs/"
       ],
       "forbidden_present": [],
-      "path": "scripts/quality_check.py",
+      "path": "turbo_mode_handoff_runtime/quality_check.py",
       "required": [
         "<project_root>/.codex/handoffs/"
       ],
       "required_missing": [],
       "root": "plugin",
-      "sha256": "be95513aa03b4ba848c48068f2a3cc462f1c7cf900ffcb0e8c9c3542bfc57c90",
+      "sha256": "3d61980c21dcd72ebe635f48760a3c4019c2315c040be4a1aeb12167085ad6b6",
       "status": "passed"
     },
     {

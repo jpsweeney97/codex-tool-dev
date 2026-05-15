@@ -53,7 +53,7 @@ PLUGIN_SPECS = (
         forbidden=(LEGACY_STORAGE_ROOT, "local-only working memory"),
     ),
     InventorySpec(
-        path="scripts/quality_check.py",
+        path="turbo_mode_handoff_runtime/quality_check.py",
         root="plugin",
         required=("<project_root>/.codex/handoffs/",),
         forbidden=("<project_root>/docs/handoffs/",),
