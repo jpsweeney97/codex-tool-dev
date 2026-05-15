@@ -552,8 +552,7 @@ def main(argv: list[str] | None = None) -> int:
         return _emit(payload, args.field)
 
     if args.command == "allocate-active-path":
-        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError
-        from turbo_mode_handoff_runtime.active_writes import allocate_active_path
+        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError, allocate_active_path
 
         try:
             active_path = allocate_active_path(
@@ -568,8 +567,7 @@ def main(argv: list[str] | None = None) -> int:
         return _emit({"active_path": str(active_path)}, args.field)
 
     if args.command == "begin-active-write":
-        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError
-        from turbo_mode_handoff_runtime.active_writes import begin_active_write
+        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError, begin_active_write
 
         try:
             reservation = begin_active_write(
@@ -585,8 +583,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return _emit(reservation.to_payload(), args.field)
     if args.command == "write-active-handoff":
-        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError
-        from turbo_mode_handoff_runtime.active_writes import write_active_handoff
+        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError, write_active_handoff
 
         try:
             payload = write_active_handoff(
@@ -611,8 +608,7 @@ def main(argv: list[str] | None = None) -> int:
         print()
         return 0
     if args.command == "abandon-active-write":
-        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError
-        from turbo_mode_handoff_runtime.active_writes import abandon_active_write
+        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError, abandon_active_write
 
         try:
             payload = abandon_active_write(
@@ -625,8 +621,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return _emit(payload, args.field)
     if args.command == "active-write-transaction-recover":
-        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError
-        from turbo_mode_handoff_runtime.active_writes import recover_active_write_transaction
+        from turbo_mode_handoff_runtime.active_writes import (
+            ActiveWriteError,
+            recover_active_write_transaction,
+        )
 
         try:
             payload = recover_active_write_transaction(
