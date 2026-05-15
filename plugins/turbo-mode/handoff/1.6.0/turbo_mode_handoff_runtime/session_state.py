@@ -13,6 +13,7 @@ from pathlib import Path
 
 from turbo_mode_handoff_runtime import storage_primitives
 from turbo_mode_handoff_runtime.project_paths import get_state_dir
+from turbo_mode_handoff_runtime.storage_primitives import LEGACY_CONSUMED_PREFIX
 
 
 class AmbiguousResumeStateError(RuntimeError):
@@ -30,9 +31,6 @@ class ResumeState:
     resume_token: str
     archive_path: str
     created_at: str
-
-
-_LEGACY_CONSUMED_PREFIX = "MIGRATED:"
 
 
 def _legacy_state_path(state_dir: Path, project: str) -> Path:
@@ -59,7 +57,7 @@ def _delete_path(path: Path, *, context: str) -> bool:
 
 
 def _mark_legacy_state_consumed(legacy_path: Path, migrated_state_path: Path) -> None:
-    legacy_path.write_text(f"{_LEGACY_CONSUMED_PREFIX}{migrated_state_path}\n", encoding="utf-8")
+    legacy_path.write_text(f"{LEGACY_CONSUMED_PREFIX}{migrated_state_path}\n", encoding="utf-8")
 
 
 def _read_legacy_archive_path(legacy_path: Path) -> str | None:
@@ -68,7 +66,7 @@ def _read_legacy_archive_path(legacy_path: Path) -> str | None:
         raise ValueError(
             f"read-state failed: legacy state file was empty. Got: {str(legacy_path)!r:.100}"
         )
-    if payload.startswith(_LEGACY_CONSUMED_PREFIX):
+    if payload.startswith(LEGACY_CONSUMED_PREFIX):
         return None
     return payload
 

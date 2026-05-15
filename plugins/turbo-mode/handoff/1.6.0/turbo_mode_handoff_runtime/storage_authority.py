@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 
 from turbo_mode_handoff_runtime.storage_primitives import (
+    LEGACY_CONSUMED_PREFIX,
     read_json_object as _read_json_object_primitive,
     sha256_regular_file_or_none as _content_sha256,
     write_json_atomic as _write_json_atomic,
@@ -70,7 +71,6 @@ LEGACY_ACTIVE_OPT_IN_MANIFEST = (
     / "plans"
     / "2026-05-13-handoff-storage-legacy-active-opt-ins.md"
 )
-LEGACY_CONSUMED_PREFIX = "MIGRATED:"
 CHAIN_STATE_TTL_SECONDS = 24 * 60 * 60
 
 
