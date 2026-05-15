@@ -70,7 +70,7 @@ def test_source_harness_isolation_proof_uses_test_only_copy_outside_source(
         == proof["manifest_identity"]["installed_sha256"]
     )
     assert proof["manifest_identity"]["name"] == "handoff"
-    assert proof["manifest_identity"]["version"] == "1.6.0"
+    assert proof["manifest_identity"]["version"] == "1.7.0"
     assert "installed-host behavior proof" not in serialized
     assert "installed host matrix certified" not in serialized
     assert "installed cache certified" not in serialized
@@ -101,7 +101,7 @@ def test_source_harness_payload_rejects_source_checkout_helper_leakage(
         ],
         "manifest_identity": {
             "name": "handoff",
-            "version": "1.6.0",
+            "version": "1.7.0",
             "source_sha256": "0" * 64,
             "installed_sha256": "0" * 64,
         },

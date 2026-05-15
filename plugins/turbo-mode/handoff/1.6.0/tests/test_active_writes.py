@@ -710,7 +710,7 @@ def test_allocate_active_path_treats_tracked_missing_path_as_occupied(tmp_path: 
         capture_output=True,
         text=True,
     )
-    subprocess.run(["trash", str(existing)], check=True, capture_output=True, text=True)
+    existing.unlink()
 
     active_path = active_writes.allocate_active_path(
         tmp_path,
@@ -2063,6 +2063,7 @@ def test_release_lock_preserves_session_state_dir(tmp_path: Path) -> None:
     assert reservation.operation_state_path.exists()
 
 
+@pytest.mark.slow
 def test_active_write_lock_live_contention_with_subprocess(tmp_path: Path) -> None:
     plugin_root = str(Path(__file__).resolve().parent.parent)
 

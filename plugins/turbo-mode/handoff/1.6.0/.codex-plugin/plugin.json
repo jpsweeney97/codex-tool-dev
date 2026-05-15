@@ -1,6 +1,6 @@
 {
   "name": "handoff",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Session handoff, resume, and deferred work tracking for context continuity",
   "author": {
     "name": "JP"

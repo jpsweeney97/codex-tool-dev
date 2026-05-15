@@ -84,6 +84,18 @@ def test_load_resume_state_ignores_consumed_legacy_marker(tmp_path: Path) -> Non
     assert load_resume_state(state_dir, "demo") is None
 
 
+def test_legacy_consumed_prefix_is_shared_with_storage_authority() -> None:
+    from turbo_mode_handoff_runtime import storage_primitives
+    from turbo_mode_handoff_runtime.session_state import LEGACY_CONSUMED_PREFIX as state_prefix
+    from turbo_mode_handoff_runtime.storage_authority import (
+        LEGACY_CONSUMED_PREFIX as authority_prefix,
+    )
+
+    assert storage_primitives.LEGACY_CONSUMED_PREFIX == "MIGRATED:"
+    assert authority_prefix == storage_primitives.LEGACY_CONSUMED_PREFIX
+    assert state_prefix == storage_primitives.LEGACY_CONSUMED_PREFIX
+
+
 def test_clear_resume_state_removes_file(tmp_path: Path) -> None:
     state_dir = tmp_path / ".session-state"
     state_dir.mkdir()

@@ -20,9 +20,9 @@
 
 **The headline is the zero.** Nothing in this plugin is actively bleeding — no incidents, no velocity-stop, no P0. For a published single-author tool mid-refactor, the debt is **latent and concentrated**, not pervasive: one structural hotspot (`storage_authority.py`, 1733 lines, flagged independently by three lenses) and a cluster of cheap release-hygiene gaps that are wrong *right now* for a published artifact.
 
-**Why the watch list is 60% (and why that's not inflation):** The rubric flags >40% watch as "logging observations." Here it is the opposite — it is an accurate portrait of a clean codebase. The P0/P1 surface is genuinely small; most real debt is latent (P2) and several watch items are *cheap companions* to the quick-wins (test-suite-readiness pairs with the CI fix; runbook/ADR pair with the bus-factor fix). The watch list below is grouped by companion relationship, not dumped flat.
+**Why the watch list is 65% (and why that's not inflation):** The rubric flags >40% watch as "logging observations." Here it is the opposite — it is an accurate portrait of a clean codebase. The P0/P1 surface is genuinely small; most real debt is latent (P2) and several watch items are *cheap companions* to the quick-wins (test-suite-readiness pairs with the CI fix; runbook/ADR pair with the bus-factor fix). The watch list below is grouped by companion relationship, not dumped flat.
 
-**Severity inflation check:** 0% P0, 30% P1 — within tolerance. One silent-failure finding (SY-13) was *raised* P2→P1 with explicit rationale; one structural finding (SY-1) raised P2→P1 on corroboration. **Correction:** SY-12's earlier P2→P1 raise has been **retracted** and the finding demoted to P3/watch — see QW5. `quality_check.py` is not a wired gate in 1.6.0, so the "fails open" rationale that justified the raise does not apply at this version.
+**Severity inflation check:** 0% P0, 30% P1 — within tolerance. One silent-failure finding (SY-13) was *raised* P2→P1 with explicit rationale; one structural finding (SY-1) raised P2→P1 on corroboration. **Correction:** SY-12's earlier P2→P1 raise has been **retracted** and the finding demoted to P3/watch — see WL13. `quality_check.py` is not a wired gate in 1.6.0, so the "fails open" rationale that justified the raise does not apply at this version.
 
 ---
 
@@ -49,7 +49,7 @@
 
 ## 3. Quick Wins
 
-*Bucket: (P0/P1) + small effort + clear remediation. Ordered by severity then leverage. Start here.*
+*Bucket: (P0/P1) + small effort + clear remediation. Ordered by severity then leverage. Start here with QW1-QW4. The former QW5 identifier is retained only as a redirect for traceability and is not part of this execution queue.*
 
 ### QW1 — Add CI to run the existing test suite `[SY-3]`
 - **category:** test-debt + operational (independent convergence — two auditors, two framings)
@@ -83,14 +83,9 @@
 - **recommendation:** Define once (export from `storage_primitives.py`), import in both sites. ~5 minutes. Add a one-line test asserting both sites resolve to the same value.
 - **effort:** small · **leverage:** medium · *(severity raised P2→P1: compounding correctness debt in a published data tool with no guarding test)*
 
-### QW5 — *(Reclassified → Watch / P3)* `quality_check.py` swallows its own validation errors `[SY-12]`
-- **category:** code-health (silent failure) — **latent, conditional on future hook wiring**
-- **anchor:** `quality_check.py:419-426, 431-443`
-- **correction:** The original entry called this "the handoff-quality gate," claimed its "correctness guarantee is already void," and raised it P2→P1 as "a gate that fails open." **That framing is wrong for 1.6.0 and is retracted.** `quality_check.py` is *not* a wired gate: `hooks/hooks.json` is `{"hooks": {}}`; `README.md` (§Hooks, §Runtime-only Helpers, Design Principles) states it is non-gating and not wired into any skill or hook; no `SKILL.md` or `hooks.json` references it; and `tests/test_release_metadata.py::test_readme_does_not_publish_bundled_hook_launcher_contract` *actively enforces* that it is not published as a hook. There is no gate to fail open in this release.
-- **problem (still true, as latent code debt):** Two `except Exception: return 0` blocks mean that *if this helper is ever wired as a PostToolUse gate*, a raising `validate()` or a serialization failure would return success and let malformed handoffs pass silently.
-- **impact:** None at 1.6.0 — dormant and unreachable as a gate. The risk is purely conditional: it materializes only if a future release wires this helper into a hook without first hardening it.
-- **recommendation:** Track as a watch item paired with any future hook-enablement work. When/if wired: let unexpected `validate()` exceptions propagate (or re-raise as a named error) and emit a fallback plain-text error on serialization failure. **No action required for 1.6.0.**
-- **effort:** small · **leverage:** low (latent) · **severity:** P3 · *(retained in this section under its original QW5 reference for traceability; it is no longer a quick win and is counted under the Watch List in the snapshot)*
+### QW5 — Retired / reclassified; see WL13 `[SY-12]`
+- **status:** Not a quick win. The earlier QW5 framing treated `quality_check.py` as an active gate, but live 1.6.0 keeps it unwired (`hooks.json` empty; README/tests enforce non-wiring).
+- **action:** No 1.6.0 action here. Track the latent helper behavior under WL13 and harden it only if future hook-enablement work wires this helper into a PostToolUse hook.
 
 ---
 
@@ -153,7 +148,7 @@
 - **WL2 `[SY-7]`** Brittle tests — 108 exact JSON-field asserts + a full-string error equality. *Trigger: before the next operation-state schema change / `schema_version` bump.*
 - **WL4 `[SY-10]`** Unbounded growth — `transactions/`/`markers/` dirs + `rglob` scans, no pruning. *Trigger: when any project's `.session-state/transactions/` exceeds ~hundreds of files or `/load` latency becomes perceptible.*
 - **WL12 `[SY-15]`** Legacy `docs/handoffs/` fallback has no exit condition (P3). *Trigger: add the 5-min removal-condition comment now; remove the shim at 2.0 or when no user repos retain `docs/handoffs/`.*
-- **WL13 `[SY-12]`** `quality_check.py` swallows its own `validate()`/serialization exceptions and returns 0 (P3) — **reclassified from QW5**; dormant because it is *not* a wired gate in 1.6.0 (`hooks.json` empty; README/tests enforce non-wiring). *Trigger: only if a future release wires this helper into a PostToolUse hook — harden it in the same change. No action for 1.6.0.*
+- **WL13 `[SY-12]`** `quality_check.py:419-426, 431-443` swallows its own `validate()`/serialization exceptions and returns 0 (P3) — **reclassified from QW5**; dormant because it is *not* a wired gate in 1.6.0 (`hooks.json` empty; README/tests enforce non-wiring). *Trigger: only if a future release wires this helper into a PostToolUse hook — harden it in the same change. No action for 1.6.0.*
 
 ---
 

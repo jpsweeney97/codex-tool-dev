@@ -406,6 +406,7 @@ def test_tracked_primary_active_load_fails_before_mutation(tmp_path: Path) -> No
     assert not (tmp_path / ".codex" / "handoffs" / ".session-state" / "locks" / "load.lock").exists()
 
 
+@pytest.mark.slow
 def test_load_lock_blocks_concurrent_attempt_before_mutation(tmp_path: Path) -> None:
     source = _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_locked.md")
     lock = tmp_path / ".codex" / "handoffs" / ".session-state" / "locks" / "load.lock"

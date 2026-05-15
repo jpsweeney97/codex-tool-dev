@@ -1,4 +1,10 @@
-"""Storage authority for Handoff runtime paths and state transitions."""
+"""Storage authority for Handoff runtime paths and state transitions.
+
+This module owns storage layout classification, handoff discovery, history
+selection, and chain-state recovery diagnostics. Active-write reservation and
+write mechanics live in ``active_writes.py``; callers should import those
+helpers directly rather than treating this module as an active-write facade.
+"""
 
 from __future__ import annotations
 
@@ -6,20 +12,16 @@ import json
 import os
 import re
 import subprocess
-import sys
 import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from turbo_mode_handoff_runtime.active_writes import ActiveWriteReservation
 
 
 from turbo_mode_handoff_runtime.storage_primitives import (
+    LEGACY_CONSUMED_PREFIX,
     read_json_object as _read_json_object_primitive,
     sha256_regular_file_or_none as _content_sha256,
     write_json_atomic as _write_json_atomic,
@@ -70,7 +72,6 @@ LEGACY_ACTIVE_OPT_IN_MANIFEST = (
     / "plans"
     / "2026-05-13-handoff-storage-legacy-active-opt-ins.md"
 )
-LEGACY_CONSUMED_PREFIX = "MIGRATED:"
 CHAIN_STATE_TTL_SECONDS = 24 * 60 * 60
 
 
@@ -121,114 +122,6 @@ def get_storage_layout(project_root: Path) -> StorageLayout:
         legacy_archive_dir=legacy / "archive",
         legacy_state_dir=legacy / ".session-state",
         previous_primary_hidden_archive_dir=primary / ".archive",
-    )
-
-
-def begin_active_write(
-    project_root: Path,
-    *,
-    project_name: str | None,
-    operation: str,
-    slug: str | None = None,
-    run_id: str | None = None,
-    created_at: str | None = None,
-    lease_seconds: int = 1800,
-) -> ActiveWriteReservation:
-    """Reserve a primary active handoff write through the storage facade."""
-    from turbo_mode_handoff_runtime.active_writes import begin_active_write as _begin_active_write
-
-    return _begin_active_write(
-        project_root,
-        project_name=project_name,
-        operation=operation,
-        slug=slug,
-        run_id=run_id,
-        created_at=created_at,
-        lease_seconds=lease_seconds,
-    )
-
-
-def allocate_active_path(
-    project_root: Path,
-    *,
-    operation: str,
-    slug: str,
-    created_at: str | None = None,
-) -> Path:
-    """Allocate a primary active handoff path through the storage facade."""
-    from turbo_mode_handoff_runtime.active_writes import allocate_active_path as _allocate_active_path
-
-    return _allocate_active_path(
-        project_root,
-        operation=operation,
-        slug=slug,
-        created_at=created_at,
-    )
-
-
-def write_active_handoff(
-    project_root: Path,
-    *,
-    operation_state_path: Path,
-    content: str,
-    content_sha256: str,
-) -> dict[str, object]:
-    """Write a reserved primary active handoff through the storage facade."""
-    from turbo_mode_handoff_runtime.active_writes import write_active_handoff as _write_active_handoff
-
-    return _write_active_handoff(
-        project_root,
-        operation_state_path=operation_state_path,
-        content=content,
-        content_sha256=content_sha256,
-    )
-
-
-def list_active_writes(
-    project_root: Path,
-    *,
-    project_name: str,
-    operation: str | None = None,
-) -> list[dict[str, object]]:
-    """List active write operation-state records through the storage facade."""
-    from turbo_mode_handoff_runtime.active_writes import list_active_writes as _list_active_writes
-
-    return _list_active_writes(
-        project_root,
-        project_name=project_name,
-        operation=operation,
-    )
-
-
-def abandon_active_write(
-    project_root: Path,
-    *,
-    operation_state_path: Path,
-    reason: str,
-) -> dict[str, object]:
-    """Mark an active write abandoned through the storage facade."""
-    from turbo_mode_handoff_runtime.active_writes import abandon_active_write as _abandon_active_write
-
-    return _abandon_active_write(
-        project_root,
-        operation_state_path=operation_state_path,
-        reason=reason,
-    )
-
-
-def recover_active_write_transaction(
-    project_root: Path,
-    *,
-    operation_state_path: Path,
-) -> dict[str, object]:
-    """Recover an active write transaction through the storage facade."""
-    from turbo_mode_handoff_runtime.active_writes import (
-        recover_active_write_transaction as _recover_active_write_transaction,
-    )
-
-    return _recover_active_write_transaction(
-        project_root,
-        operation_state_path=operation_state_path,
     )
 
 

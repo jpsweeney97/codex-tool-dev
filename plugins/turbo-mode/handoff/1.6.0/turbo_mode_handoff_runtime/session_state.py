@@ -1,3 +1,10 @@
+"""CLI command dispatcher for Handoff resume state and chain-state operations.
+
+The module keeps command parsing close to the skill-facing CLI contract. Storage
+layout and chain-state recovery decisions live in ``storage_authority.py``;
+active-writer operations live in ``active_writes.py``.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -13,6 +20,7 @@ from pathlib import Path
 
 from turbo_mode_handoff_runtime import storage_primitives
 from turbo_mode_handoff_runtime.project_paths import get_state_dir
+from turbo_mode_handoff_runtime.storage_primitives import LEGACY_CONSUMED_PREFIX
 
 
 class AmbiguousResumeStateError(RuntimeError):
@@ -30,9 +38,6 @@ class ResumeState:
     resume_token: str
     archive_path: str
     created_at: str
-
-
-_LEGACY_CONSUMED_PREFIX = "MIGRATED:"
 
 
 def _legacy_state_path(state_dir: Path, project: str) -> Path:
@@ -59,7 +64,7 @@ def _delete_path(path: Path, *, context: str) -> bool:
 
 
 def _mark_legacy_state_consumed(legacy_path: Path, migrated_state_path: Path) -> None:
-    legacy_path.write_text(f"{_LEGACY_CONSUMED_PREFIX}{migrated_state_path}\n", encoding="utf-8")
+    legacy_path.write_text(f"{LEGACY_CONSUMED_PREFIX}{migrated_state_path}\n", encoding="utf-8")
 
 
 def _read_legacy_archive_path(legacy_path: Path) -> str | None:
@@ -68,7 +73,7 @@ def _read_legacy_archive_path(legacy_path: Path) -> str | None:
         raise ValueError(
             f"read-state failed: legacy state file was empty. Got: {str(legacy_path)!r:.100}"
         )
-    if payload.startswith(_LEGACY_CONSUMED_PREFIX):
+    if payload.startswith(LEGACY_CONSUMED_PREFIX):
         return None
     return payload
 
@@ -547,8 +552,7 @@ def main(argv: list[str] | None = None) -> int:
         return _emit(payload, args.field)
 
     if args.command == "allocate-active-path":
-        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError
-        from turbo_mode_handoff_runtime.storage_authority import allocate_active_path
+        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError, allocate_active_path
 
         try:
             active_path = allocate_active_path(
@@ -563,8 +567,7 @@ def main(argv: list[str] | None = None) -> int:
         return _emit({"active_path": str(active_path)}, args.field)
 
     if args.command == "begin-active-write":
-        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError
-        from turbo_mode_handoff_runtime.storage_authority import begin_active_write
+        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError, begin_active_write
 
         try:
             reservation = begin_active_write(
@@ -580,8 +583,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return _emit(reservation.to_payload(), args.field)
     if args.command == "write-active-handoff":
-        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError
-        from turbo_mode_handoff_runtime.storage_authority import write_active_handoff
+        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError, write_active_handoff
 
         try:
             payload = write_active_handoff(
@@ -595,7 +597,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return _emit(payload, args.field)
     if args.command == "list-active-writes":
-        from turbo_mode_handoff_runtime.storage_authority import list_active_writes
+        from turbo_mode_handoff_runtime.active_writes import list_active_writes
 
         records = list_active_writes(
             Path(args.project_root),
@@ -606,8 +608,7 @@ def main(argv: list[str] | None = None) -> int:
         print()
         return 0
     if args.command == "abandon-active-write":
-        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError
-        from turbo_mode_handoff_runtime.storage_authority import abandon_active_write
+        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError, abandon_active_write
 
         try:
             payload = abandon_active_write(
@@ -620,8 +621,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return _emit(payload, args.field)
     if args.command == "active-write-transaction-recover":
-        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError
-        from turbo_mode_handoff_runtime.storage_authority import recover_active_write_transaction
+        from turbo_mode_handoff_runtime.active_writes import (
+            ActiveWriteError,
+            recover_active_write_transaction,
+        )
 
         try:
             payload = recover_active_write_transaction(
@@ -633,8 +636,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return _emit(payload, args.field)
     if args.command == "active-writer-flow":
-        from turbo_mode_handoff_runtime.active_writes import ActiveWriteError
-        from turbo_mode_handoff_runtime.storage_authority import (
+        from turbo_mode_handoff_runtime.active_writes import (
+            ActiveWriteError,
             begin_active_write,
             list_active_writes,
             write_active_handoff,

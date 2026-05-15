@@ -33,6 +33,7 @@ POLICY_CODE_COMMENTS = [
     PLUGIN_ROOT / "turbo_mode_handoff_runtime" / "cleanup.py",
     PLUGIN_ROOT / "turbo_mode_handoff_runtime" / "project_paths.py",
 ]
+EXPECTED_VERSION = "1.7.0"
 
 
 def test_versions_are_aligned() -> None:
@@ -40,8 +41,33 @@ def test_versions_are_aligned() -> None:
         (PLUGIN_ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
     )
     pyproject = tomllib.loads((PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert plugin_json["version"] == "1.6.0"
-    assert pyproject["project"]["version"] == "1.6.0"
+    assert plugin_json["version"] == EXPECTED_VERSION
+    assert pyproject["project"]["version"] == EXPECTED_VERSION
+
+
+def test_readme_documents_current_summary_and_development_commands() -> None:
+    text = (PLUGIN_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "codex plugin install ./plugins/turbo-mode/handoff/1.6.0" in text
+    assert "cd plugins/turbo-mode/handoff/1.6.0" in text
+    assert "uv run --directory plugins/turbo-mode/handoff/1.6.0 pytest" in text
+    assert "pytest --collect-only -q" in text
+    assert "/summary" in text
+    assert "`handoff`, `checkpoint`, or `summary`" in text
+    assert "./packages/plugins/handoff" not in text
+    assert "cd packages/plugins/handoff" not in text
+    assert "uv run --package handoff-plugin pytest" not in text
+    assert "354 tests across 10 test modules" not in text
+
+
+def test_contributor_architecture_docs_exist_and_are_linked() -> None:
+    contributing = PLUGIN_ROOT / "CONTRIBUTING.md"
+    architecture = PLUGIN_ROOT / "references" / "ARCHITECTURE.md"
+    readme = (PLUGIN_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert contributing.exists()
+    assert architecture.exists()
+    assert "CONTRIBUTING.md" in readme
+    assert "references/ARCHITECTURE.md" in readme
 
 
 def test_docs_do_not_claim_universal_gitignore_policy() -> None:
@@ -114,6 +140,7 @@ def test_load_skill_does_not_instruct_plugin_managed_gitignore() -> None:
     assert "SessionStart hook runs silently" not in text
 
 
-def test_changelog_has_1_6_0_release_header() -> None:
+def test_changelog_has_1_7_0_release_header() -> None:
     text = (PLUGIN_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert re.search(r"^## \[1\.7\.0\] - 2026-05-15$", text, re.MULTILINE), text
     assert re.search(r"^## \[1\.6\.0\] - \d{4}-\d{2}-\d{2}$", text, re.MULTILINE), text

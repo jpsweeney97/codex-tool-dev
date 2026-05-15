@@ -21,6 +21,7 @@ from typing import Literal
 
 _CLAIM_TIMEOUT_SECONDS = 60
 _LOCK_TIMEOUT_SECONDS = 1800
+LEGACY_CONSUMED_PREFIX = "MIGRATED:"
 
 
 @dataclass(frozen=True)
