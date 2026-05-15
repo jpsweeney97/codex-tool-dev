@@ -10,7 +10,10 @@ class TestMain:
 
     def test_always_returns_zero(self, capsys) -> None:
         """main() must return 0 even when internals raise."""
-        with patch("turbo_mode_handoff_runtime.cleanup.prune_old_state_files", side_effect=RuntimeError("unexpected")):
+        with patch(
+            "turbo_mode_handoff_runtime.cleanup.prune_old_state_files",
+            side_effect=RuntimeError("unexpected"),
+        ):
             assert main() == 0
         captured = capsys.readouterr()
         assert "state cleanup warning: ttl prune failed: unexpected" in captured.err

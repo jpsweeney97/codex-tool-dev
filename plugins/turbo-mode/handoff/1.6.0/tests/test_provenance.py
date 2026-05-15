@@ -1,13 +1,19 @@
 """Tests for provenance.py — defer-meta/distill-meta parsing and session matching."""
-from __future__ import annotations
 
-import pytest
+from __future__ import annotations
 
 # --- Fixtures ---
 
-DEFER_META_COMMENT = '<!-- defer-meta {"v": 1, "source_session": "5136e38e-efc5-403f-ad5e-49516f47884b", "source_type": "pr-review", "source_ref": "PR #29", "created_by": "defer-skill"} -->'
+DEFER_META_COMMENT = (
+    '<!-- defer-meta {"v": 1, "source_session": "5136e38e-efc5-403f-ad5e-49516f47884b", '
+    '"source_type": "pr-review", "source_ref": "PR #29", "created_by": "defer-skill"} -->'
+)
 
-DISTILL_META_COMMENT = '<!-- distill-meta {"v": 1, "source_uid": "sha256:abc123", "source_anchor": "## Decisions", "content_sha256": "def456", "distilled_at": "2026-02-27T12:00:00Z"} -->'
+DISTILL_META_COMMENT = (
+    '<!-- distill-meta {"v": 1, "source_uid": "sha256:abc123", '
+    '"source_anchor": "## Decisions", "content_sha256": "def456", '
+    '"distilled_at": "2026-02-27T12:00:00Z"} -->'
+)
 
 TICKET_BODY_WITH_META = f"""\
 ## Problem
@@ -57,7 +63,7 @@ class TestParseDeferMeta:
     def test_malformed_json_returns_none(self) -> None:
         from turbo_mode_handoff_runtime.provenance import parse_defer_meta
 
-        result = parse_defer_meta('<!-- defer-meta {bad json} -->')
+        result = parse_defer_meta("<!-- defer-meta {bad json} -->")
         assert result is None
 
 
@@ -108,7 +114,11 @@ class TestReadProvenance:
     def test_yaml_wins_when_both_exist_and_disagree(self) -> None:
         from turbo_mode_handoff_runtime.provenance import read_provenance
 
-        yaml_data = {"source_session": "aaaa-yaml-wins", "source_type": "codex", "created_by": "defer-skill"}
+        yaml_data = {
+            "source_session": "aaaa-yaml-wins",
+            "source_type": "codex",
+            "created_by": "defer-skill",
+        }
         result = read_provenance(provenance_yaml=yaml_data, body_text=TICKET_BODY_WITH_META)
         assert result["source_session"] == "aaaa-yaml-wins"
         assert result["source"] == "yaml"
@@ -121,7 +131,11 @@ class TestReadProvenanceFallback:
         from turbo_mode_handoff_runtime.provenance import read_provenance
 
         result = read_provenance(
-            provenance_yaml={"source_session": "", "source_type": "pr-review", "created_by": "defer-skill"},
+            provenance_yaml={
+                "source_session": "",
+                "source_type": "pr-review",
+                "created_by": "defer-skill",
+            },
             body_text=TICKET_BODY_WITH_META,
         )
         assert result is not None
@@ -132,7 +146,11 @@ class TestReadProvenanceFallback:
         from turbo_mode_handoff_runtime.provenance import read_provenance
 
         result = read_provenance(
-            provenance_yaml={"source_session": None, "source_type": "pr-review", "created_by": "defer-skill"},
+            provenance_yaml={
+                "source_session": None,
+                "source_type": "pr-review",
+                "created_by": "defer-skill",
+            },
             body_text=TICKET_BODY_WITH_META,
         )
         assert result is not None
@@ -144,12 +162,16 @@ class TestSessionMatch:
     def test_exact_uuid_match(self) -> None:
         from turbo_mode_handoff_runtime.provenance import session_matches
 
-        assert session_matches("5136e38e-efc5-403f-ad5e-49516f47884b", "5136e38e-efc5-403f-ad5e-49516f47884b")
+        assert session_matches(
+            "5136e38e-efc5-403f-ad5e-49516f47884b", "5136e38e-efc5-403f-ad5e-49516f47884b"
+        )
 
     def test_no_match(self) -> None:
         from turbo_mode_handoff_runtime.provenance import session_matches
 
-        assert not session_matches("5136e38e-efc5-403f-ad5e-49516f47884b", "aaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        assert not session_matches(
+            "5136e38e-efc5-403f-ad5e-49516f47884b", "aaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        )
 
     def test_none_returns_false(self) -> None:
         from turbo_mode_handoff_runtime.provenance import session_matches
@@ -176,7 +198,7 @@ class TestProvenanceWarnings:
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            result = parse_defer_meta('<!-- defer-meta {bad json} -->')
+            result = parse_defer_meta("<!-- defer-meta {bad json} -->")
         assert result is None
         assert len(w) == 1
         assert "JSON" in str(w[0].message)
@@ -188,7 +210,7 @@ class TestProvenanceWarnings:
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            result = parse_distill_meta('<!-- distill-meta {bad} -->')
+            result = parse_distill_meta("<!-- distill-meta {bad} -->")
         assert result is None
         assert len(w) == 1
         assert "JSON" in str(w[0].message)

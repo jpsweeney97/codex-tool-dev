@@ -43,14 +43,14 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
         return {}, text
 
     fm_text = text[4:end]
-    remaining = text[end + 4:]
+    remaining = text[end + 4 :]
 
     frontmatter: dict[str, str] = {}
     for line in fm_text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        match = re.match(r'^(\w[\w-]*)\s*:\s*(.+)$', line)
+        match = re.match(r"^(\w[\w-]*)\s*:\s*(.+)$", line)
         if match:
             key = match.group(1)
             value = match.group(2).strip()
@@ -95,11 +95,13 @@ def parse_sections(text: str) -> list[Section]:
         if not inside_fence and line.startswith("## "):
             if current_heading:
                 content = "".join(current_lines).strip()
-                sections.append(Section(
-                    heading=current_heading,
-                    level=2,
-                    content=content,
-                ))
+                sections.append(
+                    Section(
+                        heading=current_heading,
+                        level=2,
+                        content=content,
+                    )
+                )
             current_heading = line.strip()
             current_lines = []
         elif current_heading:
@@ -107,11 +109,13 @@ def parse_sections(text: str) -> list[Section]:
 
     if current_heading:
         content = "".join(current_lines).strip()
-        sections.append(Section(
-            heading=current_heading,
-            level=2,
-            content=content,
-        ))
+        sections.append(
+            Section(
+                heading=current_heading,
+                level=2,
+                content=content,
+            )
+        )
 
     return sections
 

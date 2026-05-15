@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from turbo_mode_handoff_runtime.plugin_siblings import find_sibling_plugin_root
 
 

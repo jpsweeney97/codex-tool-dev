@@ -16,7 +16,8 @@ def find_sibling_plugin_root(current_plugin_root: Path, sibling_name: str) -> Pa
     )
     if len(versions) != 1:
         raise RuntimeError(
-            f"Expected exactly one installed {sibling_name} version under {sibling_base}, got {len(versions)}"
+            f"Expected exactly one installed {sibling_name} version under {sibling_base}, "
+            f"got {len(versions)}"
         )
     return versions[0]
 

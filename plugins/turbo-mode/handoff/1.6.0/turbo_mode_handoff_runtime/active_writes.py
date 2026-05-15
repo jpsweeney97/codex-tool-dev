@@ -6,28 +6,40 @@ import hashlib
 import json
 import os
 import subprocess
-import sys
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-
 from turbo_mode_handoff_runtime import storage_primitives as _storage_primitives
-from turbo_mode_handoff_runtime.storage_authority import (
+from turbo_mode_handoff_runtime.chain_state import (
     ChainStateDiagnosticError,
     continue_chain_state,
-    get_storage_layout,
     read_chain_state,
 )
+from turbo_mode_handoff_runtime.storage_layout import get_storage_layout
 from turbo_mode_handoff_runtime.storage_primitives import (
     LockPolicy,
+)
+from turbo_mode_handoff_runtime.storage_primitives import (
     acquire_lock as _acquire_lock_with_policy,
+)
+from turbo_mode_handoff_runtime.storage_primitives import (
     parse_created_at as _parse_created_at,
+)
+from turbo_mode_handoff_runtime.storage_primitives import (
     read_json_object as _read_json_object,
+)
+from turbo_mode_handoff_runtime.storage_primitives import (
     release_lock as _release_lock,
+)
+from turbo_mode_handoff_runtime.storage_primitives import (
     sha256_file as _sha256_file,
+)
+from turbo_mode_handoff_runtime.storage_primitives import (
     sha256_file_or_none as _sha256_path,
+)
+from turbo_mode_handoff_runtime.storage_primitives import (
     write_json_atomic as _write_json_atomic,
 )
 
@@ -121,10 +133,7 @@ def begin_active_write(
     project = project_name or layout.project_root.name
     active_run_id = run_id or uuid.uuid4().hex
     operation_state_path = (
-        layout.primary_state_dir
-        / "active-writes"
-        / project
-        / f"{active_run_id}.json"
+        layout.primary_state_dir / "active-writes" / project / f"{active_run_id}.json"
     )
     if run_id is not None and operation_state_path.exists():
         return _existing_reservation(
@@ -166,19 +175,19 @@ def begin_active_write(
         lease_id = uuid.uuid4().hex
         acquired_at = now.isoformat()
         expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
-        transaction_path = (
-            layout.primary_state_dir / "transactions" / f"{transaction_id}.json"
+        transaction_path = layout.primary_state_dir / "transactions" / f"{transaction_id}.json"
+        idempotency_key = _stable_hash(
+            [
+                project,
+                operation,
+                active_run_id,
+                state_snapshot_hash,
+                resumed_path or "",
+                resumed_hash or "",
+                bound_slug,
+                str(active_path),
+            ]
         )
-        idempotency_key = _stable_hash([
-            project,
-            operation,
-            active_run_id,
-            state_snapshot_hash,
-            resumed_path or "",
-            resumed_hash or "",
-            bound_slug,
-            str(active_path),
-        ])
         reservation = ActiveWriteReservation(
             schema_version=1,
             project=project,
@@ -245,8 +254,7 @@ def _chain_state_active_write_error(exc: ChainStateDiagnosticError) -> ActiveWri
     error = exc.payload.get("error", {})
     code = error.get("code") if isinstance(error, dict) else "unknown"
     return ActiveWriteError(
-        "begin-active-write failed: chain-state recovery required. "
-        f"Got: {code!r:.100}"
+        f"begin-active-write failed: chain-state recovery required. Got: {code!r:.100}"
     )
 
 
@@ -287,7 +295,8 @@ def _read_operation_state(path: Path, *, operation_label: str) -> dict[str, obje
         return _read_json_object(path)
     except (OSError, ValueError) as exc:
         raise ActiveWriteError(
-            f"{operation_label} failed: operation state unreadable; manual operator review required. "
+            f"{operation_label} failed: operation state unreadable; "
+            "manual operator review required. "
             f"Got: {str(path)!r:.100}"
         ) from exc
 
@@ -352,7 +361,8 @@ def _ensure_no_compatible_reservation(
             record = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ActiveWriteError(
-                "begin-active-write failed: active-write record unreadable; manual operator review required. "
+                "begin-active-write failed: active-write record unreadable; "
+                "manual operator review required. "
                 f"Got: {str(path)!r:.100}"
             ) from exc
         if record.get("operation") != operation:
@@ -364,8 +374,7 @@ def _ensure_no_compatible_reservation(
         if _auto_expire_pre_output_reservation(record, path, now=now):
             continue
         raise ActiveWriteError(
-            "begin-active-write failed: active write already reserved. "
-            f"Got: {str(path)!r:.100}"
+            f"begin-active-write failed: active write already reserved. Got: {str(path)!r:.100}"
         )
 
 
@@ -391,7 +400,9 @@ def _auto_expire_pre_output_reservation(
         return False
     updated = {**record, "status": "reservation_expired", "updated_at": now.isoformat()}
     _write_json_atomic(operation_state_path, updated)
-    _write_json_atomic(Path(str(transaction_path_value)), {**updated, "status": "reservation_expired"})
+    _write_json_atomic(
+        Path(str(transaction_path_value)), {**updated, "status": "reservation_expired"}
+    )
     return True
 
 
@@ -478,19 +489,20 @@ def write_active_handoff(
         expected_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         if expected_hash != content_sha256:
             raise ActiveWriteError(
-                "write-active-handoff failed: content hash mismatch. "
-                f"Got: {content_sha256!r:.100}"
+                f"write-active-handoff failed: content hash mismatch. Got: {content_sha256!r:.100}"
             )
         active_path = Path(str(state["allocated_active_path"]))
         transaction_path = Path(str(state["transaction_path"]))
         if state.get("status") != "committed":
             generated_at = datetime.now(UTC).isoformat()
-            state.update({
-                "status": "content-generated",
-                "content_hash": content_sha256,
-                "output_sha256": content_sha256,
-                "updated_at": generated_at,
-            })
+            state.update(
+                {
+                    "status": "content-generated",
+                    "content_hash": content_sha256,
+                    "output_sha256": content_sha256,
+                    "updated_at": generated_at,
+                }
+            )
             _write_json_atomic(operation_state_path, state)
             _write_json_atomic(
                 transaction_path,
@@ -542,14 +554,16 @@ def write_active_handoff(
                 )
             os.replace(temp_path, active_path)
         updated_at = datetime.now(UTC).isoformat()
-        state.update({
-            "status": "write-pending",
-            "active_path": str(active_path),
-            "temp_active_path": temp_active_path,
-            "content_hash": content_sha256,
-            "output_sha256": content_sha256,
-            "updated_at": updated_at,
-        })
+        state.update(
+            {
+                "status": "write-pending",
+                "active_path": str(active_path),
+                "temp_active_path": temp_active_path,
+                "content_hash": content_sha256,
+                "output_sha256": content_sha256,
+                "updated_at": updated_at,
+            }
+        )
         _write_json_atomic(operation_state_path, state)
         _write_json_atomic(
             transaction_path,
@@ -560,15 +574,19 @@ def write_active_handoff(
             },
         )
         try:
-            cleanup_action, cleanup_path, cleanup_mechanism = _clear_snapshotted_primary_state(state)
+            cleanup_action, cleanup_path, cleanup_mechanism = _clear_snapshotted_primary_state(
+                state
+            )
         except ActiveWriteError:
             failed_at = datetime.now(UTC).isoformat()
-            state.update({
-                "status": "cleanup_failed",
-                "state_cleanup_action": "cleanup_failed",
-                "state_cleanup_path": _first_state_cleanup_path(state),
-                "updated_at": failed_at,
-            })
+            state.update(
+                {
+                    "status": "cleanup_failed",
+                    "state_cleanup_action": "cleanup_failed",
+                    "state_cleanup_path": _first_state_cleanup_path(state),
+                    "updated_at": failed_at,
+                }
+            )
             _write_json_atomic(operation_state_path, state)
             _write_json_atomic(
                 transaction_path,
@@ -579,13 +597,15 @@ def write_active_handoff(
                 },
             )
             raise
-        state.update({
-            "status": "committed",
-            "state_cleanup_action": cleanup_action,
-            "state_cleanup_path": cleanup_path,
-            "state_cleanup_mechanism": cleanup_mechanism,
-            "updated_at": datetime.now(UTC).isoformat(),
-        })
+        state.update(
+            {
+                "status": "committed",
+                "state_cleanup_action": cleanup_action,
+                "state_cleanup_path": cleanup_path,
+                "state_cleanup_mechanism": cleanup_mechanism,
+                "updated_at": datetime.now(UTC).isoformat(),
+            }
+        )
         _write_json_atomic(operation_state_path, state)
         transaction = {
             **state,
@@ -651,14 +671,16 @@ def abandon_active_write(
     try:
         updated_at = datetime.now(UTC).isoformat()
         active_path = Path(str(state.get("active_path") or state["allocated_active_path"]))
-        state.update({
-            "status": "abandoned",
-            "active_path": str(active_path),
-            "active_path_exists": active_path.exists(),
-            "active_path_sha256": _sha256_path(active_path),
-            "abandon_reason": reason,
-            "updated_at": updated_at,
-        })
+        state.update(
+            {
+                "status": "abandoned",
+                "active_path": str(active_path),
+                "active_path_exists": active_path.exists(),
+                "active_path_sha256": _sha256_path(active_path),
+                "abandon_reason": reason,
+                "updated_at": updated_at,
+            }
+        )
         _write_json_atomic(operation_state_path, state)
         transaction_path = Path(str(state["transaction_path"]))
         transaction = {
@@ -737,17 +759,19 @@ def recover_active_write_transaction(
             )
         updated_at = datetime.now(UTC).isoformat()
         cleanup_action, cleanup_path, cleanup_mechanism = _clear_snapshotted_primary_state(state)
-        state.update({
-            "status": "committed",
-            "active_path": str(active_path),
-            "content_hash": content_hash,
-            "output_sha256": content_hash,
-            "recovered_from_status": recovered_from_status,
-            "state_cleanup_action": cleanup_action,
-            "state_cleanup_path": cleanup_path,
-            "state_cleanup_mechanism": cleanup_mechanism,
-            "updated_at": updated_at,
-        })
+        state.update(
+            {
+                "status": "committed",
+                "active_path": str(active_path),
+                "content_hash": content_hash,
+                "output_sha256": content_hash,
+                "recovered_from_status": recovered_from_status,
+                "state_cleanup_action": cleanup_action,
+                "state_cleanup_path": cleanup_path,
+                "state_cleanup_mechanism": cleanup_mechanism,
+                "updated_at": updated_at,
+            }
+        )
         _write_json_atomic(operation_state_path, state)
         transaction_path = Path(str(state["transaction_path"]))
         transaction = {
@@ -772,8 +796,7 @@ def _allocate_active_path(
         active_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise ActiveWriteError(
-            "allocate-active-path failed: parent path conflict. "
-            f"Got: {str(active_dir)!r:.100}"
+            f"allocate-active-path failed: parent path conflict. Got: {str(active_dir)!r:.100}"
         ) from exc
     prefix = created_at.strftime("%Y-%m-%d_%H-%M")
     stem = f"{operation}-{slug}"
@@ -885,10 +908,12 @@ def _ensure_reservation_is_fresh(
     if expires >= datetime.now(UTC):
         return
     updated_at = datetime.now(UTC).isoformat()
-    state.update({
-        "status": "reservation_expired",
-        "updated_at": updated_at,
-    })
+    state.update(
+        {
+            "status": "reservation_expired",
+            "updated_at": updated_at,
+        }
+    )
     _write_json_atomic(operation_state_path, state)
     transaction_path = Path(str(state["transaction_path"]))
     _write_json_atomic(
@@ -899,8 +924,7 @@ def _ensure_reservation_is_fresh(
         },
     )
     raise ActiveWriteError(
-        "write-active-handoff failed: reservation expired. "
-        f"Got: {expires_at!r:.100}"
+        f"write-active-handoff failed: reservation expired. Got: {expires_at!r:.100}"
     )
 
 
@@ -915,19 +939,20 @@ def _ensure_state_snapshot_is_current(
         state_dir,
         str(state.get("project", "")),
     )
-    if (
-        snapshot_id == str(state.get("state_snapshot_id", ""))
-        and snapshot_hash == str(state.get("state_snapshot_hash", ""))
+    if snapshot_id == str(state.get("state_snapshot_id", "")) and snapshot_hash == str(
+        state.get("state_snapshot_hash", "")
     ):
         return
     updated_at = datetime.now(UTC).isoformat()
-    state.update({
-        "status": "reservation_conflict",
-        "conflict_reason": "state_snapshot_changed",
-        "current_state_snapshot_id": snapshot_id,
-        "current_state_snapshot_hash": snapshot_hash,
-        "updated_at": updated_at,
-    })
+    state.update(
+        {
+            "status": "reservation_conflict",
+            "conflict_reason": "state_snapshot_changed",
+            "current_state_snapshot_id": snapshot_id,
+            "current_state_snapshot_hash": snapshot_hash,
+            "updated_at": updated_at,
+        }
+    )
     _write_json_atomic(operation_state_path, state)
     transaction_path = Path(str(state["transaction_path"]))
     _write_json_atomic(
@@ -938,8 +963,7 @@ def _ensure_state_snapshot_is_current(
         },
     )
     raise ActiveWriteError(
-        "write-active-handoff failed: state snapshot changed. "
-        f"Got: {snapshot_hash!r:.100}"
+        f"write-active-handoff failed: state snapshot changed. Got: {snapshot_hash!r:.100}"
     )
 
 
@@ -962,12 +986,14 @@ def _ensure_transaction_watermark_is_current(
     if watermark == str(state.get("transaction_watermark", "")):
         return
     updated_at = datetime.now(UTC).isoformat()
-    state.update({
-        "status": "reservation_conflict",
-        "conflict_reason": "transaction_watermark_changed",
-        "current_transaction_watermark": watermark,
-        "updated_at": updated_at,
-    })
+    state.update(
+        {
+            "status": "reservation_conflict",
+            "conflict_reason": "transaction_watermark_changed",
+            "current_transaction_watermark": watermark,
+            "updated_at": updated_at,
+        }
+    )
     _write_json_atomic(operation_state_path, state)
     _write_json_atomic(
         transaction_path,
@@ -977,8 +1003,7 @@ def _ensure_transaction_watermark_is_current(
         },
     )
     raise ActiveWriteError(
-        "write-active-handoff failed: transaction watermark changed. "
-        f"Got: {watermark!r:.100}"
+        f"write-active-handoff failed: transaction watermark changed. Got: {watermark!r:.100}"
     )
 
 

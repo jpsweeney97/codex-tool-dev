@@ -16,8 +16,6 @@ Exit Codes:
 """
 
 import sys
-from pathlib import Path
-
 
 from turbo_mode_handoff_runtime.session_state import prune_old_state_files
 

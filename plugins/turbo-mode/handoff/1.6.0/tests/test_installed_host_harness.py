@@ -53,8 +53,7 @@ def test_source_harness_isolation_proof_uses_test_only_copy_outside_source(
         for path in runtime_module_paths
     )
     assert all(
-        not path.is_relative_to(SOURCE_CHECKOUT_ROOT.resolve())
-        for path in runtime_module_paths
+        not path.is_relative_to(SOURCE_CHECKOUT_ROOT.resolve()) for path in runtime_module_paths
     )
     assert facade_command_paths == [installed_root / "scripts" / "session_state.py"]
     assert all(path.is_relative_to(installed_root / "scripts") for path in facade_command_paths)

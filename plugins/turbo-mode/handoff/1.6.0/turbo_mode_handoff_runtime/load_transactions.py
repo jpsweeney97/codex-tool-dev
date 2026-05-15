@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-
 from turbo_mode_handoff_runtime.session_state import allocate_archive_path, write_resume_state
 from turbo_mode_handoff_runtime.storage_authority import (
     HandoffCandidate,
@@ -20,14 +19,24 @@ from turbo_mode_handoff_runtime.storage_authority import (
     StorageLocation,
     discover_handoff_inventory,
     eligible_active_candidates,
-    get_storage_layout,
 )
+from turbo_mode_handoff_runtime.storage_layout import get_storage_layout
 from turbo_mode_handoff_runtime.storage_primitives import (
     LockPolicy,
+)
+from turbo_mode_handoff_runtime.storage_primitives import (
     acquire_lock as _acquire_lock_with_policy,
+)
+from turbo_mode_handoff_runtime.storage_primitives import (
     read_json_object as _read_json_object,
+)
+from turbo_mode_handoff_runtime.storage_primitives import (
     release_lock as _release_lock,
+)
+from turbo_mode_handoff_runtime.storage_primitives import (
     sha256_file as _sha256_file,
+)
+from turbo_mode_handoff_runtime.storage_primitives import (
     write_json_atomic as _write_json_atomic,
 )
 
@@ -202,12 +211,14 @@ def list_load_recovery_records(project_root: Path) -> list[dict[str, object]]:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            records.append({
-                "transaction_path": str(path),
-                "status": "unreadable",
-                "operation": "load",
-                "error": f"pending transaction record unreadable: {path}: {exc!r}",
-            })
+            records.append(
+                {
+                    "transaction_path": str(path),
+                    "status": "unreadable",
+                    "operation": "load",
+                    "error": f"pending transaction record unreadable: {path}: {exc!r}",
+                }
+            )
             continue
         if data.get("operation") == "load" and data.get("status") == "pending":
             records.append(data)
@@ -284,7 +295,8 @@ def _recover_pending_load(layout, *, project: str) -> LoadResult | None:
             record = json.loads(transaction_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise LoadTransactionError(
-                "load-handoff failed: pending transaction record unreadable; manual operator review required. "
+                "load-handoff failed: pending transaction record unreadable; "
+                "manual operator review required. "
                 f"Got: {str(transaction_path)!r:.100}"
             ) from exc
         if record.get("operation") != "load" or record.get("status") != "pending":
@@ -580,16 +592,18 @@ def _recover_consumed_legacy_active(
             "load-handoff failed: consumed legacy active registry entry is stale. "
             f"Got: {entry.get('copied_primary_archive_path')!r:.100}"
         )
-    registry["entries"].append({
-        **key,
-        "source_absolute_path": str(source_path),
-        "source_resolved_path": str(source_path.resolve()),
-        "copied_primary_archive_path": str(archive_path),
-        "copied_content_sha256": copied_hash,
-        "operation": "legacy-load",
-        "transaction_id": str(record.get("transaction_id", "")),
-        "consumed_at": datetime.now(UTC).isoformat(),
-    })
+    registry["entries"].append(
+        {
+            **key,
+            "source_absolute_path": str(source_path),
+            "source_resolved_path": str(source_path.resolve()),
+            "copied_primary_archive_path": str(archive_path),
+            "copied_content_sha256": copied_hash,
+            "operation": "legacy-load",
+            "transaction_id": str(record.get("transaction_id", "")),
+            "consumed_at": datetime.now(UTC).isoformat(),
+        }
+    )
     _write_json_atomic(registry_path, registry)
 
 
@@ -629,15 +643,17 @@ def _recover_copied_legacy_archive(
             "load-handoff failed: copied legacy archive registry entry is stale. "
             f"Got: {entry.get('copied_primary_archive_path')!r:.100}"
         )
-    registry["entries"].append({
-        **key,
-        "source_absolute_path": str(source_path),
-        "copied_primary_archive_path": str(archive_path),
-        "copied_content_sha256": copied_hash,
-        "operation": "legacy-archive-load",
-        "transaction_id": str(record.get("transaction_id", "")),
-        "copied_at": datetime.now(UTC).isoformat(),
-    })
+    registry["entries"].append(
+        {
+            **key,
+            "source_absolute_path": str(source_path),
+            "copied_primary_archive_path": str(archive_path),
+            "copied_content_sha256": copied_hash,
+            "operation": "legacy-archive-load",
+            "transaction_id": str(record.get("transaction_id", "")),
+            "copied_at": datetime.now(UTC).isoformat(),
+        }
+    )
     _write_json_atomic(registry_path, registry)
 
 
@@ -769,15 +785,17 @@ def _record_copied_legacy_archive(
             "load-handoff failed: copied legacy archive registry entry is stale. "
             f"Got: {entry.get('copied_primary_archive_path')!r:.100}"
         )
-    registry["entries"].append({
-        **key,
-        "source_absolute_path": str(candidate.path),
-        "copied_primary_archive_path": str(copied_archive_path),
-        "copied_content_sha256": copied_hash,
-        "operation": "legacy-archive-load",
-        "transaction_id": transaction_id,
-        "copied_at": datetime.now(UTC).isoformat(),
-    })
+    registry["entries"].append(
+        {
+            **key,
+            "source_absolute_path": str(candidate.path),
+            "copied_primary_archive_path": str(copied_archive_path),
+            "copied_content_sha256": copied_hash,
+            "operation": "legacy-archive-load",
+            "transaction_id": transaction_id,
+            "copied_at": datetime.now(UTC).isoformat(),
+        }
+    )
     _write_json_atomic(registry_path, registry)
 
 
@@ -806,8 +824,7 @@ def _copy_to_archive_atomic(
         except FileNotFoundError:
             pass
         raise LoadTransactionError(
-            "load-handoff failed: copied archive hash mismatch. "
-            f"Got: {str(archive_path)!r:.100}"
+            f"load-handoff failed: copied archive hash mismatch. Got: {str(archive_path)!r:.100}"
         )
     os.replace(temp_path, archive_path)
     return copied_hash
@@ -862,16 +879,18 @@ def _consume_legacy_active(
             "load-handoff failed: consumed legacy active registry entry is stale. "
             f"Got: {entry.get('copied_primary_archive_path')!r:.100}"
         )
-    registry["entries"].append({
-        **key,
-        "source_absolute_path": str(candidate.path),
-        "source_resolved_path": str(candidate.path.resolve()),
-        "copied_primary_archive_path": str(copied_archive_path),
-        "copied_content_sha256": copied_hash,
-        "operation": "legacy-load",
-        "transaction_id": transaction_id,
-        "consumed_at": datetime.now(UTC).isoformat(),
-    })
+    registry["entries"].append(
+        {
+            **key,
+            "source_absolute_path": str(candidate.path),
+            "source_resolved_path": str(candidate.path.resolve()),
+            "copied_primary_archive_path": str(copied_archive_path),
+            "copied_content_sha256": copied_hash,
+            "operation": "legacy-load",
+            "transaction_id": transaction_id,
+            "consumed_at": datetime.now(UTC).isoformat(),
+        }
+    )
     _write_json_atomic(registry_path, registry)
 
 

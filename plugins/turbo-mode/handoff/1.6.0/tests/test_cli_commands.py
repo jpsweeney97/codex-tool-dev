@@ -5,7 +5,6 @@ import os
 import subprocess
 from pathlib import Path
 
-
 PLUGIN_ROOT = Path(__file__).parent.parent
 
 
@@ -24,7 +23,13 @@ def _init_repo(root: Path) -> None:
 
 def _residue_snapshot(root: Path) -> set[str]:
     snapshot: set[str] = set()
-    for pattern in [".venv", ".pytest_cache", ".DS_Store", "scripts/__pycache__", "hooks/__pycache__"]:
+    for pattern in [
+        ".venv",
+        ".pytest_cache",
+        ".DS_Store",
+        "scripts/__pycache__",
+        "hooks/__pycache__",
+    ]:
         for match in root.glob(pattern):
             snapshot.add(str(match.relative_to(root)))
     return snapshot
@@ -39,7 +44,7 @@ def test_search_command_runs_from_normal_repo_cwd(tmp_path: Path) -> None:
     command = (
         f'PLUGIN_ROOT="{PLUGIN_ROOT}" '
         f'PROJECT_ROOT="{tmp_path}" '
-        f'PYTHONDONTWRITEBYTECODE=1 '
+        f"PYTHONDONTWRITEBYTECODE=1 "
         f'UV_PROJECT_ENVIRONMENT="{runtime_env}" '
         f'uv run --project "{PLUGIN_ROOT}/pyproject.toml" '
         f'python "{PLUGIN_ROOT}/scripts/search.py" nonexistent_query_xyz'
@@ -60,7 +65,7 @@ def test_triage_command_runs_from_normal_repo_cwd(tmp_path: Path) -> None:
     command = (
         f'PLUGIN_ROOT="{PLUGIN_ROOT}" '
         f'PROJECT_ROOT="{tmp_path}" '
-        f'PYTHONDONTWRITEBYTECODE=1 '
+        f"PYTHONDONTWRITEBYTECODE=1 "
         f'UV_PROJECT_ENVIRONMENT="{runtime_env}" '
         f'uv run --project "{PLUGIN_ROOT}/pyproject.toml" '
         f'python "{PLUGIN_ROOT}/scripts/triage.py" --tickets-dir "{tickets}"'
@@ -98,7 +103,7 @@ def test_distill_command_runs_from_normal_repo_cwd(tmp_path: Path) -> None:
     command = (
         f'PLUGIN_ROOT="{PLUGIN_ROOT}" '
         f'PROJECT_ROOT="{tmp_path}" '
-        f'PYTHONDONTWRITEBYTECODE=1 '
+        f"PYTHONDONTWRITEBYTECODE=1 "
         f'UV_PROJECT_ENVIRONMENT="{runtime_env}" '
         f'uv run --project "{PLUGIN_ROOT}/pyproject.toml" '
         f'python "{PLUGIN_ROOT}/scripts/distill.py" "{handoff}" --learnings "{learnings}"'
@@ -125,7 +130,10 @@ def test_defer_pipeline_matches_ticket_guard_contract(tmp_path: Path) -> None:
                     "the guard-compatible command form."
                 ),
                 "source_text": "Deferred follow-up for release gate verification.",
-                "proposed_approach": "Emit one envelope and ingest it through the guarded Ticket entrypoint.",
+                "proposed_approach": (
+                    "Emit one envelope and ingest it through the guarded Ticket "
+                    "entrypoint."
+                ),
                 "acceptance_criteria": ["One ticket file exists", "Envelope moved to .processed"],
                 "priority": "medium",
                 "source_type": "ad-hoc",
@@ -138,7 +146,8 @@ def test_defer_pipeline_matches_ticket_guard_contract(tmp_path: Path) -> None:
     emit_command = f'''PLUGIN_ROOT="{PLUGIN_ROOT}"
 PROJECT_ROOT="{tmp_path}"
 PYTHONDONTWRITEBYTECODE=1 UV_PROJECT_ENVIRONMENT="{runtime_env}" \\
-uv run --project "{PLUGIN_ROOT}/pyproject.toml" python "{PLUGIN_ROOT}/scripts/defer.py" --tickets-dir "{tickets_dir}" <<'JSON'
+uv run --project "{PLUGIN_ROOT}/pyproject.toml" python \\
+  "{PLUGIN_ROOT}/scripts/defer.py" --tickets-dir "{tickets_dir}" <<'JSON'
 {candidates_json}
 JSON
 '''
@@ -181,10 +190,7 @@ JSON
         check=True,
     )
     ticket_root = resolver.stdout.strip()
-    literal_command = (
-        f"python3 {ticket_root}/scripts/ticket_engine_user.py "
-        f"ingest {payload_path}"
-    )
+    literal_command = f"python3 {ticket_root}/scripts/ticket_engine_user.py ingest {payload_path}"
 
     guard_result = subprocess.run(
         ["python3", f"{ticket_root}/hooks/ticket_engine_guard.py"],

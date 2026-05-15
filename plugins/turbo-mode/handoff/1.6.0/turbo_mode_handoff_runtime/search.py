@@ -8,13 +8,11 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 from pathlib import Path
 
 # Re-exported for backward compatibility with callers that import parser symbols
 # from turbo_mode_handoff_runtime.search. Do not remove without updating downstream imports.
-
-from turbo_mode_handoff_runtime.handoff_parsing import HandoffFile, Section, parse_handoff
+from turbo_mode_handoff_runtime.handoff_parsing import parse_handoff
 from turbo_mode_handoff_runtime.project_paths import (
     get_handoffs_dir,
     get_legacy_handoffs_dir,
@@ -43,8 +41,9 @@ def search_handoffs(
     Args:
         handoffs_dir: Directory containing handoff .md files (with optional .archive/ subdirectory)
         query: Search string or regex pattern
-        regex: If True, treat query as regex (case-sensitive). If False, literal case-insensitive match.
-            Users can embed (?i) in their regex for case-insensitive regex search.
+        regex: If True, treat query as regex (case-sensitive). If False, literal
+            case-insensitive match. Users can embed (?i) in their regex for
+            case-insensitive regex search.
 
     Returns:
         List of result dicts sorted by date descending. Each dict contains:
@@ -81,15 +80,17 @@ def search_handoffs(
         for section in handoff.sections:
             search_text = f"{section.heading}\n{section.content}"
             if pattern.search(search_text):
-                results.append({
-                    "file": path.name,
-                    "title": handoff.frontmatter.get("title", path.stem),
-                    "date": handoff.frontmatter.get("date", ""),
-                    "type": handoff.frontmatter.get("type", "handoff"),
-                    "archived": archived,
-                    "section_heading": section.heading,
-                    "section_content": section.content,
-                })
+                results.append(
+                    {
+                        "file": path.name,
+                        "title": handoff.frontmatter.get("title", path.stem),
+                        "date": handoff.frontmatter.get("date", ""),
+                        "type": handoff.frontmatter.get("type", "handoff"),
+                        "archived": archived,
+                        "section_heading": section.heading,
+                        "section_content": section.content,
+                    }
+                )
 
     # Sort by date descending
     results.sort(key=lambda r: r["date"], reverse=True)
@@ -110,10 +111,12 @@ def search_handoff_history(
     results: list[dict] = []
     for candidate in candidates:
         if candidate.selection_eligibility != SelectionEligibility.ELIGIBLE:
-            skipped_sink.append({
-                "file": str(candidate.path),
-                "reason": candidate.skip_reason or candidate.selection_eligibility,
-            })
+            skipped_sink.append(
+                {
+                    "file": str(candidate.path),
+                    "reason": candidate.skip_reason or candidate.selection_eligibility,
+                }
+            )
             continue
         results.extend(
             _search_candidate(
@@ -149,23 +152,25 @@ def _search_candidate(
     for section in handoff.sections:
         search_text = f"{section.heading}\n{section.content}"
         if pattern.search(search_text):
-            results.append({
-                "file": candidate.path.name,
-                "title": handoff.frontmatter.get("title", candidate.path.stem),
-                "date": handoff.frontmatter.get("date", ""),
-                "type": handoff.frontmatter.get("type", "handoff"),
-                "archived": _is_archived(candidate.storage_location),
-                "section_heading": section.heading,
-                "section_content": section.content,
-                "source_path": str(candidate.path),
-                "storage_location": candidate.storage_location,
-                "artifact_class": candidate.artifact_class,
-                "source_git_visibility": candidate.source_git_visibility,
-                "source_fs_status": candidate.source_fs_status,
-                "document_profile": candidate.document_profile,
-                "content_sha256": candidate.content_sha256,
-                "dedup_winner": dedup_winner,
-            })
+            results.append(
+                {
+                    "file": candidate.path.name,
+                    "title": handoff.frontmatter.get("title", candidate.path.stem),
+                    "date": handoff.frontmatter.get("date", ""),
+                    "type": handoff.frontmatter.get("type", "handoff"),
+                    "archived": _is_archived(candidate.storage_location),
+                    "section_heading": section.heading,
+                    "section_content": section.content,
+                    "source_path": str(candidate.path),
+                    "storage_location": candidate.storage_location,
+                    "artifact_class": candidate.artifact_class,
+                    "source_git_visibility": candidate.source_git_visibility,
+                    "source_fs_status": candidate.source_fs_status,
+                    "document_profile": candidate.document_profile,
+                    "content_sha256": candidate.content_sha256,
+                    "dedup_winner": dedup_winner,
+                }
+            )
     return results
 
 
@@ -209,15 +214,17 @@ def main(argv: list[str] | None = None) -> str:
                 skipped=skipped_files,
             )
         except re.error as e:
-            return json.dumps({
-                "query": args.query,
-                "total_matches": 0,
-                "results": [],
-                "skipped": skipped_files,
-                "project_source": project_source,
-                "error": f"Invalid regex: {e}",
-                "legacy_warning": None,
-            })
+            return json.dumps(
+                {
+                    "query": args.query,
+                    "total_matches": 0,
+                    "results": [],
+                    "skipped": skipped_files,
+                    "project_source": project_source,
+                    "error": f"Invalid regex: {e}",
+                    "legacy_warning": None,
+                }
+            )
         legacy_warning = None
         if any(result.get("storage_location", "").startswith("legacy_") for result in results):
             legacy_warning = (
@@ -225,43 +232,49 @@ def main(argv: list[str] | None = None) -> str:
                 "Post-cutover writes use `.codex/handoffs/`; legacy matches are "
                 "read-only compatibility input."
             )
-        return json.dumps({
-            "query": args.query,
-            "total_matches": len(results),
-            "results": results,
-            "skipped": skipped_files,
-            "project_source": project_source,
-            "error": None,
-            "legacy_warning": legacy_warning,
-        })
+        return json.dumps(
+            {
+                "query": args.query,
+                "total_matches": len(results),
+                "results": results,
+                "skipped": skipped_files,
+                "project_source": project_source,
+                "error": None,
+                "legacy_warning": legacy_warning,
+            }
+        )
 
     _, project_source = get_project_name()
     handoffs_dir = args.handoffs_dir or get_handoffs_dir()
 
     if not handoffs_dir.exists():
-        return json.dumps({
-            "query": args.query,
-            "total_matches": 0,
-            "results": [],
-            "skipped": [],
-            "project_source": project_source,
-            "error": f"Handoffs directory not found: {handoffs_dir}",
-            "legacy_warning": None,
-        })
+        return json.dumps(
+            {
+                "query": args.query,
+                "total_matches": 0,
+                "results": [],
+                "skipped": [],
+                "project_source": project_source,
+                "error": f"Handoffs directory not found: {handoffs_dir}",
+                "legacy_warning": None,
+            }
+        )
 
     skipped_files: list[dict] = []
     try:
         results = search_handoffs(handoffs_dir, args.query, regex=args.regex, skipped=skipped_files)
     except re.error as e:
-        return json.dumps({
-            "query": args.query,
-            "total_matches": 0,
-            "results": [],
-            "skipped": skipped_files,
-            "project_source": project_source,
-            "error": f"Invalid regex: {e}",
-            "legacy_warning": None,
-        })
+        return json.dumps(
+            {
+                "query": args.query,
+                "total_matches": 0,
+                "results": [],
+                "skipped": skipped_files,
+                "project_source": project_source,
+                "error": f"Invalid regex: {e}",
+                "legacy_warning": None,
+            }
+        )
 
     # Legacy fallback: check docs/handoffs/ for pre-cutover files.
     legacy_warning = None
@@ -269,8 +282,11 @@ def main(argv: list[str] | None = None) -> str:
         legacy_dir = get_legacy_handoffs_dir()
         if legacy_dir.exists():
             legacy_results = search_handoffs(
-                legacy_dir, args.query, regex=args.regex,
-                skipped=skipped_files, archive_name="archive",
+                legacy_dir,
+                args.query,
+                regex=args.regex,
+                skipped=skipped_files,
+                archive_name="archive",
             )
             if legacy_results:
                 legacy_warning = (
@@ -283,12 +299,14 @@ def main(argv: list[str] | None = None) -> str:
     except OSError as exc:
         skipped_files.append({"file": "legacy-discovery", "reason": str(exc)})
 
-    return json.dumps({
-        "query": args.query,
-        "total_matches": len(results),
-        "results": results,
-        "skipped": skipped_files,
-        "project_source": project_source,
-        "error": None,
-        "legacy_warning": legacy_warning,
-    })
+    return json.dumps(
+        {
+            "query": args.query,
+            "total_matches": len(results),
+            "results": results,
+            "skipped": skipped_files,
+            "project_source": project_source,
+            "error": None,
+            "legacy_warning": legacy_warning,
+        }
+    )

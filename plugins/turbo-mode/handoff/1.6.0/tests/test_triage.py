@@ -1,12 +1,11 @@
 """Tests for triage.py — ticket reading, status normalization, orphan detection."""
+
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 import pytest
-
 import turbo_mode_handoff_runtime.triage as triage_module
 
 
@@ -244,26 +243,23 @@ type: handoff
 """
 
 
-TICKET_WITH_PROVENANCE = """\
-# T-20260228-03: Ticket with provenance
-
-```yaml
-id: T-20260228-03
-date: 2026-02-28
-status: deferred
-priority: medium
-provenance:
-  source_session: "aaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-  source_type: handoff
-  created_by: defer-skill
-```
-
-## Problem
-
-Has provenance.
-
-<!-- defer-meta {"v":1,"source_session":"aaaa-bbbb-cccc-dddd-eeeeeeeeeeee","source_type":"handoff","source_ref":"test","created_by":"defer-skill"} -->
-"""
+TICKET_WITH_PROVENANCE = (
+    "# T-20260228-03: Ticket with provenance\n\n"
+    "```yaml\n"
+    "id: T-20260228-03\n"
+    "date: 2026-02-28\n"
+    "status: deferred\n"
+    "priority: medium\n"
+    "provenance:\n"
+    '  source_session: "aaaa-bbbb-cccc-dddd-eeeeeeeeeeee"\n'
+    "  source_type: handoff\n"
+    "  created_by: defer-skill\n"
+    "```\n\n"
+    "## Problem\n\n"
+    "Has provenance.\n\n"
+    '<!-- defer-meta {"v":1,"source_session":"aaaa-bbbb-cccc-dddd-eeeeeeeeeeee",'
+    '"source_type":"handoff","source_ref":"test","created_by":"defer-skill"} -->\n'
+)
 
 
 class TestExtractHandoffItems:
@@ -661,10 +657,10 @@ class TestEndToEnd:
         # Setup: tickets directory with diverse tickets
         tickets_dir = tmp_path / "tickets"
         tickets_dir.mkdir()
-        (tickets_dir / "deferred.md").write_text(TICKET_DEFERRED)      # non-terminal, open
-        (tickets_dir / "done.md").write_text(TICKET_DONE)              # terminal, filtered out
-        (tickets_dir / "legacy.md").write_text(TICKET_LEGACY_COMPLETE) # terminal (complete→done)
-        (tickets_dir / "prov.md").write_text(TICKET_WITH_PROVENANCE)   # has provenance
+        (tickets_dir / "deferred.md").write_text(TICKET_DEFERRED)  # non-terminal, open
+        (tickets_dir / "done.md").write_text(TICKET_DONE)  # terminal, filtered out
+        (tickets_dir / "legacy.md").write_text(TICKET_LEGACY_COMPLETE)  # terminal (complete→done)
+        (tickets_dir / "prov.md").write_text(TICKET_WITH_PROVENANCE)  # has provenance
 
         # Setup: handoffs directory
         handoffs_dir = tmp_path / "handoffs"
@@ -675,10 +671,10 @@ class TestEndToEnd:
 
         # Verify open_tickets: only non-terminal tickets
         open_ids = {t["id"] for t in report["open_tickets"]}
-        assert "T-20260228-01" in open_ids    # deferred
-        assert "T-20260228-03" in open_ids    # deferred (with provenance)
-        assert "T-20260228-02" not in open_ids # done
-        assert "T-004" not in open_ids         # complete → done
+        assert "T-20260228-01" in open_ids  # deferred
+        assert "T-20260228-03" in open_ids  # deferred (with provenance)
+        assert "T-20260228-02" not in open_ids  # done
+        assert "T-004" not in open_ids  # complete → done
 
         # Verify match counts
         counts = report["match_counts"]
@@ -775,4 +771,6 @@ session_id: aaaa-bbbb-cccc-dddd-eeeeeeeeeeee
         parsed = parse_ticket(created_path)
         assert parsed is not None
         assert parsed.frontmatter["id"] == "T-20260228-01"
-        assert parsed.frontmatter["provenance"]["source_session"] == "aaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        assert (
+            parsed.frontmatter["provenance"]["source_session"] == "aaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        )

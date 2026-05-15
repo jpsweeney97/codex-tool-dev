@@ -1,4 +1,5 @@
 """Tests for ticket_parsing.py — fenced-YAML ticket format parser."""
+
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
@@ -327,10 +328,12 @@ class TestParseTicketWarnings:
         from turbo_mode_handoff_runtime.ticket_parsing import parse_ticket
 
         # Missing required 'status' field
-        bad_schema = '# Bad\n\n```yaml\nid: T-1\ndate: 2026-02-28\n```\n\n## Problem\n\nNo status.'
+        bad_schema = "# Bad\n\n```yaml\nid: T-1\ndate: 2026-02-28\n```\n\n## Problem\n\nNo status."
         (tmp_path / "schema.md").write_text(bad_schema)
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             result = parse_ticket(tmp_path / "schema.md")
         assert result is None
-        assert any("Schema validation failed for" in str(x.message) for x in w), "Should include schema error detail"
+        assert any("Schema validation failed for" in str(x.message) for x in w), (
+            "Should include schema error detail"
+        )

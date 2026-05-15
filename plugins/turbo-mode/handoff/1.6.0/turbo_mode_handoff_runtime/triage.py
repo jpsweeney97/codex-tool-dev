@@ -2,6 +2,7 @@
 
 Phase 0: read-only. Produces JSON report.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -13,9 +14,15 @@ import warnings
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
-
-from turbo_mode_handoff_runtime.handoff_parsing import parse_frontmatter, parse_sections, section_name
-from turbo_mode_handoff_runtime.project_paths import get_handoffs_dir, get_legacy_handoffs_dir, get_project_root
+from turbo_mode_handoff_runtime.handoff_parsing import (
+    parse_frontmatter,
+    parse_sections,
+    section_name,
+)
+from turbo_mode_handoff_runtime.project_paths import (
+    get_legacy_handoffs_dir,
+    get_project_root,
+)
 from turbo_mode_handoff_runtime.provenance import read_provenance, session_matches
 from turbo_mode_handoff_runtime.storage_authority import (
     HandoffCandidate,
@@ -103,31 +110,32 @@ def read_open_tickets(tickets_dir: Path) -> list[OpenTicket]:
         if norm_status in _TERMINAL_STATUSES:
             continue
 
-        results.append({
-            "id": fm["id"],
-            "date": fm.get("date", ""),
-            "priority": fm.get("priority", "medium"),
-            "status_raw": raw_status,
-            "status_normalized": norm_status,
-            "normalization_confidence": confidence,
-            "summary": str(path.stem),
-            "path": str(path),
-        })
+        results.append(
+            {
+                "id": fm["id"],
+                "date": fm.get("date", ""),
+                "priority": fm.get("priority", "medium"),
+                "status_raw": raw_status,
+                "status_normalized": norm_status,
+                "normalization_confidence": confidence,
+                "summary": str(path.stem),
+                "path": str(path),
+            }
+        )
 
     return results
 
 
 # Ticket ID patterns — union of new + legacy formats
 _TICKET_ID_PATTERNS = [
-    r"T-\d{8}-\d{2,}",     # new: T-20260228-01, T-20260228-100
-    r"T-\d{3}",             # legacy numeric: T-004
-    r"T-[A-F]",             # legacy alpha: T-A (P3-5: covers current A-F corpus only)
-    r"handoff-[\w-]+",      # P1-11 fix: legacy noun — supports hyphens (handoff-quality-hook)
+    r"T-\d{8}-\d{2,}",  # new: T-20260228-01, T-20260228-100
+    r"T-\d{3}",  # legacy numeric: T-004
+    r"T-[A-F]",  # legacy alpha: T-A (P3-5: covers current A-F corpus only)
+    r"handoff-[\w-]+",  # P1-11 fix: legacy noun — supports hyphens (handoff-quality-hook)
 ]
 _TICKET_ID_RE = re.compile(r"\b(?:" + "|".join(_TICKET_ID_PATTERNS) + r")\b")
 
 _LIST_ITEM_RE = re.compile(r"^[-*]\s+(.+)$|^(\d+)\.\s+(.+)$", re.MULTILINE)
-
 
 
 def extract_handoff_items(
@@ -169,12 +177,14 @@ def extract_handoff_items(
                 text = m.group(1) or m.group(3) or ""
                 text = text.strip()
                 if text:
-                    items.append({
-                        "text": text,
-                        "section": name,
-                        "session_id": session_id,
-                        "handoff": handoff_filename,
-                    })
+                    items.append(
+                        {
+                            "text": text,
+                            "section": name,
+                            "session_id": session_id,
+                            "handoff": handoff_filename,
+                        }
+                    )
             else:
                 # P1-4: count skipped prose lines
                 skipped_prose_count += 1
@@ -197,11 +207,13 @@ def _load_tickets_for_matching(tickets_dir: Path) -> list[dict[str, Any]]:
             provenance_yaml=fm.get("provenance"),
             body_text=ticket.body,
         )
-        results.append({
-            "id": fm["id"],
-            "provenance": prov,
-            "path": str(path),
-        })
+        results.append(
+            {
+                "id": fm["id"],
+                "provenance": prov,
+                "path": str(path),
+            }
+        )
     return results
 
 
@@ -247,7 +259,9 @@ _LOOKBACK_DAYS = 30  # P1-3: design requires 30-day scan window
 
 
 def _scan_handoff_dirs(
-    handoffs_dir: Path, *, archive_name: str = "archive",
+    handoffs_dir: Path,
+    *,
+    archive_name: str = "archive",
 ) -> list[Path]:
     """Collect handoff files from active and archive directories.
 
@@ -437,9 +451,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.handoffs_dir is None:
         project_root = (
-            args.project_root.resolve()
-            if args.project_root is not None
-            else get_project_root()[0]
+            args.project_root.resolve() if args.project_root is not None else get_project_root()[0]
         )
         report = generate_project_report(args.tickets_dir, project_root)
     else:

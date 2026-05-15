@@ -15,9 +15,7 @@ import re
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
-
 from typing import Literal, NotRequired, TypedDict
-
 
 from turbo_mode_handoff_runtime.handoff_parsing import parse_handoff, section_name
 from turbo_mode_handoff_runtime.project_paths import get_project_root
@@ -27,7 +25,6 @@ from turbo_mode_handoff_runtime.storage_authority import (
     discover_handoff_inventory,
     eligible_active_candidates,
 )
-
 
 DedupStatus = Literal["NEW", "EXACT_DUP_SOURCE", "EXACT_DUP_CONTENT", "UPDATED_SOURCE"]
 DurabilityHint = Literal["likely_durable", "likely_ephemeral", "unknown"]
@@ -136,9 +133,7 @@ def parse_subsections(content: str) -> list[Subsection]:
 
     for line in lines:
         stripped = line.rstrip()
-        if not inside_fence and (
-            stripped.startswith("```") or stripped.startswith("~~~")
-        ):
+        if not inside_fence and (stripped.startswith("```") or stripped.startswith("~~~")):
             inside_fence = True
             fence_marker = stripped[:3]
         elif inside_fence and stripped.startswith(fence_marker):
@@ -240,13 +235,18 @@ def compute_source_uid(
     Uses canonical JSON hashing for unambiguous key composition (avoids
     delimiter collision if components contain ':'). Format: sha256:<hex>.
     """
-    payload = json_mod.dumps({
-        "v": 1,
-        "doc": document_identity,
-        "section": section_name,
-        "heading": subsection_heading,
-        "heading_ix": heading_ix,
-    }, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    payload = json_mod.dumps(
+        {
+            "v": 1,
+            "doc": document_identity,
+            "section": section_name,
+            "heading": subsection_heading,
+            "heading_ix": heading_ix,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
 
@@ -257,7 +257,7 @@ def compute_content_hash(content: str) -> str:
     Normalizes whitespace (collapse runs, strip) before hashing so that
     formatting-only changes don't create false non-duplicates.
     """
-    normalized = re.sub(r'\s+', ' ', content).strip()
+    normalized = re.sub(r"\s+", " ", content).strip()
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
 
@@ -286,7 +286,7 @@ def make_distill_meta(
     return f"<!-- distill-meta {json_mod.dumps(meta, sort_keys=True)} -->"
 
 
-_DISTILL_META_RE = re.compile(r'<!--\s*distill-meta\s+(\{.*?\})\s*-->')
+_DISTILL_META_RE = re.compile(r"<!--\s*distill-meta\s+(\{.*?\})\s*-->")
 
 
 def _extract_distill_metas_detailed(learnings_content: str) -> tuple[list[dict], list[str]]:
@@ -320,17 +320,13 @@ def _extract_distill_metas(learnings_content: str) -> list[dict]:
 
 def check_exact_dup_source(source_uid: str, learnings_content: str) -> bool:
     """Check if source_uid already exists in learnings.md distill-meta comments."""
-    return any(
-        m.get("source_uid") == source_uid
-        for m in _extract_distill_metas(learnings_content)
-    )
+    return any(m.get("source_uid") == source_uid for m in _extract_distill_metas(learnings_content))
 
 
 def check_exact_dup_content(content_hash: str, learnings_content: str) -> bool:
     """Check if content_hash already exists in learnings.md distill-meta comments."""
     return any(
-        m.get("content_sha256") == content_hash
-        for m in _extract_distill_metas(learnings_content)
+        m.get("content_sha256") == content_hash for m in _extract_distill_metas(learnings_content)
     )
 
 
@@ -379,7 +375,7 @@ def extract_signals(raw_markdown: str) -> dict[str, str]:
     """Extract confidence and reversibility signals from bold-labeled fields."""
     signals: dict[str, str] = {}
     for field in ("Confidence", "Reversibility"):
-        pattern = rf'\*\*{field}:\*\*\s*(.+)'
+        pattern = rf"\*\*{field}:\*\*\s*(.+)"
         match = re.search(pattern, raw_markdown)
         if match:
             signals[field.lower()] = match.group(1).strip()
@@ -388,7 +384,7 @@ def extract_signals(raw_markdown: str) -> dict[str, str]:
 
 def _make_anchor(handoff_filename: str, section_name: str, subsection_heading: str) -> str:
     """Create a source anchor for provenance."""
-    slug = re.sub(r'[^a-z0-9]+', '-', subsection_heading.lower()).strip('-')
+    slug = re.sub(r"[^a-z0-9]+", "-", subsection_heading.lower()).strip("-")
     return f"{handoff_filename}#{section_name.lower()}/{slug}"
 
 
@@ -457,7 +453,9 @@ def extract_candidates(
                     if other.heading:
                         subsections[i] = replace(
                             other,
-                            raw_markdown=preamble.raw_markdown.strip() + "\n\n" + other.raw_markdown,
+                            raw_markdown=preamble.raw_markdown.strip()
+                            + "\n\n"
+                            + other.raw_markdown,
                         )
                         break
             subsections = subsections[1:]
@@ -473,9 +471,7 @@ def extract_candidates(
             content_hash = compute_content_hash(sub.raw_markdown)
 
             # Determine dedup status (4-state matrix, per-record correlated)
-            dedup_status = determine_dedup_status(
-                source_uid, content_hash, learnings_content
-            )
+            dedup_status = determine_dedup_status(source_uid, content_hash, learnings_content)
 
             candidate: CandidateDict = {
                 "source_section": name,
@@ -490,9 +486,7 @@ def extract_candidates(
 
             # Add durability hint for Codebase Knowledge and Gotchas
             if name in ("Codebase Knowledge", "Gotchas"):
-                candidate["durability_hint"] = classify_durability(
-                    sub.heading, sub.raw_markdown
-                )
+                candidate["durability_hint"] = classify_durability(sub.heading, sub.raw_markdown)
 
             candidates.append(candidate)
 
@@ -570,54 +564,64 @@ def main(argv: list[str] | None = None) -> str:
             args.handoff,
         )
         if resolve_error is not None or resolved_path is None:
-            return json_mod.dumps({
-                "handoff_path": args.handoff or "",
-                "handoff_date": "",
-                "handoff_title": "",
-                "candidates": [],
-                "output_version": 1,
-                "error": resolve_error,
-                "error_code": "HANDOFF_NOT_FOUND",
-                "warnings": [],
-            })
+            return json_mod.dumps(
+                {
+                    "handoff_path": args.handoff or "",
+                    "handoff_date": "",
+                    "handoff_title": "",
+                    "candidates": [],
+                    "output_version": 1,
+                    "error": resolve_error,
+                    "error_code": "HANDOFF_NOT_FOUND",
+                    "warnings": [],
+                }
+            )
         handoff_path = str(resolved_path)
     else:
         handoff_path = args.handoff
 
     if not Path(handoff_path).exists():
-        return json_mod.dumps({
-            "handoff_path": handoff_path,
-            "handoff_date": "",
-            "handoff_title": "",
-            "candidates": [],
-            "output_version": 1,
-            "error": f"Handoff file not found: {handoff_path}",
-            "error_code": "HANDOFF_NOT_FOUND",
-            "warnings": [],
-        })
+        return json_mod.dumps(
+            {
+                "handoff_path": handoff_path,
+                "handoff_date": "",
+                "handoff_title": "",
+                "candidates": [],
+                "output_version": 1,
+                "error": f"Handoff file not found: {handoff_path}",
+                "error_code": "HANDOFF_NOT_FOUND",
+                "warnings": [],
+            }
+        )
 
     learnings_content = ""
     if args.learnings:
         learnings_path = Path(args.learnings)
         if not learnings_path.exists():
-            print(f"Warning: Learnings file not found: {args.learnings}. Dedup checking disabled.", file=sys.stderr)
+            print(
+                f"Warning: Learnings file not found: {args.learnings}. Dedup checking disabled.",
+                file=sys.stderr,
+            )
         else:
             try:
                 learnings_content = learnings_path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as exc:
-                return json_mod.dumps({
-                    "handoff_path": handoff_path,
-                    "handoff_date": "",
-                    "handoff_title": "",
-                    "candidates": [],
-                    "output_version": 1,
-                    "error": f"Failed to read learnings file: {exc}",
-                    "error_code": "LEARNINGS_UNREADABLE",
-                    "warnings": [],
-                })
+                return json_mod.dumps(
+                    {
+                        "handoff_path": handoff_path,
+                        "handoff_date": "",
+                        "handoff_title": "",
+                        "candidates": [],
+                        "output_version": 1,
+                        "error": f"Failed to read learnings file: {exc}",
+                        "error_code": "LEARNINGS_UNREADABLE",
+                        "warnings": [],
+                    }
+                )
 
     result = extract_candidates(
-        handoff_path, learnings_content,
+        handoff_path,
+        learnings_content,
         extra_sections=tuple(args.include_section),
     )
     result = _attach_source_provenance(result, source_candidate)

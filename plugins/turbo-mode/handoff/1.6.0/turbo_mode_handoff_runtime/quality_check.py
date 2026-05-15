@@ -24,10 +24,13 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-
 from turbo_mode_handoff_runtime.handoff_parsing import (
     parse_frontmatter as _parse_handoff_frontmatter,
+)
+from turbo_mode_handoff_runtime.handoff_parsing import (
     parse_sections as _parse_handoff_sections,
+)
+from turbo_mode_handoff_runtime.handoff_parsing import (
     section_name as _section_name,
 )
 
@@ -140,43 +143,38 @@ def validate_frontmatter(frontmatter: dict[str, str], doc_type: str) -> list[Iss
 
     missing = [f for f in REQUIRED_FRONTMATTER_FIELDS if f not in frontmatter]
     if missing:
-        issues.append(Issue(
-            "error", f"Missing required frontmatter: {', '.join(missing)}"
-        ))
+        issues.append(Issue("error", f"Missing required frontmatter: {', '.join(missing)}"))
 
     blank = [
-        f for f in REQUIRED_FRONTMATTER_FIELDS
-        if f in frontmatter and not frontmatter[f].strip()
+        f for f in REQUIRED_FRONTMATTER_FIELDS if f in frontmatter and not frontmatter[f].strip()
     ]
     if blank:
-        issues.append(Issue(
-            "error", f"Blank required frontmatter: {', '.join(blank)}"
-        ))
+        issues.append(Issue("error", f"Blank required frontmatter: {', '.join(blank)}"))
 
     if doc_type == "checkpoint" and "title" in frontmatter:
         title = frontmatter["title"]
         if not title.startswith("Checkpoint:"):
-            issues.append(Issue(
-                "warning",
-                f"Checkpoint title should start with 'Checkpoint:', "
-                f"got: '{title[:60]}'",
-            ))
+            issues.append(
+                Issue(
+                    "warning",
+                    f"Checkpoint title should start with 'Checkpoint:', got: '{title[:60]}'",
+                )
+            )
 
     if doc_type == "summary" and "title" in frontmatter:
         title = frontmatter["title"]
         if not title.startswith("Summary:"):
-            issues.append(Issue(
-                "warning",
-                f"Summary title should start with 'Summary:', "
-                f"got: '{title[:60]}'",
-            ))
+            issues.append(
+                Issue(
+                    "warning",
+                    f"Summary title should start with 'Summary:', got: '{title[:60]}'",
+                )
+            )
 
     return issues
 
 
-def validate_sections(
-    sections: list[dict[str, str]], doc_type: str
-) -> list[Issue]:
+def validate_sections(sections: list[dict[str, str]], doc_type: str) -> list[Issue]:
     """Validate section presence and content for the given document type.
 
     Checks: all required sections present by name, no empty sections.
@@ -193,15 +191,11 @@ def validate_sections(
 
     missing = [name for name in required if name not in section_names]
     if missing:
-        issues.append(Issue(
-            "error", f"Missing required sections: {', '.join(missing)}"
-        ))
+        issues.append(Issue("error", f"Missing required sections: {', '.join(missing)}"))
 
     for section in sections:
         if not section["content"].strip():
-            issues.append(Issue(
-                "warning", f"Empty section: '{section['heading']}'"
-            ))
+            issues.append(Issue("warning", f"Empty section: '{section['heading']}'"))
 
     # Hollow-handoff guardrail: at least 1 of {Decisions, Changes, Learnings}
     # must have non-empty content (handoffs only).
@@ -209,19 +203,18 @@ def validate_sections(
     # are already caught by the missing-sections check above.
     if doc_type in ("handoff", "summary"):
         present_content_sections = [
-            s for s in sections
-            if s["heading"] in CONTENT_REQUIRED_SECTIONS
+            s for s in sections if s["heading"] in CONTENT_REQUIRED_SECTIONS
         ]
         if len(present_content_sections) == len(CONTENT_REQUIRED_SECTIONS):
-            has_substance = any(
-                s["content"].strip() for s in present_content_sections
-            )
+            has_substance = any(s["content"].strip() for s in present_content_sections)
             if not has_substance:
-                issues.append(Issue(
-                    "error",
-                    "Hollow document: at least 1 of {Decisions, Changes, Learnings} "
-                    "must have substantive content.",
-                ))
+                issues.append(
+                    Issue(
+                        "error",
+                        "Hollow document: at least 1 of {Decisions, Changes, Learnings} "
+                        "must have substantive content.",
+                    )
+                )
 
     return issues
 
@@ -251,42 +244,52 @@ def validate_line_count(content: str, doc_type: str) -> list[Issue]:
 
     if doc_type == "handoff":
         if body_lines < HANDOFF_MIN_LINES:
-            issues.append(Issue(
-                "error",
-                f"Handoff body is {body_lines} lines "
-                f"(minimum: {HANDOFF_MIN_LINES}). "
-                "Under-capturing session content.",
-            ))
+            issues.append(
+                Issue(
+                    "error",
+                    f"Handoff body is {body_lines} lines "
+                    f"(minimum: {HANDOFF_MIN_LINES}). "
+                    "Under-capturing session content.",
+                )
+            )
     elif doc_type == "summary":
         if body_lines < SUMMARY_MIN_LINES:
-            issues.append(Issue(
-                "error",
-                f"Summary body is {body_lines} lines "
-                f"(minimum: {SUMMARY_MIN_LINES}). "
-                "Under-capturing session content.",
-            ))
+            issues.append(
+                Issue(
+                    "error",
+                    f"Summary body is {body_lines} lines "
+                    f"(minimum: {SUMMARY_MIN_LINES}). "
+                    "Under-capturing session content.",
+                )
+            )
         elif body_lines > SUMMARY_MAX_LINES:
-            issues.append(Issue(
-                "warning",
-                f"Summary body is {body_lines} lines "
-                f"(maximum: {SUMMARY_MAX_LINES}). "
-                "Consider a full handoff instead.",
-            ))
+            issues.append(
+                Issue(
+                    "warning",
+                    f"Summary body is {body_lines} lines "
+                    f"(maximum: {SUMMARY_MAX_LINES}). "
+                    "Consider a full handoff instead.",
+                )
+            )
     elif doc_type == "checkpoint":
         if body_lines < CHECKPOINT_MIN_LINES:
-            issues.append(Issue(
-                "error",
-                f"Checkpoint body is {body_lines} lines "
-                f"(minimum: {CHECKPOINT_MIN_LINES}). "
-                "Missing required sections.",
-            ))
+            issues.append(
+                Issue(
+                    "error",
+                    f"Checkpoint body is {body_lines} lines "
+                    f"(minimum: {CHECKPOINT_MIN_LINES}). "
+                    "Missing required sections.",
+                )
+            )
         elif body_lines > CHECKPOINT_MAX_LINES:
-            issues.append(Issue(
-                "warning",
-                f"Checkpoint body is {body_lines} lines "
-                f"(maximum: {CHECKPOINT_MAX_LINES}). "
-                "Consider a full handoff instead.",
-            ))
+            issues.append(
+                Issue(
+                    "warning",
+                    f"Checkpoint body is {body_lines} lines "
+                    f"(maximum: {CHECKPOINT_MAX_LINES}). "
+                    "Consider a full handoff instead.",
+                )
+            )
 
     return issues
 
@@ -301,10 +304,12 @@ def validate(content: str) -> list[Issue]:
     frontmatter = parse_frontmatter(content)
 
     if not frontmatter:
-        return [Issue(
-            "error",
-            "No frontmatter found. Document must start with --- YAML block.",
-        )]
+        return [
+            Issue(
+                "error",
+                "No frontmatter found. Document must start with --- YAML block.",
+            )
+        ]
 
     # Default to handoff for backwards compatibility
     doc_type = frontmatter.get("type", "handoff")
@@ -314,10 +319,12 @@ def validate(content: str) -> list[Issue]:
     # Type allowlist — validate before branching to prevent
     # untrusted input controlling which validation rules apply
     if doc_type not in VALID_TYPES:
-        issues.append(Issue(
-            "error",
-            f"Invalid type '{doc_type}'. Must be one of: {', '.join(sorted(VALID_TYPES))}.",
-        ))
+        issues.append(
+            Issue(
+                "error",
+                f"Invalid type '{doc_type}'. Must be one of: {', '.join(sorted(VALID_TYPES))}.",
+            )
+        )
         return issues  # Can't validate sections/lines without valid type
 
     issues.extend(validate_frontmatter(frontmatter, doc_type))
@@ -344,7 +351,7 @@ def is_handoff_path(file_path: str) -> bool:
     parts = path.parts
     for i in range(len(parts) - 1):
         if parts[i] == ".codex" and parts[i + 1] == "handoffs":
-            remaining = parts[i + 2:]
+            remaining = parts[i + 2 :]
             # Direct child of handoffs/
             if len(remaining) == 1:
                 return True
@@ -363,8 +370,7 @@ def format_output(issues: list[Issue]) -> str:
 
     parts: list[str] = []
     parts.append(
-        f"Handoff quality check found "
-        f"{len(errors)} error(s) and {len(warnings)} warning(s)."
+        f"Handoff quality check found {len(errors)} error(s) and {len(warnings)} warning(s)."
     )
 
     if errors:
