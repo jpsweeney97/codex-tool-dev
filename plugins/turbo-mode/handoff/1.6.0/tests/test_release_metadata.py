@@ -59,6 +59,17 @@ def test_readme_documents_current_summary_and_development_commands() -> None:
     assert "354 tests across 10 test modules" not in text
 
 
+def test_contributor_architecture_docs_exist_and_are_linked() -> None:
+    contributing = PLUGIN_ROOT / "CONTRIBUTING.md"
+    architecture = PLUGIN_ROOT / "references" / "ARCHITECTURE.md"
+    readme = (PLUGIN_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert contributing.exists()
+    assert architecture.exists()
+    assert "CONTRIBUTING.md" in readme
+    assert "references/ARCHITECTURE.md" in readme
+
+
 def test_docs_do_not_claim_universal_gitignore_policy() -> None:
     for path in POLICY_DOCS:
         text = path.read_text(encoding="utf-8")

@@ -292,6 +292,8 @@ Three inherited edge cases are documented in `references/handoff-contract.md`:
 
 | Document | Purpose |
 |----------|---------|
+| `CONTRIBUTING.md` | Contributor setup, source authority, and runtime boundaries |
+| `references/ARCHITECTURE.md` | Runtime ownership map, storage layout, and reseam boundaries |
 | `references/handoff-contract.md` | Frontmatter schema, chain protocol, storage conventions, known limitations |
 | `references/format-reference.md` | Section checklist, quality targets, worked examples |
 | `skills/save/synthesis-guide.md` | Internal synthesis guidance for the save skill |

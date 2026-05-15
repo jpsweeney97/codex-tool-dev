@@ -1,4 +1,10 @@
-"""Storage authority for Handoff runtime paths and state transitions."""
+"""Storage authority for Handoff runtime paths and state transitions.
+
+This module owns storage layout classification, handoff discovery, history
+selection, and chain-state recovery diagnostics. Active-write reservation and
+write mechanics live in ``active_writes.py``; callers should import those
+helpers directly rather than treating this module as an active-write facade.
+"""
 
 from __future__ import annotations
 

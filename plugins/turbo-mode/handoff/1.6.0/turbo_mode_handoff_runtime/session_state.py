@@ -1,3 +1,10 @@
+"""CLI command dispatcher for Handoff resume state and chain-state operations.
+
+The module keeps command parsing close to the skill-facing CLI contract. Storage
+layout and chain-state recovery decisions live in ``storage_authority.py``;
+active-writer operations live in ``active_writes.py``.
+"""
+
 from __future__ import annotations
 
 import argparse
