@@ -295,7 +295,7 @@ Three inherited edge cases are documented in `references/handoff-contract.md`:
 | `references/handoff-contract.md` | Frontmatter schema, chain protocol, storage conventions, known limitations |
 | `references/format-reference.md` | Section checklist, quality targets, worked examples |
 | `skills/save/synthesis-guide.md` | Internal synthesis guidance for the save skill |
-| `CHANGELOG.md` | Version history (1.0.0-1.6.0) |
+| `CHANGELOG.md` | Version history (1.0.0-1.7.0) |
 
 ## License
 

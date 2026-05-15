@@ -160,7 +160,7 @@ def verify_source_harness_payload(payload: dict[str, object]) -> None:
         raise _invalid_payload("missing manifest identity", identity)
     if identity.get("name") != "handoff":
         raise _invalid_payload("unexpected manifest name", identity.get("name"))
-    if identity.get("version") != "1.6.0":
+    if identity.get("version") != "1.7.0":
         raise _invalid_payload("unexpected manifest version", identity.get("version"))
     if identity.get("source_sha256") != identity.get("installed_sha256"):
         raise _invalid_payload(

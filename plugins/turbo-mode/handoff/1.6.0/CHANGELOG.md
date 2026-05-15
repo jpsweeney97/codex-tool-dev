@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-05-15
+
 ### Changed
 - **BREAKING:** Handoff storage moved from `<project_root>/docs/handoffs/` to `<project_root>/.codex/handoffs/`. The plugin still does not add gitignore rules, stage files, or auto-commit files; host-repository tracking policy remains external to the plugin. Archive remains `archive/`. No auto-pruning is applied to handoff files.
 - **BREAKING:** Implementation modules moved from `scripts/*` into `turbo_mode_handoff_runtime/*`. The `scripts/` directory now contains only eight CLI facades (`defer.py`, `distill.py`, `list_handoffs.py`, `load_transactions.py`, `plugin_siblings.py`, `search.py`, `session_state.py`, `triage.py`), and `scripts.*` is no longer a supported import namespace.
