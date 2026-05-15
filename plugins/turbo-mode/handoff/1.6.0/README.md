@@ -65,6 +65,14 @@ Core logic lives in `turbo_mode_handoff_runtime/`. The `scripts/` directory now 
 
 Runtime-only helpers such as `turbo_mode_handoff_runtime/quality_check.py`, `turbo_mode_handoff_runtime/cleanup.py`, and `turbo_mode_handoff_runtime/storage_authority_inventory.py` remain source utilities and are not wired into Handoff `1.6.0` skill entrypoints or hooks.
 
+Runtime module ownership for storage and chain behavior:
+
+- `storage_layout.py`: storage paths.
+- `storage_inspection.py`: filesystem and git inspection helpers.
+- `storage_authority.py`: handoff discovery and selection authority.
+- `chain_state.py`: chain-state inventory, diagnostics, read, and lifecycle.
+- `scripts/`: executable CLI facades only.
+
 ## Configuration
 
 ### Storage Locations

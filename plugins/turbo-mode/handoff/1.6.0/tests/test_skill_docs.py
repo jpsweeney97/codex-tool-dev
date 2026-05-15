@@ -79,10 +79,10 @@ def test_load_skill_uses_load_transaction_and_listing_scripts() -> None:
         "<project_root>/.codex/handoffs/.session-state/handoff-<project>-<resume_token>.json"
         in text
     )
-    assert "load_transactions.py\" \\" in text
+    assert 'load_transactions.py" \\' in text
     assert "session_state.py" not in text
     assert 'ls "$(git rev-parse --show-toplevel)/docs/handoffs"' not in text
-    assert "--archive-dir \"$PROJECT_ROOT/docs/handoffs/archive\"" not in text
+    assert '--archive-dir "$PROJECT_ROOT/docs/handoffs/archive"' not in text
 
 
 def test_load_skill_documents_fail_closed_operator_recovery_boundaries() -> None:
@@ -101,17 +101,14 @@ def test_load_skill_documents_fail_closed_operator_recovery_boundaries() -> None
 def test_defer_skill_uses_plugin_siblings_plain_field() -> None:
     text = (PLUGIN_ROOT / "skills" / "defer" / "SKILL.md").read_text(encoding="utf-8")
     assert (
-        'plugin_siblings.py" --plugin-root "$PLUGIN_ROOT" '
-        "--sibling ticket --field plugin_root"
+        'plugin_siblings.py" --plugin-root "$PLUGIN_ROOT" --sibling ticket --field plugin_root'
     ) in text
     assert (
-        'python "$PLUGIN_ROOT/scripts/defer.py" '
-        '--tickets-dir "$PROJECT_ROOT/docs/tickets"'
+        'python "$PLUGIN_ROOT/scripts/defer.py" --tickets-dir "$PROJECT_ROOT/docs/tickets"'
     ) in text
     assert (
         "python3 /absolute/ticket/root/scripts/ticket_engine_user.py ingest "
-        '"$PROJECT_ROOT/.codex/ticket-tmp/payload-'
-        in text
+        '"$PROJECT_ROOT/.codex/ticket-tmp/payload-' in text
     )
     assert "relative payload path" in text
     assert "$TICKET_PLUGIN_ROOT" not in text

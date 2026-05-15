@@ -16,7 +16,7 @@
       ],
       "required_missing": [],
       "root": "plugin",
-      "sha256": "6de197ef4d787df66411bc76b37c9abf52f771f104cbc1e5585b1f59651e0f30",
+      "sha256": "50566eadc34be4a18af481c0c132130682b487d836dfc31e251b4ab9c6e62f40",
       "status": "passed"
     },
     {
@@ -76,7 +76,7 @@
       ],
       "required_missing": [],
       "root": "plugin",
-      "sha256": "3d61980c21dcd72ebe635f48760a3c4019c2315c040be4a1aeb12167085ad6b6",
+      "sha256": "ef891bdc8b5801f28f00d67c79e72677f0b871cdfcfbeaaca9c72538fffd2b8a",
       "status": "passed"
     },
     {
