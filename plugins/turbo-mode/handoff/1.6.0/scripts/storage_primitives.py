@@ -10,11 +10,13 @@ import hashlib
 import json
 import os
 import socket
+import subprocess
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 
 _CLAIM_TIMEOUT_SECONDS = 60
@@ -28,6 +30,57 @@ class LockPolicy:
     operation_label: str
     lock_kind: str
     error_factory: Callable[[str], Exception]
+
+    def __post_init__(self) -> None:
+        if not self.operation_label.strip():
+            raise ValueError("lock-policy init failed: operation label must be non-empty. Got: ''")
+        if not self.lock_kind.strip():
+            raise ValueError("lock-policy init failed: lock kind must be non-empty. Got: ''")
+
+
+DeleteAction = Literal["deleted", "already_absent", "failed"]
+DeleteMechanism = Literal["trash", "unlink"]
+
+
+@dataclass(frozen=True)
+class DeleteResult:
+    """Structured result from best-effort file deletion."""
+
+    action: DeleteAction
+    mechanism: DeleteMechanism | None
+    path: str
+    error: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.action not in {"deleted", "already_absent", "failed"}:
+            raise ValueError(
+                f"delete-result init failed: unknown action. Got: {self.action!r:.100}"
+            )
+        if self.mechanism not in {"trash", "unlink", None}:
+            raise ValueError(
+                f"delete-result init failed: unknown mechanism. Got: {self.mechanism!r:.100}"
+            )
+        if self.action == "failed":
+            if self.mechanism is None or self.error is None:
+                raise ValueError(
+                    "delete-result init failed: failed delete requires mechanism and error. "
+                    f"Got: {(self.mechanism, self.error)!r:.100}"
+                )
+            return
+        if self.error is not None:
+            raise ValueError(
+                "delete-result init failed: successful delete cannot carry error. "
+                f"Got: {self.error!r:.100}"
+            )
+        if self.action == "deleted" and self.mechanism is None:
+            raise ValueError(
+                "delete-result init failed: deleted action requires mechanism. Got: None"
+            )
+        if self.action == "already_absent" and self.mechanism is not None:
+            raise ValueError(
+                "delete-result init failed: already_absent action cannot carry mechanism. "
+                f"Got: {self.mechanism!r:.100}"
+            )
 
 
 def parse_created_at(value: str | None) -> datetime:
@@ -47,6 +100,101 @@ def write_json_atomic(path: Path, payload: dict[str, object]) -> None:
     temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     os.replace(temp_path, path)
+
+
+def read_json_object(
+    path: Path,
+    *,
+    missing: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Read a JSON object from disk; ``missing`` applies only to absent files."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        if missing is not None:
+            return dict(missing)
+        raise
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(
+            f"read-json-object failed: JSON object unreadable. Got: {str(path)!r:.100}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"read-json-object failed: JSON object malformed. Got: {str(path)!r:.100}"
+        )
+    return payload
+
+
+def write_text_atomic_exclusive(
+    path: Path,
+    payload: str,
+    *,
+    max_attempts: int = 100,
+) -> Path:
+    """Write text through a sibling temp file and publish via exclusive hard link."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stem = path.stem
+    suffix = path.suffix
+    for attempt in range(max_attempts):
+        retry_suffix = "" if attempt == 0 else f"-{attempt:02d}"
+        candidate = path.with_name(f"{stem}{retry_suffix}{suffix}")
+        temp_path = candidate.with_name(f".{candidate.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temp_path.write_text(payload, encoding="utf-8")
+            try:
+                os.link(temp_path, candidate)
+            except FileExistsError:
+                continue
+            return candidate
+        finally:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
+    raise FileExistsError(
+        f"write-text-atomic-exclusive failed: collision budget exhausted. Got: {str(path)!r:.100}"
+    )
+
+
+def safe_delete(path: Path) -> DeleteResult:
+    """Delete one file by preferring trash, then unlink, then reporting failure.
+
+    Returns a DeleteResult with action in {"deleted", "already_absent", "failed"}.
+    Never raises for trash or unlink errors; callers inspect ``action`` to decide
+    whether to enter their own recovery flow. ``mechanism`` records which delete
+    path was attempted on success or partial-attempt; ``error`` carries the last
+    underlying exception string on failure so callers can surface it in
+    operator-actionable messages.
+    """
+    if not path.exists():
+        return DeleteResult(action="already_absent", mechanism=None, path=str(path))
+    try:
+        subprocess.run(
+            ["trash", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        return DeleteResult(action="deleted", mechanism="trash", path=str(path))
+    except (
+        OSError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        FileNotFoundError,
+    ) as trash_exc:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return DeleteResult(action="already_absent", mechanism=None, path=str(path))
+        except OSError as unlink_exc:
+            return DeleteResult(
+                action="failed",
+                mechanism="unlink",
+                path=str(path),
+                error=f"trash: {trash_exc!r}; unlink: {unlink_exc!r}",
+            )
+        return DeleteResult(action="deleted", mechanism="unlink", path=str(path))
 
 
 def sha256_file(path: Path) -> str:
@@ -108,8 +256,13 @@ def acquire_lock(
     }
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
-    lock_check = json.loads(path.read_text(encoding="utf-8"))
-    if lock_check.get("lock_id") != transaction_id:
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        lock_check = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        raise _held_error(path, policy) from exc
+    if not isinstance(lock_check, dict) or lock_check.get("lock_id") != transaction_id:
         raise _held_error(path, policy)
 
 
@@ -150,13 +303,13 @@ def _try_recover_stale_lock(path: Path, *, now: datetime, policy: LockPolicy) ->
     claim_path = path.with_name(path.name + ".recovery")
     try:
         claim_fd = os.open(claim_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
+    except FileExistsError as exc:
         claim_age_hint = _claim_age_hint(claim_path, now=now)
         raise policy.error_factory(
             f"{policy.operation_label} failed: recovery claim file present{claim_age_hint}; "
             f"if no process is actively recovering this lock, run `trash {claim_path}` and retry. "
             f"Got: {str(claim_path)!r:.100}"
-        )
+        ) from exc
     try:
         _write_claim_metadata(claim_fd)
         try:

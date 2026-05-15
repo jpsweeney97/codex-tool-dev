@@ -25,6 +25,43 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+def _load_bootstrap_by_path() -> None:
+    import importlib.util
+
+    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
+    cached = sys.modules.get("scripts._bootstrap")
+    if cached is not None:
+        cached_file = getattr(cached, "__file__", None)
+        try:
+            cached_path = Path(cached_file).resolve() if cached_file is not None else None
+        except (OSError, TypeError):
+            cached_path = None
+        if cached_path == bootstrap_path:
+            ensure = getattr(cached, "ensure_plugin_scripts_package", None)
+            if callable(ensure):
+                ensure()
+                return
+        sys.modules.pop("scripts._bootstrap", None)
+    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
+            f"Got: {str(bootstrap_path)!r:.100}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["scripts._bootstrap"] = module
+    spec.loader.exec_module(module)
+
+
+_load_bootstrap_by_path()
+del _load_bootstrap_by_path
+
+from scripts.handoff_parsing import (
+    parse_frontmatter as _parse_handoff_frontmatter,
+    parse_sections as _parse_handoff_sections,
+    section_name as _section_name,
+)
+
 # --- Constants ---
 
 REQUIRED_FRONTMATTER_FIELDS: tuple[str, ...] = (
@@ -103,88 +140,21 @@ class Issue:
 
 
 def parse_frontmatter(content: str) -> dict[str, str]:
-    """Extract YAML frontmatter fields as key-value pairs.
-
-    Simple line-by-line parser. Strips surrounding quotes from values.
-    Returns empty dict if no valid frontmatter block found (no opening
-    or no closing ---).
-    """
-    lines = content.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}
-
-    frontmatter: dict[str, str] = {}
-    for line in lines[1:]:
-        if line.strip() == "---":
-            break
-        if ":" in line:
-            key, _, value = line.partition(":")
-            value = value.strip()
-            if (value.startswith('"') and value.endswith('"')) or (
-                value.startswith("'") and value.endswith("'")
-            ):
-                value = value[1:-1]
-            frontmatter[key.strip()] = value
-    else:
-        return {}  # No closing ---
-
+    """Extract YAML frontmatter fields as key-value pairs."""
+    frontmatter, _ = _parse_handoff_frontmatter(content)
     return frontmatter
 
 
 def parse_sections(content: str) -> list[dict[str, str]]:
-    """Extract ## sections with their content.
-
-    Returns list of {"heading": str, "content": str} dicts.
-    Only captures ## headings (not # or ### or deeper).
-    Skips frontmatter block if present.
-    Tracks code fences to avoid false headings inside code blocks.
-    """
-    lines = content.splitlines()
-
-    # Skip frontmatter
-    body_start = 0
-    if lines and lines[0].strip() == "---":
-        for i, line in enumerate(lines[1:], start=1):
-            if line.strip() == "---":
-                body_start = i + 1
-                break
-
-    sections: list[dict[str, str]] = []
-    current_heading: str | None = None
-    current_content: list[str] = []
-    inside_fence: bool = False
-
-    for line in lines[body_start:]:
-        # Track code fences (CommonMark: backtick or tilde, 0-3 spaces indent)
-        stripped = line.lstrip(" ")
-        indent = len(line) - len(stripped)
-        if indent <= 3 and (
-            stripped.startswith("```") or stripped.startswith("~~~")
-        ):
-            inside_fence = not inside_fence
-
-        if (
-            not inside_fence
-            and line.startswith("## ")
-            and not line.startswith("### ")
-        ):
-            if current_heading is not None:
-                sections.append({
-                    "heading": current_heading,
-                    "content": "\n".join(current_content).strip(),
-                })
-            current_heading = line[3:].strip()
-            current_content = []
-        elif current_heading is not None:
-            current_content.append(line)
-
-    if current_heading is not None:
-        sections.append({
-            "heading": current_heading,
-            "content": "\n".join(current_content).strip(),
-        })
-
-    return sections
+    """Extract ## sections with current quality-check return shape."""
+    _, body = _parse_handoff_frontmatter(content)
+    return [
+        {
+            "heading": _section_name(section.heading),
+            "content": section.content,
+        }
+        for section in _parse_handoff_sections(body)
+    ]
 
 
 # --- Validation ---

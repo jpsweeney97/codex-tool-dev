@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import subprocess
 import sys
 import time
 import uuid
@@ -11,16 +10,46 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-try:
-    from scripts.project_paths import get_state_dir
-    from scripts.storage_primitives import write_json_atomic
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from scripts.project_paths import get_state_dir  # type: ignore[no-redef]
-    from scripts.storage_primitives import write_json_atomic  # type: ignore[no-redef]
+def _load_bootstrap_by_path() -> None:
+    import importlib.util
+
+    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
+    cached = sys.modules.get("scripts._bootstrap")
+    if cached is not None:
+        cached_file = getattr(cached, "__file__", None)
+        try:
+            cached_path = Path(cached_file).resolve() if cached_file is not None else None
+        except (OSError, TypeError):
+            cached_path = None
+        if cached_path == bootstrap_path:
+            ensure = getattr(cached, "ensure_plugin_scripts_package", None)
+            if callable(ensure):
+                ensure()
+                return
+        sys.modules.pop("scripts._bootstrap", None)
+    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
+            f"Got: {str(bootstrap_path)!r:.100}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["scripts._bootstrap"] = module
+    spec.loader.exec_module(module)
+
+
+_load_bootstrap_by_path()
+del _load_bootstrap_by_path
+
+from scripts import storage_primitives
+from scripts.project_paths import get_state_dir
 
 
 class AmbiguousResumeStateError(RuntimeError):
+    pass
+
+
+class CorruptResumeStateError(RuntimeError):
     pass
 
 
@@ -40,16 +69,23 @@ def _legacy_state_path(state_dir: Path, project: str) -> Path:
     return state_dir / f"handoff-{project}"
 
 
-def _trash_path(path: Path, *, context: str) -> bool:
+def _delete_path(path: Path, *, context: str) -> bool:
     try:
-        subprocess.run(["trash", str(path)], capture_output=True, text=True, timeout=5, check=True)
-        return True
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        result = storage_primitives.safe_delete(path)
+    except OSError as exc:
         print(
             f"state cleanup warning: {context} failed: {exc}. Got: {str(path)!r:.100}",
             file=sys.stderr,
         )
         return False
+    if result.action in {"deleted", "already_absent"}:
+        return True
+    detail = f": {result.error}" if result.error else ""
+    print(
+        f"state cleanup warning: {context} failed{detail}. Got: {str(path)!r:.100}",
+        file=sys.stderr,
+    )
+    return False
 
 
 def _mark_legacy_state_consumed(legacy_path: Path, migrated_state_path: Path) -> None:
@@ -91,14 +127,23 @@ def write_resume_state(state_dir: Path, project: str, archive_path: str, resume_
         archive_path=archive_path,
         created_at=datetime.now(timezone.utc).isoformat(),
     )
-    write_json_atomic(state_path, asdict(payload))
+    storage_primitives.write_json_atomic(state_path, asdict(payload))
     return state_path
+
+
+def _read_resume_state_payload(path: Path, *, operation: str) -> dict[str, object]:
+    try:
+        return storage_primitives.read_json_object(path)
+    except (OSError, ValueError) as exc:
+        raise CorruptResumeStateError(
+            f"{operation} failed: resume state unreadable. Got: {str(path)!r:.100}"
+        ) from exc
 
 
 def list_resume_states(state_dir: Path, project: str) -> list[ResumeState]:
     states: list[ResumeState] = []
     for path in sorted(state_dir.glob(f"handoff-{project}-*.json")):
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = _read_resume_state_payload(path, operation="read-state")
         states.append(ResumeState(**data))
     return states
 
@@ -111,9 +156,9 @@ def migrate_legacy_resume_state(state_dir: Path, project: str) -> ResumeState | 
     if archive_path is None:
         return None
     state_path = write_resume_state(state_dir, project, archive_path)
-    if not _trash_path(legacy_path, context="legacy state migration cleanup"):
+    if not _delete_path(legacy_path, context="legacy state migration cleanup"):
         _mark_legacy_state_consumed(legacy_path, state_path)
-    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    payload = _read_resume_state_payload(state_path, operation="read-state")
     return ResumeState(**payload)
 
 
@@ -149,14 +194,17 @@ def clear_resume_state(state_dir: Path, state_path_arg: str) -> bool:
         return True
     legacy_project: str | None = None
     if resolved_state_path.suffix == ".json":
-        payload = json.loads(resolved_state_path.read_text(encoding="utf-8"))
+        payload = _read_resume_state_payload(resolved_state_path, operation="clear-state")
         legacy_project = payload.get("project")
 
-    cleared = _trash_path(resolved_state_path, context="clear-state")
+    cleared = _delete_path(resolved_state_path, context="clear-state")
     if legacy_project:
         legacy_path = _legacy_state_path(state_dir, legacy_project)
         if legacy_path.exists():
-            legacy_cleared = _trash_path(legacy_path, context="legacy state cleanup after clear-state")
+            legacy_cleared = _delete_path(
+                legacy_path,
+                context="legacy state cleanup after clear-state",
+            )
             cleared = cleared and legacy_cleared
     return cleared
 
@@ -168,11 +216,19 @@ def prune_old_state_files(max_age_hours: int = 24, *, state_dir: Path | None = N
         return []
     deleted: list[Path] = []
     cutoff = time.time() - (max_age_hours * 60 * 60)
-    for state_file in sorted(path for path in state_dir.iterdir() if path.is_file() and path.name.startswith("handoff-")):
+    for state_file in sorted(state_dir.iterdir()):
         try:
-            if state_file.stat().st_mtime < cutoff and _trash_path(state_file, context="ttl prune"):
+            if not state_file.is_file() or not state_file.name.startswith("handoff-"):
+                continue
+            is_expired = state_file.stat().st_mtime < cutoff
+            if is_expired and _delete_path(state_file, context="ttl prune"):
                 deleted.append(state_file)
-        except OSError:
+        except OSError as exc:
+            print(
+                "state cleanup warning: ttl prune stat/delete failed: "
+                f"{exc}. Got: {str(state_file)!r:.100}",
+                file=sys.stderr,
+            )
             continue
     return deleted
 
@@ -418,16 +474,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "read-state":
         try:
             state = load_resume_state(Path(args.state_dir), args.project)
-        except (AmbiguousResumeStateError, ValueError) as exc:
+        except (AmbiguousResumeStateError, CorruptResumeStateError, ValueError) as exc:
             json.dump({"error": str(exc)}, sys.stdout)
             return 2
         if state is None:
             return 1
         return _emit(asdict(state), args.field)
     if args.command == "clear-state":
-        if clear_resume_state(Path(args.state_dir), args.state_path):
-            return 0
-        return 1
+        try:
+            cleared = clear_resume_state(Path(args.state_dir), args.state_path)
+        except CorruptResumeStateError as exc:
+            json.dump({"error": str(exc)}, sys.stdout)
+            return 2
+        return 0 if cleared else 1
 
     if args.command == "prune-state":
         deleted = prune_old_state_files(args.max_age_hours, state_dir=Path(args.state_dir))

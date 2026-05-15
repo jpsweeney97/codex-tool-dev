@@ -1349,3 +1349,19 @@ def test_list_load_recovery_records_surfaces_corrupt_transaction(tmp_path: Path)
     assert len(records) == 1
     assert records[0]["status"] == "unreadable"
     assert records[0]["transaction_path"] == str(corrupt)
+    assert "JSONDecodeError" in str(records[0]["error"])
+
+
+def test_read_registry_reports_corrupt_json(tmp_path: Path) -> None:
+    registry_path = (
+        tmp_path
+        / ".codex"
+        / "handoffs"
+        / ".session-state"
+        / "copied-legacy-archives.json"
+    )
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text("{bad", encoding="utf-8")
+
+    with pytest.raises(load_transactions.LoadTransactionError, match="registry unreadable"):
+        load_transactions._read_registry(registry_path)

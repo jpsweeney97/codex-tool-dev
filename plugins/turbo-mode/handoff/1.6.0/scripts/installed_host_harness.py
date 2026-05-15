@@ -10,11 +10,38 @@ import sys
 import textwrap
 from pathlib import Path
 
-try:
-    from scripts.storage_primitives import sha256_file
-except ModuleNotFoundError:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from scripts.storage_primitives import sha256_file  # type: ignore[no-redef]
+def _load_bootstrap_by_path() -> None:
+    import importlib.util
+
+    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
+    cached = sys.modules.get("scripts._bootstrap")
+    if cached is not None:
+        cached_file = getattr(cached, "__file__", None)
+        try:
+            cached_path = Path(cached_file).resolve() if cached_file is not None else None
+        except (OSError, TypeError):
+            cached_path = None
+        if cached_path == bootstrap_path:
+            ensure = getattr(cached, "ensure_plugin_scripts_package", None)
+            if callable(ensure):
+                ensure()
+                return
+        sys.modules.pop("scripts._bootstrap", None)
+    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
+            f"Got: {str(bootstrap_path)!r:.100}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["scripts._bootstrap"] = module
+    spec.loader.exec_module(module)
+
+
+_load_bootstrap_by_path()
+del _load_bootstrap_by_path
+
+from scripts.storage_primitives import sha256_file
 
 
 class InstalledHostHarnessError(RuntimeError):

@@ -12,58 +12,54 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-try:
-    from scripts.session_state import allocate_archive_path, write_resume_state
-    from scripts.storage_authority import (
-        HandoffCandidate,
-        SelectionEligibility,
-        StorageLocation,
-        discover_handoff_inventory,
-        eligible_active_candidates,
-        get_storage_layout,
-    )
-    from scripts.storage_primitives import (
-        LockPolicy,
-        acquire_lock as _acquire_lock_with_policy,
-        release_lock as _release_lock,
-        sha256_file as _sha256_file,
-        write_json_atomic as _write_json_atomic,
-    )
-except ModuleNotFoundError:
-    import types
+def _load_bootstrap_by_path() -> None:
+    import importlib.util
 
-    _script_dir = Path(__file__).resolve().parent
-    sys.path.insert(0, str(_script_dir.parent))
-    scripts_pkg = sys.modules.get("scripts")
-    if scripts_pkg is None or not hasattr(scripts_pkg, "__path__"):
-        scripts_pkg = types.ModuleType("scripts")
-        scripts_pkg.__path__ = [str(_script_dir)]  # type: ignore[attr-defined]
-        sys.modules["scripts"] = scripts_pkg
-    else:
-        package_path = list(scripts_pkg.__path__)  # type: ignore[attr-defined]
-        if str(_script_dir) not in package_path:
-            package_path.insert(0, str(_script_dir))
-            scripts_pkg.__path__ = package_path  # type: ignore[attr-defined]
+    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
+    cached = sys.modules.get("scripts._bootstrap")
+    if cached is not None:
+        cached_file = getattr(cached, "__file__", None)
+        try:
+            cached_path = Path(cached_file).resolve() if cached_file is not None else None
+        except (OSError, TypeError):
+            cached_path = None
+        if cached_path == bootstrap_path:
+            ensure = getattr(cached, "ensure_plugin_scripts_package", None)
+            if callable(ensure):
+                ensure()
+                return
+        sys.modules.pop("scripts._bootstrap", None)
+    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
+            f"Got: {str(bootstrap_path)!r:.100}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["scripts._bootstrap"] = module
+    spec.loader.exec_module(module)
 
-    from scripts.session_state import (  # type: ignore[no-redef]
-        allocate_archive_path,
-        write_resume_state,
-    )
-    from scripts.storage_authority import (  # type: ignore[no-redef]
-        HandoffCandidate,
-        SelectionEligibility,
-        StorageLocation,
-        discover_handoff_inventory,
-        eligible_active_candidates,
-        get_storage_layout,
-    )
-    from scripts.storage_primitives import (  # type: ignore[no-redef]
-        LockPolicy,
-        acquire_lock as _acquire_lock_with_policy,
-        release_lock as _release_lock,
-        sha256_file as _sha256_file,
-        write_json_atomic as _write_json_atomic,
-    )
+
+_load_bootstrap_by_path()
+del _load_bootstrap_by_path
+
+from scripts.session_state import allocate_archive_path, write_resume_state
+from scripts.storage_authority import (
+    HandoffCandidate,
+    SelectionEligibility,
+    StorageLocation,
+    discover_handoff_inventory,
+    eligible_active_candidates,
+    get_storage_layout,
+)
+from scripts.storage_primitives import (
+    LockPolicy,
+    acquire_lock as _acquire_lock_with_policy,
+    read_json_object as _read_json_object,
+    release_lock as _release_lock,
+    sha256_file as _sha256_file,
+    write_json_atomic as _write_json_atomic,
+)
 
 
 class LoadTransactionError(RuntimeError):
@@ -240,7 +236,7 @@ def list_load_recovery_records(project_root: Path) -> list[dict[str, object]]:
                 "transaction_path": str(path),
                 "status": "unreadable",
                 "operation": "load",
-                "error": f"pending transaction record unreadable: {path}",
+                "error": f"pending transaction record unreadable: {path}: {exc!r}",
             })
             continue
         if data.get("operation") == "load" and data.get("status") == "pending":
@@ -910,9 +906,13 @@ def _consume_legacy_active(
 
 
 def _read_registry(path: Path) -> dict[str, object]:
-    if not path.exists():
-        return {"entries": []}
-    data = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        data = _read_json_object(path, missing={"entries": []})
+    except (OSError, ValueError) as exc:
+        raise LoadTransactionError(
+            "load-handoff failed: registry unreadable; manual operator review required. "
+            f"Got: {str(path)!r:.100}"
+        ) from exc
     entries = data.get("entries")
     if not isinstance(entries, list):
         raise LoadTransactionError(

@@ -12,6 +12,39 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+def _load_bootstrap_by_path() -> None:
+    import importlib.util
+
+    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
+    cached = sys.modules.get("scripts._bootstrap")
+    if cached is not None:
+        cached_file = getattr(cached, "__file__", None)
+        try:
+            cached_path = Path(cached_file).resolve() if cached_file is not None else None
+        except (OSError, TypeError):
+            cached_path = None
+        if cached_path == bootstrap_path:
+            ensure = getattr(cached, "ensure_plugin_scripts_package", None)
+            if callable(ensure):
+                ensure()
+                return
+        sys.modules.pop("scripts._bootstrap", None)
+    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
+            f"Got: {str(bootstrap_path)!r:.100}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["scripts._bootstrap"] = module
+    spec.loader.exec_module(module)
+
+
+_load_bootstrap_by_path()
+del _load_bootstrap_by_path
+
+from scripts.storage_primitives import write_text_atomic_exclusive
+
 
 def _slug(title: str) -> str:
     """Generate a filename slug from a title.
@@ -78,23 +111,8 @@ def _prepare_envelope(candidate: dict[str, Any]) -> tuple[str, str]:
 
 
 def _write_envelope_payload(envelopes_dir: Path, stem: str, payload: str) -> Path:
-    """Write pre-serialized envelope payload to disk.
-
-    Uses exclusive create mode. Retries with -01 through -99 suffixes.
-    Raises FileExistsError after 100 collision attempts (candidate-local).
-    Raises OSError on I/O failure (operational — abort batch).
-    """
-    for attempt in range(100):
-        suffix = "" if attempt == 0 else f"-{attempt:02d}"
-        path = envelopes_dir / f"{stem}{suffix}.json"
-        try:
-            with path.open("x", encoding="utf-8") as handle:
-                handle.write(payload)
-        except FileExistsError:
-            continue
-        return path
-
-    raise FileExistsError(f"Envelope filename collision after 100 attempts for stem: {stem}")
+    """Write pre-serialized envelope payload to disk atomically."""
+    return write_text_atomic_exclusive(envelopes_dir / f"{stem}.json", payload)
 
 
 def emit_envelope(candidate: dict[str, Any], envelopes_dir: Path) -> Path:

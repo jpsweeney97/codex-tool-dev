@@ -14,37 +14,51 @@ from pathlib import Path
 
 # Re-exported for backward compatibility with callers that import parser symbols
 # from scripts.search. Do not remove without updating downstream imports.
-try:
-    from scripts.handoff_parsing import HandoffFile, Section, parse_handoff
-    from scripts.project_paths import (
-        get_handoffs_dir,
-        get_legacy_handoffs_dir,
-        get_project_name,
-        get_project_root,
-    )
-    from scripts.storage_authority import (
-        HandoffCandidate,
-        SelectionEligibility,
-        StorageLocation,
-        discover_handoff_inventory,
-        eligible_history_candidates,
-    )
-except ModuleNotFoundError:  # Direct execution (python3 scripts/search.py)
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from scripts.handoff_parsing import HandoffFile, Section, parse_handoff  # type: ignore[no-redef]
-    from scripts.project_paths import (  # type: ignore[no-redef]
-        get_handoffs_dir,
-        get_legacy_handoffs_dir,
-        get_project_name,
-        get_project_root,
-    )
-    from scripts.storage_authority import (  # type: ignore[no-redef]
-        HandoffCandidate,
-        SelectionEligibility,
-        StorageLocation,
-        discover_handoff_inventory,
-        eligible_history_candidates,
-    )
+def _load_bootstrap_by_path() -> None:
+    import importlib.util
+
+    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
+    cached = sys.modules.get("scripts._bootstrap")
+    if cached is not None:
+        cached_file = getattr(cached, "__file__", None)
+        try:
+            cached_path = Path(cached_file).resolve() if cached_file is not None else None
+        except (OSError, TypeError):
+            cached_path = None
+        if cached_path == bootstrap_path:
+            ensure = getattr(cached, "ensure_plugin_scripts_package", None)
+            if callable(ensure):
+                ensure()
+                return
+        sys.modules.pop("scripts._bootstrap", None)
+    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
+            f"Got: {str(bootstrap_path)!r:.100}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["scripts._bootstrap"] = module
+    spec.loader.exec_module(module)
+
+
+_load_bootstrap_by_path()
+del _load_bootstrap_by_path
+
+from scripts.handoff_parsing import HandoffFile, Section, parse_handoff
+from scripts.project_paths import (
+    get_handoffs_dir,
+    get_legacy_handoffs_dir,
+    get_project_name,
+    get_project_root,
+)
+from scripts.storage_authority import (
+    HandoffCandidate,
+    SelectionEligibility,
+    StorageLocation,
+    discover_handoff_inventory,
+    eligible_history_candidates,
+)
 
 
 def search_handoffs(

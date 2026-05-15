@@ -12,51 +12,54 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-try:
-    from scripts.storage_authority import (
-        ChainStateDiagnosticError,
-        continue_chain_state,
-        get_storage_layout,
-        read_chain_state,
-    )
-    from scripts.storage_primitives import (
-        LockPolicy,
-        acquire_lock as _acquire_lock_with_policy,
-        parse_created_at as _parse_created_at,
-        release_lock as _release_lock,
-        sha256_file_or_none as _sha256_path,
-        write_json_atomic as _write_json_atomic,
-    )
-except ModuleNotFoundError:
-    import types
+def _load_bootstrap_by_path() -> None:
+    import importlib.util
 
-    _script_dir = Path(__file__).resolve().parent
-    sys.path.insert(0, str(_script_dir.parent))
-    scripts_pkg = sys.modules.get("scripts")
-    if scripts_pkg is None or not hasattr(scripts_pkg, "__path__"):
-        scripts_pkg = types.ModuleType("scripts")
-        scripts_pkg.__path__ = [str(_script_dir)]  # type: ignore[attr-defined]
-        sys.modules["scripts"] = scripts_pkg
-    else:
-        package_path = list(scripts_pkg.__path__)  # type: ignore[attr-defined]
-        if str(_script_dir) not in package_path:
-            package_path.insert(0, str(_script_dir))
-            scripts_pkg.__path__ = package_path  # type: ignore[attr-defined]
+    bootstrap_path = Path(__file__).resolve().parent / "_bootstrap.py"
+    cached = sys.modules.get("scripts._bootstrap")
+    if cached is not None:
+        cached_file = getattr(cached, "__file__", None)
+        try:
+            cached_path = Path(cached_file).resolve() if cached_file is not None else None
+        except (OSError, TypeError):
+            cached_path = None
+        if cached_path == bootstrap_path:
+            ensure = getattr(cached, "ensure_plugin_scripts_package", None)
+            if callable(ensure):
+                ensure()
+                return
+        sys.modules.pop("scripts._bootstrap", None)
+    spec = importlib.util.spec_from_file_location("scripts._bootstrap", bootstrap_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            "handoff bootstrap failed: missing or unloadable _bootstrap.py. "
+            f"Got: {str(bootstrap_path)!r:.100}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["scripts._bootstrap"] = module
+    spec.loader.exec_module(module)
 
-    from scripts.storage_authority import (  # type: ignore[no-redef]
-        ChainStateDiagnosticError,
-        continue_chain_state,
-        get_storage_layout,
-        read_chain_state,
-    )
-    from scripts.storage_primitives import (  # type: ignore[no-redef]
-        LockPolicy,
-        acquire_lock as _acquire_lock_with_policy,
-        parse_created_at as _parse_created_at,
-        release_lock as _release_lock,
-        sha256_file_or_none as _sha256_path,
-        write_json_atomic as _write_json_atomic,
-    )
+
+_load_bootstrap_by_path()
+del _load_bootstrap_by_path
+
+from scripts import storage_primitives as _storage_primitives
+from scripts.storage_authority import (
+    ChainStateDiagnosticError,
+    continue_chain_state,
+    get_storage_layout,
+    read_chain_state,
+)
+from scripts.storage_primitives import (
+    LockPolicy,
+    acquire_lock as _acquire_lock_with_policy,
+    parse_created_at as _parse_created_at,
+    read_json_object as _read_json_object,
+    release_lock as _release_lock,
+    sha256_file as _sha256_file,
+    sha256_file_or_none as _sha256_path,
+    write_json_atomic as _write_json_atomic,
+)
 
 
 class ActiveWriteError(RuntimeError):
@@ -283,7 +286,10 @@ def _existing_reservation(
     operation: str,
     slug: str | None,
 ) -> ActiveWriteReservation:
-    payload = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    payload = _read_operation_state(
+        operation_state_path,
+        operation_label="begin-active-write",
+    )
     if payload.get("operation") != operation:
         raise ActiveWriteError(
             "begin-active-write failed: run id belongs to another operation. "
@@ -304,6 +310,16 @@ def _bind_slug(operation: str, slug: str | None) -> tuple[str, str]:
         raise ActiveWriteError("begin-active-write failed: slug must be non-empty. Got: ''")
     _ensure_slug_segment("begin-active-write", slug)
     return slug, "caller-predeclared"
+
+
+def _read_operation_state(path: Path, *, operation_label: str) -> dict[str, object]:
+    try:
+        return _read_json_object(path)
+    except (OSError, ValueError) as exc:
+        raise ActiveWriteError(
+            f"{operation_label} failed: operation state unreadable; manual operator review required. "
+            f"Got: {str(path)!r:.100}"
+        ) from exc
 
 
 def _ensure_slug_segment(operation: str, slug: str) -> None:
@@ -472,7 +488,10 @@ def write_active_handoff(
 ) -> dict[str, object]:
     """Write reserved active handoff content and mark the transaction committed."""
     layout = get_storage_layout(project_root)
-    state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    state = _read_operation_state(
+        operation_state_path,
+        operation_label="write-active-handoff",
+    )
     project = str(state.get("project", layout.project_root.name))
     operation = str(state.get("operation", ""))
     transaction_id = str(state.get("transaction_id", ""))
@@ -512,7 +531,11 @@ def write_active_handoff(
             )
         temp_active_path: str | None = None
         if active_path.exists():
-            existing_hash = _sha256_path(active_path)
+            existing_hash = _sha256_path_required(
+                active_path,
+                operation_label="write-active-handoff",
+                target_label="active output",
+            )
             if existing_hash != content_sha256:
                 if state.get("status") != "committed":
                     state["status"] = "content_mismatch"
@@ -533,7 +556,11 @@ def write_active_handoff(
                     "write-active-handoff failed: active output write failed. "
                     f"Got: {str(active_path)!r:.100}"
                 ) from exc
-            temp_hash = _sha256_path(temp_path)
+            temp_hash = _sha256_path_required(
+                temp_path,
+                operation_label="write-active-handoff",
+                target_label="written active output",
+            )
             if temp_hash != content_sha256:
                 try:
                     temp_path.unlink()
@@ -563,7 +590,7 @@ def write_active_handoff(
             },
         )
         try:
-            cleanup_action, cleanup_path = _clear_snapshotted_primary_state(state)
+            cleanup_action, cleanup_path, cleanup_mechanism = _clear_snapshotted_primary_state(state)
         except ActiveWriteError:
             failed_at = datetime.now(UTC).isoformat()
             state.update({
@@ -586,6 +613,7 @@ def write_active_handoff(
             "status": "committed",
             "state_cleanup_action": cleanup_action,
             "state_cleanup_path": cleanup_path,
+            "state_cleanup_mechanism": cleanup_mechanism,
             "updated_at": datetime.now(UTC).isoformat(),
         })
         _write_json_atomic(operation_state_path, state)
@@ -615,7 +643,17 @@ def list_active_writes(
     for path in sorted(active_writes_dir.glob("*.json")):
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            records.append(_unreadable_active_write_record(path, operation=operation, exc=exc))
+            continue
+        if not isinstance(record, dict):
+            records.append(
+                _unreadable_active_write_record(
+                    path,
+                    operation=operation,
+                    exc=ValueError("operation state was not a JSON object"),
+                )
+            )
             continue
         if operation is not None and record.get("operation") != operation:
             continue
@@ -631,7 +669,10 @@ def abandon_active_write(
 ) -> dict[str, object]:
     """Mark one active-write operation abandoned without deleting active output."""
     layout = get_storage_layout(project_root)
-    state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    state = _read_operation_state(
+        operation_state_path,
+        operation_label="abandon-active-write",
+    )
     project = str(state.get("project", layout.project_root.name))
     operation = str(state.get("operation", ""))
     transaction_id = str(state.get("transaction_id", ""))
@@ -667,7 +708,10 @@ def recover_active_write_transaction(
 ) -> dict[str, object]:
     """Recover a verifiable active-write transaction without regenerating content."""
     layout = get_storage_layout(project_root)
-    state = json.loads(operation_state_path.read_text(encoding="utf-8"))
+    state = _read_operation_state(
+        operation_state_path,
+        operation_label="active-write-transaction-recover",
+    )
     project = str(state.get("project", layout.project_root.name))
     operation = str(state.get("operation", ""))
     transaction_id = str(state.get("transaction_id", ""))
@@ -697,7 +741,14 @@ def recover_active_write_transaction(
                 },
             )
             return state
-        if _sha256_path(active_path) != content_hash:
+        if (
+            _sha256_path_required(
+                active_path,
+                operation_label="active-write-transaction-recover",
+                target_label="active output",
+            )
+            != content_hash
+        ):
             state["status"] = "content_mismatch"
             state["updated_at"] = datetime.now(UTC).isoformat()
             _write_json_atomic(operation_state_path, state)
@@ -715,7 +766,7 @@ def recover_active_write_transaction(
                 f"Got: {str(active_path)!r:.100}"
             )
         updated_at = datetime.now(UTC).isoformat()
-        cleanup_action, cleanup_path = _clear_snapshotted_primary_state(state)
+        cleanup_action, cleanup_path, cleanup_mechanism = _clear_snapshotted_primary_state(state)
         state.update({
             "status": "committed",
             "active_path": str(active_path),
@@ -724,6 +775,7 @@ def recover_active_write_transaction(
             "recovered_from_status": recovered_from_status,
             "state_cleanup_action": cleanup_action,
             "state_cleanup_path": cleanup_path,
+            "state_cleanup_mechanism": cleanup_mechanism,
             "updated_at": updated_at,
         })
         _write_json_atomic(operation_state_path, state)
@@ -798,42 +850,56 @@ def _state_snapshot(
     state_paths: list[str] = []
     resumed_path: str | None = None
     for path in states:
-        data = path.read_text(encoding="utf-8")
+        try:
+            data = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ActiveWriteError(
+                f"begin-active-write failed: resume state unreadable. Got: {str(path)!r:.100}"
+            ) from exc
         payload_parts.extend([path.name, data])
         state_paths.append(str(path))
         if resumed_path is None:
             try:
-                resumed_path = str(json.loads(data).get("archive_path", ""))
-            except json.JSONDecodeError:
-                resumed_path = None
+                payload = json.loads(data)
+            except (json.JSONDecodeError, ValueError) as exc:
+                raise ActiveWriteError(
+                    f"begin-active-write failed: resume state unreadable. Got: {str(path)!r:.100}"
+                ) from exc
+            if not isinstance(payload, dict):
+                raise ActiveWriteError(
+                    f"begin-active-write failed: resume state malformed. Got: {str(path)!r:.100}"
+                )
+            archive_path = payload.get("archive_path", "")
+            if not isinstance(archive_path, str):
+                raise ActiveWriteError(
+                    "begin-active-write failed: resume archive path malformed. "
+                    f"Got: {str(path)!r:.100}"
+                )
+            resumed_path = archive_path
     resumed_hash = _sha256_path(Path(resumed_path)) if resumed_path else None
     return "primary-state", _stable_hash(payload_parts), state_paths, resumed_path, resumed_hash
 
 
-def _clear_snapshotted_primary_state(state: dict[str, object]) -> tuple[str, str | None]:
+def _clear_snapshotted_primary_state(
+    state: dict[str, object],
+) -> tuple[str, str | None, str | None]:
     paths = [Path(str(path)) for path in state.get("state_snapshot_paths", [])]
     if not paths:
-        return "none", None
+        return "none", None, None
     if len(paths) > 1:
         raise ActiveWriteError(
             f"write-active-handoff failed: ambiguous state cleanup. Got: {len(paths)!r:.100}"
         )
     path = paths[0]
     if not path.exists():
-        return "already-cleared-primary-state", str(path)
-    try:
-        subprocess.run(["trash", str(path)], capture_output=True, text=True, timeout=5, check=True)
-    except (
-        OSError,
-        subprocess.CalledProcessError,
-        subprocess.TimeoutExpired,
-        FileNotFoundError,
-    ) as exc:
+        return "already-cleared-primary-state", str(path), None
+    delete_result = _storage_primitives.safe_delete(path)
+    if delete_result.action not in {"deleted", "already_absent"}:
         raise ActiveWriteError(
-            "write-active-handoff failed: state cleanup failed. "
-            f"Got: {str(path)!r:.100}"
-        ) from exc
-    return "cleared-primary-state", str(path)
+            f"write-active-handoff failed: state cleanup failed via {delete_result.mechanism}. "
+            f"Got: ({delete_result.error!r}, {str(path)!r:.100})"
+        )
+    return "cleared-primary-state", str(path), delete_result.mechanism
 
 
 def _ensure_reservation_is_fresh(
@@ -987,3 +1053,34 @@ def _stable_hash(parts: list[str]) -> str:
         digest.update(part.encode("utf-8"))
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def _sha256_path_required(
+    path: Path,
+    *,
+    operation_label: str,
+    target_label: str,
+) -> str:
+    try:
+        return _sha256_file(path)
+    except OSError as exc:
+        raise ActiveWriteError(
+            f"{operation_label} failed: {target_label} unreadable. Got: {str(path)!r:.100}"
+        ) from exc
+
+
+def _unreadable_active_write_record(
+    path: Path,
+    *,
+    operation: str | None,
+    exc: Exception,
+) -> dict[str, object]:
+    record: dict[str, object] = {
+        "operation_state_path": str(path),
+        "status": "unreadable",
+        "operation": "unknown",
+        "error": f"active-write operation-state record unreadable: {path}: {exc!r}",
+    }
+    if operation is not None:
+        record["requested_operation"] = operation
+    return record
