@@ -30,6 +30,25 @@ RUNTIME_MODULES = {
     "triage.py",
 }
 
+CLI_FACADES = {
+    "defer.py",
+    "distill.py",
+    "list_handoffs.py",
+    "load_transactions.py",
+    "plugin_siblings.py",
+    "search.py",
+    "session_state.py",
+    "triage.py",
+}
+
+STRING_RETURNING_FACADES = {
+    "distill.py",
+    "list_handoffs.py",
+    "search.py",
+}
+
+INTEGER_RETURNING_FACADES = CLI_FACADES - STRING_RETURNING_FACADES
+
 
 def _parse(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -57,3 +76,28 @@ def test_runtime_modules_are_import_only() -> None:
         text = path.read_text(encoding="utf-8")
         assert not text.startswith("#!"), path
         assert 'if __name__ == "__main__"' not in text, path
+
+
+def test_scripts_directory_contains_only_cli_facades() -> None:
+    assert {p.name for p in SCRIPTS_DIR.glob("*.py")} == CLI_FACADES
+
+
+def test_cli_facades_use_the_approved_template() -> None:
+    for path in SCRIPTS_DIR.glob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        module = path.stem
+        assert text.startswith("#!/usr/bin/env python3\n"), path
+        assert "PLUGIN_ROOT = Path(__file__).resolve().parents[1]" in text, path
+        assert "sys.path.insert(0, str(PLUGIN_ROOT))" in text, path
+        assert f"from {RUNTIME_PACKAGE}.{module} import main" in text, path
+        assert 'if __name__ == "__main__":' in text, path
+        if path.name in STRING_RETURNING_FACADES:
+            assert "print(main())" in text, path
+            assert "raise SystemExit(0)" in text, path
+            assert "raise SystemExit(main())" not in text, path
+        else:
+            assert path.name in INTEGER_RETURNING_FACADES
+            assert "raise SystemExit(main())" in text, path
+            assert "print(main())" not in text, path
+        assert "_bootstrap" not in text, path
+        assert "globals().update" not in text, path
