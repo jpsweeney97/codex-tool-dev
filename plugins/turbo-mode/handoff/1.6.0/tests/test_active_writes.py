@@ -2063,6 +2063,7 @@ def test_release_lock_preserves_session_state_dir(tmp_path: Path) -> None:
     assert reservation.operation_state_path.exists()
 
 
+@pytest.mark.slow
 def test_active_write_lock_live_contention_with_subprocess(tmp_path: Path) -> None:
     plugin_root = str(Path(__file__).resolve().parent.parent)
 
