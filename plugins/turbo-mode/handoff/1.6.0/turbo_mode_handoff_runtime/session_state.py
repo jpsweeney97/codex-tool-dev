@@ -43,6 +43,16 @@ def _legacy_state_path(state_dir: Path, project: str) -> Path:
     return state_dir / f"handoff-{project}"
 
 
+# Terminal transaction statuses, derived from the lifecycle's own terminal
+# transitions: the write-transaction terminal check in active_writes
+# ({"committed", "abandoned", "reservation_expired"}) plus the
+# load-transaction terminal transitions in load_transactions ("completed",
+# "abandoned"). Anything else is in-flight or an operator-recovery signal.
+TERMINAL_TRANSACTION_STATUSES = frozenset(
+    {"committed", "completed", "abandoned", "reservation_expired"}
+)
+
+
 def _delete_path(path: Path, *, context: str) -> bool:
     try:
         result = storage_primitives.safe_delete(path)
@@ -221,9 +231,17 @@ def prune_old_state_files(max_age_hours: int = 24, *, state_dir: Path | None = N
                     status = payload.get("status") if isinstance(payload, dict) else None
                 except (OSError, json.JSONDecodeError, ValueError):
                     status = None
-                # Never prune in-flight ("pending") transactions. Any terminal,
-                # unreadable, or malformed record past the TTL is safe to drop.
-                if status == "pending":
+                # Allow-list, not deny-list: past the TTL, prune only genuinely
+                # terminal records, plus unreadable/malformed/typeless records
+                # (status is None or a non-string). Any string status not in the
+                # terminal set is in-flight or an operator-recovery signal and is
+                # kept (e.g. pending, write-pending, cleanup_failed,
+                # content_mismatch, reservation_conflict).
+                prunable = (
+                    not isinstance(status, str)
+                    or status in TERMINAL_TRANSACTION_STATUSES
+                )
+                if not prunable:
                     continue
                 if _delete_path(tx_file, context="ttl prune transactions"):
                     deleted.append(tx_file)
