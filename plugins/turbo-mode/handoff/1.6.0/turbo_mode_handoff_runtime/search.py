@@ -12,7 +12,7 @@ from pathlib import Path
 
 # Re-exported for backward compatibility with callers that import parser symbols
 # from turbo_mode_handoff_runtime.search. Do not remove without updating downstream imports.
-from turbo_mode_handoff_runtime.handoff_parsing import parse_handoff
+from turbo_mode_handoff_runtime.handoff_parsing import HandoffFile, Section, parse_handoff
 from turbo_mode_handoff_runtime.project_paths import (
     get_handoffs_dir,
     get_legacy_handoffs_dir,
@@ -26,6 +26,15 @@ from turbo_mode_handoff_runtime.storage_authority import (
     discover_handoff_inventory,
     eligible_history_candidates,
 )
+
+__all__ = [
+    "HandoffFile",
+    "Section",
+    "main",
+    "parse_handoff",
+    "search_handoff_history",
+    "search_handoffs",
+]
 
 
 def search_handoffs(
