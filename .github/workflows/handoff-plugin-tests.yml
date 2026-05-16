@@ -49,3 +49,11 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 \
           PYTHONPYCACHEPREFIX="${RUNNER_TEMP}/codex-tool-dev-pycache" \
           uv run --directory plugins/turbo-mode/handoff/1.6.0 pytest -q -p no:cacheprovider
+
+      - name: Advisory pyright (non-blocking)
+        continue-on-error: true
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 \
+          PYTHONPYCACHEPREFIX="${RUNNER_TEMP}/codex-tool-dev-pycache" \
+          uv run --directory plugins/turbo-mode/handoff/1.6.0 --with pyright \
+          sh -c 'pyright --version && pyright --stats turbo_mode_handoff_runtime/'

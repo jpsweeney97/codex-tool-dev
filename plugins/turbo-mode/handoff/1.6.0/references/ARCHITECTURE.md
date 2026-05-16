@@ -17,6 +17,40 @@ Runtime ownership map (layering order, lowest first):
 
 Layering invariant: imports flow one way, lowest to highest. The base layer is three independent, stdlib-only modules with no internal imports — `storage_primitives`, `storage_layout`, and `storage_inspection` (they are peers; none imports another). Above them: `storage_authority` → `chain_state` → `active_writes` → `session_state`/`load_transactions` → domain modules. No base-layer module may import any `turbo_mode_handoff_runtime` module (by absolute or relative import); doing so re-creates the cross-module import cycle the storage reseam removed and is prohibited. This is enforced mechanically by `tests/test_runtime_namespace.py::test_storage_base_layer_has_no_internal_imports`.
 
+### Active-write status-domain partition
+
+The active-write lifecycle persists two record kinds with **distinct,
+non-mergeable** status vocabularies, typed in `active_writes.py` as
+`ActiveWriteOperationStateStatus` and `ActiveWriteTransactionStatus`:
+
+- **operation-state records** (`.../active-writes/<project>/<run>.json`):
+  terminal `committed`; also exclusively `begun`, `unreadable`.
+- **transaction records** (`.../transactions/<txn>.json`): terminal
+  `completed`.
+
+`committed` (operation-state) and `completed` (transaction) are the
+discriminating pair. Merging the two vocabularies would re-introduce the
+PR #15 prune-bug class. The invariant is enforced at runtime by
+`tests/test_active_write_lifecycle_matrix.py`, which spies the single
+atomic-write chokepoint and asserts the partition on every write
+(transients included) across the lifecycle/recovery matrix; the Literal
+aliases are the static-analysis handle and an advisory non-blocking
+pyright CI step is the cheap precision surface.
+`session_state.TERMINAL_TRANSACTION_STATUSES` is a cross-domain TTL-prune
+terminal set, kept aligned via a test-layer check rather than a
+module-level `session_state` → `active_writes` import. Such an import
+follows the layering (`session_state` is above `active_writes` and already
+imports it function-locally); it is avoided here only to not add a
+module-load-time coupling for one constant — the test-layer check needs no
+import at all.
+
+Tripwires: (i) any write putting `completed` or `unreadable` into an
+operation-state file or `committed`/`begun`/`unreadable` into a transaction
+file falsifies the model — stop and triage. (ii) >~3 new pyright suppressions to land the
+`transaction_status` annotation → drop to runtime-gate-only + tracked
+ticket. (iii) Make pyright blocking only if a low-noise prototype holds
+and status/payload bugs recur beyond PR #15.
+
 `storage_authority_inventory.py` is a non-wired dev/CI helper (not part of the runtime load path): it builds and checks the storage-authority documentation-coverage fixture. See CONTRIBUTING.md for how to regenerate that fixture after a storage-authority doc change.
 
 Primary handoffs live under `.codex/handoffs/`; controlled legacy discovery covers pre-cutover `docs/handoffs/` history.
