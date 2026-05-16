@@ -10,6 +10,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
 from turbo_mode_handoff_runtime import storage_primitives as _storage_primitives
 from turbo_mode_handoff_runtime.chain_state import (
@@ -46,6 +47,52 @@ from turbo_mode_handoff_runtime.storage_primitives import (
 
 class ActiveWriteError(RuntimeError):
     pass
+
+
+# --- Active-write status-domain partition -------------------------------
+#
+# The active-write lifecycle persists TWO record kinds with DISTINCT status
+# vocabularies:
+#
+#   * operation-state records  (.../active-writes/<project>/<run>.json)
+#   * transaction records      (.../transactions/<txn>.json)
+#
+# Discriminating invariant (enforced by the write-spy lifecycle-matrix
+# regression test, NOT by these annotations — the repo gates on
+# ruff+pytest only): "committed" is an operation-state-only terminal;
+# "completed" is a transaction-only terminal; "begun"/"unreadable" are
+# operation-state-only. The two domains are NOT mergeable — a single
+# unified status type would mis-model the lifecycle and reintroduce the
+# PR #15 class of bug. Every member below is emitted by this module: each
+# has a verified write site, EXCEPT the synthetic read-path "unreadable"
+# record (built by _unreadable_active_write_record and returned by the
+# read-only list_active_writes; never persisted via _write_json_atomic).
+# See docs/superpowers/plans/2026-05-16-handoff-active-write-status-
+# partition.md.
+ActiveWriteOperationStateStatus = Literal[
+    "begun",
+    "pending_before_write",
+    "content-generated",
+    "content_mismatch",
+    "write-pending",
+    "cleanup_failed",
+    "committed",
+    "abandoned",
+    "reservation_expired",
+    "reservation_conflict",
+    "unreadable",
+]
+ActiveWriteTransactionStatus = Literal[
+    "pending_before_write",
+    "content-generated",
+    "content_mismatch",
+    "write-pending",
+    "cleanup_failed",
+    "completed",
+    "abandoned",
+    "reservation_expired",
+    "reservation_conflict",
+]
 
 
 DEFAULT_SLUGS = {
