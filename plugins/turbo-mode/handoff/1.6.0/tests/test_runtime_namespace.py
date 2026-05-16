@@ -11,6 +11,7 @@ SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 RUNTIME_MODULES = {
     "active_writes.py",
     "cleanup.py",
+    "chain_state.py",
     "defer.py",
     "distill.py",
     "handoff_parsing.py",
@@ -25,6 +26,8 @@ RUNTIME_MODULES = {
     "session_state.py",
     "storage_authority.py",
     "storage_authority_inventory.py",
+    "storage_inspection.py",
+    "storage_layout.py",
     "storage_primitives.py",
     "ticket_parsing.py",
     "triage.py",

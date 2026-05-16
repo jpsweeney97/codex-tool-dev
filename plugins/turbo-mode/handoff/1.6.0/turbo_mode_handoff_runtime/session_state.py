@@ -14,9 +14,8 @@ import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
 
 from turbo_mode_handoff_runtime import storage_primitives
 from turbo_mode_handoff_runtime.project_paths import get_state_dir
@@ -88,10 +87,14 @@ def allocate_archive_path(source_path: Path, archive_dir: Path) -> Path:
         candidate = archive_dir / f"{stem}-{index:02d}{suffix}"
         if not candidate.exists():
             return candidate
-    raise FileExistsError(f"archive allocation failed: collision budget exhausted. Got: {str(source_path)!r:.100}")
+    raise FileExistsError(
+        f"archive allocation failed: collision budget exhausted. Got: {str(source_path)!r:.100}"
+    )
 
 
-def write_resume_state(state_dir: Path, project: str, archive_path: str, resume_token: str | None = None) -> Path:
+def write_resume_state(
+    state_dir: Path, project: str, archive_path: str, resume_token: str | None = None
+) -> Path:
     state_dir.mkdir(parents=True, exist_ok=True)
     token = resume_token or uuid.uuid4().hex
     state_path = state_dir / f"handoff-{project}-{token}.json"
@@ -100,7 +103,7 @@ def write_resume_state(state_dir: Path, project: str, archive_path: str, resume_
         project=project,
         resume_token=token,
         archive_path=archive_path,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.now(UTC).isoformat(),
     )
     storage_primitives.write_json_atomic(state_path, asdict(payload))
     return state_path
@@ -140,7 +143,9 @@ def migrate_legacy_resume_state(state_dir: Path, project: str) -> ResumeState | 
 def load_resume_state(state_dir: Path, project: str) -> ResumeState | None:
     states = list_resume_states(state_dir, project)
     if len(states) > 1:
-        raise AmbiguousResumeStateError(f"Multiple pending resume states for project {project}: {len(states)}")
+        raise AmbiguousResumeStateError(
+            f"Multiple pending resume states for project {project}: {len(states)}"
+        )
     if len(states) == 1:
         return states[0]
     return migrate_legacy_resume_state(state_dir, project)
@@ -154,12 +159,11 @@ def clear_resume_state(state_dir: Path, state_path_arg: str) -> bool:
     resolved_state_dir = state_dir.resolve()
     resolved_state_path = state_path.resolve()
     if resolved_state_path.exists() and not resolved_state_path.is_file():
-        raise ValueError(
-            f"clear-state failed: state path must point to a file. Got: {raw!r:.100}"
-        )
+        raise ValueError(f"clear-state failed: state path must point to a file. Got: {raw!r:.100}")
     if not state_path.name.startswith("handoff-") or state_path.suffix not in ("", ".json"):
         raise ValueError(
-            f"clear-state failed: state path must match handoff-* or handoff-*.json. Got: {raw!r:.100}"
+            "clear-state failed: state path must match handoff-* or handoff-*.json. "
+            f"Got: {raw!r:.100}"
         )
     if resolved_state_path.parent != resolved_state_dir:
         raise ValueError(
@@ -242,7 +246,9 @@ def main(argv: list[str] | None = None) -> int:
     read_parser = subparsers.add_parser("read-state")
     read_parser.add_argument("--state-dir", required=True)
     read_parser.add_argument("--project", required=True)
-    read_parser.add_argument("--field", choices=("state_path", "archive_path", "resume_token"), default=None)
+    read_parser.add_argument(
+        "--field", choices=("state_path", "archive_path", "resume_token"), default=None
+    )
 
     clear_parser = subparsers.add_parser("clear-state")
     clear_parser.add_argument("--state-dir", required=True)
@@ -444,7 +450,9 @@ def main(argv: list[str] | None = None) -> int:
         source.replace(destination)
         return _emit({"archived_path": str(destination)}, args.field)
     if args.command == "write-state":
-        state_path = write_resume_state(Path(args.state_dir), args.project, args.archive_path, args.resume_token)
+        state_path = write_resume_state(
+            Path(args.state_dir), args.project, args.archive_path, args.resume_token
+        )
         return _emit({"state_path": str(state_path)}, args.field)
     if args.command == "read-state":
         try:
@@ -469,7 +477,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command in {"chain-state-recovery-inventory", "list-chain-state"}:
-        from turbo_mode_handoff_runtime.storage_authority import chain_state_recovery_inventory
+        from turbo_mode_handoff_runtime.chain_state import chain_state_recovery_inventory
 
         payload = chain_state_recovery_inventory(
             Path(args.project_root),
@@ -480,7 +488,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "read-chain-state":
-        from turbo_mode_handoff_runtime.storage_authority import ChainStateDiagnosticError, read_chain_state
+        from turbo_mode_handoff_runtime.chain_state import (
+            ChainStateDiagnosticError,
+            read_chain_state,
+        )
 
         try:
             payload = read_chain_state(
@@ -496,7 +507,7 @@ def main(argv: list[str] | None = None) -> int:
         return _emit(payload, args.field)
 
     if args.command == "mark-chain-state-consumed":
-        from turbo_mode_handoff_runtime.storage_authority import (
+        from turbo_mode_handoff_runtime.chain_state import (
             ChainStateDiagnosticError,
             mark_chain_state_consumed,
         )
@@ -516,7 +527,10 @@ def main(argv: list[str] | None = None) -> int:
         return _emit(payload, args.field)
 
     if args.command == "continue-chain-state":
-        from turbo_mode_handoff_runtime.storage_authority import ChainStateDiagnosticError, continue_chain_state
+        from turbo_mode_handoff_runtime.chain_state import (
+            ChainStateDiagnosticError,
+            continue_chain_state,
+        )
 
         try:
             payload = continue_chain_state(
@@ -532,7 +546,7 @@ def main(argv: list[str] | None = None) -> int:
         return _emit(payload, args.field)
 
     if args.command == "abandon-primary-chain-state":
-        from turbo_mode_handoff_runtime.storage_authority import (
+        from turbo_mode_handoff_runtime.chain_state import (
             ChainStateDiagnosticError,
             abandon_primary_chain_state,
         )

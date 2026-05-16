@@ -6,19 +6,19 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
-from turbo_mode_handoff_runtime.storage_authority import (
+from turbo_mode_handoff_runtime.chain_state import (
     ChainStateDiagnosticError,
-    SelectionEligibility,
-    StorageLocation,
     abandon_primary_chain_state,
     chain_state_recovery_inventory,
     continue_chain_state,
+    mark_chain_state_consumed,
+)
+from turbo_mode_handoff_runtime.storage_authority import (
+    SelectionEligibility,
+    StorageLocation,
     discover_handoff_inventory,
     eligible_active_candidates,
     eligible_history_candidates,
-    get_storage_layout,
-    mark_chain_state_consumed,
 )
 
 
@@ -83,20 +83,6 @@ def _write_legacy_active_opt_in(
     return manifest
 
 
-def test_storage_layout_uses_codex_handoffs_as_primary(tmp_path: Path) -> None:
-    layout = get_storage_layout(tmp_path)
-
-    assert layout.primary_active_dir == tmp_path / ".codex" / "handoffs"
-    assert layout.primary_archive_dir == tmp_path / ".codex" / "handoffs" / "archive"
-    assert layout.primary_state_dir == tmp_path / ".codex" / "handoffs" / ".session-state"
-    assert layout.legacy_active_dir == tmp_path / "docs" / "handoffs"
-    assert layout.legacy_archive_dir == tmp_path / "docs" / "handoffs" / "archive"
-    assert (
-        layout.previous_primary_hidden_archive_dir
-        == tmp_path / ".codex" / "handoffs" / ".archive"
-    )
-
-
 def test_storage_authority_does_not_export_active_write_facade() -> None:
     import turbo_mode_handoff_runtime.storage_authority as storage_authority
 
@@ -109,6 +95,30 @@ def test_storage_authority_does_not_export_active_write_facade() -> None:
         "recover_active_write_transaction",
     }
     for name in removed_exports:
+        assert not hasattr(storage_authority, name)
+
+
+def test_storage_authority_does_not_export_storage_layout_facade() -> None:
+    import turbo_mode_handoff_runtime.storage_authority as storage_authority
+
+    assert not hasattr(storage_authority, "StorageLayout")
+    assert not hasattr(storage_authority, "get_storage_layout")
+
+
+def test_storage_authority_does_not_export_chain_state_facade() -> None:
+    import turbo_mode_handoff_runtime.storage_authority as storage_authority
+
+    moved_exports = {
+        "CHAIN_STATE_TTL_SECONDS",
+        "ChainStateDiagnosticError",
+        "LEGACY_CONSUMED_PREFIX",
+        "chain_state_recovery_inventory",
+        "read_chain_state",
+        "mark_chain_state_consumed",
+        "continue_chain_state",
+        "abandon_primary_chain_state",
+    }
+    for name in moved_exports:
         assert not hasattr(storage_authority, name)
 
 
@@ -274,9 +284,7 @@ def test_active_selection_orders_by_filename_timestamp_then_lexical_path(tmp_pat
 def test_active_selection_reports_invalid_hidden_nested_and_state_diagnostics(
     tmp_path: Path,
 ) -> None:
-    invalid = _invalid_handoff(
-        tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_invalid.md"
-    )
+    invalid = _invalid_handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_invalid.md")
     hidden = _handoff(tmp_path / ".codex" / "handoffs" / ".hidden.md")
     nested = _handoff(tmp_path / ".codex" / "handoffs" / "nested" / "2026-05-13_12-00_nested.md")
     state_doc = _handoff(
@@ -395,13 +403,15 @@ def test_chain_state_recovery_inventory_reports_token_mismatch_as_invalid(
     state = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
     state.parent.mkdir(parents=True, exist_ok=True)
     state.write_text(
-        json.dumps({
-            "state_path": str(state),
-            "project": "demo",
-            "resume_token": "different-token",
-            "archive_path": "/tmp/archive.md",
-            "created_at": "2026-05-13T16:00:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(state),
+                "project": "demo",
+                "resume_token": "different-token",
+                "archive_path": "/tmp/archive.md",
+                "created_at": "2026-05-13T16:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -435,13 +445,15 @@ def _seed_primary_state(tmp_path: Path, *, project: str = "demo") -> tuple[Path,
     state = tmp_path / ".codex" / "handoffs" / ".session-state" / f"handoff-{project}-token-a.json"
     state.parent.mkdir(parents=True, exist_ok=True)
     state.write_text(
-        json.dumps({
-            "state_path": str(state),
-            "project": project,
-            "resume_token": "token-a",
-            "archive_path": str(tmp_path / ".codex" / "handoffs" / "archive" / "old.md"),
-            "created_at": "2026-05-13T16:00:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(state),
+                "project": project,
+                "resume_token": "token-a",
+                "archive_path": str(tmp_path / ".codex" / "handoffs" / "archive" / "old.md"),
+                "created_at": "2026-05-13T16:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
     return state, hashlib.sha256(state.read_bytes()).hexdigest()
@@ -452,8 +464,11 @@ def test_mark_chain_state_consumed_raises_payload_hash_mismatch(tmp_path: Path) 
     rel = state.relative_to(tmp_path).as_posix()
     with pytest.raises(ChainStateDiagnosticError) as exc_info:
         mark_chain_state_consumed(
-            tmp_path, project_name="demo", state_path=rel,
-            expected_payload_sha256="0" * 64, reason="test",
+            tmp_path,
+            project_name="demo",
+            state_path=rel,
+            expected_payload_sha256="0" * 64,
+            reason="test",
         )
     assert exc_info.value.payload["error"]["code"] == "chain-state-payload-hash-mismatch"
 
@@ -463,7 +478,9 @@ def test_continue_chain_state_raises_payload_hash_mismatch(tmp_path: Path) -> No
     rel = state.relative_to(tmp_path).as_posix()
     with pytest.raises(ChainStateDiagnosticError) as exc_info:
         continue_chain_state(
-            tmp_path, project_name="demo", state_path=rel,
+            tmp_path,
+            project_name="demo",
+            state_path=rel,
             expected_payload_sha256="0" * 64,
         )
     assert exc_info.value.payload["error"]["code"] == "chain-state-payload-hash-mismatch"
@@ -474,8 +491,11 @@ def test_abandon_primary_chain_state_raises_payload_hash_mismatch(tmp_path: Path
     rel = state.relative_to(tmp_path).as_posix()
     with pytest.raises(ChainStateDiagnosticError) as exc_info:
         abandon_primary_chain_state(
-            tmp_path, project_name="demo", state_path=rel,
-            expected_payload_sha256="0" * 64, reason="test",
+            tmp_path,
+            project_name="demo",
+            state_path=rel,
+            expected_payload_sha256="0" * 64,
+            reason="test",
         )
     assert exc_info.value.payload["error"]["code"] == "chain-state-payload-hash-mismatch"
 
@@ -487,8 +507,11 @@ def test_mark_chain_state_consumed_raises_primary_chain_state_not_consumable(
     rel = state.relative_to(tmp_path).as_posix()
     with pytest.raises(ChainStateDiagnosticError) as exc_info:
         mark_chain_state_consumed(
-            tmp_path, project_name="demo", state_path=rel,
-            expected_payload_sha256=sha, reason="test",
+            tmp_path,
+            project_name="demo",
+            state_path=rel,
+            expected_payload_sha256=sha,
+            reason="test",
         )
     assert exc_info.value.payload["error"]["code"] == "primary-chain-state-not-consumable"
 
@@ -500,8 +523,11 @@ def test_abandon_primary_chain_state_raises_chain_state_candidate_not_primary(
     rel = state.relative_to(tmp_path).as_posix()
     with pytest.raises(ChainStateDiagnosticError) as exc_info:
         abandon_primary_chain_state(
-            tmp_path, project_name="demo", state_path=rel,
-            expected_payload_sha256=sha, reason="test",
+            tmp_path,
+            project_name="demo",
+            state_path=rel,
+            expected_payload_sha256=sha,
+            reason="test",
         )
     assert exc_info.value.payload["error"]["code"] == "chain-state-candidate-not-primary"
 
@@ -510,30 +536,35 @@ def test_select_chain_state_candidate_raises_selector_ambiguous(tmp_path: Path) 
     state_a = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
     state_a.parent.mkdir(parents=True, exist_ok=True)
     state_a.write_text(
-        json.dumps({
-            "state_path": str(state_a),
-            "project": "demo",
-            "resume_token": "token-a",
-            "archive_path": str(tmp_path / ".codex" / "handoffs" / "archive" / "old-a.md"),
-            "created_at": "2026-05-13T16:00:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(state_a),
+                "project": "demo",
+                "resume_token": "token-a",
+                "archive_path": str(tmp_path / ".codex" / "handoffs" / "archive" / "old-a.md"),
+                "created_at": "2026-05-13T16:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
     state_b = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
     state_b.write_text(
-        json.dumps({
-            "state_path": str(state_b),
-            "project": "demo",
-            "resume_token": "token-b",
-            "archive_path": str(tmp_path / ".codex" / "handoffs" / "archive" / "old-b.md"),
-            "created_at": "2026-05-13T16:01:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(state_b),
+                "project": "demo",
+                "resume_token": "token-b",
+                "archive_path": str(tmp_path / ".codex" / "handoffs" / "archive" / "old-b.md"),
+                "created_at": "2026-05-13T16:01:00Z",
+            }
+        ),
         encoding="utf-8",
     )
     sha_a = hashlib.sha256(state_a.read_bytes()).hexdigest()
     with pytest.raises(ChainStateDiagnosticError) as exc_info:
         continue_chain_state(
-            tmp_path, project_name="demo",
+            tmp_path,
+            project_name="demo",
             state_path=".codex/handoffs/.session-state",
             expected_payload_sha256=sha_a,
         )
@@ -581,14 +612,24 @@ def test_consumed_legacy_active_matches_fails_closed_on_malformed_registry(
 
 def test_read_json_object_fails_closed_on_corrupt_marker(tmp_path: Path) -> None:
     state, sha = _seed_legacy_state(tmp_path)
-    marker_path = tmp_path / ".codex" / "handoffs" / ".session-state" / "markers" / "chain-state-consumed.json"
+    marker_path = (
+        tmp_path
+        / ".codex"
+        / "handoffs"
+        / ".session-state"
+        / "markers"
+        / "chain-state-consumed.json"
+    )
     marker_path.parent.mkdir(parents=True, exist_ok=True)
     marker_path.write_text("garbage{{{", encoding="utf-8")
     rel = state.relative_to(tmp_path).as_posix()
     with pytest.raises(ChainStateDiagnosticError) as exc_info:
         mark_chain_state_consumed(
-            tmp_path, project_name="demo", state_path=rel,
-            expected_payload_sha256=sha, reason="test",
+            tmp_path,
+            project_name="demo",
+            state_path=rel,
+            expected_payload_sha256=sha,
+            reason="test",
         )
     assert exc_info.value.payload["error"]["code"] == "chain-state-marker-unreadable"
 
@@ -628,7 +669,8 @@ def test_active_inventory_degrades_on_corrupt_consumed_legacy_active_registry(
     legacy_dir.mkdir(parents=True)
     legacy = legacy_dir / "2026-05-14_00-00_demo.md"
     legacy.write_text(
-        "---\nproject: demo\ncreated_at: 2026-05-14T00:00:00Z\nsession_id: s\ntype: handoff\n---\n\n## Goal\nbody\n",
+        "---\nproject: demo\ncreated_at: 2026-05-14T00:00:00Z\nsession_id: s\ntype: handoff\n"
+        "---\n\n## Goal\nbody\n",
         encoding="utf-8",
     )
     registry = tmp_path / ".codex" / "handoffs" / ".session-state" / "consumed-legacy-active.json"
@@ -640,7 +682,9 @@ def test_active_inventory_degrades_on_corrupt_consumed_legacy_active_registry(
         scan_mode="active-selection",
     )
 
-    candidates = [candidate for candidate in inventory.candidates if candidate.path == legacy.resolve()]
+    candidates = [
+        candidate for candidate in inventory.candidates if candidate.path == legacy.resolve()
+    ]
     assert len(candidates) == 1
     assert candidates[0].selection_eligibility == SelectionEligibility.BLOCKED_POLICY_CONFLICT
     assert candidates[0].skip_reason is not None

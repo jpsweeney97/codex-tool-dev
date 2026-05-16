@@ -3,15 +3,15 @@
 Deterministic: builds DeferredWorkEnvelope JSON, writes to .envelopes/.
 LLM extraction happens in the SKILL.md — this script receives candidates.
 """
+
 from __future__ import annotations
 
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
 
 from turbo_mode_handoff_runtime.storage_primitives import write_text_atomic_exclusive
 
@@ -40,7 +40,7 @@ def _prepare_envelope(candidate: dict[str, Any]) -> tuple[str, str]:
         if not value.strip():
             raise ValueError(f"{field} must be non-empty")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     envelope: dict[str, Any] = {
         "envelope_version": "1.0",
@@ -69,7 +69,7 @@ def _prepare_envelope(candidate: dict[str, Any]) -> tuple[str, str]:
     if candidate.get("branch"):
         context_parts.append(f"Captured on branch `{candidate['branch']}`.")
     if candidate.get("source_text"):
-        context_parts.append(f"Evidence anchor:\n> \"{candidate['source_text']}\"")
+        context_parts.append(f'Evidence anchor:\n> "{candidate["source_text"]}"')
     if context_parts:
         envelope["context"] = "\n\n".join(context_parts)
 
@@ -108,7 +108,11 @@ def main(argv: list[str] | None = None) -> int:
         candidates = json.load(sys.stdin)
     except json.JSONDecodeError as exc:
         json.dump(
-            {"status": "error", "envelopes": [], "errors": [{"summary": "stdin", "error": f"Invalid JSON input: {exc}"}]},
+            {
+                "status": "error",
+                "envelopes": [],
+                "errors": [{"summary": "stdin", "error": f"Invalid JSON input: {exc}"}],
+            },
             sys.stdout,
         )
         return 1
@@ -121,7 +125,11 @@ def main(argv: list[str] | None = None) -> int:
         envelopes_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         json.dump(
-            {"status": "error", "envelopes": [], "errors": [{"summary": "setup", "error": f"{type(exc).__name__}: {exc}"}]},
+            {
+                "status": "error",
+                "envelopes": [],
+                "errors": [{"summary": "setup", "error": f"{type(exc).__name__}: {exc}"}],
+            },
             sys.stdout,
         )
         return 1
@@ -130,32 +138,40 @@ def main(argv: list[str] | None = None) -> int:
 
     for cand in candidates:
         if not isinstance(cand, dict):
-            errors.append({
-                "summary": "unknown",
-                "error": f"Candidate must be a dict, got {type(cand).__name__}",
-            })
+            errors.append(
+                {
+                    "summary": "unknown",
+                    "error": f"Candidate must be a dict, got {type(cand).__name__}",
+                }
+            )
             continue
         try:
             payload, stem = _prepare_envelope(cand)
         except (KeyError, TypeError, ValueError) as exc:
-            errors.append({
-                "summary": cand.get("summary", "unknown"),
-                "error": f"{type(exc).__name__}: {exc}",
-            })
+            errors.append(
+                {
+                    "summary": cand.get("summary", "unknown"),
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
             continue
         try:
             path = _write_envelope_payload(envelopes_dir, stem, payload)
         except FileExistsError as exc:
-            errors.append({
-                "summary": cand.get("summary", "unknown"),
-                "error": f"FileExistsError: {exc}",
-            })
+            errors.append(
+                {
+                    "summary": cand.get("summary", "unknown"),
+                    "error": f"FileExistsError: {exc}",
+                }
+            )
             continue
         except OSError as exc:
-            errors.append({
-                "summary": cand.get("summary", "unknown"),
-                "error": f"{type(exc).__name__}: {exc}",
-            })
+            errors.append(
+                {
+                    "summary": cand.get("summary", "unknown"),
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
             break
         created.append(str(path))
 

@@ -18,7 +18,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-
 _CLAIM_TIMEOUT_SECONDS = 60
 _LOCK_TIMEOUT_SECONDS = 1800
 LEGACY_CONSUMED_PREFIX = "MIGRATED:"
@@ -120,9 +119,7 @@ def read_json_object(
             f"read-json-object failed: JSON object unreadable. Got: {str(path)!r:.100}"
         ) from exc
     if not isinstance(payload, dict):
-        raise ValueError(
-            f"read-json-object failed: JSON object malformed. Got: {str(path)!r:.100}"
-        )
+        raise ValueError(f"read-json-object failed: JSON object malformed. Got: {str(path)!r:.100}")
     return payload
 
 
@@ -319,7 +316,8 @@ def _try_recover_stale_lock(path: Path, *, now: datetime, policy: LockPolicy) ->
             return True
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             raise policy.error_factory(
-                f"{policy.operation_label} failed: lock metadata unreadable; manual operator review required. "
+                f"{policy.operation_label} failed: lock metadata unreadable; "
+                "manual operator review required. "
                 f"Got: {str(path)!r:.100}"
             ) from exc
         if not isinstance(payload, dict):
@@ -341,7 +339,8 @@ def _try_recover_stale_lock(path: Path, *, now: datetime, policy: LockPolicy) ->
             return False
         if hostname != socket.gethostname():
             raise policy.error_factory(
-                f"{policy.operation_label} failed: stale lock from another host; manual operator review required. "
+                f"{policy.operation_label} failed: stale lock from another host; "
+                "manual operator review required. "
                 f"Got: {(hostname, str(path))!r:.100}"
             )
         os.unlink(path)
@@ -377,6 +376,7 @@ def _claim_age_hint(claim_path: Path, *, now: datetime) -> str:
 
 def _malformed_error(path: Path, policy: LockPolicy) -> Exception:
     return policy.error_factory(
-        f"{policy.operation_label} failed: lock metadata malformed; manual operator review required. "
+        f"{policy.operation_label} failed: lock metadata malformed; "
+        "manual operator review required. "
         f"Got: {str(path)!r:.100}"
     )

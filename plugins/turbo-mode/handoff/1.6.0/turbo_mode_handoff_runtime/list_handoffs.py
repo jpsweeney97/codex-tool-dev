@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
-
 from turbo_mode_handoff_runtime.handoff_parsing import parse_handoff
 from turbo_mode_handoff_runtime.project_paths import get_project_root
-from turbo_mode_handoff_runtime.storage_authority import discover_handoff_inventory, eligible_active_candidates
+from turbo_mode_handoff_runtime.storage_authority import (
+    discover_handoff_inventory,
+    eligible_active_candidates,
+)
 
 
 def list_handoffs(project_root: Path) -> list[dict[str, Any]]:
@@ -20,19 +21,21 @@ def list_handoffs(project_root: Path) -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
     for candidate in eligible_active_candidates(inventory):
         handoff = parse_handoff(candidate.path)
-        output.append({
-            "path": str(candidate.path),
-            "title": handoff.frontmatter.get("title", candidate.path.stem),
-            "date": handoff.frontmatter.get("date", ""),
-            "type": handoff.frontmatter.get("type", "handoff"),
-            "branch": handoff.frontmatter.get("branch", ""),
-            "storage_location": candidate.storage_location,
-            "artifact_class": candidate.artifact_class,
-            "source_git_visibility": candidate.source_git_visibility,
-            "source_fs_status": candidate.source_fs_status,
-            "document_profile": candidate.document_profile,
-            "content_sha256": candidate.content_sha256,
-        })
+        output.append(
+            {
+                "path": str(candidate.path),
+                "title": handoff.frontmatter.get("title", candidate.path.stem),
+                "date": handoff.frontmatter.get("date", ""),
+                "type": handoff.frontmatter.get("type", "handoff"),
+                "branch": handoff.frontmatter.get("branch", ""),
+                "storage_location": candidate.storage_location,
+                "artifact_class": candidate.artifact_class,
+                "source_git_visibility": candidate.source_git_visibility,
+                "source_fs_status": candidate.source_fs_status,
+                "document_profile": candidate.document_profile,
+                "content_sha256": candidate.content_sha256,
+            }
+        )
     return output
 
 

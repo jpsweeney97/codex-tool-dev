@@ -32,4 +32,10 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 Implementation modules live in `turbo_mode_handoff_runtime/`.
 The `scripts/` directory contains executable CLI facades only. Do not add new `scripts.*` import dependencies.
 
+- `storage_layout.py`: storage paths.
+- `storage_inspection.py`: filesystem and git inspection helpers.
+- `storage_authority.py`: handoff discovery and selection authority.
+- `chain_state.py`: chain-state inventory, diagnostics, read, and lifecycle.
+- `scripts/`: executable CLI facades only.
+
 Installed-runtime claims require runtime inventory. Source tests alone prove source behavior only.

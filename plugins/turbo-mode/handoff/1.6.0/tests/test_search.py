@@ -5,8 +5,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
-from turbo_mode_handoff_runtime.search import main as search_main, parse_handoff, search_handoffs
+from turbo_mode_handoff_runtime.search import main as search_main
+from turbo_mode_handoff_runtime.search import parse_handoff, search_handoffs
 
 
 @pytest.fixture(autouse=True)
@@ -20,7 +20,20 @@ def default_missing_legacy_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
 def test_search_runtime_exposes_parse_handoff_for_internal_use() -> None:
     """Verify parse_handoff remains importable from the runtime search module."""
     from turbo_mode_handoff_runtime.search import parse_handoff  # noqa: F811
+
     assert callable(parse_handoff)
+
+
+def test_search_runtime_reexports_parser_symbols_for_compatibility() -> None:
+    """HandoffFile/Section remain re-exported for downstream imports."""
+    from turbo_mode_handoff_runtime.handoff_parsing import (
+        HandoffFile as ParserHandoffFile,
+    )
+    from turbo_mode_handoff_runtime.handoff_parsing import Section as ParserSection
+    from turbo_mode_handoff_runtime.search import HandoffFile, Section
+
+    assert HandoffFile is ParserHandoffFile
+    assert Section is ParserSection
 
 
 class TestParseHandoff:
@@ -100,7 +113,9 @@ class TestParseHandoff:
         assert result.path == str(handoff)
 
     def test_headings_inside_code_fences_ignored(self, tmp_path: Path) -> None:
-        """A3 (handoff-search-implementation): ## lines inside fenced code blocks must not create sections."""
+        """A3 (handoff-search-implementation):
+        ## lines inside fenced code blocks must not create sections.
+        """
         handoff = tmp_path / "test.md"
         handoff.write_text(
             "---\ntitle: Test\n---\n"
@@ -125,22 +140,16 @@ class TestParseHandoff:
     def test_unclosed_frontmatter_treated_as_no_frontmatter(self, tmp_path: Path) -> None:
         """Opening --- with no closing --- is treated as no frontmatter."""
         handoff = tmp_path / "test.md"
-        handoff.write_text(
-            "---\n"
-            "title: Broken\n"
-            "no closing delimiter\n"
-            "\n"
-            "## Goal\n"
-            "\n"
-            "Do something.\n"
-        )
+        handoff.write_text("---\ntitle: Broken\nno closing delimiter\n\n## Goal\n\nDo something.\n")
         result = parse_handoff(handoff)
         assert result.frontmatter == {}
         assert len(result.sections) == 1
         assert result.sections[0].heading == "## Goal"
 
     def test_unterminated_fence_does_not_crash(self, tmp_path: Path) -> None:
-        """A8 (handoff-search-implementation): Unterminated fence suppresses subsequent sections (graceful degradation)."""
+        """A8 (handoff-search-implementation):
+        Unterminated fence suppresses subsequent sections (graceful degradation).
+        """
         handoff = tmp_path / "test.md"
         handoff.write_text(
             "---\ntitle: Test\n---\n"
@@ -208,49 +217,31 @@ class TestSearchHandoffs:
     """Tests for search_handoffs — search logic."""
 
     def test_literal_match_case_insensitive(self, tmp_path: Path) -> None:
-        _make_handoff(
-            tmp_path, "Test", "2026-02-25",
-            "## Decisions\n\nWe chose Regular Merge.\n"
-        )
+        _make_handoff(tmp_path, "Test", "2026-02-25", "## Decisions\n\nWe chose Regular Merge.\n")
         results = search_handoffs(tmp_path, "regular merge")
         assert len(results) == 1
         assert results[0]["section_heading"] == "## Decisions"
         assert "Regular Merge" in results[0]["section_content"]
 
     def test_regex_match(self, tmp_path: Path) -> None:
-        _make_handoff(
-            tmp_path, "Test", "2026-02-25",
-            "## Decisions\n\nChose option A over B.\n"
-        )
+        _make_handoff(tmp_path, "Test", "2026-02-25", "## Decisions\n\nChose option A over B.\n")
         results = search_handoffs(tmp_path, r"option [AB]", regex=True)
         assert len(results) == 1
 
     def test_no_matches_returns_empty(self, tmp_path: Path) -> None:
-        _make_handoff(
-            tmp_path, "Test", "2026-02-25",
-            "## Goal\n\nBuild something.\n"
-        )
+        _make_handoff(tmp_path, "Test", "2026-02-25", "## Goal\n\nBuild something.\n")
         results = search_handoffs(tmp_path, "nonexistent_xyz")
         assert results == []
 
     def test_match_in_heading(self, tmp_path: Path) -> None:
-        _make_handoff(
-            tmp_path, "Test", "2026-02-25",
-            "## Codebase Knowledge\n\nSome details.\n"
-        )
+        _make_handoff(tmp_path, "Test", "2026-02-25", "## Codebase Knowledge\n\nSome details.\n")
         results = search_handoffs(tmp_path, "codebase knowledge")
         assert len(results) == 1
         assert results[0]["section_heading"] == "## Codebase Knowledge"
 
     def test_multiple_files_sorted_by_date_descending(self, tmp_path: Path) -> None:
-        _make_handoff(
-            tmp_path, "Old", "2026-01-01",
-            "## Decisions\n\nDecision about merging.\n"
-        )
-        _make_handoff(
-            tmp_path, "New", "2026-02-25",
-            "## Decisions\n\nDecision about merging.\n"
-        )
+        _make_handoff(tmp_path, "Old", "2026-01-01", "## Decisions\n\nDecision about merging.\n")
+        _make_handoff(tmp_path, "New", "2026-02-25", "## Decisions\n\nDecision about merging.\n")
         results = search_handoffs(tmp_path, "merging")
         assert len(results) == 2
         assert results[0]["date"] == "2026-02-25"
@@ -258,8 +249,10 @@ class TestSearchHandoffs:
 
     def test_multiple_sections_in_same_file(self, tmp_path: Path) -> None:
         _make_handoff(
-            tmp_path, "Test", "2026-02-25",
-            "## Goal\n\nSearch feature.\n\n## Learnings\n\nSearch is useful.\n"
+            tmp_path,
+            "Test",
+            "2026-02-25",
+            "## Goal\n\nSearch feature.\n\n## Learnings\n\nSearch is useful.\n",
         )
         results = search_handoffs(tmp_path, "search")
         assert len(results) == 2
@@ -268,8 +261,7 @@ class TestSearchHandoffs:
         archive = tmp_path / "archive"
         archive.mkdir()
         _make_handoff(
-            archive, "Archived", "2026-01-15",
-            "## Decisions\n\nOld decision about caching.\n"
+            archive, "Archived", "2026-01-15", "## Decisions\n\nOld decision about caching.\n"
         )
         results = search_handoffs(tmp_path, "caching")
         assert len(results) == 1
@@ -283,10 +275,7 @@ class TestSearchHandoffs:
 
     def test_regex_is_case_sensitive(self, tmp_path: Path) -> None:
         """Regex mode is case-sensitive (flags=0), unlike literal mode."""
-        _make_handoff(
-            tmp_path, "Test", "2026-02-25",
-            "## Decisions\n\nChose Regular Merge.\n"
-        )
+        _make_handoff(tmp_path, "Test", "2026-02-25", "## Decisions\n\nChose Regular Merge.\n")
         # Literal: case-insensitive — matches
         assert len(search_handoffs(tmp_path, "regular merge")) == 1
         # Regex: case-sensitive — lowercase doesn't match titlecase
@@ -297,18 +286,14 @@ class TestSearchHandoffs:
     def test_literal_escapes_regex_metacharacters(self, tmp_path: Path) -> None:
         """Literal search escapes regex metacharacters via re.escape()."""
         _make_handoff(
-            tmp_path, "Test", "2026-02-25",
-            "## Decisions\n\nChose option (A) over option (B).\n"
+            tmp_path, "Test", "2026-02-25", "## Decisions\n\nChose option (A) over option (B).\n"
         )
         results = search_handoffs(tmp_path, "option (A)")
         assert len(results) == 1
 
     def test_unreadable_file_reported_in_skipped(self, tmp_path: Path) -> None:
         """Unreadable files are reported via skipped parameter, not silently dropped."""
-        _make_handoff(
-            tmp_path, "Good", "2026-02-25",
-            "## Goal\n\nSearchable content.\n"
-        )
+        _make_handoff(tmp_path, "Good", "2026-02-25", "## Goal\n\nSearchable content.\n")
         bad_file = tmp_path / "2026-02-24_00-00_bad.md"
         bad_file.write_bytes(b"---\ntitle: Bad\n---\n\n## Goal\n\n\xff\xfe invalid\n")
 
@@ -354,14 +339,15 @@ class TestSearchCLI:
         handoffs_dir = tmp_path / "handoffs"
         handoffs_dir.mkdir()
         _make_handoff(
-            handoffs_dir, "Session One", "2026-02-20",
-            "## Decisions\n\n### Chose Python\n\nPython over Rust for speed of dev.\n"
+            handoffs_dir,
+            "Session One",
+            "2026-02-20",
+            "## Decisions\n\n### Chose Python\n\nPython over Rust for speed of dev.\n",
         )
         archive = handoffs_dir / "archive"
         archive.mkdir()
         _make_handoff(
-            archive, "Old Session", "2026-01-15",
-            "## Learnings\n\nPython parsing is fast enough.\n"
+            archive, "Old Session", "2026-01-15", "## Learnings\n\nPython parsing is fast enough.\n"
         )
 
         output = search_main(["Python", "--handoffs-dir", str(handoffs_dir)])
@@ -380,12 +366,18 @@ class TestSearchCLI:
         legacy_archive = legacy_dir / "archive"
         legacy_archive.mkdir(parents=True)
         _make_handoff(
-            legacy_archive, "Legacy Archived", "2026-01-15",
-            "## Decisions\n\nOld decision about split roots.\n"
+            legacy_archive,
+            "Legacy Archived",
+            "2026-01-15",
+            "## Decisions\n\nOld decision about split roots.\n",
         )
 
-        with patch("turbo_mode_handoff_runtime.search.get_project_name", return_value=("test", "git")):
-            with patch("turbo_mode_handoff_runtime.search.get_legacy_handoffs_dir", return_value=legacy_dir):
+        with patch(
+            "turbo_mode_handoff_runtime.search.get_project_name", return_value=("test", "git")
+        ):
+            with patch(
+                "turbo_mode_handoff_runtime.search.get_legacy_handoffs_dir", return_value=legacy_dir
+            ):
                 output = search_main(["split roots", "--handoffs-dir", str(primary_dir)])
 
         result = json.loads(output)
@@ -400,8 +392,10 @@ class TestSearchCLI:
         primary_dir.mkdir(parents=True)
         legacy_archive.mkdir(parents=True)
         _make_handoff(
-            legacy_archive, "Legacy Archived", "2026-01-15",
-            "## Decisions\n\nOld decision about split roots.\n"
+            legacy_archive,
+            "Legacy Archived",
+            "2026-01-15",
+            "## Decisions\n\nOld decision about split roots.\n",
         )
 
         output = search_main(["split roots", "--project-root", str(tmp_path)])
@@ -422,12 +416,16 @@ class TestSearchCLI:
         primary_archive = primary_dir / "archive"
         primary_archive.mkdir(parents=True)
         _make_handoff(
-            primary_dir, "Same", "2026-02-01",
-            "## Decisions\n\nSame decision about canonical source.\n"
+            primary_dir,
+            "Same",
+            "2026-02-01",
+            "## Decisions\n\nSame decision about canonical source.\n",
         )
         _make_handoff(
-            primary_archive, "Same", "2026-02-01",
-            "## Decisions\n\nSame decision about canonical source.\n"
+            primary_archive,
+            "Same",
+            "2026-02-01",
+            "## Decisions\n\nSame decision about canonical source.\n",
         )
 
         output = search_main(["canonical source", "--project-root", str(tmp_path)])
@@ -440,7 +438,9 @@ class TestSearchCLI:
         primary_dir = tmp_path / ".codex" / "handoffs"
         primary_dir.mkdir(parents=True)
 
-        with patch("turbo_mode_handoff_runtime.search.get_legacy_handoffs_dir", side_effect=OSError("boom")):
+        with patch(
+            "turbo_mode_handoff_runtime.search.get_legacy_handoffs_dir", side_effect=OSError("boom")
+        ):
             output = search_main(["anything", "--handoffs-dir", str(primary_dir)])
 
         result = json.loads(output)
@@ -471,8 +471,7 @@ class TestSearchCLI:
         handoffs_dir = tmp_path / "handoffs"
         handoffs_dir.mkdir()
         _make_handoff(
-            handoffs_dir, "Test", "2026-02-25",
-            "## Decisions\n\nChose option-A over option-B.\n"
+            handoffs_dir, "Test", "2026-02-25", "## Decisions\n\nChose option-A over option-B.\n"
         )
 
         output = search_main([r"option-[AB]", "--regex", "--handoffs-dir", str(handoffs_dir)])
@@ -508,7 +507,9 @@ class TestSearchCLI:
         handoffs_dir = tmp_path / "handoffs"
         handoffs_dir.mkdir()
 
-        with patch("turbo_mode_handoff_runtime.search.get_project_name", return_value=("test", "git")):
+        with patch(
+            "turbo_mode_handoff_runtime.search.get_project_name", return_value=("test", "git")
+        ):
             output = search_main(["anything", "--handoffs-dir", str(handoffs_dir)])
 
         result = json.loads(output)
@@ -519,14 +520,18 @@ class TestSearchCLI:
         handoffs_dir = tmp_path / "handoffs"
         handoffs_dir.mkdir()
 
-        with patch("turbo_mode_handoff_runtime.search.get_project_name", return_value=("test", "cwd")):
+        with patch(
+            "turbo_mode_handoff_runtime.search.get_project_name", return_value=("test", "cwd")
+        ):
             output = search_main(["anything", "--handoffs-dir", str(handoffs_dir)])
 
         result = json.loads(output)
         assert result["project_source"] == "cwd"
 
     def test_direct_execution_via_subprocess(self) -> None:
-        """A9 (handoff-search-implementation): Verify __main__ path works under direct script execution."""
+        """A9 (handoff-search-implementation):
+        Verify __main__ path works under direct script execution.
+        """
         import subprocess
 
         script = Path(__file__).parent.parent / "scripts" / "search.py"

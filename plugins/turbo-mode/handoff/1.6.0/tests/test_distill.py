@@ -5,22 +5,18 @@ from pathlib import Path
 
 import pytest
 from turbo_mode_handoff_runtime.distill import (
-    CandidateDict,
-    DedupStatus,
-    DurabilityHint,
-    ErrorCode,
-    ExtractionResultDict,
-    Subsection,
+    check_exact_dup_content,
+    check_exact_dup_source,
     classify_durability,
+    compute_content_hash,
+    compute_source_uid,
     determine_dedup_status,
     extract_candidates,
     extract_signals,
-    parse_subsections,
-    check_exact_dup_content,
-    check_exact_dup_source,
-    compute_content_hash,
-    compute_source_uid,
     make_distill_meta,
+    parse_subsections,
+)
+from turbo_mode_handoff_runtime.distill import (
     main as distill_main,
 )
 
@@ -68,11 +64,7 @@ class TestParseSubsections:
         assert subs[0].raw_markdown == content
 
     def test_leading_text_before_first_subsection(self) -> None:
-        content = (
-            "Some intro text.\n\n"
-            "### Sub A\n\n"
-            "Content A.\n"
-        )
+        content = "Some intro text.\n\n### Sub A\n\nContent A.\n"
         subs = parse_subsections(content)
         assert len(subs) == 2
         assert subs[0].heading == ""
@@ -80,22 +72,14 @@ class TestParseSubsections:
         assert subs[1].heading == "Sub A"
 
     def test_backtick_fences_do_not_split(self) -> None:
-        content = (
-            "### Real\n\n"
-            "```\n### Fake\n```\n\n"
-            "More content.\n"
-        )
+        content = "### Real\n\n```\n### Fake\n```\n\nMore content.\n"
         subs = parse_subsections(content)
         assert len(subs) == 1
         assert subs[0].heading == "Real"
         assert "### Fake" in subs[0].raw_markdown
 
     def test_tilde_fences_do_not_split(self) -> None:
-        content = (
-            "### Real\n\n"
-            "~~~\n### Fake\n~~~\n\n"
-            "More content.\n"
-        )
+        content = "### Real\n\n~~~\n### Fake\n~~~\n\nMore content.\n"
         subs = parse_subsections(content)
         assert len(subs) == 1
         assert subs[0].heading == "Real"
@@ -132,12 +116,7 @@ class TestParseSubsections:
 
     def test_unterminated_fence_suppresses_splits(self) -> None:
         """An unclosed fence suppresses all subsequent ### splits (fail-safe)."""
-        content = (
-            "### Real\n\n"
-            "```\n"
-            "### Suppressed by unclosed fence\n"
-            "text inside fence\n"
-        )
+        content = "### Real\n\n```\n### Suppressed by unclosed fence\ntext inside fence\n"
         subs = parse_subsections(content)
         assert len(subs) == 1
         assert subs[0].heading == "Real"
@@ -254,19 +233,23 @@ class TestDocumentIdentity:
 
     def test_returns_session_id(self) -> None:
         from turbo_mode_handoff_runtime.distill import _document_identity
+
         assert _document_identity({"session_id": "abc-123"}) == "abc-123"
 
     def test_strips_whitespace(self) -> None:
         from turbo_mode_handoff_runtime.distill import _document_identity
+
         assert _document_identity({"session_id": "  abc-123  "}) == "abc-123"
 
     def test_rejects_missing_session_id(self) -> None:
         from turbo_mode_handoff_runtime.distill import _document_identity
+
         with pytest.raises(ValueError, match="No session_id"):
             _document_identity({})
 
     def test_rejects_blank_session_id(self) -> None:
         from turbo_mode_handoff_runtime.distill import _document_identity
+
         with pytest.raises(ValueError, match="No session_id"):
             _document_identity({"session_id": "  "})
 
@@ -330,19 +313,37 @@ class TestDetermineDedup:
     """Tests for determine_dedup_status — per-record correlated dedup."""
 
     def test_same_row_exact_dup(self) -> None:
-        learnings = '<!-- distill-meta {"v": 1, "source_uid": "sha256:src_A", "content_sha256": "sha256:content_A"} -->\n'
-        assert determine_dedup_status("sha256:src_A", "sha256:content_A", learnings) == "EXACT_DUP_SOURCE"
+        learnings = (
+            '<!-- distill-meta {"v": 1, "source_uid": "sha256:src_A", '
+            '"content_sha256": "sha256:content_A"} -->\n'
+        )
+        assert (
+            determine_dedup_status("sha256:src_A", "sha256:content_A", learnings)
+            == "EXACT_DUP_SOURCE"
+        )
 
     def test_source_match_content_differs_is_updated(self) -> None:
-        learnings = '<!-- distill-meta {"v": 1, "source_uid": "sha256:src_A", "content_sha256": "sha256:old"} -->\n'
+        learnings = (
+            '<!-- distill-meta {"v": 1, "source_uid": "sha256:src_A", '
+            '"content_sha256": "sha256:old"} -->\n'
+        )
         assert determine_dedup_status("sha256:src_A", "sha256:new", learnings) == "UPDATED_SOURCE"
 
     def test_content_only_match(self) -> None:
-        learnings = '<!-- distill-meta {"v": 1, "source_uid": "sha256:other", "content_sha256": "sha256:content_A"} -->\n'
-        assert determine_dedup_status("sha256:src_A", "sha256:content_A", learnings) == "EXACT_DUP_CONTENT"
+        learnings = (
+            '<!-- distill-meta {"v": 1, "source_uid": "sha256:other", '
+            '"content_sha256": "sha256:content_A"} -->\n'
+        )
+        assert (
+            determine_dedup_status("sha256:src_A", "sha256:content_A", learnings)
+            == "EXACT_DUP_CONTENT"
+        )
 
     def test_no_matches_is_new(self) -> None:
-        learnings = '<!-- distill-meta {"v": 1, "source_uid": "sha256:other", "content_sha256": "sha256:other"} -->\n'
+        learnings = (
+            '<!-- distill-meta {"v": 1, "source_uid": "sha256:other", '
+            '"content_sha256": "sha256:other"} -->\n'
+        )
         assert determine_dedup_status("sha256:src_A", "sha256:content_A", learnings) == "NEW"
 
     def test_empty_learnings_is_new(self) -> None:
@@ -352,8 +353,10 @@ class TestDetermineDedup:
         """When source_uid matches entry A and content_sha256 matches entry B,
         source identity takes precedence: UPDATED_SOURCE (not EXACT_DUP_SOURCE)."""
         learnings = (
-            '<!-- distill-meta {"v": 1, "source_uid": "sha256:src_A", "content_sha256": "sha256:old_content"} -->\n'
-            '<!-- distill-meta {"v": 1, "source_uid": "sha256:src_B", "content_sha256": "sha256:new_content"} -->\n'
+            '<!-- distill-meta {"v": 1, "source_uid": "sha256:src_A", '
+            '"content_sha256": "sha256:old_content"} -->\n'
+            '<!-- distill-meta {"v": 1, "source_uid": "sha256:src_B", '
+            '"content_sha256": "sha256:new_content"} -->\n'
         )
         status = determine_dedup_status("sha256:src_A", "sha256:new_content", learnings)
         assert status == "UPDATED_SOURCE"
@@ -374,8 +377,10 @@ class TestCrossRowDedupIntegration:
         candidate_hash = compute_content_hash("**Choice:** Python for new reasons.")
         # Entry A: same source, old content. Entry B: different source, same content.
         learnings = (
-            f'<!-- distill-meta {{"v": 1, "source_uid": "{uid}", "content_sha256": "sha256:old_content"}} -->\n'
-            f'<!-- distill-meta {{"v": 1, "source_uid": "sha256:unrelated", "content_sha256": "{candidate_hash}"}} -->\n'
+            f'<!-- distill-meta {{"v": 1, "source_uid": "{uid}", '
+            f'"content_sha256": "sha256:old_content"}} -->\n'
+            f'<!-- distill-meta {{"v": 1, "source_uid": "sha256:unrelated", '
+            f'"content_sha256": "{candidate_hash}"}} -->\n'
         )
         result = extract_candidates(str(handoff), learnings)
         assert result["candidates"][0]["dedup_status"] == "UPDATED_SOURCE"
@@ -447,15 +452,20 @@ class TestExtractCandidates:
     def test_exact_dup_detected(self, tmp_path: Path) -> None:
         handoff = tmp_path / "test.md"
         handoff.write_text(
-            "---\ntitle: Test\ndate: 2026-02-27\ntype: handoff\nsession_id: test-session-123\n---\n\n"
+            "---\ntitle: Test\ndate: 2026-02-27\ntype: handoff\n"
+            "session_id: test-session-123\n---\n\n"
             "## Decisions\n\n"
             "### Chose Python\n\n"
             "**Choice:** Python.\n\n"
         )
-        from turbo_mode_handoff_runtime.distill import compute_source_uid, compute_content_hash
+        from turbo_mode_handoff_runtime.distill import compute_content_hash, compute_source_uid
+
         uid = compute_source_uid("test-session-123", "Decisions", "Chose Python", heading_ix=0)
         chash = compute_content_hash("**Choice:** Python.")
-        learnings = f'<!-- distill-meta {{"v": 1, "source_uid": "{uid}", "content_sha256": "{chash}"}} -->\n'
+        learnings = (
+            f'<!-- distill-meta {{"v": 1, "source_uid": "{uid}", '
+            f'"content_sha256": "{chash}"}} -->\n'
+        )
         result = extract_candidates(str(handoff), learnings)
         assert result["candidates"][0]["dedup_status"] == "EXACT_DUP_SOURCE"
 
@@ -515,8 +525,16 @@ class TestOutputContract:
             "## Decisions\n\n### Sub\n\n**Choice:** A.\n\n"
         )
         result = extract_candidates(str(handoff), "")
-        required = {"handoff_path", "handoff_date", "handoff_title",
-                     "candidates", "error", "output_version", "error_code", "warnings"}
+        required = {
+            "handoff_path",
+            "handoff_date",
+            "handoff_title",
+            "candidates",
+            "error",
+            "output_version",
+            "error_code",
+            "warnings",
+        }
         assert required.issubset(result.keys())
         assert result["output_version"] == 1
 
@@ -528,8 +546,16 @@ class TestOutputContract:
         )
         result = extract_candidates(str(handoff), "")
         candidate = result["candidates"][0]
-        required = {"source_section", "subsection_heading", "raw_markdown", "signals",
-                     "source_uid", "content_sha256", "source_anchor", "dedup_status"}
+        required = {
+            "source_section",
+            "subsection_heading",
+            "raw_markdown",
+            "signals",
+            "source_uid",
+            "content_sha256",
+            "source_anchor",
+            "dedup_status",
+        }
         assert required.issubset(candidate.keys())
 
     def test_dedup_status_is_known_enum(self, tmp_path: Path) -> None:
@@ -691,10 +717,11 @@ class TestEdgeCases:
 
     def test_malformed_distill_meta_does_not_crash(self) -> None:
         from turbo_mode_handoff_runtime.distill import _extract_distill_metas
+
         learnings = (
-            '<!-- distill-meta {broken json here -->\n'
+            "<!-- distill-meta {broken json here -->\n"
             '<!-- distill-meta {"v": 1, "source_uid": "sha256:good"} -->\n'
-            '<!-- distill-meta not-even-braces -->\n'
+            "<!-- distill-meta not-even-braces -->\n"
         )
         metas = _extract_distill_metas(learnings)
         assert len(metas) == 1
@@ -702,19 +729,19 @@ class TestEdgeCases:
 
     def test_malformed_distill_meta_returns_warning(self) -> None:
         from turbo_mode_handoff_runtime.distill import _extract_distill_metas_detailed
+
         # Regex requires {…} — use valid braces with invalid JSON inside
-        metas, warnings = _extract_distill_metas_detailed(
-            '<!-- distill-meta {broken json} -->'
-        )
+        metas, warnings = _extract_distill_metas_detailed("<!-- distill-meta {broken json} -->")
         assert len(metas) == 0
         assert len(warnings) == 1
         assert "malformed distill-meta skipped" in warnings[0]
 
     def test_detailed_returns_valid_metas_alongside_warnings(self) -> None:
         from turbo_mode_handoff_runtime.distill import _extract_distill_metas_detailed
+
         content = (
             '<!-- distill-meta {"source_uid": "sha256:abc"} -->\n'
-            '<!-- distill-meta {broken json} -->\n'
+            "<!-- distill-meta {broken json} -->\n"
             '<!-- distill-meta {"source_uid": "sha256:def"} -->'
         )
         metas, warnings = _extract_distill_metas_detailed(content)
@@ -746,10 +773,14 @@ class TestNoAutodropInvariant:
             "---\ntitle: Test\ndate: 2026-02-27\ntype: handoff\nsession_id: abc-123\n---\n\n"
             "## Decisions\n\n### Chose Python\n\n**Choice:** Python.\n\n"
         )
-        from turbo_mode_handoff_runtime.distill import compute_source_uid, compute_content_hash
+        from turbo_mode_handoff_runtime.distill import compute_content_hash, compute_source_uid
+
         uid = compute_source_uid("abc-123", "Decisions", "Chose Python", heading_ix=0)
         chash = compute_content_hash("**Choice:** Python.")
-        learnings = f'<!-- distill-meta {{"v": 1, "source_uid": "{uid}", "content_sha256": "{chash}"}} -->\n'
+        learnings = (
+            f'<!-- distill-meta {{"v": 1, "source_uid": "{uid}", '
+            f'"content_sha256": "{chash}"}} -->\n'
+        )
         result = extract_candidates(str(handoff), learnings)
         assert len(result["candidates"]) == 1
         assert result["candidates"][0]["dedup_status"] == "EXACT_DUP_SOURCE"
@@ -761,6 +792,7 @@ class TestNoAutodropInvariant:
             "## Decisions\n\n### Chose Python\n\n**Choice:** Python.\n\n"
         )
         from turbo_mode_handoff_runtime.distill import compute_content_hash
+
         h = compute_content_hash("**Choice:** Python.")
         learnings = f'<!-- distill-meta {{"v": 1, "content_sha256": "{h}"}} -->\n'
         result = extract_candidates(str(handoff), learnings)
@@ -778,8 +810,12 @@ class TestUpdatedSource:
             "## Decisions\n\n### Chose Python\n\n**Choice:** Python for speed.\n\n"
         )
         from turbo_mode_handoff_runtime.distill import compute_source_uid
+
         uid = compute_source_uid("update-test", "Decisions", "Chose Python", heading_ix=0)
-        learnings = f'<!-- distill-meta {{"v": 1, "source_uid": "{uid}", "content_sha256": "sha256:old_hash"}} -->\n'
+        learnings = (
+            f'<!-- distill-meta {{"v": 1, "source_uid": "{uid}", '
+            f'"content_sha256": "sha256:old_hash"}} -->\n'
+        )
         result = extract_candidates(str(handoff), learnings)
         assert result["candidates"][0]["dedup_status"] == "UPDATED_SOURCE"
 
@@ -875,7 +911,7 @@ class TestHandoffReadError:
 
     def test_binary_handoff_returns_error(self, tmp_path: Path) -> None:
         handoff = tmp_path / "test.md"
-        handoff.write_bytes(b'\x80\x81\x82\xff' * 100)
+        handoff.write_bytes(b"\x80\x81\x82\xff" * 100)
         result = extract_candidates(str(handoff), "")
         assert result["error"] is not None
         assert result["error_code"] == "HANDOFF_UNREADABLE"
@@ -911,7 +947,8 @@ class TestPathIndependence:
 
     def test_same_handoff_different_paths_same_uid(self, tmp_path: Path) -> None:
         content = (
-            "---\ntitle: Test\ndate: 2026-02-27\ntype: handoff\nsession_id: stable-uid-test\n---\n\n"
+            "---\ntitle: Test\ndate: 2026-02-27\ntype: handoff\n"
+            "session_id: stable-uid-test\n---\n\n"
             "## Decisions\n\n### Chose A\n\n**Choice:** A.\n\n"
         )
         path_a = tmp_path / "handoff.md"
@@ -975,9 +1012,12 @@ class TestPreambleMergeHashStability:
 
         # Second extraction — with learnings
         result2 = extract_candidates(str(handoff), learnings_with_meta)
-        c2 = [x for x in result2["candidates"] if x["subsection_heading"] == c["subsection_heading"]][0]
+        c2 = [
+            x for x in result2["candidates"] if x["subsection_heading"] == c["subsection_heading"]
+        ][0]
         assert c2["dedup_status"] == "EXACT_DUP_SOURCE", (
-            f"Preamble merge changed content hash! Expected EXACT_DUP_SOURCE, got {c2['dedup_status']}"
+            "Preamble merge changed content hash! "
+            f"Expected EXACT_DUP_SOURCE, got {c2['dedup_status']}"
         )
 
 
@@ -986,5 +1026,6 @@ class TestMakeAnchorEdgeCases:
 
     def test_empty_heading_produces_valid_anchor(self) -> None:
         from turbo_mode_handoff_runtime.distill import _make_anchor
+
         anchor = _make_anchor("handoff.md", "Decisions", "")
         assert anchor == "handoff.md#decisions/"

@@ -10,7 +10,6 @@ import sys
 import textwrap
 from pathlib import Path
 
-
 from turbo_mode_handoff_runtime.storage_primitives import sha256_file
 
 
@@ -28,9 +27,7 @@ def run_source_harness_isolation_proof(
     source_checkout = _source_checkout_root(source_plugin)
     isolated_home = codex_home.resolve()
     _reject_real_codex_home(isolated_home)
-    installed_plugin = (
-        isolated_home / "plugins" / "cache" / "turbo-mode" / "handoff" / "1.6.0"
-    )
+    installed_plugin = isolated_home / "plugins" / "cache" / "turbo-mode" / "handoff" / "1.6.0"
     if installed_plugin.exists():
         raise InstalledHostHarnessError(
             "source-harness-isolation-proof failed: installed root already exists. "

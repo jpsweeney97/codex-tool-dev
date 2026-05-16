@@ -2,6 +2,7 @@
 
 Dual-read: YAML field (primary) > HTML comment (fallback).
 """
+
 from __future__ import annotations
 
 import json

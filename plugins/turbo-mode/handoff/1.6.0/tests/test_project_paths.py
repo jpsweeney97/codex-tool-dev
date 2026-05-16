@@ -33,7 +33,9 @@ class TestGetProjectRoot:
         assert source == "cwd"
 
     def test_git_not_found_falls_back_to_cwd(self) -> None:
-        with patch("turbo_mode_handoff_runtime.project_paths.subprocess.run", side_effect=FileNotFoundError):
+        with patch(
+            "turbo_mode_handoff_runtime.project_paths.subprocess.run", side_effect=FileNotFoundError
+        ):
             root, source = get_project_root()
             assert root == Path.cwd()
             assert source == "cwd"
@@ -48,13 +50,18 @@ class TestGetProjectRoot:
             assert source == "cwd"
 
     def test_oserror_falls_back_to_cwd(self) -> None:
-        with patch("turbo_mode_handoff_runtime.project_paths.subprocess.run", side_effect=OSError("disk error")):
+        with patch(
+            "turbo_mode_handoff_runtime.project_paths.subprocess.run",
+            side_effect=OSError("disk error"),
+        ):
             root, source = get_project_root()
             assert root == Path.cwd()
             assert source == "cwd"
 
     def test_exception_logs_to_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
-        with patch("turbo_mode_handoff_runtime.project_paths.subprocess.run", side_effect=FileNotFoundError):
+        with patch(
+            "turbo_mode_handoff_runtime.project_paths.subprocess.run", side_effect=FileNotFoundError
+        ):
             get_project_root()
         assert "Warning: git project detection failed" in capsys.readouterr().err
 

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import turbo_mode_handoff_runtime.active_writes as active_writes
 import turbo_mode_handoff_runtime.session_state as session_state
-from turbo_mode_handoff_runtime.storage_authority import chain_state_recovery_inventory, read_chain_state
+from turbo_mode_handoff_runtime.chain_state import chain_state_recovery_inventory, read_chain_state
 
 
 @pytest.mark.parametrize(
@@ -126,15 +126,11 @@ def test_active_writer_flow_cli_bridges_legacy_state_and_marks_source_consumed(
     )
     inventory = chain_state_recovery_inventory(tmp_path, project_name="demo")
     by_path = {
-        candidate["project_relative_state_path"]: candidate
-        for candidate in inventory["candidates"]
+        candidate["project_relative_state_path"]: candidate for candidate in inventory["candidates"]
     }
 
     assert Path(payload["active_path"]) == (
-        tmp_path
-        / ".codex"
-        / "handoffs"
-        / f"2026-05-13_16-45_{operation}-{expected_slug}.md"
+        tmp_path / ".codex" / "handoffs" / f"2026-05-13_16-45_{operation}-{expected_slug}.md"
     )
     assert operation_state["resumed_from_path"] == str(archive)
     assert operation_state["resumed_from_hash"] == hashlib.sha256(archive.read_bytes()).hexdigest()
@@ -372,13 +368,15 @@ def test_active_writer_flow_cli_cleanup_falls_back_to_unlink_when_trash_fails(
     state_dir.mkdir(parents=True)
     state_path = state_dir / "handoff-demo-resume.json"
     state_path.write_text(
-        json.dumps({
-            "state_path": str(state_path),
-            "project": "demo",
-            "resume_token": "resume",
-            "archive_path": str(archive),
-            "created_at": "2026-05-13T16:00:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(state_path),
+                "project": "demo",
+                "resume_token": "resume",
+                "archive_path": str(archive),
+                "created_at": "2026-05-13T16:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
     original_subprocess_run = active_writes._storage_primitives.subprocess.run
@@ -390,19 +388,21 @@ def test_active_writer_flow_cli_cleanup_falls_back_to_unlink_when_trash_fails(
 
     monkeypatch.setattr(active_writes._storage_primitives.subprocess, "run", fail_trash)
 
-    result = session_state.main([
-        "active-writer-flow",
-        "--project-root",
-        str(tmp_path),
-        "--project",
-        "demo",
-        "--operation",
-        "save",
-        "--run-id",
-        "flow-cleanup-failure",
-        "--created-at",
-        "2026-05-13T16:45:00Z",
-    ])
+    result = session_state.main(
+        [
+            "active-writer-flow",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--operation",
+            "save",
+            "--run-id",
+            "flow-cleanup-failure",
+            "--created-at",
+            "2026-05-13T16:45:00Z",
+        ]
+    )
 
     captured = capsys.readouterr()
     assert result == 0
@@ -481,9 +481,7 @@ def test_active_writer_flow_releases_lock_during_generation_and_reacquires_for_w
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    lock_path = (
-        tmp_path / ".codex" / "handoffs" / ".session-state" / "locks" / "active-write.lock"
-    )
+    lock_path = tmp_path / ".codex" / "handoffs" / ".session-state" / "locks" / "active-write.lock"
     original_generator = session_state._deterministic_active_writer_content
     observed: dict[str, bool] = {}
 
@@ -495,14 +493,16 @@ def test_active_writer_flow_releases_lock_during_generation_and_reacquires_for_w
         observed["lock_released_during_generation"] = not lock_path.exists()
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path.write_text(
-            json.dumps({
-                "lock_id": "competing-writer",
-                "project": "demo",
-                "operation": "save",
-                "hostname": socket.gethostname(),
-                "created_at": datetime.now(UTC).isoformat(),
-                "timeout_seconds": 1800,
-            }),
+            json.dumps(
+                {
+                    "lock_id": "competing-writer",
+                    "project": "demo",
+                    "operation": "save",
+                    "hostname": socket.gethostname(),
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "timeout_seconds": 1800,
+                }
+            ),
             encoding="utf-8",
         )
         return original_generator(operation_state, content_note=content_note)
@@ -513,19 +513,21 @@ def test_active_writer_flow_releases_lock_during_generation_and_reacquires_for_w
         generate_while_competing_lock_exists,
     )
 
-    result = session_state.main([
-        "active-writer-flow",
-        "--project-root",
-        str(tmp_path),
-        "--project",
-        "demo",
-        "--operation",
-        "save",
-        "--run-id",
-        "flow-lock-reacquire",
-        "--created-at",
-        "2026-05-13T16:45:00Z",
-    ])
+    result = session_state.main(
+        [
+            "active-writer-flow",
+            "--project-root",
+            str(tmp_path),
+            "--project",
+            "demo",
+            "--operation",
+            "save",
+            "--run-id",
+            "flow-lock-reacquire",
+            "--created-at",
+            "2026-05-13T16:45:00Z",
+        ]
+    )
 
     captured = capsys.readouterr()
     assert observed["lock_released_during_generation"] is True
@@ -849,9 +851,7 @@ def test_begin_active_write_auto_expires_stale_pre_output_reservation(
         created_at="2026-05-13T16:46:00Z",
     )
 
-    expired_operation_state = json.loads(
-        first.operation_state_path.read_text(encoding="utf-8")
-    )
+    expired_operation_state = json.loads(first.operation_state_path.read_text(encoding="utf-8"))
     expired_transaction = json.loads(first.transaction_path.read_text(encoding="utf-8"))
     assert expired_operation_state["status"] == "reservation_expired"
     assert expired_transaction["status"] == "reservation_expired"
@@ -880,9 +880,7 @@ def test_begin_active_write_does_not_auto_expire_after_content_hash_exists(
 
     operation_state = json.loads(first.operation_state_path.read_text(encoding="utf-8"))
     operation_state["content_hash"] = "a" * 64
-    first.operation_state_path.write_text(
-        json.dumps(operation_state, indent=2), encoding="utf-8"
-    )
+    first.operation_state_path.write_text(json.dumps(operation_state, indent=2), encoding="utf-8")
 
     with pytest.raises(active_writes.ActiveWriteError, match="active write already reserved"):
         active_writes.begin_active_write(
@@ -1020,12 +1018,7 @@ def test_list_active_writes_reports_pending_operation_state_without_mutation(
 
 def test_list_active_writes_surfaces_unreadable_operation_state(tmp_path: Path) -> None:
     active_writes_dir = (
-        tmp_path
-        / ".codex"
-        / "handoffs"
-        / ".session-state"
-        / "active-writes"
-        / "demo"
+        tmp_path / ".codex" / "handoffs" / ".session-state" / "active-writes" / "demo"
     )
     active_writes_dir.mkdir(parents=True)
     corrupt = active_writes_dir / "corrupt.json"
@@ -1442,13 +1435,15 @@ def test_write_active_handoff_clears_snapshotted_primary_state_after_output_writ
     state_dir.mkdir(parents=True)
     state_path = state_dir / "handoff-demo-resume.json"
     state_path.write_text(
-        json.dumps({
-            "state_path": str(state_path),
-            "project": "demo",
-            "resume_token": "resume",
-            "archive_path": str(archive),
-            "created_at": "2026-05-13T16:00:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(state_path),
+                "project": "demo",
+                "resume_token": "resume",
+                "archive_path": str(archive),
+                "created_at": "2026-05-13T16:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
     begin = subprocess.run(
@@ -1518,13 +1513,15 @@ def test_write_active_handoff_falls_back_to_unlink_when_trash_fails(
     state_dir.mkdir(parents=True)
     state_path = state_dir / "handoff-demo-resume.json"
     state_path.write_text(
-        json.dumps({
-            "state_path": str(state_path),
-            "project": "demo",
-            "resume_token": "resume",
-            "archive_path": str(archive),
-            "created_at": "2026-05-13T16:00:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(state_path),
+                "project": "demo",
+                "resume_token": "resume",
+                "archive_path": str(archive),
+                "created_at": "2026-05-13T16:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
     reservation = active_writes.begin_active_write(
@@ -1571,13 +1568,15 @@ def test_write_active_handoff_persists_cleanup_failed_when_both_mechanisms_fail(
     state_dir.mkdir(parents=True)
     state_path = state_dir / "handoff-demo-resume.json"
     state_path.write_text(
-        json.dumps({
-            "state_path": str(state_path),
-            "project": "demo",
-            "resume_token": "resume",
-            "archive_path": str(archive),
-            "created_at": "2026-05-13T16:00:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(state_path),
+                "project": "demo",
+                "resume_token": "resume",
+                "archive_path": str(archive),
+                "created_at": "2026-05-13T16:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
     reservation = active_writes.begin_active_write(
@@ -1670,13 +1669,15 @@ def test_write_active_handoff_rejects_changed_state_snapshot_before_output_write
     state_dir = tmp_path / ".codex" / "handoffs" / ".session-state"
     conflicting_state = state_dir / "handoff-demo-conflict.json"
     conflicting_state.write_text(
-        json.dumps({
-            "state_path": str(conflicting_state),
-            "project": "demo",
-            "resume_token": "conflict",
-            "archive_path": "/tmp/other.md",
-            "created_at": "2026-05-13T16:01:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(conflicting_state),
+                "project": "demo",
+                "resume_token": "conflict",
+                "archive_path": "/tmp/other.md",
+                "created_at": "2026-05-13T16:01:00Z",
+            }
+        ),
         encoding="utf-8",
     )
     content = "---\ntitle: State conflict\n---\n\n# Handoff\n"
@@ -1718,11 +1719,13 @@ def test_write_active_handoff_rejects_changed_transaction_watermark_before_outpu
         / "external-conflict.json"
     )
     conflict_transaction.write_text(
-        json.dumps({
-            "transaction_id": "external-conflict",
-            "operation": "load",
-            "status": "completed",
-        }),
+        json.dumps(
+            {
+                "transaction_id": "external-conflict",
+                "operation": "load",
+                "status": "completed",
+            }
+        ),
         encoding="utf-8",
     )
     content = "---\ntitle: Transaction conflict\n---\n\n# Handoff\n"
@@ -1781,7 +1784,10 @@ def test_active_write_lock_blocks_within_timeout(tmp_path: Path) -> None:
     lock = _stage_lock(tmp_path, _valid_lock_metadata(created_at=datetime.now(UTC)))
     with pytest.raises(active_writes.ActiveWriteError, match="lock is already held"):
         active_writes.begin_active_write(
-            tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
+            tmp_path,
+            project_name="demo",
+            operation="save",
+            created_at="2026-05-13T16:45:00Z",
         )
     assert lock.exists()
 
@@ -1810,7 +1816,10 @@ def test_active_write_lock_recovers_from_stale_lock_same_host_after_timeout(
     stale_time = datetime.now(UTC) - timedelta(hours=2)
     _stage_lock(tmp_path, _valid_lock_metadata(created_at=stale_time))
     reservation = active_writes.begin_active_write(
-        tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
+        tmp_path,
+        project_name="demo",
+        operation="save",
+        created_at="2026-05-13T16:45:00Z",
     )
     lock = _lock_path(tmp_path)
     assert not lock.exists()
@@ -1824,7 +1833,10 @@ def test_active_write_lock_fails_closed_on_unparseable_metadata(tmp_path: Path) 
     lock.write_text("not-json", encoding="utf-8")
     with pytest.raises(active_writes.ActiveWriteError, match="lock metadata unreadable"):
         active_writes.begin_active_write(
-            tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
+            tmp_path,
+            project_name="demo",
+            operation="save",
+            created_at="2026-05-13T16:45:00Z",
         )
     assert lock.exists()
 
@@ -1847,7 +1859,11 @@ def test_active_write_lock_fails_closed_on_unparseable_metadata(tmp_path: Path) 
             id="wrong-type-created_at",
         ),
         pytest.param(
-            {"created_at": "2026-01-01T00:00:00Z", "timeout_seconds": "nope", "hostname": socket.gethostname()},
+            {
+                "created_at": "2026-01-01T00:00:00Z",
+                "timeout_seconds": "nope",
+                "hostname": socket.gethostname(),
+            },
             id="wrong-type-timeout_seconds",
         ),
         pytest.param(
@@ -1869,7 +1885,10 @@ def test_active_write_lock_fails_closed_on_malformed_json_metadata(
     lock.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(active_writes.ActiveWriteError, match="lock metadata malformed"):
         active_writes.begin_active_write(
-            tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
+            tmp_path,
+            project_name="demo",
+            operation="save",
+            created_at="2026-05-13T16:45:00Z",
         )
     assert lock.exists()
 
@@ -1877,11 +1896,15 @@ def test_active_write_lock_fails_closed_on_malformed_json_metadata(
 def test_active_write_lock_fails_closed_on_foreign_host(tmp_path: Path) -> None:
     stale_time = datetime.now(UTC) - timedelta(hours=2)
     lock = _stage_lock(
-        tmp_path, _valid_lock_metadata(created_at=stale_time, hostname="different-host"),
+        tmp_path,
+        _valid_lock_metadata(created_at=stale_time, hostname="different-host"),
     )
     with pytest.raises(active_writes.ActiveWriteError, match="stale lock from another host"):
         active_writes.begin_active_write(
-            tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
+            tmp_path,
+            project_name="demo",
+            operation="save",
+            created_at="2026-05-13T16:45:00Z",
         )
     assert lock.exists()
 
@@ -1903,7 +1926,10 @@ def test_active_write_lock_records_new_owner_during_critical_section(
 
     monkeypatch.setattr(active_writes, "_continue_legacy_chain_state_if_unambiguous", spy)
     reservation = active_writes.begin_active_write(
-        tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
+        tmp_path,
+        project_name="demo",
+        operation="save",
+        created_at="2026-05-13T16:45:00Z",
     )
     state = json.loads(reservation.operation_state_path.read_text(encoding="utf-8"))
     assert not lock.exists()
@@ -1918,17 +1944,24 @@ def test_active_write_lock_recovery_claim_present_fails_closed_with_live_hint(
     lock = _stage_lock(tmp_path, _valid_lock_metadata(created_at=stale_time))
     claim_path = lock.with_name(lock.name + ".recovery")
     claim_path.write_text(
-        json.dumps({
-            "pid": os.getpid(),
-            "hostname": socket.gethostname(),
-            "created_at": datetime.now(UTC).isoformat(),
-            "timeout_seconds": 60,
-        }),
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "hostname": socket.gethostname(),
+                "created_at": datetime.now(UTC).isoformat(),
+                "timeout_seconds": 60,
+            }
+        ),
         encoding="utf-8",
     )
-    with pytest.raises(active_writes.ActiveWriteError, match="recovery claim file present") as exc_info:
+    with pytest.raises(
+        active_writes.ActiveWriteError, match="recovery claim file present"
+    ) as exc_info:
         active_writes.begin_active_write(
-            tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
+            tmp_path,
+            project_name="demo",
+            operation="save",
+            created_at="2026-05-13T16:45:00Z",
         )
     assert "(live recoverer:" in str(exc_info.value)
     assert "trash" in str(exc_info.value)
@@ -1975,17 +2008,24 @@ def test_active_write_lock_recovery_claim_present_fails_closed_with_stale_hint(
     claim_path = lock.with_name(lock.name + ".recovery")
     stale_claim_time = datetime.now(UTC) - timedelta(minutes=5)
     claim_path.write_text(
-        json.dumps({
-            "pid": os.getpid(),
-            "hostname": socket.gethostname(),
-            "created_at": stale_claim_time.isoformat(),
-            "timeout_seconds": 60,
-        }),
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "hostname": socket.gethostname(),
+                "created_at": stale_claim_time.isoformat(),
+                "timeout_seconds": 60,
+            }
+        ),
         encoding="utf-8",
     )
-    with pytest.raises(active_writes.ActiveWriteError, match="recovery claim file present") as exc_info:
+    with pytest.raises(
+        active_writes.ActiveWriteError, match="recovery claim file present"
+    ) as exc_info:
         active_writes.begin_active_write(
-            tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
+            tmp_path,
+            project_name="demo",
+            operation="save",
+            created_at="2026-05-13T16:45:00Z",
         )
     assert "(likely stale:" in str(exc_info.value)
     assert "trash" in str(exc_info.value)
@@ -1998,9 +2038,14 @@ def test_active_write_lock_recovery_claim_unparseable_fails_closed(tmp_path: Pat
     lock = _stage_lock(tmp_path, _valid_lock_metadata(created_at=stale_time))
     claim_path = lock.with_name(lock.name + ".recovery")
     claim_path.write_text("not-json", encoding="utf-8")
-    with pytest.raises(active_writes.ActiveWriteError, match="recovery claim file present") as exc_info:
+    with pytest.raises(
+        active_writes.ActiveWriteError, match="recovery claim file present"
+    ) as exc_info:
         active_writes.begin_active_write(
-            tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
+            tmp_path,
+            project_name="demo",
+            operation="save",
+            created_at="2026-05-13T16:45:00Z",
         )
     assert "(claim metadata unreadable)" in str(exc_info.value)
     assert "trash" in str(exc_info.value)
@@ -2018,7 +2063,10 @@ def test_active_write_lock_recovery_claim_malformed_fails_closed(tmp_path: Path)
     )
     with pytest.raises(active_writes.ActiveWriteError, match="recovery claim file present"):
         active_writes.begin_active_write(
-            tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
+            tmp_path,
+            project_name="demo",
+            operation="save",
+            created_at="2026-05-13T16:45:00Z",
         )
     assert lock.exists()
     assert claim_path.exists()
@@ -2032,21 +2080,29 @@ def test_active_write_lock_recovery_claim_removed_then_operation_succeeds(
     claim_path = lock.with_name(lock.name + ".recovery")
     stale_claim_time = datetime.now(UTC) - timedelta(minutes=5)
     claim_path.write_text(
-        json.dumps({
-            "pid": os.getpid(),
-            "hostname": socket.gethostname(),
-            "created_at": stale_claim_time.isoformat(),
-            "timeout_seconds": 60,
-        }),
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "hostname": socket.gethostname(),
+                "created_at": stale_claim_time.isoformat(),
+                "timeout_seconds": 60,
+            }
+        ),
         encoding="utf-8",
     )
     with pytest.raises(active_writes.ActiveWriteError, match="recovery claim file present"):
         active_writes.begin_active_write(
-            tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
+            tmp_path,
+            project_name="demo",
+            operation="save",
+            created_at="2026-05-13T16:45:00Z",
         )
     claim_path.unlink()
     reservation = active_writes.begin_active_write(
-        tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
+        tmp_path,
+        project_name="demo",
+        operation="save",
+        created_at="2026-05-13T16:45:00Z",
     )
     assert not _lock_path(tmp_path).exists()
     state = json.loads(reservation.operation_state_path.read_text(encoding="utf-8"))
@@ -2055,7 +2111,10 @@ def test_active_write_lock_recovery_claim_removed_then_operation_succeeds(
 
 def test_release_lock_preserves_session_state_dir(tmp_path: Path) -> None:
     reservation = active_writes.begin_active_write(
-        tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
+        tmp_path,
+        project_name="demo",
+        operation="save",
+        created_at="2026-05-13T16:45:00Z",
     )
     session_state_dir = tmp_path / ".codex" / "handoffs" / ".session-state"
     assert session_state_dir.exists()
@@ -2154,15 +2213,16 @@ except Exception as exc:
 def test_ensure_no_compatible_reservation_fails_closed_on_corrupt_record(
     tmp_path: Path,
 ) -> None:
-    corrupt_dir = (
-        tmp_path / ".codex" / "handoffs" / ".session-state" / "active-writes" / "demo"
-    )
+    corrupt_dir = tmp_path / ".codex" / "handoffs" / ".session-state" / "active-writes" / "demo"
     corrupt_dir.mkdir(parents=True, exist_ok=True)
     corrupt_file = corrupt_dir / "garbage.json"
     corrupt_file.write_text("not-json{{{", encoding="utf-8")
     with pytest.raises(active_writes.ActiveWriteError, match="active-write record unreadable"):
         active_writes.begin_active_write(
-            tmp_path, project_name="demo", operation="save", created_at="2026-05-13T16:45:00Z",
+            tmp_path,
+            project_name="demo",
+            operation="save",
+            created_at="2026-05-13T16:45:00Z",
         )
 
 

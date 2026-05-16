@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 import turbo_mode_handoff_runtime.session_state as session_state
 from turbo_mode_handoff_runtime.session_state import (
     AmbiguousResumeStateError,
@@ -84,16 +83,14 @@ def test_load_resume_state_ignores_consumed_legacy_marker(tmp_path: Path) -> Non
     assert load_resume_state(state_dir, "demo") is None
 
 
-def test_legacy_consumed_prefix_is_shared_with_storage_authority() -> None:
+def test_legacy_consumed_prefix_is_storage_primitives_owned() -> None:
+    import turbo_mode_handoff_runtime.chain_state as chain_state
     from turbo_mode_handoff_runtime import storage_primitives
     from turbo_mode_handoff_runtime.session_state import LEGACY_CONSUMED_PREFIX as state_prefix
-    from turbo_mode_handoff_runtime.storage_authority import (
-        LEGACY_CONSUMED_PREFIX as authority_prefix,
-    )
 
     assert storage_primitives.LEGACY_CONSUMED_PREFIX == "MIGRATED:"
-    assert authority_prefix == storage_primitives.LEGACY_CONSUMED_PREFIX
     assert state_prefix == storage_primitives.LEGACY_CONSUMED_PREFIX
+    assert not hasattr(chain_state, "LEGACY_CONSUMED_PREFIX")
 
 
 def test_clear_resume_state_removes_file(tmp_path: Path) -> None:
@@ -367,13 +364,15 @@ def test_chain_state_recovery_inventory_cli_reports_state_identity_without_mutat
     archive.parent.mkdir(parents=True, exist_ok=True)
     archive.write_text("---\ntitle: Previous\n---\n", encoding="utf-8")
     primary.write_text(
-        json.dumps({
-            "state_path": str(primary),
-            "project": "demo",
-            "resume_token": "token-a",
-            "archive_path": str(archive),
-            "created_at": "2026-05-13T16:00:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(primary),
+                "project": "demo",
+                "resume_token": "token-a",
+                "archive_path": str(archive),
+                "created_at": "2026-05-13T16:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
     legacy_payload = {
@@ -405,8 +404,7 @@ def test_chain_state_recovery_inventory_cli_reports_state_identity_without_mutat
     payload = json.loads(result.stdout)
     assert payload["project"] == "demo"
     by_path = {
-        candidate["project_relative_state_path"]: candidate
-        for candidate in payload["candidates"]
+        candidate["project_relative_state_path"]: candidate for candidate in payload["candidates"]
     }
     primary_row = by_path[".codex/handoffs/.session-state/handoff-demo-token-a.json"]
     legacy_row = by_path["docs/handoffs/.session-state/handoff-demo-token-b.json"]
@@ -432,13 +430,15 @@ def test_list_chain_state_cli_aliases_recovery_inventory(tmp_path: Path) -> None
     primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
     primary.parent.mkdir(parents=True, exist_ok=True)
     primary.write_text(
-        json.dumps({
-            "state_path": str(primary),
-            "project": "demo",
-            "resume_token": "token-a",
-            "archive_path": "/tmp/primary.md",
-            "created_at": "2026-05-13T16:00:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(primary),
+                "project": "demo",
+                "resume_token": "token-a",
+                "archive_path": "/tmp/primary.md",
+                "created_at": "2026-05-13T16:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -474,13 +474,15 @@ def test_read_chain_state_cli_fails_ambiguous_primary_with_recovery_inventory(
     for token in ("token-a", "token-b"):
         state = state_dir / f"handoff-demo-{token}.json"
         state.write_text(
-            json.dumps({
-                "state_path": str(state),
-                "project": "demo",
-                "resume_token": token,
-                "archive_path": f"/tmp/{token}.md",
-                "created_at": "2026-05-13T16:00:00Z",
-            }),
+            json.dumps(
+                {
+                    "state_path": str(state),
+                    "project": "demo",
+                    "resume_token": token,
+                    "archive_path": f"/tmp/{token}.md",
+                    "created_at": "2026-05-13T16:00:00Z",
+                }
+            ),
             encoding="utf-8",
         )
 
@@ -527,23 +529,27 @@ def test_read_chain_state_cli_rejects_primary_with_unresolved_legacy(
     primary.parent.mkdir(parents=True, exist_ok=True)
     legacy.parent.mkdir(parents=True, exist_ok=True)
     primary.write_text(
-        json.dumps({
-            "state_path": str(primary),
-            "project": "demo",
-            "resume_token": "token-a",
-            "archive_path": "/tmp/primary.md",
-            "created_at": "2026-05-13T16:00:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(primary),
+                "project": "demo",
+                "resume_token": "token-a",
+                "archive_path": "/tmp/primary.md",
+                "created_at": "2026-05-13T16:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
     legacy.write_text(
-        json.dumps({
-            "state_path": str(legacy),
-            "project": "demo",
-            "resume_token": "token-b",
-            "archive_path": "/tmp/legacy.md",
-            "created_at": "2026-05-13T16:01:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(legacy),
+                "project": "demo",
+                "resume_token": "token-b",
+                "archive_path": "/tmp/legacy.md",
+                "created_at": "2026-05-13T16:01:00Z",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -586,13 +592,15 @@ def test_mark_chain_state_consumed_suppresses_unresolved_legacy_state(
     primary.parent.mkdir(parents=True, exist_ok=True)
     legacy.parent.mkdir(parents=True, exist_ok=True)
     primary.write_text(
-        json.dumps({
-            "state_path": str(primary),
-            "project": "demo",
-            "resume_token": "token-a",
-            "archive_path": "/tmp/primary.md",
-            "created_at": "2026-05-13T16:00:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(primary),
+                "project": "demo",
+                "resume_token": "token-a",
+                "archive_path": "/tmp/primary.md",
+                "created_at": "2026-05-13T16:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
     legacy_payload = {
@@ -857,13 +865,15 @@ def test_read_chain_state_cli_rejects_expired_legacy_state_with_inventory(
     legacy = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo-token-b.json"
     legacy.parent.mkdir(parents=True, exist_ok=True)
     legacy.write_text(
-        json.dumps({
-            "state_path": str(legacy),
-            "project": "demo",
-            "resume_token": "token-b",
-            "archive_path": "/tmp/legacy.md",
-            "created_at": "2026-05-13T16:01:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(legacy),
+                "project": "demo",
+                "resume_token": "token-b",
+                "archive_path": "/tmp/legacy.md",
+                "created_at": "2026-05-13T16:01:00Z",
+            }
+        ),
         encoding="utf-8",
     )
     old = legacy.stat().st_mtime - (25 * 60 * 60)
@@ -1052,13 +1062,15 @@ def test_read_chain_state_cli_reads_single_primary_state(tmp_path: Path) -> None
     primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
     primary.parent.mkdir(parents=True, exist_ok=True)
     primary.write_text(
-        json.dumps({
-            "state_path": str(primary),
-            "project": "demo",
-            "resume_token": "token-a",
-            "archive_path": "/tmp/primary.md",
-            "created_at": "2026-05-13T16:00:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(primary),
+                "project": "demo",
+                "resume_token": "token-a",
+                "archive_path": "/tmp/primary.md",
+                "created_at": "2026-05-13T16:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -1092,13 +1104,15 @@ def test_read_chain_state_cli_field_state_outputs_json(tmp_path: Path) -> None:
     primary = tmp_path / ".codex" / "handoffs" / ".session-state" / "handoff-demo-token-a.json"
     primary.parent.mkdir(parents=True, exist_ok=True)
     primary.write_text(
-        json.dumps({
-            "state_path": str(primary),
-            "project": "demo",
-            "resume_token": "token-a",
-            "archive_path": "/tmp/primary.md",
-            "created_at": "2026-05-13T16:00:00Z",
-        }),
+        json.dumps(
+            {
+                "state_path": str(primary),
+                "project": "demo",
+                "resume_token": "token-a",
+                "archive_path": "/tmp/primary.md",
+                "created_at": "2026-05-13T16:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -1128,11 +1142,7 @@ def test_read_chain_state_cli_field_state_outputs_json(tmp_path: Path) -> None:
 
 
 def _residue_snapshot(root: Path, patterns: list[str]) -> set[str]:
-    return {
-        str(match.relative_to(root))
-        for pattern in patterns
-        for match in root.glob(pattern)
-    }
+    return {str(match.relative_to(root)) for pattern in patterns for match in root.glob(pattern)}
 
 
 def _plugin_residue_snapshot(plugin_root: Path) -> set[str]:
@@ -1168,7 +1178,8 @@ def test_state_shell_snippet_preserves_exit_2(tmp_path: Path) -> None:
 PLUGIN_ROOT="{plugin_root}"
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 READ_STATE_OUTPUT="$(
-  PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" read-state --state-dir "{state_dir}" --project demo --field state_path 2>&1
+  PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
+    read-state --state-dir "{state_dir}" --project demo --field state_path 2>&1
 )"
 READ_STATE_STATUS=$?
 case "$READ_STATE_STATUS" in
@@ -1197,7 +1208,8 @@ def test_state_shell_snippet_skips_clear_when_absent(tmp_path: Path) -> None:
 PLUGIN_ROOT="{plugin_root}"
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 READ_STATE_OUTPUT="$(
-  PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" read-state --state-dir "{state_dir}" --project demo --field state_path 2>&1
+  PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
+    read-state --state-dir "{state_dir}" --project demo --field state_path 2>&1
 )"
 READ_STATE_STATUS=$?
 printf 'READ_STATE_STATUS=%s\\n' "$READ_STATE_STATUS"
@@ -1208,12 +1220,15 @@ case "$READ_STATE_STATUS" in
   *) printf '%s\\n' "$READ_STATE_OUTPUT" >&2; exit "$READ_STATE_STATUS" ;;
 esac
 if [ -n "$STATE_PATH" ]; then
-  PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" clear-state --state-dir "{state_dir}" --state-path "$STATE_PATH"
+  PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
+    clear-state --state-dir "{state_dir}" --state-path "$STATE_PATH"
 else
   printf 'CLEAR_SKIPPED\\n'
 fi
 '''
-    result = subprocess.run(["/bin/zsh", "-lc", shell], capture_output=True, text=True, cwd=str(tmp_path))
+    result = subprocess.run(
+        ["/bin/zsh", "-lc", shell], capture_output=True, text=True, cwd=str(tmp_path)
+    )
     assert result.returncode == 0
     assert "READ_STATE_STATUS=1" in result.stdout
     assert "CLEAR_SKIPPED" in result.stdout

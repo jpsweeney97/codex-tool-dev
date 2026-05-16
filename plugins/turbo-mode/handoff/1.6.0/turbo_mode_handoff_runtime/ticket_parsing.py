@@ -4,6 +4,7 @@ Existing tickets use ```yaml ... ``` blocks (NOT --- frontmatter).
 handoff_parsing.py cannot parse this format. This module uses PyYAML
 for full YAML support including multiline values (files: arrays, etc.).
 """
+
 from __future__ import annotations
 
 import re
@@ -74,7 +75,16 @@ def parse_yaml_frontmatter(yaml_text: str) -> dict[str, Any] | None:
 _REQUIRED_FIELDS = ("id", "date", "status")
 _LIST_FIELDS = ("files", "blocked_by", "blocks", "related")
 _DICT_FIELDS = ("provenance",)
-_STRING_FIELDS = ("id", "date", "status", "priority", "source_type", "source_ref", "branch", "effort")
+_STRING_FIELDS = (
+    "id",
+    "date",
+    "status",
+    "priority",
+    "source_type",
+    "source_ref",
+    "branch",
+    "effort",
+)
 
 
 @dataclass(frozen=True)
