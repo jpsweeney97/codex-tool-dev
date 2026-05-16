@@ -16,9 +16,11 @@ from turbo_mode_handoff_runtime.chain_state import (
 from turbo_mode_handoff_runtime.storage_authority import (
     SelectionEligibility,
     StorageLocation,
+    _skip_reason,
     discover_handoff_inventory,
     eligible_active_candidates,
     eligible_history_candidates,
+    root_for_location,
 )
 
 
@@ -747,3 +749,55 @@ def test_chain_state_marker_status_returns_marker_unreadable_when_payload_malfor
 
     assert payload["total"] == 1
     assert payload["candidates"][0]["marker_status"] == "marker-unreadable"
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        StorageLocation.LEGACY_ARCHIVE,
+        StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE,
+    ],
+)
+def test_skip_reason_unit_equivalence_for_archive_locations(
+    tmp_path: Path, location: StorageLocation
+) -> None:
+    """Characterization (PR #15 #3, unit): the deleted location short-circuits
+    in `_skip_reason` were dead code (returned None before the existing
+    `return None`). Pin that a flat file at these roots is not skipped, while
+    the generic nested/hidden rules still apply."""
+    root = root_for_location(tmp_path, location)
+    root.mkdir(parents=True, exist_ok=True)
+
+    flat = root / "2026-05-13_12-00_a.md"
+    flat.write_text("---\nproject: demo\n---\n", encoding="utf-8")
+    nested = root / "sub" / "2026-05-13_12-00_b.md"
+    nested.parent.mkdir(parents=True, exist_ok=True)
+    nested.write_text("---\nproject: demo\n---\n", encoding="utf-8")
+    hidden = root / ".hidden.md"
+    hidden.write_text("---\nproject: demo\n---\n", encoding="utf-8")
+
+    assert _skip_reason(root, flat) is None
+    assert _skip_reason(root, nested) == "nested_file"
+    assert _skip_reason(root, hidden) == "hidden_basename"
+
+
+def test_discovery_does_not_skip_flat_archive_files(tmp_path: Path) -> None:
+    """Characterization (PR #15 #3, call site): through the real
+    discover_handoff_inventory path (which formerly passed the now-deleted
+    `location` arg), a flat handoff in legacy-archive and previous-primary-
+    hidden-archive must be discovered with skip_reason None; a nested one is
+    still skipped 'nested_file'. history-search covers both locations."""
+    legacy_root = root_for_location(tmp_path, StorageLocation.LEGACY_ARCHIVE)
+    hidden_root = root_for_location(
+        tmp_path, StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE
+    )
+    legacy_flat = _handoff(legacy_root / "2026-05-13_12-00_legacy.md")
+    hidden_flat = _handoff(hidden_root / "2026-05-13_12-00_hidden.md")
+    legacy_nested = _handoff(legacy_root / "sub" / "2026-05-13_12-00_nested.md")
+
+    inventory = discover_handoff_inventory(tmp_path, scan_mode="history-search")
+    by_path = {candidate.path: candidate for candidate in inventory.candidates}
+
+    assert by_path[legacy_flat.resolve()].skip_reason is None
+    assert by_path[hidden_flat.resolve()].skip_reason is None
+    assert by_path[legacy_nested.resolve()].skip_reason == "nested_file"

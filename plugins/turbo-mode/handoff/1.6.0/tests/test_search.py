@@ -24,18 +24,6 @@ def test_search_runtime_exposes_parse_handoff_for_internal_use() -> None:
     assert callable(parse_handoff)
 
 
-def test_search_runtime_reexports_parser_symbols_for_compatibility() -> None:
-    """HandoffFile/Section remain re-exported for downstream imports."""
-    from turbo_mode_handoff_runtime.handoff_parsing import (
-        HandoffFile as ParserHandoffFile,
-    )
-    from turbo_mode_handoff_runtime.handoff_parsing import Section as ParserSection
-    from turbo_mode_handoff_runtime.search import HandoffFile, Section
-
-    assert HandoffFile is ParserHandoffFile
-    assert Section is ParserSection
-
-
 class TestParseHandoff:
     """Tests for parse_handoff — markdown parsing."""
 

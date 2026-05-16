@@ -588,3 +588,27 @@ def test_release_lock_preserves_locks_dir_with_sibling(tmp_path: Path) -> None:
     assert not lock.exists()
     assert sibling.exists()
     assert lock.parent.exists()
+
+
+def test_registry_key_is_storage_primitives_owned() -> None:
+    import turbo_mode_handoff_runtime.load_transactions as load_transactions
+    import turbo_mode_handoff_runtime.storage_authority as storage_authority
+
+    assert callable(storage_primitives.registry_key)
+    # Both consumers must resolve the shared primitive, not a local copy — a
+    # divergence would silently misread consumed legacy state.
+    assert load_transactions._registry_key is storage_primitives.registry_key
+    assert storage_authority._registry_key is storage_primitives.registry_key
+    entry: dict[str, object] = {
+        "source_root": "/r",
+        "project_relative_source_path": "a/b.md",
+        "storage_location": "primary",
+        "source_content_sha256": "abc",
+        "extra": "ignored",
+    }
+    assert storage_primitives.registry_key(entry) == {
+        "source_root": "/r",
+        "project_relative_source_path": "a/b.md",
+        "storage_location": "primary",
+        "source_content_sha256": "abc",
+    }

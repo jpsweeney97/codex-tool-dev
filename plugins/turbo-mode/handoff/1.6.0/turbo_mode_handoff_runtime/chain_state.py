@@ -10,6 +10,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from turbo_mode_handoff_runtime import storage_primitives as _storage_primitives
+
+# StorageLocation is the intentional shared bridge type: storage_authority is the
+# discovery authority that names locations, and chain_state consumes that
+# classification. This one-way edge (chain_state -> storage_authority) is by
+# design and must stay one-way — storage_authority must never import chain_state
+# (that would re-introduce the cross-module cycle the reseam removed).
 from turbo_mode_handoff_runtime.storage_authority import StorageLocation
 from turbo_mode_handoff_runtime.storage_inspection import fs_status, git_visibility
 from turbo_mode_handoff_runtime.storage_layout import StorageLayout, get_storage_layout
@@ -53,7 +59,7 @@ def chain_state_recovery_inventory(
                 source_root="primary",
                 project_name=project_name,
             )
-            for path in _state_candidate_paths(layout.primary_state_dir, project_name)
+            for path in _chain_state_file_paths(layout.primary_state_dir, project_name)
         ],
         *[
             _chain_state_record(
@@ -63,7 +69,7 @@ def chain_state_recovery_inventory(
                 source_root="legacy",
                 project_name=project_name,
             )
-            for path in _state_candidate_paths(layout.legacy_state_dir, project_name)
+            for path in _chain_state_file_paths(layout.legacy_state_dir, project_name)
         ],
         *[
             _chain_state_record(
@@ -73,7 +79,7 @@ def chain_state_recovery_inventory(
                 source_root="legacy",
                 project_name=project_name,
             )
-            for path in _state_like_residue_paths(layout.legacy_active_dir, project_name)
+            for path in _chain_state_file_paths(layout.legacy_active_dir, project_name)
         ],
     ]
     return {
@@ -522,15 +528,13 @@ def _select_chain_state_candidate(
     return candidates[0]
 
 
-def _state_candidate_paths(root: Path, project_name: str) -> list[Path]:
-    if not root.exists() or not root.is_dir():
-        return []
-    paths = [root / f"handoff-{project_name}"]
-    paths.extend(sorted(root.glob(f"handoff-{project_name}-*.json")))
-    return [path for path in paths if path.is_file()]
+def _chain_state_file_paths(root: Path, project_name: str) -> list[Path]:
+    """Chain-state files for ``project_name`` directly under ``root``.
 
-
-def _state_like_residue_paths(root: Path, project_name: str) -> list[Path]:
+    The primary / legacy-state / state-like-residue distinction is the
+    caller's: it is expressed by which ``root`` is passed and the
+    ``storage_location`` the caller records, not by the scan itself.
+    """
     if not root.exists() or not root.is_dir():
         return []
     paths = [root / f"handoff-{project_name}"]
@@ -770,6 +774,11 @@ def _age_seconds(path: Path) -> int | None:
 
 
 def _read_json_object(path: Path) -> dict[str, object]:
+    # Deliberately NOT storage_primitives.read_json_object: chain-state marker
+    # reads must fail as ChainStateDiagnosticError (an operator-recovery
+    # contract), not ValueError, and a missing marker is normal (-> {}), not an
+    # error. Do not "simplify" to the shared primitive: it would change the
+    # error type and break the recovery contract.
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:

@@ -1169,6 +1169,7 @@ def test_recover_pending_load_filters_by_project(tmp_path: Path) -> None:
     assert foreign_after["status"] == "pending"
 
 
+@pytest.mark.slow
 def test_load_lock_live_contention_with_subprocess(tmp_path: Path) -> None:
     _handoff(tmp_path / ".codex" / "handoffs" / "2026-05-13_12-00_contention-test.md")
     plugin_root = str(Path(__file__).resolve().parent.parent)

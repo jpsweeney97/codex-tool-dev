@@ -2262,3 +2262,37 @@ def test_write_active_handoff_reports_corrupt_operation_state(tmp_path: Path) ->
             content="content",
             content_sha256=hashlib.sha256(b"content").hexdigest(),
         )
+
+
+def test_persist_operation_and_transaction_failure_leaves_operation_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Characterization (PR #15 #5): if the transaction write fails after the
+    operation-state write, the error propagates and operation state is on disk
+    (recovery keys off operation state, written first). The transaction file
+    must not exist."""
+    op_path = tmp_path / "active-writes" / "demo" / "run.json"
+    tx_path = tmp_path / "transactions" / "run.json"
+    state: dict[str, object] = {"project": "demo", "status": "write-pending"}
+
+    real_write = active_writes._write_json_atomic
+
+    def selective_write(path: Path, payload: dict[str, object]) -> None:
+        if path == tx_path:
+            raise OSError("transaction write failed")
+        real_write(path, payload)
+
+    monkeypatch.setattr(active_writes, "_write_json_atomic", selective_write)
+
+    with pytest.raises(OSError, match="transaction write failed"):
+        active_writes._persist_operation_and_transaction(
+            op_path,
+            tx_path,
+            state,
+            transaction_status="write-pending",
+        )
+
+    assert op_path.exists()
+    assert json.loads(op_path.read_text(encoding="utf-8"))["status"] == "write-pending"
+    assert not tx_path.exists()

@@ -27,6 +27,9 @@ from turbo_mode_handoff_runtime.storage_primitives import (
     read_json_object as _read_json_object_primitive,
 )
 from turbo_mode_handoff_runtime.storage_primitives import (
+    registry_key as _registry_key,
+)
+from turbo_mode_handoff_runtime.storage_primitives import (
     sha256_regular_file_or_none as _content_sha256,
 )
 
@@ -242,6 +245,14 @@ def _discover_markdown(
 ) -> list[HandoffCandidate]:
     if not root.exists() or not root.is_dir():
         return []
+    # rglob (not flat glob) is intentional: `root` may be an active dir whose
+    # archive/.archive/.session-state are nested subdirs (see storage_layout).
+    # rglob deliberately over-discovers; _skip_reason then filters nested_file /
+    # state_directory entries and the candidate classifier assigns the correct
+    # StorageLocation. A flat glob here would change the discovered set, so it
+    # must not be swapped naively. Watch trigger: revisit only if /load latency
+    # is reported or per-project handoff counts exceed ~500 (then split active
+    # vs archive into separate targeted scans rather than flatten this one).
     return [
         _candidate_for_path(
             project_root=project_root,
@@ -286,7 +297,7 @@ def _candidate_for_path(
     filename_timestamp = _filename_timestamp(path)
     content_sha256 = _content_sha256(path)
     document_profile = _document_profile(path, location=location, scan_mode=scan_mode)
-    skip_reason = _skip_reason(root_for_location(project_root, location), path, location)
+    skip_reason = _skip_reason(root_for_location(project_root, location), path)
     if skip_reason is not None:
         return HandoffCandidate(
             path=path.resolve(),
@@ -573,7 +584,7 @@ def _looks_like_current_contract(path: Path) -> bool:
     return {"project", "created_at", "session_id", "type"} <= keys
 
 
-def _skip_reason(root: Path, path: Path, location: StorageLocation) -> str | None:
+def _skip_reason(root: Path, path: Path) -> str | None:
     if path.name.startswith("."):
         return "hidden_basename"
     try:
@@ -586,10 +597,6 @@ def _skip_reason(root: Path, path: Path, location: StorageLocation) -> str | Non
         return "symlink"
     if path.parent != root:
         return "nested_file"
-    if location == StorageLocation.LEGACY_ARCHIVE:
-        return None
-    if location == StorageLocation.PREVIOUS_PRIMARY_HIDDEN_ARCHIVE:
-        return None
     return None
 
 
@@ -755,12 +762,3 @@ def _clean_table_cell(value: str) -> str:
 
 def _row_cell(row: dict[str, str], key: str) -> str:
     return row.get(key, "").strip()
-
-
-def _registry_key(entry: dict[str, object]) -> dict[str, str]:
-    return {
-        "source_root": str(entry.get("source_root", "")),
-        "project_relative_source_path": str(entry.get("project_relative_source_path", "")),
-        "storage_location": str(entry.get("storage_location", "")),
-        "source_content_sha256": str(entry.get("source_content_sha256", "")),
-    }

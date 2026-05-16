@@ -15,6 +15,7 @@ STALE_TOPOLOGY_PATTERNS = [
     r"`storage_authority\.py`[^.\n]*(owns|handles)[^.\n]*chain-state",
 ]
 REQUIRED_TOPOLOGY_CLAIMS = {
+    "`storage_primitives.py`": "filesystem primitives, locking protocol, and atomic write helpers",
     "`storage_layout.py`": "storage paths",
     "`storage_inspection.py`": "filesystem and git inspection",
     "`storage_authority.py`": "handoff discovery and selection",

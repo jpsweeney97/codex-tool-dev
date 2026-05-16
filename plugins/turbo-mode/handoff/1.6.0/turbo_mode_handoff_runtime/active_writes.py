@@ -460,6 +460,63 @@ def allocate_active_path(
     )
 
 
+def _write_content_to_active_path(active_path: Path, content: str, content_sha256: str) -> str:
+    """Atomically write ``content`` to ``active_path`` via temp file + rename.
+
+    Returns the temp path used. Raises ``ActiveWriteError`` on write failure or
+    a post-write hash mismatch. Pure file-write unit: no operation-state
+    coupling, so the caller still owns all transaction-state transitions.
+    """
+    try:
+        active_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = active_path.with_name(f".{active_path.name}.{uuid.uuid4().hex}.tmp")
+        temp_active_path = str(temp_path)
+        temp_path.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        raise ActiveWriteError(
+            "write-active-handoff failed: active output write failed. "
+            f"Got: {str(active_path)!r:.100}"
+        ) from exc
+    temp_hash = _sha256_path_required(
+        temp_path,
+        operation_label="write-active-handoff",
+        target_label="written active output",
+    )
+    if temp_hash != content_sha256:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise ActiveWriteError(
+            "write-active-handoff failed: written content hash mismatch. "
+            f"Got: {str(temp_path)!r:.100}"
+        )
+    os.replace(temp_path, active_path)
+    return temp_active_path
+
+
+def _persist_operation_and_transaction(
+    operation_state_path: Path,
+    transaction_path: Path,
+    state: dict[str, object],
+    *,
+    transaction_status: str,
+    transaction_active_path: str | None = None,
+) -> dict[str, object]:
+    """Persist operation state then the transaction record.
+
+    Operation state is always written first (unchanged ordering). The
+    transaction mirrors ``state`` with its own ``status`` and, when supplied,
+    an ``active_path``. Returns the transaction dict written.
+    """
+    _write_json_atomic(operation_state_path, state)
+    transaction: dict[str, object] = {**state, "status": transaction_status}
+    if transaction_active_path is not None:
+        transaction["active_path"] = transaction_active_path
+    _write_json_atomic(transaction_path, transaction)
+    return transaction
+
+
 def write_active_handoff(
     project_root: Path,
     *,
@@ -503,13 +560,11 @@ def write_active_handoff(
                     "updated_at": generated_at,
                 }
             )
-            _write_json_atomic(operation_state_path, state)
-            _write_json_atomic(
+            _persist_operation_and_transaction(
+                operation_state_path,
                 transaction_path,
-                {
-                    **state,
-                    "status": "content-generated",
-                },
+                state,
+                transaction_status="content-generated",
             )
         temp_active_path: str | None = None
         if active_path.exists():
@@ -528,31 +583,9 @@ def write_active_handoff(
                     f"Got: {str(active_path)!r:.100}"
                 )
         else:
-            try:
-                active_path.parent.mkdir(parents=True, exist_ok=True)
-                temp_path = active_path.with_name(f".{active_path.name}.{uuid.uuid4().hex}.tmp")
-                temp_active_path = str(temp_path)
-                temp_path.write_text(content, encoding="utf-8")
-            except OSError as exc:
-                raise ActiveWriteError(
-                    "write-active-handoff failed: active output write failed. "
-                    f"Got: {str(active_path)!r:.100}"
-                ) from exc
-            temp_hash = _sha256_path_required(
-                temp_path,
-                operation_label="write-active-handoff",
-                target_label="written active output",
+            temp_active_path = _write_content_to_active_path(
+                active_path, content, content_sha256
             )
-            if temp_hash != content_sha256:
-                try:
-                    temp_path.unlink()
-                except FileNotFoundError:
-                    pass
-                raise ActiveWriteError(
-                    "write-active-handoff failed: written content hash mismatch. "
-                    f"Got: {str(temp_path)!r:.100}"
-                )
-            os.replace(temp_path, active_path)
         updated_at = datetime.now(UTC).isoformat()
         state.update(
             {
@@ -564,14 +597,12 @@ def write_active_handoff(
                 "updated_at": updated_at,
             }
         )
-        _write_json_atomic(operation_state_path, state)
-        _write_json_atomic(
+        _persist_operation_and_transaction(
+            operation_state_path,
             transaction_path,
-            {
-                **state,
-                "status": "write-pending",
-                "active_path": str(active_path),
-            },
+            state,
+            transaction_status="write-pending",
+            transaction_active_path=str(active_path),
         )
         try:
             cleanup_action, cleanup_path, cleanup_mechanism = _clear_snapshotted_primary_state(
@@ -587,14 +618,12 @@ def write_active_handoff(
                     "updated_at": failed_at,
                 }
             )
-            _write_json_atomic(operation_state_path, state)
-            _write_json_atomic(
+            _persist_operation_and_transaction(
+                operation_state_path,
                 transaction_path,
-                {
-                    **state,
-                    "status": "cleanup_failed",
-                    "active_path": str(active_path),
-                },
+                state,
+                transaction_status="cleanup_failed",
+                transaction_active_path=str(active_path),
             )
             raise
         state.update(
@@ -606,13 +635,13 @@ def write_active_handoff(
                 "updated_at": datetime.now(UTC).isoformat(),
             }
         )
-        _write_json_atomic(operation_state_path, state)
-        transaction = {
-            **state,
-            "status": "completed",
-            "active_path": str(active_path),
-        }
-        _write_json_atomic(transaction_path, transaction)
+        transaction = _persist_operation_and_transaction(
+            operation_state_path,
+            transaction_path,
+            state,
+            transaction_status="completed",
+            transaction_active_path=str(active_path),
+        )
         return transaction
     finally:
         _release_lock(lock_path)

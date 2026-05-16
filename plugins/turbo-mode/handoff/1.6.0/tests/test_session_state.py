@@ -246,6 +246,152 @@ def test_prune_old_state_files_logs_per_file_oserror(
     assert repr(str(legacy))[:100] in captured.err
 
 
+def test_prune_old_state_files_prunes_terminal_transactions(tmp_path: Path) -> None:
+    state_dir = tmp_path / ".session-state"
+    state_dir.mkdir()
+    transactions = state_dir / "transactions"
+    transactions.mkdir()
+
+    def _aged(name: str, status: str, *, stale: bool) -> Path:
+        path = transactions / name
+        path.write_text(json.dumps({"status": status}), encoding="utf-8")
+        if stale:
+            old = path.stat().st_mtime - (25 * 60 * 60)
+            os.utime(path, (old, old))
+        return path
+
+    pending = _aged("pending.json", "pending", stale=True)
+    completed_old = _aged("completed-old.json", "completed", stale=True)
+    abandoned_old = _aged("abandoned-old.json", "abandoned", stale=True)
+    completed_fresh = _aged("completed-fresh.json", "completed", stale=False)
+
+    deleted = prune_old_state_files(state_dir=state_dir)
+
+    assert completed_old in deleted
+    assert abandoned_old in deleted
+    assert not completed_old.exists()
+    assert not abandoned_old.exists()
+    assert pending.exists()  # pending is in-flight: never pruned, even when stale
+    assert completed_fresh.exists()  # terminal but within TTL
+
+
+def test_prune_keeps_in_flight_and_recovery_write_transactions(tmp_path: Path) -> None:
+    """Regression (PR #15 review #1): non-'pending' in-flight / operator-recovery
+    write-transaction records must survive TTL prune."""
+    state_dir = tmp_path / ".session-state"
+    state_dir.mkdir()
+    transactions = state_dir / "transactions"
+    transactions.mkdir()
+
+    in_flight_statuses = [
+        "pending",
+        "pending_before_write",
+        "content-generated",
+        "content_mismatch",
+        "write-pending",
+        "cleanup_failed",
+        "reservation_conflict",
+    ]
+    kept: list[Path] = []
+    for status in in_flight_statuses:
+        path = transactions / f"{status}.json"
+        path.write_text(json.dumps({"status": status}), encoding="utf-8")
+        old = path.stat().st_mtime - (25 * 60 * 60)
+        os.utime(path, (old, old))
+        kept.append(path)
+
+    deleted = prune_old_state_files(state_dir=state_dir)
+
+    for path in kept:
+        assert path.exists(), f"{path.name} was pruned but is in-flight/recovery"
+        assert path not in deleted
+
+
+def test_prune_drops_terminal_unreadable_and_malformed_records_past_ttl(
+    tmp_path: Path,
+) -> None:
+    """Characterization: the allow-list still drops genuinely terminal records
+    and the documented unreadable/malformed/typeless cases (including a
+    present-but-non-string status value, which is malformed)."""
+    state_dir = tmp_path / ".session-state"
+    state_dir.mkdir()
+    transactions = state_dir / "transactions"
+    transactions.mkdir()
+
+    def _stale(name: str, body: str) -> Path:
+        path = transactions / name
+        path.write_text(body, encoding="utf-8")
+        old = path.stat().st_mtime - (25 * 60 * 60)
+        os.utime(path, (old, old))
+        return path
+
+    committed = _stale("committed.json", json.dumps({"status": "committed"}))
+    reservation_expired = _stale(
+        "reservation-expired.json", json.dumps({"status": "reservation_expired"})
+    )
+    invalid_json = _stale("garbage.json", "{not json")
+    non_dict = _stale("list.json", "[]")
+    no_status = _stale("no-status.json", json.dumps({"operation": "load"}))
+    junk_value = _stale("junk-value.json", json.dumps({"status": 42}))
+
+    deleted = prune_old_state_files(state_dir=state_dir)
+
+    for path in (
+        committed,
+        reservation_expired,
+        invalid_json,
+        non_dict,
+        no_status,
+        junk_value,
+    ):
+        assert not path.exists(), f"{path.name} should have been pruned"
+        assert path in deleted
+
+
+def test_prune_ttl_boundary_keeps_records_at_or_within_cutoff(tmp_path: Path) -> None:
+    """Characterization: prune uses `st_mtime >= cutoff -> keep`. A terminal
+    record within the TTL window is kept; strictly past it is dropped.
+
+    Note: the 'at cutoff' case uses a 2-second buffer above the computed cutoff
+    to avoid a race between the test's time.time() call and the one inside
+    prune_old_state_files(). The important invariant is the `>=` keep predicate
+    and that strictly-stale terminal records are pruned.
+    """
+    import time
+
+    state_dir = tmp_path / ".session-state"
+    state_dir.mkdir()
+    transactions = state_dir / "transactions"
+    transactions.mkdir()
+    cutoff = time.time() - (24 * 60 * 60)
+
+    def _at(name: str, mtime: float) -> Path:
+        path = transactions / name
+        path.write_text(json.dumps({"status": "completed"}), encoding="utf-8")
+        os.utime(path, (mtime, mtime))
+        return path
+
+    # +2 s buffer so this is safely above the function's own cutoff even with
+    # clock jitter between the two time.time() calls.
+    near_cutoff = _at("near-cutoff.json", cutoff + 2)
+    within = _at("within.json", cutoff + 5)
+    past = _at("past.json", cutoff - 5)
+
+    prune_old_state_files(state_dir=state_dir)
+
+    assert near_cutoff.exists()  # mtime >= cutoff -> kept
+    assert within.exists()
+    assert not past.exists()  # terminal and strictly past cutoff -> pruned
+
+
+def test_prune_handles_missing_transactions_dir(tmp_path: Path) -> None:
+    """Characterization: absent transactions/ dir must not raise."""
+    state_dir = tmp_path / ".session-state"
+    state_dir.mkdir()
+
+    assert prune_old_state_files(state_dir=state_dir) == []
+
+
 def test_session_state_cli_round_trip(tmp_path: Path) -> None:
     script = Path(__file__).parent.parent / "scripts" / "session_state.py"
     source = tmp_path / "handoff.md"
@@ -1164,6 +1310,7 @@ def _project_residue_snapshot(project_root: Path) -> set[str]:
     )
 
 
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh not available")
 def test_state_shell_snippet_preserves_exit_2(tmp_path: Path) -> None:
     plugin_root = Path(__file__).parent.parent
     plugin_before = _plugin_residue_snapshot(plugin_root)
@@ -1196,6 +1343,7 @@ esac
     assert _project_residue_snapshot(tmp_path) == project_before
 
 
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh not available")
 def test_state_shell_snippet_skips_clear_when_absent(tmp_path: Path) -> None:
     plugin_root = Path(__file__).parent.parent
     plugin_before = _plugin_residue_snapshot(plugin_root)

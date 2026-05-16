@@ -20,7 +20,10 @@ from turbo_mode_handoff_runtime.storage_authority import (
     discover_handoff_inventory,
     eligible_active_candidates,
 )
-from turbo_mode_handoff_runtime.storage_layout import get_storage_layout
+from turbo_mode_handoff_runtime.storage_layout import (
+    StorageLayout,
+    get_storage_layout,
+)
 from turbo_mode_handoff_runtime.storage_primitives import (
     LockPolicy,
 )
@@ -29,6 +32,9 @@ from turbo_mode_handoff_runtime.storage_primitives import (
 )
 from turbo_mode_handoff_runtime.storage_primitives import (
     read_json_object as _read_json_object,
+)
+from turbo_mode_handoff_runtime.storage_primitives import (
+    registry_key as _registry_key,
 )
 from turbo_mode_handoff_runtime.storage_primitives import (
     release_lock as _release_lock,
@@ -286,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
-def _recover_pending_load(layout, *, project: str) -> LoadResult | None:
+def _recover_pending_load(layout: StorageLayout, *, project: str) -> LoadResult | None:
     transactions_dir = layout.primary_state_dir / "transactions"
     if not transactions_dir.exists():
         return None
@@ -318,7 +324,7 @@ def _recover_pending_load(layout, *, project: str) -> LoadResult | None:
 
 
 def _recover_load_transaction(
-    layout,
+    layout: StorageLayout,
     transaction_path: Path,
     record: dict[str, object],
 ) -> LoadResult | None:
@@ -372,7 +378,7 @@ def _recover_load_transaction(
 
 
 def _resolve_pending_archive_path(
-    layout,
+    layout: StorageLayout,
     transaction_path: Path,
     record: dict[str, object],
 ) -> Path | None:
@@ -443,7 +449,7 @@ def _resolve_pending_archive_path(
 
 
 def _adopt_primary_active_archive_by_hash(
-    layout,
+    layout: StorageLayout,
     transaction_path: Path,
     record: dict[str, object],
 ) -> Path:
@@ -498,7 +504,7 @@ def _abandon_pending_load_for_retry(
 
 
 def _registry_archive_for_pending_legacy_active(
-    layout,
+    layout: StorageLayout,
     record: dict[str, object],
 ) -> Path | None:
     return _lookup_pending_legacy_archive(
@@ -510,7 +516,7 @@ def _registry_archive_for_pending_legacy_active(
 
 
 def _registry_archive_for_pending_legacy_archive(
-    layout,
+    layout: StorageLayout,
     record: dict[str, object],
 ) -> Path | None:
     return _lookup_pending_legacy_archive(
@@ -522,7 +528,7 @@ def _registry_archive_for_pending_legacy_archive(
 
 
 def _lookup_pending_legacy_archive(
-    layout,
+    layout: StorageLayout,
     record: dict[str, object],
     *,
     registry_path: Path,
@@ -558,7 +564,7 @@ def _lookup_pending_legacy_archive(
 
 
 def _recover_consumed_legacy_active(
-    layout,
+    layout: StorageLayout,
     record: dict[str, object],
     *,
     archive_path: Path,
@@ -608,7 +614,7 @@ def _recover_consumed_legacy_active(
 
 
 def _recover_copied_legacy_archive(
-    layout,
+    layout: StorageLayout,
     record: dict[str, object],
     *,
     archive_path: Path,
@@ -734,7 +740,7 @@ def _ensure_loadable(candidate: HandoffCandidate) -> None:
 
 
 def _copy_legacy_archive(
-    layout,
+    layout: StorageLayout,
     candidate: HandoffCandidate,
 ) -> Path:
     registry_path = layout.primary_state_dir / "copied-legacy-archives.json"
@@ -762,7 +768,7 @@ def _copy_legacy_archive(
 
 
 def _record_copied_legacy_archive(
-    layout,
+    layout: StorageLayout,
     candidate: HandoffCandidate,
     *,
     copied_archive_path: Path,
@@ -799,7 +805,7 @@ def _record_copied_legacy_archive(
     _write_json_atomic(registry_path, registry)
 
 
-def _copy_legacy_active(layout, candidate: HandoffCandidate) -> Path:
+def _copy_legacy_active(layout: StorageLayout, candidate: HandoffCandidate) -> Path:
     consumed_archive_path = _verified_consumed_legacy_active_archive(layout, candidate)
     if consumed_archive_path is not None:
         return consumed_archive_path
@@ -831,7 +837,7 @@ def _copy_to_archive_atomic(
 
 
 def _verified_consumed_legacy_active_archive(
-    layout,
+    layout: StorageLayout,
     candidate: HandoffCandidate,
 ) -> Path | None:
     registry_path = layout.primary_state_dir / "consumed-legacy-active.json"
@@ -856,7 +862,7 @@ def _verified_consumed_legacy_active_archive(
 
 
 def _consume_legacy_active(
-    layout,
+    layout: StorageLayout,
     candidate: HandoffCandidate,
     *,
     copied_archive_path: Path,
@@ -925,15 +931,6 @@ def _legacy_active_key(project_root: Path, candidate: HandoffCandidate) -> dict[
         "project_relative_source_path": candidate.path.relative_to(project_root).as_posix(),
         "storage_location": candidate.storage_location,
         "source_content_sha256": candidate.content_sha256 or "",
-    }
-
-
-def _registry_key(entry: dict[str, object]) -> dict[str, str]:
-    return {
-        "source_root": str(entry.get("source_root", "")),
-        "project_relative_source_path": str(entry.get("project_relative_source_path", "")),
-        "storage_location": str(entry.get("storage_location", "")),
-        "source_content_sha256": str(entry.get("source_content_sha256", "")),
     }
 
 
