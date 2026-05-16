@@ -126,6 +126,21 @@ def read_json_object(
     return payload
 
 
+def registry_key(entry: dict[str, object]) -> dict[str, str]:
+    """Stable identity key for a consumed-legacy-active registry entry.
+
+    Shared by ``load_transactions`` and ``storage_authority`` so the on-disk
+    registry schema has exactly one key derivation; a divergence here would
+    silently misread consumed legacy state. Stdlib-only; no internal imports.
+    """
+    return {
+        "source_root": str(entry.get("source_root", "")),
+        "project_relative_source_path": str(entry.get("project_relative_source_path", "")),
+        "storage_location": str(entry.get("storage_location", "")),
+        "source_content_sha256": str(entry.get("source_content_sha256", "")),
+    }
+
+
 def write_text_atomic_exclusive(
     path: Path,
     payload: str,

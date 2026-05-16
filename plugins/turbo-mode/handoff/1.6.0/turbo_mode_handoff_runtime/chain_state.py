@@ -59,7 +59,7 @@ def chain_state_recovery_inventory(
                 source_root="primary",
                 project_name=project_name,
             )
-            for path in _state_candidate_paths(layout.primary_state_dir, project_name)
+            for path in _chain_state_file_paths(layout.primary_state_dir, project_name)
         ],
         *[
             _chain_state_record(
@@ -69,7 +69,7 @@ def chain_state_recovery_inventory(
                 source_root="legacy",
                 project_name=project_name,
             )
-            for path in _state_candidate_paths(layout.legacy_state_dir, project_name)
+            for path in _chain_state_file_paths(layout.legacy_state_dir, project_name)
         ],
         *[
             _chain_state_record(
@@ -79,7 +79,7 @@ def chain_state_recovery_inventory(
                 source_root="legacy",
                 project_name=project_name,
             )
-            for path in _state_like_residue_paths(layout.legacy_active_dir, project_name)
+            for path in _chain_state_file_paths(layout.legacy_active_dir, project_name)
         ],
     ]
     return {
@@ -528,15 +528,13 @@ def _select_chain_state_candidate(
     return candidates[0]
 
 
-def _state_candidate_paths(root: Path, project_name: str) -> list[Path]:
-    if not root.exists() or not root.is_dir():
-        return []
-    paths = [root / f"handoff-{project_name}"]
-    paths.extend(sorted(root.glob(f"handoff-{project_name}-*.json")))
-    return [path for path in paths if path.is_file()]
+def _chain_state_file_paths(root: Path, project_name: str) -> list[Path]:
+    """Chain-state files for ``project_name`` directly under ``root``.
 
-
-def _state_like_residue_paths(root: Path, project_name: str) -> list[Path]:
+    The primary / legacy-state / state-like-residue distinction is the
+    caller's: it is expressed by which ``root`` is passed and the
+    ``storage_location`` the caller records, not by the scan itself.
+    """
     if not root.exists() or not root.is_dir():
         return []
     paths = [root / f"handoff-{project_name}"]
