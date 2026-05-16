@@ -51,7 +51,7 @@ Verified by reading `turbo_mode_handoff_runtime/active_writes.py` at commit `6d4
 | `reservation_expired` | :404 (auto-expire) ; :952 (write path) | scenarios `reservation_expired`, `auto_expire` |
 | `reservation_conflict` | :991 (snapshot) ; :1031 (watermark) | scenarios `conflict_snapshot`, `conflict_watermark` |
 
-**Discriminating invariant (the stop-tripwire):** `committed` ∈ operation-state domain only; `completed` ∈ transaction domain only. Additionally `begun` is a *persisted* operation-state-only status, and `unreadable` is a synthetic operation-state-shaped status that is never persisted at all. All other statuses appear in both domains. If any *write* (not just final state) ever puts `completed` into an operation-state file, or `committed`/`begun`/`unreadable` into a transaction file, the source-domain model is wrong — **STOP** (see Stop Conditions). The `unreadable` arm of this tripwire asserts an invariant that must hold *trivially* — `unreadable` is never written by any flow — so if the Task 3 write-spy ever observes it, the synthetic-record assumption itself is false (Stop Condition 1 / Gate G3).
+**Discriminating invariant (the stop-tripwire):** `committed` ∈ operation-state domain only; `completed` ∈ transaction domain only. Additionally `begun` is a *persisted* operation-state-only status, and `unreadable` is a synthetic operation-state-shaped status that is never persisted at all. All other statuses appear in both domains. If any *write* (not just final state) ever puts `completed` or `unreadable` into an operation-state file, or `committed`/`begun`/`unreadable` into a transaction file, the source-domain model is wrong — **STOP** (see Stop Conditions). The `unreadable` arm of this tripwire asserts an invariant that must hold *trivially* — `unreadable` is never written by any flow — so if the Task 3 write-spy ever observes it, the synthetic-record assumption itself is false (Stop Condition 1 / Gate G3).
 
 **Correctness note (was a latent plan defect, now pinned):** on the *write-path* content-mismatch (`write_active_handoff`), only the operation-state record is updated to `content_mismatch` (active_writes.py:580 writes operation state only); the transaction record is left at its last value, `content-generated` (:567). Transaction `content_mismatch` is produced **only** by the recovery path (:781). Task 3 asserts exactly this — it does not assume the transaction becomes `content_mismatch` on the write path.
 
@@ -63,8 +63,8 @@ This is an execution-control document. Honor these gates.
 
 **Stop conditions (halt and report; do not proceed):**
 
-1. **Domain-model tripwire (Codex dialogue evidence (i)), now write-granular:** If the Task 3 write-spy observes ANY call writing `completed` into a path under `.../active-writes/`, or `committed`/`begun`/`unreadable` into a path under `.../transactions/` — at *any* point in a lifecycle, including transient/intermediate writes — the partition model is falsified. Stop, convert Task 3 into lifecycle bug-triage, do NOT land the aliases as written.
-2. **Noise-threshold tripwire (dialogue evidence (ii)) — measured as a delta, never inferred:** *Introduced count* = (Task 4 Step 3 post-annotation pyright `--stats` error count) − (Task 2 Step 1 pre-annotation baseline error count). Both probes MUST use the **identical command and scope**: `pyright --stats turbo_mode_handoff_runtime/active_writes.py` — deliberately the single annotated file (the annotation's blast radius), narrower than the Task 5 package-wide CI surface; the two scopes are **not** cross-compared. If the introduced delta exceeds ~3 new `cast(...)`/`# type: ignore`/`Any` widenings (NOT pre-existing unrelated `dict[str, object]` findings), drop scope: keep Tasks 0, 1, 3, 5 (alias + runtime gate + CI advisory), file a tracked baseline-reduction ticket, do NOT land Task 2. Record the baseline count, the post count, and the delta in the closeout. (Expected delta: 0 — every `transaction_status` call site passes a string literal; this a-priori expectation does NOT substitute for capturing the baseline.)
+1. **Domain-model tripwire (Codex dialogue evidence (i)), now write-granular:** If the Task 3 write-spy observes ANY call writing `completed` or `unreadable` into a path under `.../active-writes/`, or `committed`/`begun`/`unreadable` into a path under `.../transactions/` — at *any* point in a lifecycle, including transient/intermediate writes — the partition model is falsified. Stop, convert Task 3 into lifecycle bug-triage, do NOT land the aliases as written. (The `unreadable`-into-operation-state arm is caught per-scenario by `WriteSpy.assert_partitioned`'s op branch — Round-4 finding F5; previously only the coverage test's tail assertion caught it.)
+2. **Noise-threshold tripwire (dialogue evidence (ii)) — measured as a delta, never inferred:** *Introduced count* = (Task 4 Step 3 post-annotation pyright `--stats` error count) − (Task 2 Step 1 pre-annotation baseline error count). Both probes MUST use the **identical command and scope**: `pyright --stats turbo_mode_handoff_runtime/active_writes.py` — deliberately the single annotated file (the annotation's blast radius), narrower than the Task 5 package-wide CI surface; the two scopes are **not** cross-compared. If the introduced delta exceeds ~3 new `cast(...)`/`# type: ignore`/`Any` widenings (NOT pre-existing unrelated `dict[str, object]` findings), drop scope: keep Tasks 0, 1, 3, 5 (alias + runtime gate + CI advisory), file a tracked baseline-reduction ticket, do NOT land Task 2. Record the baseline count, the post count, and the delta in the closeout. (Expected delta: 0 — every `transaction_status` call site passes a string literal; this a-priori expectation does NOT substitute for capturing the baseline.) **SC2 validity precondition (Round-4 finding F2):** the delta is meaningful ONLY if BOTH probes actually analyzed the file. There is no `pyrightconfig.json` and no `[tool.pyright]` in the plugin (verified), so a single-file `pyright` run under `uv run --with pyright` can fail to resolve `turbo_mode_handoff_runtime.*` and emit only `reportMissingImports`; baseline and post would then both be import-noise and the delta a vacuous ~0 (a false PASS that proves nothing about the annotation). Each probe MUST pass the validity guard: (a) NO unresolved-import diagnostic for `turbo_mode_handoff_runtime` (`reportMissingImports` / `could not be resolved`), and (b) a real `N errors, M warnings, …` summary line is present. If either probe fails the guard, SC2 is **INVALID** — treat it as a stop: fix the invocation (add a `pyrightconfig.json`, or pass `--pythonpath`/`--project` so the package resolves) and re-measure. Do NOT infer a 0 delta and do NOT land Task 2 on an unproven probe.
 3. **Coverage-gap tripwire (round-2 review Finding 2):** If `test_observed_status_coverage` shows any runtime-reachable alias member (every member except the explicitly-enumerated `unreadable`) was NOT observed by the write-spy *in its own status domain* (operation-state members in operation-state writes; transaction members in transaction writes — a domain-blind union does NOT satisfy this), STOP — the gate does not actually prove the partition; investigate the missing path before landing docs/ADR claims of runtime enforcement.
 4. Repo-level: any destructive cleanup decision, stale runtime state, or generated residue blocking verification — name it and the decision needed.
 
@@ -72,9 +72,9 @@ This is an execution-control document. Honor these gates.
 
 - **G0 (after Task 0):** branch `feature/handoff-active-write-status-partition` exists off `main`; this plan file is committed (tracked) so later ADR/closeout references resolve to a real artifact.
 - **G1 (after Task 1):** new partition test green; full Handoff suite green; ruff clean on changed paths.
-- **G2 (after Task 2):** Task 2 Step 1 pre-annotation pyright baseline captured to `/tmp/handoff-partition-pyright-baseline.txt` (same command/scope as the Task 4 Step 3 probe) BEFORE the annotation edit, so Stop Condition 2's introduced-count is a real delta and not an inferred 0; full Handoff suite still green (annotation is behavior-preserving); ruff clean.
+- **G2 (after Task 2):** Task 2 Step 1 pre-annotation pyright baseline captured to `/tmp/handoff-partition-pyright-baseline.txt` (same command/scope as the Task 4 Step 3 probe) BEFORE the annotation edit, so Stop Condition 2's introduced-count is a real delta and not an inferred 0; **the baseline passes the SC2 validity guard** (pyright resolved `turbo_mode_handoff_runtime`, real summary line present — not import-only noise); full Handoff suite still green (annotation is behavior-preserving); ruff clean.
 - **G3 (after Task 3):** all 12 lifecycle-matrix scenarios green; `test_observed_status_coverage` green AND `RUNTIME_OP_MEMBERS ⊆ observed["op"]` and `RUNTIME_TX_MEMBERS ⊆ observed["tx"]` (per-domain, not a domain-blind union). The only excepted member is `unreadable`, enumerated as static-pin-only with rationale: it is a synthetic unreadable-record marker, never written via the `_write_json_atomic` chokepoint by any lifecycle or recovery flow. Stop Condition 3 applies if any other member is unobserved in its own domain.
-- **G4 (after Task 4):** consistency test green; pyright introduced-count recorded as the measured delta (Task 4 Step 3 post − Task 2 Step 1 baseline, identical command/scope); `git diff` shows ZERO changes to `session_state.py`.
+- **G4 (after Task 4):** consistency test green; the Task 4 Step 3 post-probe passes the SC2 validity guard (same guard as G2); pyright introduced-count recorded as the measured delta (Task 4 Step 3 post − Task 2 Step 1 baseline, identical command/scope, both probes valid); `git diff` shows ZERO changes to `session_state.py`.
 - **G5 (after Task 5):** workflow YAML parses; pyright step is `continue-on-error: true` with NO `|| true` swallow and captures `pyright --version`; existing pytest steps byte-for-byte unchanged.
 
 **Commit boundaries (one coherent commit per task, surfaces not mixed):** T0 plan-as-authority · T1 source alias + pin test · T2 single annotation · T3 write-spy runtime gate · T4 layering-safe consistency test · T5 CI advisory · T6 docs/ADR/closeout.
@@ -353,9 +353,20 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   > /tmp/handoff-partition-pyright-baseline.txt 2>&1
 echo "pyright baseline exit: $?"
 tail -5 /tmp/handoff-partition-pyright-baseline.txt
+
+# SC2 validity guard (Round-4 finding F2) — a vacuous probe must STOP, not
+# silently yield delta 0. Adjust the unresolved-import / summary-line tokens
+# to the installed pyright's wording if it differs; the intent is fixed.
+if grep -Eq 'reportMissingImports|could not be resolved' /tmp/handoff-partition-pyright-baseline.txt; then
+  echo "SC2 BASELINE INVALID: pyright did not resolve turbo_mode_handoff_runtime; delta would be vacuous. Apply Stop Condition 2 INVALID arm (fix invocation, re-measure)."
+elif ! grep -Eq '[0-9]+ error.?, [0-9]+ warning.?, [0-9]+ info' /tmp/handoff-partition-pyright-baseline.txt; then
+  echo "SC2 BASELINE INVALID: no pyright summary line; probe did not complete. Apply Stop Condition 2 INVALID arm."
+else
+  echo "SC2 BASELINE VALID: package resolved, summary line present."
+fi
 ```
 
-The exit status is captured by a **separate** `echo` (not `| tail`-swallowed — same hardening as Task 4 Step 3). `/tmp/handoff-partition-pyright-baseline.txt` is execution-time evidence, NOT committed (consistent with the Task 4 Step 3 probe file; the Task 2 commit still contains only `active_writes.py`). Transcribe the `pyright --version` line, the `--stats` error/warning counts, and the `pyright baseline exit:` value into the Task 6 closeout "Pre-Task-2 baseline" slot. Stop Condition 2's introduced count = (Task 4 Step 3 post error count) − (this baseline error count), same command/scope.
+The exit status is captured by a **separate** `echo` (not `| tail`-swallowed — same hardening as Task 4 Step 3). The SC2 validity guard is mandatory (Gate G2): if it prints `SC2 BASELINE INVALID`, do NOT proceed to Step 2 — apply Stop Condition 2's INVALID arm (fix the pyright invocation so `turbo_mode_handoff_runtime` resolves, then re-capture the baseline). A vacuous baseline makes the whole SC2 delta meaningless. `/tmp/handoff-partition-pyright-baseline.txt` is execution-time evidence, NOT committed (consistent with the Task 4 Step 3 probe file; the Task 2 commit still contains only `active_writes.py`). Transcribe the `pyright --version` line, the `--stats` error/warning counts, and the `pyright baseline exit:` value into the Task 6 closeout "Pre-Task-2 baseline" slot. Stop Condition 2's introduced count = (Task 4 Step 3 post error count) − (this baseline error count), same command/scope.
 
 - [ ] **Step 2: Annotate `_persist_operation_and_transaction`'s `transaction_status`**
 
@@ -400,7 +411,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 **Files:**
 - Test: `plugins/turbo-mode/handoff/1.6.0/tests/test_active_write_lifecycle_matrix.py` (create)
 
-This test, not the annotations, is what prevents the PR #15 bug class under the repo's ruff+pytest gate. It monkeypatches the single atomic-write chokepoint (`active_writes._write_json_atomic`, aliased from `storage_primitives.write_json_atomic` at active_writes.py:43; every op-state, transaction, transient, conflict and recovery write funnels through it) and asserts the partition on the **complete write history** of every reachable path — not just final file state. Coverage is asserted **per status domain** via `WriteSpy.observed_by_domain()`, not a domain-blind union (round-2 review Finding 2). Setups for the conflict, recovery, cleanup-failure, and auto-expire scenarios are copied from existing **named passing** tests in `tests/test_active_writes.py` (no invented setup); the previously-synthetic `_drive_cleanup_failed` now copies `test_write_active_handoff_persists_cleanup_failed_when_both_mechanisms_fail` so the genuine cleanup path runs (round-2 review Finding 4). The driver set covers **every** `_write_json_atomic` status write site, including recovery-success and begin-time auto-expire (round-2 review Finding 1); the only status not driven through the chokepoint is the synthetic `unreadable` record, which is never written via `_write_json_atomic` by any flow.
+This test, not the annotations, is what prevents the PR #15 bug class under the repo's ruff+pytest gate. It monkeypatches the single atomic-write chokepoint (`active_writes._write_json_atomic`, aliased from `storage_primitives.write_json_atomic` at active_writes.py:43; every op-state, transaction, transient, conflict and recovery write funnels through it) and asserts the partition on the **complete write history** of every reachable path — not just final file state. Coverage is asserted **per status domain** via `WriteSpy.observed_by_domain()`, not a domain-blind union (round-2 review Finding 2). Setups for the conflict, recover-pending/mismatch, cleanup-failure, auto-expire, and reservation-expired scenarios are **verbatim-faithful copies** of existing **named passing direct-API** tests in `tests/test_active_writes.py` (no invented setup); `_drive_recover_success` is a behavior-verified direct-API **equivalent** of the subprocess/CLI test `test_active_write_transaction_recover_commits_verified_written_output` (NOT a verbatim copy — exact provenance in Self-Review §2 / Round-4 F1). The previously-synthetic `_drive_cleanup_failed` now copies `test_write_active_handoff_persists_cleanup_failed_when_both_mechanisms_fail` so the genuine cleanup path runs (round-2 review Finding 4); `_drive_reservation_expired` now copies `test_write_active_handoff_rejects_expired_reservation_before_output_write` (deterministic past-timestamp expiry, not a wall-clock race — Round-4 F4). The driver set covers **every** `_write_json_atomic` status write site, including recovery-success and begin-time auto-expire (round-2 review Finding 1); the only status not driven through the chokepoint is the synthetic `unreadable` record, which is never written via `_write_json_atomic` by any flow.
 
 - [ ] **Step 1: Create the lifecycle-matrix test**
 
@@ -415,8 +426,8 @@ included), for every reachable lifecycle path. This is the runtime
 enforcement of the partition (the Literal aliases have no teeth under the
 repo's ruff+pytest gate).
 
-Tripwire (Stop Condition 1): if any write puts 'completed' into a
-.../active-writes/ path, or 'committed'/'begun'/'unreadable' into a
+Tripwire (Stop Condition 1): if any write puts 'completed' or 'unreadable'
+into a .../active-writes/ path, or 'committed'/'begun'/'unreadable' into a
 .../transactions/ path, the source-domain model is falsified -- STOP.
 """
 
@@ -483,8 +494,14 @@ class WriteSpy:
                 assert status in OP_MEMBERS, (
                     f"{scenario}: op write status {status!r} not in op alias"
                 )
-                assert status != "completed", (
-                    f"{scenario}: TRIPWIRE 'completed' written to operation-state file"
+                # 'completed' is tx-only; 'unreadable' is synthetic and must
+                # never be persisted to ANY domain (Round-4 finding F5 -- the
+                # op arm was previously missing, so unreadable-into-op was
+                # only caught by the coverage test's tail assertion, not the
+                # per-scenario tripwire). 'unreadable' is in OP_MEMBERS so the
+                # membership assert above does not catch it.
+                assert status not in {"completed", "unreadable"}, (
+                    f"{scenario}: TRIPWIRE {status!r} written to operation-state file"
                 )
             elif domain == "tx":
                 assert status in TX_MEMBERS, (
@@ -562,8 +579,22 @@ def _drive_abandon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> WriteSpy:
 def _drive_reservation_expired(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> WriteSpy:
+    # Copied setup: test_active_writes.py::
+    # test_write_active_handoff_rejects_expired_reservation_before_output_write
+    # Deterministic expiry trigger: a hard past lease_expires_at, NOT a
+    # lease_seconds=0 + wall-clock race (Round-4 finding F4). datetime.now is
+    # non-monotonic; an NTP step-back between begin and the freshness check
+    # must not un-expire a regression-gate scenario. The hand-edit is a plain
+    # write_text (NOT _write_json_atomic) so the spy does not record the
+    # setup mutation -- only the begin writes and the reservation_expired
+    # write-path writes are spied.
     spy = _install_spy(monkeypatch)
-    res = _begin(tmp_path, slug="expired", lease_seconds=0)
+    res = _begin(tmp_path, slug="expired")
+    state = _read(res.operation_state_path)
+    state["lease_expires_at"] = "2000-01-01T00:00:00+00:00"
+    res.operation_state_path.write_text(
+        json.dumps(state, indent=2), encoding="utf-8"
+    )
     content = "body"
     with pytest.raises(active_writes.ActiveWriteError, match="reservation expired"):
         active_writes.write_active_handoff(
@@ -795,15 +826,18 @@ def _drive_recover_mismatch(
 def _drive_recover_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> WriteSpy:
-    # Copied setup: test_active_writes.py::
+    # Direct-API EQUIVALENT (NOT a verbatim copy -- Round-4 F1) of:
+    # test_active_writes.py::
     # test_active_write_transaction_recover_commits_verified_written_output
-    # (direct-API form, matching the other drivers). This is the ONLY
-    # driver that exercises the recovery-success write site
-    # (active_writes.py:804 op->'committed', :811 tx->'completed') -- the
-    # single most dangerous site to leave unguarded because it writes BOTH
-    # discriminating terminals. Its absence was the blocking review
-    # finding; the plan's own vocabulary table had admitted "recover happy
-    # not driven".
+    # That named test is a subprocess/CLI test; this driver is the
+    # behavior-verified direct-API form, matching the other drivers. The
+    # equivalence (written_not_confirmed -> op 'committed' :804 / tx
+    # 'completed' :811, no snapshot paths) was traced against live source.
+    # This is the ONLY driver that exercises the recovery-success write
+    # site -- the single most dangerous site to leave unguarded because it
+    # writes BOTH discriminating terminals. Its absence was the blocking
+    # round-2 finding; the plan's own vocabulary table had admitted
+    # "recover happy not driven".
     spy = _install_spy(monkeypatch)
     res = _begin(tmp_path, slug="recover-success")
     content = "---\ntitle: Recover\n---\n\n# Written\n"
@@ -1020,9 +1054,20 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   > /tmp/handoff-partition-pyright.txt 2>&1
 echo "pyright probe exit: $?"
 tail -5 /tmp/handoff-partition-pyright.txt
+
+# SC2 validity guard on the POST probe (Round-4 finding F2, Gate G4) — same
+# guard as Task 2 Step 1; both probes must be valid for the delta to mean
+# anything.
+if grep -Eq 'reportMissingImports|could not be resolved' /tmp/handoff-partition-pyright.txt; then
+  echo "SC2 POST INVALID: pyright did not resolve turbo_mode_handoff_runtime; delta would be vacuous. Apply Stop Condition 2 INVALID arm."
+elif ! grep -Eq '[0-9]+ error.?, [0-9]+ warning.?, [0-9]+ info' /tmp/handoff-partition-pyright.txt; then
+  echo "SC2 POST INVALID: no pyright summary line; probe did not complete. Apply Stop Condition 2 INVALID arm."
+else
+  echo "SC2 POST VALID: package resolved, summary line present."
+fi
 ```
 
-This post-annotation probe uses the **identical command and scope** as the Task 2 Step 1 pre-annotation baseline (`pyright --stats turbo_mode_handoff_runtime/active_writes.py` — the single annotated file, the annotation's blast radius). The output is redirected to a file and the `uv run` exit status is captured by a **separate** `echo` (no `| tail` swallowing it — round-2 review Finding 3). Transcribe the full `/tmp/handoff-partition-pyright.txt` (the `pyright --version` line, the `--stats` error/warning counts) and the printed `pyright probe exit:` value into the Task 6 closeout artifact `docs/superpowers/plans/2026-05-16-handoff-active-write-status-partition-closeout.md` (created and committed in Task 6 Step 4 / Step 6). **Apply Stop Condition 2 as a measured delta:** introduced count = (this probe's `--stats` error count) − (the Task 2 Step 1 `/tmp/handoff-partition-pyright-baseline.txt` error count). The a-priori expectation is 0 (every `transaction_status` call site passes a string literal), but the closeout MUST record the actual measured delta, not the expectation. If the delta is >~3 new suppressions/errors, halt and drop Task 2 per the plan, and record that decision in the closeout. Note: the Task 5 CI step deliberately runs the broader package-wide scope (`turbo_mode_handoff_runtime/`); that count is NOT the SC2 measurement and is never differenced against this file-scoped pair.
+If the post probe prints `SC2 POST INVALID`, Gate G4 fails — apply Stop Condition 2's INVALID arm (fix the invocation, re-measure BOTH probes identically) rather than recording a delta. This post-annotation probe uses the **identical command and scope** as the Task 2 Step 1 pre-annotation baseline (`pyright --stats turbo_mode_handoff_runtime/active_writes.py` — the single annotated file, the annotation's blast radius). The output is redirected to a file and the `uv run` exit status is captured by a **separate** `echo` (no `| tail` swallowing it — round-2 review Finding 3). Transcribe the full `/tmp/handoff-partition-pyright.txt` (the `pyright --version` line, the `--stats` error/warning counts) and the printed `pyright probe exit:` value into the Task 6 closeout artifact `docs/superpowers/plans/2026-05-16-handoff-active-write-status-partition-closeout.md` (created and committed in Task 6 Step 4 / Step 6). **Apply Stop Condition 2 as a measured delta:** introduced count = (this probe's `--stats` error count) − (the Task 2 Step 1 `/tmp/handoff-partition-pyright-baseline.txt` error count). The a-priori expectation is 0 (every `transaction_status` call site passes a string literal), but the closeout MUST record the actual measured delta, not the expectation. If the delta is >~3 new suppressions/errors, halt and drop Task 2 per the plan, and record that decision in the closeout. Note: the Task 5 CI step deliberately runs the broader package-wide scope (`turbo_mode_handoff_runtime/`); that count is NOT the SC2 measurement and is never differenced against this file-scoped pair.
 
 - [ ] **Step 4: Confirm zero `session_state.py` change (Gate G4) + commit**
 
@@ -1136,9 +1181,9 @@ pyright CI step is the cheap precision surface.
 terminal set, kept aligned via a test-layer check (no `session_state` →
 `active_writes` module import — that would invert this layering).
 
-Tripwires: (i) any write putting `completed` into an operation-state file
-or `committed`/`begun`/`unreadable` into a transaction file falsifies the
-model — stop and triage. (ii) >~3 new pyright suppressions to land the
+Tripwires: (i) any write putting `completed` or `unreadable` into an
+operation-state file or `committed`/`begun`/`unreadable` into a transaction
+file falsifies the model — stop and triage. (ii) >~3 new pyright suppressions to land the
 `transaction_status` annotation → drop to runtime-gate-only + tracked
 ticket. (iii) Make pyright blocking only if a low-noise prototype holds
 and status/payload bugs recur beyond PR #15.
@@ -1203,6 +1248,18 @@ cheap to close.
 
 ## Consequences
 
+- **Enforced value is the pytest gate, not the types (stated plainly).**
+  Under this repo's ruff+pytest CI the two `Literal` aliases and the
+  `transaction_status` annotation carry NO enforced static guarantee. Their
+  durable role is to be the single source of truth (`get_args(...)`) that
+  the write-spy gate and the `TERMINAL_TRANSACTION_STATUSES` consistency
+  test both read — a typed enumeration backing a pytest invariant, not a
+  static-analysis improvement. This ADR's title is "partition" (the modeled
+  and pytest-enforced invariant), deliberately NOT "typing pass": the types
+  are the handle, the write-spy is the enforcement, advisory pyright is
+  decorative until the documented upgrade signal fires. Read Tasks 1/2/5 as
+  scaffolding for a non-gating reader; the deliverable that prevents
+  regressions is Task 3.
 - The partition (two domains) is documented and runtime-enforced on every
   `_write_json_atomic` status write site — all 12 lifecycle/recovery
   drivers (incl. recovery-success and begin-time auto-expire), with
@@ -1257,14 +1314,16 @@ Pre-Task-2 baseline — `/tmp/handoff-partition-pyright-baseline.txt`:
 - `pyright --version`: `<captured version>`
 - Baseline exit status (`pyright baseline exit:` line): `<int>`
 - `--stats` error / warning counts: `<errors>` / `<warnings>`
+- SC2 validity guard (`SC2 BASELINE VALID|INVALID` line): `<VALID | INVALID — reason>`
 
 Post-annotation probe — `/tmp/handoff-partition-pyright.txt`:
 - `pyright --version`: `<captured version>`
 - Probe exit status (`pyright probe exit:` line): `<int>`
 - `--stats` error / warning counts: `<errors>` / `<warnings>`
+- SC2 validity guard (`SC2 POST VALID|INVALID` line): `<VALID | INVALID — reason>`
 
 - **Introduced delta** (post errors − baseline errors): `<n>` new suppressions/errors
-- Stop Condition 2 verdict: `<PASS (delta ≤ ~3, Task 2 kept) | DROP Task 2 (delta > ~3) — reason>`
+- Stop Condition 2 verdict: `<PASS (both probes VALID, delta ≤ ~3, Task 2 kept) | DROP Task 2 (both VALID, delta > ~3) — reason | INVALID (a probe failed the validity guard — delta not trusted; invocation fixed and re-measured, or Task 2 not landed)>`
 - CI-surface context — NOT the SC2 measurement (scope `turbo_mode_handoff_runtime/`, deliberately broader, never differenced against the file-scoped pair): `<package-wide error count if captured, else "n/a — see CI advisory logs">`
 - Raw outputs transcribed below (baseline first, then post-probe).
 
@@ -1342,7 +1401,7 @@ The round-1 "review Finding N" tags above refer to the **first** adversarial rev
 
 | Round-2 finding (severity) | Resolution | Where |
 |---|---|---|
-| 1 — runtime gate omits recovery-success and begin-time auto-expire write sites (blocking) | Added `_drive_recover_success` (copied from `test_active_write_transaction_recover_commits_verified_written_output`) and `_drive_auto_expire` (copied from `test_begin_active_write_auto_expires_stale_pre_output_reservation`); `ALL_DRIVERS` now 12; vocabulary table no longer says "recover happy not driven"; every `_write_json_atomic` status site is driven | T3 |
+| 1 — runtime gate omits recovery-success and begin-time auto-expire write sites (blocking) | Added `_drive_recover_success` (behavior-verified direct-API **equivalent** of the subprocess/CLI test `test_active_write_transaction_recover_commits_verified_written_output` — NOT a verbatim copy; see Round-4 F1 and §2) and `_drive_auto_expire` (verbatim-faithful copy of `test_begin_active_write_auto_expires_stale_pre_output_reservation`); `ALL_DRIVERS` now 12; vocabulary table no longer says "recover happy not driven"; every `_write_json_atomic` status site is driven | T3 |
 | 2 — coverage test is domain-blind (high) | `WriteSpy.observed_by_domain()` added; `test_observed_status_coverage` now checks `RUNTIME_OP_MEMBERS ⊆ observed["op"]` and `RUNTIME_TX_MEMBERS ⊆ observed["tx"]`; Stop Condition 3 + Gate G3 reworded per-domain | T3, Stop/Gate |
 | 3 — pyright probe exit-masked, no durable evidence home (moderate) | Probe split so `echo "pyright probe exit: $?"` is not `\| tail`-swallowed; output redirected to a file; new closeout artifact created/committed in T6 holds the version, exit, counts, and SC2 verdict | T4, T6 |
 | 4 — `_drive_cleanup_failed` synthetic (moderate) | Rewritten to copy `test_write_active_handoff_persists_cleanup_failed_when_both_mechanisms_fail`: real `safe_delete` two-mechanism failure, no `_clear_snapshotted_primary_state` bypass | T3 |
@@ -1356,8 +1415,18 @@ The **third** adversarial pass (2026-05-16, against this revised plan) is resolv
 | 3 — `unreadable` documented as a persisted write-site status when it is synthetic read-path return data (moderate) | Vocabulary header reworded; `unreadable` moved out of the persisted table into a dedicated "synthetic, NOT persisted" subsection; discriminating invariant and the inserted source/test comments corrected (ADR text was already accurate) | Vocabulary §, T1 test/source comments |
 | 4 — local SC2 probe scope (`active_writes.py`) diverged from the CI surface (`turbo_mode_handoff_runtime/`), and SC2's own text contradicted the Task 4 command (low) | SC2 standardized on the file scope (annotation blast radius) matching Task 4/closeout; CI's broader scope explicitly legitimized and marked "not the SC2 measurement, never differenced"; closeout records the two scopes separately | SC2, T4 Step 3, T5, T6 closeout |
 
-No gaps. Round-1 (5 findings + ADR-convention), round-2 (4 findings), and round-3 (4 findings) are all addressed with source-grounded fixes verified against `active_writes.py` / `session_state.py` at `HEAD 6d43d8d`.
+The **fourth** adversarial pass (2026-05-16 `/scrutinize`, against this revised plan; source re-verified against `active_writes.py`, `session_state.py`, `storage_layout.py`, `tests/test_active_writes.py`, `.github/workflows/handoff-plugin-tests.yml` at `HEAD 9740428` — docs-only ahead of `6d43d8d`, so the source grounding still holds) is resolved as follows:
 
-**2. Placeholder scan:** No TBD/TODO/"handle edge cases"/"similar to Task N". Every code/YAML/markdown block is literal and complete. Conflict, recovery, recovery-success, auto-expire, and cleanup-failure setups are copied from named passing tests in `tests/test_active_writes.py`. The closeout artifact's bracketed `<…>` slots (T6 Step 4) are execution-time evidence captures, explicitly distinguished from spec placeholders. Pyright is intentionally unpinned with an explicit reasoned justification (advisory) — not a placeholder.
+| Round-4 finding (severity) | Resolution | Where |
+|---|---|---|
+| F1 — Self-Review §2 / round-2 table / inline comment overclaimed `_drive_recover_success` as "copied from a named passing test"; the named test is subprocess/CLI, the driver is a hand-built direct-API equivalent (medium) | §2 rewritten with precise per-driver provenance; round-2 table row 1 and the inline `_drive_recover_success` comment relabeled "direct-API EQUIVALENT (NOT a verbatim copy)"; behavior-equivalence traced (op `committed` :804 / tx `completed` :811) and stated | §2, round-2 table, T3 prose + driver comment |
+| F2 — SC2 pyright delta could pass vacuously: no `pyrightconfig`/`[tool.pyright]` anywhere, so a single-file `uv run --with pyright` may fail to resolve `turbo_mode_handoff_runtime.*`, making baseline and post both import-noise and the delta a false ~0 (medium) | Added an SC2 validity guard (no unresolved-import diagnostic; real summary line) to BOTH probes (T2 Step 1, T4 Step 3); SC2 gains an explicit INVALID arm; G2/G4 require probe validity; closeout records the guard result and an INVALID verdict option | SC2, G2, G4, T2 Step 1, T4 Step 3, T6 closeout |
+| F4 — `_drive_reservation_expired` was hand-rolled with `lease_seconds=0` relying on a non-monotonic wall-clock advance; a deterministic named passing test existed and was not reused (low/medium) | Rewritten to copy `test_write_active_handoff_rejects_expired_reservation_before_output_write` (hard past `lease_expires_at`; setup mutation via plain `write_text` so the spy is not polluted) | T3 driver |
+| F5 — Stop Condition 1 framed the `unreadable` tripwire on tx writes only; `unreadable`-into-op (the likelier synthetic-model failure) was caught only by the coverage test's tail assert, not the per-scenario tripwire (low) | `WriteSpy.assert_partitioned` op branch now asserts `status not in {"completed", "unreadable"}`; SC1, the discriminating-invariant paragraph, the test module docstring, and the ARCHITECTURE.md tripwire-(i) text aligned | T3 `assert_partitioned`, SC1, Vocabulary §, ARCHITECTURE.md block |
+| Premise — the typing surface (aliases + one annotation + advisory CI) carries zero enforced value under the repo's ruff+pytest gate; the plan/ADR still read as a typing improvement (systemic, framing) | ADR Consequences leads with an explicit concession: enforced value is the pytest write-spy; the types are the single source of truth for that gate; advisory pyright is decorative until the upgrade signal; Tasks 1/2/5 are scaffolding for a non-gating reader | ADR Consequences |
+
+No gaps. Round-1 (5 findings + ADR-convention), round-2 (4 findings), round-3 (4 findings), and round-4 (F1/F2/F4/F5 + premise framing) are all addressed; round-4 fixes were re-verified against live source at `HEAD 9740428` (named tests exist at the cited line ranges; `storage_layout.primary_state_dir = root/.codex/handoffs/.session-state` confirms the hard-coded driver paths; `pyyaml>=6.0` is a declared Handoff dependency; the CI workflow's final step is `Run Handoff tests`). F3 (the `ActiveWriteOperationStateStatus` alias folds in synthetic `unreadable`) is acknowledged and deliberately retained: it is a real status string the module emits, exhaustively documented as synthetic/read-path/coverage-excluded; splitting it into a separate read-path alias is named follow-up scope, not required for this slice.
+
+**2. Placeholder scan:** No TBD/TODO/"handle edge cases"/"similar to Task N". Every code/YAML/markdown block is literal and complete. **Driver provenance (precise — Round-4 finding F1):** `_drive_conflict_snapshot`, `_drive_conflict_watermark`, `_drive_cleanup_failed`, `_drive_recover_pending`, `_drive_recover_mismatch`, `_drive_auto_expire`, and `_drive_reservation_expired` are **verbatim-faithful copies** of named passing **direct-API** tests in `tests/test_active_writes.py` (`_drive_reservation_expired` is now copied from `test_write_active_handoff_rejects_expired_reservation_before_output_write` per F4, replacing the prior hand-rolled `lease_seconds=0` race). `_drive_recover_success` is a **behavior-verified direct-API EQUIVALENT** of `test_active_write_transaction_recover_commits_verified_written_output`, which is a **subprocess/CLI** test — it is NOT a verbatim copy; the equivalence (state `written_not_confirmed` → op `committed` :804 / tx `completed` :811, no snapshot paths so `_clear_snapshotted_primary_state` returns cleanly) was traced against live `active_writes.py`. `_drive_begin`, `_drive_success`, `_drive_abandon`, and `_drive_content_mismatch` are plan-authored direct-API drivers traced against the source write sites (no named-test copy claimed). The closeout artifact's bracketed `<…>` slots (T6 Step 4) are execution-time evidence captures, explicitly distinguished from spec placeholders. Pyright is intentionally unpinned with an explicit reasoned justification (advisory) — not a placeholder.
 
 **3. Type/identifier consistency:** `ActiveWriteOperationStateStatus` / `ActiveWriteTransactionStatus` named identically in T1 (def), T2 (annotation), T3 (`get_args`), T4 (`get_args`). T3 helpers (`WriteSpy` incl. `statuses`/`observed_by_domain`/`assert_partitioned`, `_install_spy`, `_begin`, `_read`, `_drive_*` ×12, `ALL_DRIVERS`) consistent. Monkeypatch/attribute targets verified against live source at `HEAD 6d43d8d`: `active_writes._write_json_atomic` (module global, alias of `storage_primitives.write_json_atomic`, active_writes.py:43); `_drive_cleanup_failed` patches `active_writes._storage_primitives.subprocess.run` and `Path.unlink` (the exact targets the copied passing test uses, test_active_writes.py:1592-1607) — it no longer patches `_clear_snapshotted_primary_state`, so the real cleanup path runs. `begin_active_write` signature (`project_root`, `*`, `project_name`, `operation`, `slug`, `created_at`, `lease_seconds`) and `recover_active_write_transaction(project_root, *, operation_state_path)` match live source; `_drive_recover_success` uses the direct-API form and asserts op→`committed` (:804) / tx→`completed` (:811); `_drive_auto_expire` does a second compatible `begin_active_write` to trigger `_auto_expire_pre_output_reservation` (op :402 / tx :404). `TERMINAL_TRANSACTION_STATUSES` referenced as it exists (`session_state.py:51`). Member sets in the T1 test exactly match the T1 alias definitions and the Source-Grounded Vocabulary table.
