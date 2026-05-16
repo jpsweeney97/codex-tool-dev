@@ -27,8 +27,9 @@ CREATED_AT = "2026-05-13T16:45:00Z"
 
 # Runtime-reachable members. Every member EXCEPT operation-state
 # 'unreadable' is produced by some scenario below. 'unreadable' is the
-# synthetic unreadable-record marker (active_writes.py:1104); it is never
-# emitted by a normal lifecycle or recovery flow, so it is intentionally
+# synthetic unreadable-record marker built by
+# active_writes._unreadable_active_write_record; it is never emitted by a
+# normal lifecycle or recovery flow, so it is intentionally
 # static-pin-only (Task 1) and excluded here (Gate G3 rationale).
 RUNTIME_OP_MEMBERS = OP_MEMBERS - {"unreadable"}
 RUNTIME_TX_MEMBERS = set(TX_MEMBERS)
@@ -203,8 +204,10 @@ def _drive_content_mismatch(
             content=content,
             content_sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
         )
-    # Write-path mismatch persists ONLY operation state (active_writes.py:580);
-    # the transaction stays at its last value, content-generated (:567).
+    # Write-path mismatch (the write_active_handoff content-mismatch
+    # branch) persists ONLY the operation-state record; the transaction
+    # stays at its last value, content-generated, from the prior
+    # _persist_operation_and_transaction call.
     assert _read(res.operation_state_path)["status"] == "content_mismatch"
     assert _read(res.transaction_path)["status"] == "content-generated"
     return spy
@@ -293,7 +296,7 @@ def _drive_cleanup_failed(
 ) -> WriteSpy:
     # Copied setup: test_active_writes.py::
     # test_write_active_handoff_persists_cleanup_failed_when_both_mechanisms_fail
-    # Drives the REAL cleanup branch (active_writes.py:607-628 via
+    # Drives the REAL cleanup branch (write_active_handoff via
     # _clear_snapshotted_primary_state -> _storage_primitives.safe_delete)
     # by failing BOTH delete mechanisms -- it does NOT monkeypatch the
     # cleanup helper itself, so the genuine persistence path runs (review
@@ -411,8 +414,9 @@ def _drive_recover_success(
     # test_active_write_transaction_recover_commits_verified_written_output
     # That named test is a subprocess/CLI test; this driver is the
     # behavior-verified direct-API form, matching the other drivers. The
-    # equivalence (written_not_confirmed -> op 'committed' :804 / tx
-    # 'completed' :811, no snapshot paths) was traced against live source.
+    # equivalence (written_not_confirmed -> op 'committed' / tx 'completed'
+    # via recover_active_write_transaction, no snapshot paths) was traced
+    # against live source.
     # This is the ONLY driver that exercises the recovery-success write
     # site -- the single most dangerous site to leave unguarded because it
     # writes BOTH discriminating terminals. Its absence was the blocking
@@ -446,8 +450,8 @@ def _drive_auto_expire(
     # Copied setup: test_active_writes.py::
     # test_begin_active_write_auto_expires_stale_pre_output_reservation
     # This is the ONLY driver that exercises the begin-time auto-expire
-    # write site (active_writes.py:402 op, :404 tx via
-    # _auto_expire_pre_output_reservation) -- distinct from the write-path
+    # write site (active_writes._auto_expire_pre_output_reservation, which
+    # writes both the op and tx records) -- distinct from the write-path
     # expiry that _drive_reservation_expired covers. A second compatible
     # begin auto-expires the stale pre-output reservation.
     spy = _install_spy(monkeypatch)

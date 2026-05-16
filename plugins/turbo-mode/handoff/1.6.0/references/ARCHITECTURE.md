@@ -37,8 +37,12 @@ atomic-write chokepoint and asserts the partition on every write
 aliases are the static-analysis handle and an advisory non-blocking
 pyright CI step is the cheap precision surface.
 `session_state.TERMINAL_TRANSACTION_STATUSES` is a cross-domain TTL-prune
-terminal set, kept aligned via a test-layer check (no `session_state` →
-`active_writes` module import — that would invert this layering).
+terminal set, kept aligned via a test-layer check rather than a
+module-level `session_state` → `active_writes` import. Such an import
+follows the layering (`session_state` is above `active_writes` and already
+imports it function-locally); it is avoided here only to not add a
+module-load-time coupling for one constant — the test-layer check needs no
+import at all.
 
 Tripwires: (i) any write putting `completed` or `unreadable` into an
 operation-state file or `committed`/`begun`/`unreadable` into a transaction

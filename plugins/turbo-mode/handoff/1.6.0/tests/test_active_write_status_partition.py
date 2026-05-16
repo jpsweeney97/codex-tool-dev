@@ -68,11 +68,12 @@ def test_shared_statuses_are_exactly_the_documented_overlap() -> None:
     }
 
 
-# Source-grounded from session_state.py:51-53 (write-transaction terminal
-# {committed, abandoned, reservation_expired} ∪ load-transaction terminal
-# {completed, abandoned}). This is a TTL-prune ALLOW-LIST: a subset-only
-# check would let a future edit silently drop a required terminal (e.g.
-# 'completed') and still pass, disabling pruning for it. Pin it EXACTLY.
+# Source-grounded from session_state.TERMINAL_TRANSACTION_STATUSES
+# (write-transaction terminal {committed, abandoned, reservation_expired}
+# ∪ load-transaction terminal {completed, abandoned}). This is a TTL-prune
+# ALLOW-LIST: a subset-only check would let a future edit silently drop a
+# required terminal (e.g. 'completed') and still pass, disabling pruning
+# for it. Pin it EXACTLY.
 EXPECTED_TERMINAL_TRANSACTION_STATUSES = {
     "committed",
     "completed",
@@ -86,8 +87,10 @@ def test_terminal_transaction_statuses_align_with_partition() -> None:
     TTL-prune terminal allow-list. It is pinned EXACTLY (completeness, not
     just 'no unknowns' — dropping a required terminal silently disables its
     pruning), and its partition linkage is documented. Enforced in the test
-    layer to avoid a session_state -> active_writes module-level import
-    (documented layering trap, ARCHITECTURE.md:18)."""
+    layer to avoid a module-level session_state -> active_writes import for
+    one constant (a load-time coupling, not a layering inversion — that
+    import direction follows the documented layering; see ARCHITECTURE.md
+    "Active-write status-domain partition")."""
     import turbo_mode_handoff_runtime.session_state as session_state
 
     terminal = set(session_state.TERMINAL_TRANSACTION_STATUSES)

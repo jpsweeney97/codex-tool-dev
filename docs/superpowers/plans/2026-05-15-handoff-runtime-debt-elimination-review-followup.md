@@ -575,7 +575,7 @@ Suggestion-tier review items, deliberately excluded to keep the change minimal/r
 - `_build_parser`/`_dispatch` error-path tests (SystemExit on missing/unknown subcommand).
 - `installed_host_harness.py` version-constant-divergence guard test.
 - Prune success-path summary logging (behaviour change; own decision).
-- `transaction_status: str` → `Literal`/`Enum` (bundled with the PR's already-named `dict[str, object]` typing follow-up; note: importing the terminal set from `active_writes` into `session_state` would invert the documented layering, so the `session_state`-local constant in Task 1 is the layering-correct choice, not duplication to be "fixed" here).
+- `transaction_status: str` → `Literal`/`Enum` (bundled with the PR's already-named `dict[str, object]` typing follow-up; note: a `session_state` → `active_writes` import of the terminal set follows the documented layering and is not an inversion, but a module-level one adds a load-time coupling for one constant, so the `session_state`-local constant in Task 1 is the deliberate choice, not duplication to be "fixed" here).
 
 > **Resolved 2026-05-16 (partition slice):** Addressed as an incremental
 > status-domain partition, not the broad TypedDict pass. `transaction_status`
