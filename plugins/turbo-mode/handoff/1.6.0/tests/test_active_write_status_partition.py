@@ -66,3 +66,46 @@ def test_shared_statuses_are_exactly_the_documented_overlap() -> None:
         "reservation_expired",
         "reservation_conflict",
     }
+
+
+# Source-grounded from session_state.py:51-53 (write-transaction terminal
+# {committed, abandoned, reservation_expired} ∪ load-transaction terminal
+# {completed, abandoned}). This is a TTL-prune ALLOW-LIST: a subset-only
+# check would let a future edit silently drop a required terminal (e.g.
+# 'completed') and still pass, disabling pruning for it. Pin it EXACTLY.
+EXPECTED_TERMINAL_TRANSACTION_STATUSES = {
+    "committed",
+    "completed",
+    "abandoned",
+    "reservation_expired",
+}
+
+
+def test_terminal_transaction_statuses_align_with_partition() -> None:
+    """session_state.TERMINAL_TRANSACTION_STATUSES is the cross-domain
+    TTL-prune terminal allow-list. It is pinned EXACTLY (completeness, not
+    just 'no unknowns' — dropping a required terminal silently disables its
+    pruning), and its partition linkage is documented. Enforced in the test
+    layer to avoid a session_state -> active_writes module-level import
+    (documented layering trap, ARCHITECTURE.md:18)."""
+    import turbo_mode_handoff_runtime.session_state as session_state
+
+    terminal = set(session_state.TERMINAL_TRANSACTION_STATUSES)
+    op = set(get_args(active_writes.ActiveWriteOperationStateStatus))
+    tx = set(get_args(active_writes.ActiveWriteTransactionStatus))
+
+    # Exact pin: catches BOTH unknown additions AND silent omissions.
+    assert terminal == EXPECTED_TERMINAL_TRANSACTION_STATUSES, (
+        f"TERMINAL_TRANSACTION_STATUSES drifted from the source-grounded "
+        f"allow-list: missing={EXPECTED_TERMINAL_TRANSACTION_STATUSES - terminal} "
+        f"unexpected={terminal - EXPECTED_TERMINAL_TRANSACTION_STATUSES}"
+    )
+    # Partition linkage (diagnostic specificity + documents WHY each member
+    # is allowed): every member is a known status in some domain; every
+    # non-'committed' member is a valid transaction status ('committed' is
+    # the op-only cross-domain member).
+    assert terminal <= (op | tx), f"unknown terminal status(es): {terminal - (op | tx)}"
+    assert (terminal - {"committed"}) <= tx, (
+        f"non-'committed' terminals not in transaction alias: "
+        f"{(terminal - {'committed'}) - tx}"
+    )
