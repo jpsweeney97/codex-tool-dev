@@ -15,7 +15,7 @@ Runtime ownership map (layering order, lowest first):
 - `chain_state.py`: chain-state inventory, diagnostics, read, and lifecycle.
 - `scripts/`: executable CLI facades only.
 
-Layering invariant: imports flow one way, lowest to highest — `storage_primitives` → `storage_layout`/`storage_inspection` → `storage_authority` → `chain_state` → `active_writes` → `session_state`/`load_transactions` → domain modules. `storage_primitives.py` is the zero-internal-import foundation (highest fan-in in the runtime): it must not import any `turbo_mode_handoff_runtime` module. Adding such an import would re-create the cross-module import cycle the storage reseam removed and is prohibited.
+Layering invariant: imports flow one way, lowest to highest. The base layer is three independent, stdlib-only modules with no internal imports — `storage_primitives`, `storage_layout`, and `storage_inspection` (they are peers; none imports another). Above them: `storage_authority` → `chain_state` → `active_writes` → `session_state`/`load_transactions` → domain modules. No base-layer module may import any `turbo_mode_handoff_runtime` module (by absolute or relative import); doing so re-creates the cross-module import cycle the storage reseam removed and is prohibited. This is enforced mechanically by `tests/test_runtime_namespace.py::test_storage_base_layer_has_no_internal_imports`.
 
 `storage_authority_inventory.py` is a non-wired dev/CI helper (not part of the runtime load path): it builds and checks the storage-authority documentation-coverage fixture. See CONTRIBUTING.md for how to regenerate that fixture after a storage-authority doc change.
 

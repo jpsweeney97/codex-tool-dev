@@ -104,3 +104,29 @@ def test_cli_facades_use_the_approved_template() -> None:
             assert "print(main())" not in text, path
         assert "_bootstrap" not in text, path
         assert "globals().update" not in text, path
+
+
+STDLIB_ONLY_BASE_LAYER = {
+    "storage_primitives.py",
+    "storage_layout.py",
+    "storage_inspection.py",
+}
+
+
+def test_storage_base_layer_has_no_internal_imports() -> None:
+    """Enforces the ARCHITECTURE.md / ADR-0002 layering invariant: the
+    stdlib-only base layer must not import any turbo_mode_handoff_runtime
+    module, by absolute OR relative import. An internal import here
+    re-creates the cycle the reseam removed."""
+    for name in STDLIB_ONLY_BASE_LAYER:
+        tree = _parse(RUNTIME_DIR / name)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                assert node.level == 0, f"{name}: relative intra-package import"
+                assert module != RUNTIME_PACKAGE, name
+                assert not module.startswith(f"{RUNTIME_PACKAGE}."), name
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    assert alias.name != RUNTIME_PACKAGE, name
+                    assert not alias.name.startswith(f"{RUNTIME_PACKAGE}."), name
