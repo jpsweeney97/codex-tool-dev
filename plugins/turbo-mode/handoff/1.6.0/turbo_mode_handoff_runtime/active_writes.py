@@ -547,7 +547,7 @@ def _persist_operation_and_transaction(
     transaction_path: Path,
     state: dict[str, object],
     *,
-    transaction_status: str,
+    transaction_status: ActiveWriteTransactionStatus,
     transaction_active_path: str | None = None,
 ) -> dict[str, object]:
     """Persist operation state then the transaction record.
