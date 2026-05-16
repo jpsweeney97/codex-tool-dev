@@ -1,14 +1,14 @@
 # Fast-follow — active-write status-partition regression-gate hardening
 
-- **Status:** open — durable capture pending canonical ticket-engine entry
+- **Status:** tracked as **T-20260516-01**
+  (`docs/tickets/2026-05-16-harden-active-write-status-partition-regression-gate-pr.md`).
+  This file is the detailed companion reference for that ticket.
 - **Origin:** PR #16 (`feature/handoff-active-write-status-partition`)
   5-agent `/review-pr` (code, tests, types, comments, silent-failure)
 - **Priority:** medium · **Effort:** M · **Blocking:** none
-- **Tracking note:** the ticket engine is trust-gated (guard-hook
-  provenance, not live in a Claude Code source-dev session); this file is
-  the interim tracked record. Promote to a canonical ticket with
-  `/ticket create "Harden active-write status-partition regression gate
-  (PR #16 fast-follow)"` (user-origin path injects the trust triple).
+- **Tracking note:** filed through the ticket engine via the user-origin
+  `/ticket create` path (guard hook injected the user-origin trust triple;
+  no bypass). The ticket frontmatter links back to this file for detail.
 
 ## Problem
 
