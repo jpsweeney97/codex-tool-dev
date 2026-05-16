@@ -246,6 +246,35 @@ def test_prune_old_state_files_logs_per_file_oserror(
     assert repr(str(legacy))[:100] in captured.err
 
 
+def test_prune_old_state_files_prunes_terminal_transactions(tmp_path: Path) -> None:
+    state_dir = tmp_path / ".session-state"
+    state_dir.mkdir()
+    transactions = state_dir / "transactions"
+    transactions.mkdir()
+
+    def _aged(name: str, status: str, *, stale: bool) -> Path:
+        path = transactions / name
+        path.write_text(json.dumps({"status": status}), encoding="utf-8")
+        if stale:
+            old = path.stat().st_mtime - (25 * 60 * 60)
+            os.utime(path, (old, old))
+        return path
+
+    pending = _aged("pending.json", "pending", stale=True)
+    completed_old = _aged("completed-old.json", "completed", stale=True)
+    abandoned_old = _aged("abandoned-old.json", "abandoned", stale=True)
+    completed_fresh = _aged("completed-fresh.json", "completed", stale=False)
+
+    deleted = prune_old_state_files(state_dir=state_dir)
+
+    assert completed_old in deleted
+    assert abandoned_old in deleted
+    assert not completed_old.exists()
+    assert not abandoned_old.exists()
+    assert pending.exists()  # pending is in-flight: never pruned, even when stale
+    assert completed_fresh.exists()  # terminal but within TTL
+
+
 def test_session_state_cli_round_trip(tmp_path: Path) -> None:
     script = Path(__file__).parent.parent / "scripts" / "session_state.py"
     source = tmp_path / "handoff.md"
@@ -1164,6 +1193,7 @@ def _project_residue_snapshot(project_root: Path) -> set[str]:
     )
 
 
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh not available")
 def test_state_shell_snippet_preserves_exit_2(tmp_path: Path) -> None:
     plugin_root = Path(__file__).parent.parent
     plugin_before = _plugin_residue_snapshot(plugin_root)
@@ -1196,6 +1226,7 @@ esac
     assert _project_residue_snapshot(tmp_path) == project_before
 
 
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh not available")
 def test_state_shell_snippet_skips_clear_when_absent(tmp_path: Path) -> None:
     plugin_root = Path(__file__).parent.parent
     plugin_before = _plugin_residue_snapshot(plugin_root)

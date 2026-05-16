@@ -12,6 +12,15 @@ from pathlib import Path
 
 from turbo_mode_handoff_runtime.storage_primitives import sha256_file
 
+# Intentional version split — see CONTRIBUTING.md "Versioning and Install Path"
+# and docs/decisions/0001. The install-path slot is frozen at the directory
+# name (`1.6.0`) for the life of this marketplace install path, while the
+# manifest version advances independently (`1.7.0`). Both live here so a version
+# bump has exactly one place to change in this harness, and the split is
+# explicit rather than two unrelated string literals.
+HARNESS_CACHE_PATH_VERSION = "1.6.0"
+EXPECTED_MANIFEST_VERSION = "1.7.0"
+
 
 class InstalledHostHarnessError(RuntimeError):
     pass
@@ -27,7 +36,9 @@ def run_source_harness_isolation_proof(
     source_checkout = _source_checkout_root(source_plugin)
     isolated_home = codex_home.resolve()
     _reject_real_codex_home(isolated_home)
-    installed_plugin = isolated_home / "plugins" / "cache" / "turbo-mode" / "handoff" / "1.6.0"
+    installed_plugin = (
+        isolated_home / "plugins" / "cache" / "turbo-mode" / "handoff" / HARNESS_CACHE_PATH_VERSION
+    )
     if installed_plugin.exists():
         raise InstalledHostHarnessError(
             "source-harness-isolation-proof failed: installed root already exists. "
@@ -157,7 +168,7 @@ def verify_source_harness_payload(payload: dict[str, object]) -> None:
         raise _invalid_payload("missing manifest identity", identity)
     if identity.get("name") != "handoff":
         raise _invalid_payload("unexpected manifest name", identity.get("name"))
-    if identity.get("version") != "1.7.0":
+    if identity.get("version") != EXPECTED_MANIFEST_VERSION:
         raise _invalid_payload("unexpected manifest version", identity.get("version"))
     if identity.get("source_sha256") != identity.get("installed_sha256"):
         raise _invalid_payload(

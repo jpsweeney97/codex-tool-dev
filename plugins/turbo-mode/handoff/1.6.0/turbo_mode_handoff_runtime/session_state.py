@@ -209,6 +209,31 @@ def prune_old_state_files(max_age_hours: int = 24, *, state_dir: Path | None = N
                 file=sys.stderr,
             )
             continue
+
+    transactions_dir = state_dir / "transactions"
+    if transactions_dir.is_dir():
+        for tx_file in sorted(transactions_dir.glob("*.json")):
+            try:
+                if tx_file.stat().st_mtime >= cutoff:
+                    continue
+                try:
+                    payload = json.loads(tx_file.read_text(encoding="utf-8"))
+                    status = payload.get("status") if isinstance(payload, dict) else None
+                except (OSError, json.JSONDecodeError, ValueError):
+                    status = None
+                # Never prune in-flight ("pending") transactions. Any terminal,
+                # unreadable, or malformed record past the TTL is safe to drop.
+                if status == "pending":
+                    continue
+                if _delete_path(tx_file, context="ttl prune transactions"):
+                    deleted.append(tx_file)
+            except OSError as exc:
+                print(
+                    "state cleanup warning: ttl prune stat/delete failed: "
+                    f"{exc}. Got: {str(tx_file)!r:.100}",
+                    file=sys.stderr,
+                )
+                continue
     return deleted
 
 

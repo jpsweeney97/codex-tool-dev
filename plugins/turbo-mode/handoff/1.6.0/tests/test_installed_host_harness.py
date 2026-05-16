@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 from turbo_mode_handoff_runtime.installed_host_harness import (
+    EXPECTED_MANIFEST_VERSION,
+    HARNESS_CACHE_PATH_VERSION,
     InstalledHostHarnessError,
     run_source_harness_isolation_proof,
     verify_source_harness_payload,
@@ -40,7 +42,12 @@ def test_source_harness_isolation_proof_uses_test_only_copy_outside_source(
     assert proof["installed_host_behavior_matrix_exercised"] is False
     assert proof["source_checkout_root"] == str(SOURCE_CHECKOUT_ROOT.resolve())
     assert installed_root == (
-        codex_home.resolve() / "plugins" / "cache" / "turbo-mode" / "handoff" / "1.6.0"
+        codex_home.resolve()
+        / "plugins"
+        / "cache"
+        / "turbo-mode"
+        / "handoff"
+        / HARNESS_CACHE_PATH_VERSION
     )
     assert installed_root.exists()
     assert facade_path == installed_root / "scripts" / "session_state.py"
@@ -69,7 +76,7 @@ def test_source_harness_isolation_proof_uses_test_only_copy_outside_source(
         == proof["manifest_identity"]["installed_sha256"]
     )
     assert proof["manifest_identity"]["name"] == "handoff"
-    assert proof["manifest_identity"]["version"] == "1.7.0"
+    assert proof["manifest_identity"]["version"] == EXPECTED_MANIFEST_VERSION
     assert "installed-host behavior proof" not in serialized
     assert "installed host matrix certified" not in serialized
     assert "installed cache certified" not in serialized
@@ -87,20 +94,24 @@ def test_source_harness_payload_rejects_source_checkout_helper_leakage(
         "app_server_installed": False,
         "installed_host_behavior_matrix_exercised": False,
         "source_checkout_root": str(source_root),
-        "installed_plugin_root": str(tmp_path / "isolated" / "handoff" / "1.6.0"),
+        "installed_plugin_root": str(
+            tmp_path / "isolated" / "handoff" / HARNESS_CACHE_PATH_VERSION
+        ),
         "resolved_facade_path": str(source_plugin / "scripts" / "session_state.py"),
         "resolved_skill_doc_path": str(source_plugin / "skills" / "save" / "SKILL.md"),
         "facade_subprocess_command_paths": [str(source_plugin / "scripts" / "session_state.py")],
         "helper_process_cwd": str(tmp_path / "host-root"),
         "helper_process_pythonpath": None,
-        "helper_process_sys_path": [str(tmp_path / "isolated" / "handoff" / "1.6.0")],
+        "helper_process_sys_path": [
+            str(tmp_path / "isolated" / "handoff" / HARNESS_CACHE_PATH_VERSION)
+        ],
         "source_checkout_sys_path_entries": [],
         "loaded_runtime_module_files": [
             str(source_plugin / "turbo_mode_handoff_runtime" / "session_state.py")
         ],
         "manifest_identity": {
             "name": "handoff",
-            "version": "1.7.0",
+            "version": EXPECTED_MANIFEST_VERSION,
             "source_sha256": "0" * 64,
             "installed_sha256": "0" * 64,
         },

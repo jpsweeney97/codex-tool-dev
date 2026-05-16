@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 PLUGIN_ROOT = Path(__file__).parent.parent
 
 
 def _run_shell(command: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    if shutil.which("zsh") is None:
+        pytest.skip("zsh not available")
     return subprocess.run(
         ["/bin/zsh", "-lc", command],
         capture_output=True,
