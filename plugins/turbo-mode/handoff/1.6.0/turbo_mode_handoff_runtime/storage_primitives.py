@@ -1,7 +1,10 @@
-"""Shared filesystem primitives for Handoff storage scripts.
+"""Shared filesystem primitives, locking protocol, and atomic write helpers.
 
-This module is intentionally stdlib-only and must not import local Handoff
-modules. Import direction is scripts.* modules -> storage_primitives only.
+This module is intentionally stdlib-only and must not import any local
+`turbo_mode_handoff_runtime` module. It is the zero-internal-import base
+layer: imports flow one way — every other storage module imports from
+`storage_primitives`, never the reverse. Adding a local import here would
+re-create the cross-module import cycle the storage reseam removed.
 """
 
 from __future__ import annotations

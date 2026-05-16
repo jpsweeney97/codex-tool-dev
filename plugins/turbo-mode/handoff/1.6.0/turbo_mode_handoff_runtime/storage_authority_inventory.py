@@ -71,7 +71,14 @@ REPO_SPECS = (
 
 
 def default_repo_root() -> Path:
-    """Return the repository root for this source checkout."""
+    """Return the repository root for this source checkout.
+
+    parents[5] assumes the fixed source tree depth
+    repo/plugins/turbo-mode/handoff/1.6.0/turbo_mode_handoff_runtime/. This is a
+    dev/CI inventory probe only (not the runtime load path); the literal depth
+    breaks if the package is ever vendored or installed at a different depth.
+    Callers (tests) may pass an explicit repo_root to bypass this assumption.
+    """
     return Path(__file__).resolve().parents[5]
 
 

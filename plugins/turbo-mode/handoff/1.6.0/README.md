@@ -65,8 +65,9 @@ Core logic lives in `turbo_mode_handoff_runtime/`. The `scripts/` directory now 
 
 Runtime-only helpers such as `turbo_mode_handoff_runtime/quality_check.py`, `turbo_mode_handoff_runtime/cleanup.py`, and `turbo_mode_handoff_runtime/storage_authority_inventory.py` remain source utilities and are not wired into Handoff `1.6.0` skill entrypoints or hooks.
 
-Runtime module ownership for storage and chain behavior:
+Runtime module ownership for storage and chain behavior (layering order, lowest first):
 
+- `storage_primitives.py`: filesystem primitives, locking protocol, and atomic write helpers. Stdlib-only base layer with no internal imports — the one-way import foundation for all other storage modules.
 - `storage_layout.py`: storage paths.
 - `storage_inspection.py`: filesystem and git inspection helpers.
 - `storage_authority.py`: handoff discovery and selection authority.
@@ -295,6 +296,8 @@ Three inherited edge cases are documented in `references/handoff-contract.md`:
 1. **Resume-crash gap** — If a session crashes after `/load` but before `/save`, the `resumed_from` chain breaks. The archived file remains intact; the state file persists until 24h TTL.
 2. **Archive-failure poisoning** — If archiving fails but the state file is written, the next handoff's `resumed_from` points to a non-existent file. Skills handle this gracefully.
 3. **State-file TTL race** — Sessions spanning >24 hours may lose their state file to cleanup, resulting in a missing `resumed_from` link.
+
+When a chain-state operation raises a `ChainStateDiagnosticError`, see the **Chain State Diagnostics** table in `references/ARCHITECTURE.md` for the per-code trigger and operator recovery action.
 
 ## References
 
