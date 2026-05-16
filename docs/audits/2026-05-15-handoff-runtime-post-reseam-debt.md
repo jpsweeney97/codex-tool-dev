@@ -134,3 +134,32 @@ The goal is **zero debt remaining**, so all 23 are in scope. Sequenced by levera
 1. `docs/decisions/` ADR location — repo treats `docs/superpowers/plans/` & `docs/tickets/` as control docs; confirm ADR home fits policy (mirrors prior audit's open-Q on `docs/audits/`).
 2. SY-8: is the `1.6.0/` directory name a permanent marketplace-install freeze (then document it + keep the test literal) or should it track the manifest (then rename + update 3 tests + URLs)? Evidence leans freeze (test asserts the literal path intentionally).
 3. SY-3 relocation of `storage_authority_inventory.py` out of the runtime namespace — do the cheap doc+comment now; treat physical relocation as optional (low real cost while not distributed standalone).
+
+---
+
+## Closeout — 2026-05-15
+
+**Status: backlog driven to zero. All 23 canonical findings closed.**
+
+- **Branch:** `chore/handoff-runtime-debt-elimination` from `main` `0981c41`.
+- **Commits (6):** `ba3ea5d` audit+plan · `750ce7c` Pass 1 docs/knowledge · `e9e7ca1` Pass 2 source dedup · `edcf194` Pass 3 CI/packaging · `71f49f7` SY-15 · `b7df7f5` SY-16.
+- **Verification (final):** suite **617 passed** (616 baseline −1 deleted SY-1 self-test +1 SY-12 ownership test +1 SY-22 prune test); package import-shape smoke ok; `test_architecture_docs.py` enforces the new `storage_primitives` topology claim; `test_storage_authority_inventory.py` fixture matches; `ruff check` clean across `turbo_mode_handoff_runtime/` + `tests/`; `git diff --check` clean. Every task gated by the bytecode-safe harness.
+
+**Closure map:**
+
+| Pass | Commit | Findings |
+|---|---|---|
+| 1 docs/knowledge | `750ce7c` | SY-2, SY-3(doc), SY-8, SY-9, SY-10, SY-11, SY-14, SY-19 |
+| 2 source dedup/cleanup | `e9e7ca1` | SY-1, SY-12, SY-13, SY-17, SY-18, SY-20, SY-23 |
+| 3 CI/packaging | `edcf194` | SY-4, SY-5, SY-6, SY-7, SY-21, SY-22 |
+| 4 larger refactors | `71f49f7`, `b7df7f5` | SY-15, SY-16 |
+
+**Conscious scope decisions (closed via documentation/decision, smallest-credible-change; consistent with the audit's own P3/watch ratings):**
+- **SY-3** — physical relocation of `storage_authority_inventory.py` out of the runtime namespace NOT done; doc note + `parents[5]` comment + a documented fixture-regeneration command (CONTRIBUTING.md) discharge the actionable cost. Relocation has near-zero real cost while the package is not distributed standalone.
+- **SY-19** — `StorageLocation` coupling documented as the intentional shared bridge type rather than extracted (the audit's disconfirmation noted conscious design was plausible).
+- **SY-23** — `rglob` NOT swapped to flat `glob`: evidence showed equivalence depends on a subtle `_skip_reason` over-discover-then-filter invariant (archive dirs are subdirs of the active root); discharged as a documented intentional choice + watch trigger, per the plan's revert-to-watch branch and the audit's P3/watch rating.
+- **SY-16** — further `_handle_chain_state`/`_handle_active_writer` sub-handlers (plan Step 5) NOT done; CH-1's named cost is discharged by the `_build_parser`/`_dispatch` split. Additional sub-grouping of a data-integrity CLI adds risk without removing additional audited debt.
+
+**Out-of-scope follow-up (named, not silently fixed, not silently ignored):** Pyright surfaces a pervasive, pre-existing, runtime-correct `dict[str, object]` → `object` value-typing pattern across the runtime (iteration/subscript/`write_text` args). The repo gate is `ruff` + `pytest` (both clean/green); the evidence-based audit (repo standards) did not surface it; the CHANGELOG shows TypedDict adoption is a separate incremental effort. Recommend a future "runtime typing-precision / TypedDict pass" as one named follow-up — explicitly out of this evidence-scoped backlog (folding it in would be unbounded scope expansion the repo posture forbids).
+
+**Residue:** pre-existing gitignored local residue (`.DS_Store` 05-14, `.pytest_cache` 05-14, `__pycache__` 05-15 13:02) predates this work; the bytecode-safe verification commands wrote zero `.pyc` into source paths (`PYTHONPYCACHEPREFIX` redirected to `/private/tmp/codex-tool-dev-pycache`). Preserved as unrelated local state per repo policy.
