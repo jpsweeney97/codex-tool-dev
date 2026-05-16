@@ -252,7 +252,7 @@ def _emit(payload: dict[str, object], field: str | None) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -466,7 +466,14 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
     )
 
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    return _dispatch(_build_parser().parse_args(argv))
+
+
+def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "archive":
         source = Path(args.source)
         archive_dir = Path(args.archive_dir)
