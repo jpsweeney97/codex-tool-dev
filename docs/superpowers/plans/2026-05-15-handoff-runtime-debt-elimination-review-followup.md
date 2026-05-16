@@ -576,6 +576,18 @@ Suggestion-tier review items, deliberately excluded to keep the change minimal/r
 - `installed_host_harness.py` version-constant-divergence guard test.
 - Prune success-path summary logging (behaviour change; own decision).
 - `transaction_status: str` → `Literal`/`Enum` (bundled with the PR's already-named `dict[str, object]` typing follow-up; note: importing the terminal set from `active_writes` into `session_state` would invert the documented layering, so the `session_state`-local constant in Task 1 is the layering-correct choice, not duplication to be "fixed" here).
+
+> **Resolved 2026-05-16 (partition slice):** Addressed as an incremental
+> status-domain partition, not the broad TypedDict pass. `transaction_status`
+> is now typed `ActiveWriteTransactionStatus`; the partition is runtime-
+> enforced by `tests/test_active_write_lifecycle_matrix.py`. See
+> `docs/superpowers/plans/2026-05-16-handoff-active-write-status-partition.md`
+> and ADR `docs/decisions/0004-active-write-status-domain-partition.md`.
+> Broad `dict[str, object]` payload typing and the
+> `ActiveWriteReservation.status` validating-coercion at
+> `_reservation_from_payload` remain the named next follow-up, gated by the
+> documented pyright upgrade signal.
+
 - ARCHITECTURE.md "highest fan-in" wording / `expired-chain-state` runbook-row specificity.
 - `_build_parser`/`_dispatch` docstrings.
 
