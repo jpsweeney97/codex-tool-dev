@@ -1,10 +1,10 @@
 """Write-spy lifecycle-matrix gate for the active-write status-domain partition.
 
-Spies the single atomic-write chokepoint (active_writes._write_json_atomic)
-and asserts the discriminating invariant on EVERY write (transients
-included), for every reachable lifecycle path. This is the runtime
-enforcement of the partition (the Literal aliases have no teeth under the
-repo's ruff+pytest gate).
+Spies the shared atomic-write chokepoint
+(storage_primitives.write_json_atomic) and asserts the discriminating
+invariant on EVERY status write (transients included), for every reachable
+lifecycle path. This is the runtime enforcement of the partition (the
+Literal aliases have no teeth under the repo's ruff+pytest gate).
 
 Tripwire (Stop Condition 1): if any write puts 'completed' or 'unreadable'
 into a .../active-writes/ path, or 'committed'/'begun'/'unreadable' into a
@@ -20,6 +20,8 @@ from typing import get_args
 
 import pytest
 import turbo_mode_handoff_runtime.active_writes as active_writes
+import turbo_mode_handoff_runtime.chain_state as chain_state
+import turbo_mode_handoff_runtime.storage_primitives as storage_primitives
 
 OP_MEMBERS = set(get_args(active_writes.ActiveWriteOperationStateStatus))
 TX_MEMBERS = set(get_args(active_writes.ActiveWriteTransactionStatus))
@@ -36,11 +38,11 @@ RUNTIME_TX_MEMBERS = set(TX_MEMBERS)
 
 
 class WriteSpy:
-    """Records (domain, status) for every _write_json_atomic call and
+    """Records (domain, status) for every status-bearing atomic write and
     delegates to the real writer so behavior is unchanged."""
 
     def __init__(self) -> None:
-        self._real = active_writes._write_json_atomic
+        self._real = storage_primitives.write_json_atomic
         self.events: list[tuple[str, object]] = []
 
     def __call__(self, path: Path, payload: dict[str, object]) -> None:
@@ -50,6 +52,9 @@ class WriteSpy:
         elif "active-writes" in parts:
             domain = "op"
         else:
+            if "status" not in payload:
+                self._real(path, payload)
+                return
             domain = "other"
         self.events.append((domain, payload.get("status")))
         self._real(path, payload)
@@ -91,11 +96,16 @@ class WriteSpy:
                 assert status not in {"committed", "begun", "unreadable"}, (
                     f"{scenario}: TRIPWIRE {status!r} written to transaction file"
                 )
+            else:
+                pytest.fail(
+                    f"{scenario}: status {status!r} written to an unclassified "
+                    "atomic-write path"
+                )
 
 
 def _install_spy(monkeypatch: pytest.MonkeyPatch) -> WriteSpy:
     spy = WriteSpy()
-    monkeypatch.setattr(active_writes, "_write_json_atomic", spy)
+    monkeypatch.setattr(storage_primitives, "write_json_atomic", spy)
     return spy
 
 
@@ -112,6 +122,30 @@ def _begin(tmp_path: Path, *, slug: str, lease_seconds: int = 1800):
 
 def _read(path: Path) -> dict[str, object]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def test_write_spy_intercepts_chain_state_importer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    legacy_state_path = tmp_path / "docs" / "handoffs" / ".session-state" / "handoff-demo"
+    legacy_state_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_state_path.write_text(
+        str(tmp_path / ".codex" / "handoffs" / "archive" / "old.md"),
+        encoding="utf-8",
+    )
+    legacy_hash = hashlib.sha256(legacy_state_path.read_bytes()).hexdigest()
+
+    spy = _install_spy(monkeypatch)
+    continued = chain_state.continue_chain_state(
+        tmp_path,
+        project_name="demo",
+        state_path=legacy_state_path.relative_to(tmp_path).as_posix(),
+        expected_payload_sha256=legacy_hash,
+    )
+
+    assert continued["status"] == "continued"
+    assert ("tx", "completed") in spy.events
+    spy.assert_partitioned("continue-chain-state")
 
 
 # --- scenario drivers (each returns its WriteSpy) -----------------------
@@ -166,7 +200,7 @@ def _drive_reservation_expired(
     # lease_seconds=0 + wall-clock race (Round-4 finding F4). datetime.now is
     # non-monotonic; an NTP step-back between begin and the freshness check
     # must not un-expire a regression-gate scenario. The hand-edit is a plain
-    # write_text (NOT _write_json_atomic) so the spy does not record the
+    # write_text (NOT write_json_atomic) so the spy does not record the
     # setup mutation -- only the begin writes and the reservation_expired
     # write-path writes are spied.
     spy = _install_spy(monkeypatch)
@@ -334,7 +368,7 @@ def _drive_cleanup_failed(
     original_unlink = Path.unlink
 
     def fail_unlink(self: Path, *a: object, **k: object) -> None:
-        if self == state_path:
+        if self.resolve() == state_path.resolve():
             raise PermissionError("unlink denied")
         return original_unlink(self, *a, **k)
 
@@ -511,6 +545,7 @@ def test_observed_status_coverage(tmp_path: Path) -> None:
         scenario_dir.mkdir()
         with pytest.MonkeyPatch.context() as mp:
             spy = driver(scenario_dir, mp)
+            assert spy.events, f"{driver.__name__}: zero events"
             spy.assert_partitioned(driver.__name__)
             for domain, statuses in spy.observed_by_domain().items():
                 observed[domain] |= statuses

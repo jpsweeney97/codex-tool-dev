@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 import turbo_mode_handoff_runtime.active_writes as active_writes
 import turbo_mode_handoff_runtime.session_state as session_state
+import turbo_mode_handoff_runtime.storage_primitives as storage_primitives
 from turbo_mode_handoff_runtime.chain_state import chain_state_recovery_inventory, read_chain_state
 
 
@@ -2276,14 +2277,14 @@ def test_persist_operation_and_transaction_failure_leaves_operation_state(
     tx_path = tmp_path / "transactions" / "run.json"
     state: dict[str, object] = {"project": "demo", "status": "write-pending"}
 
-    real_write = active_writes._write_json_atomic
+    real_write = storage_primitives.write_json_atomic
 
     def selective_write(path: Path, payload: dict[str, object]) -> None:
         if path == tx_path:
             raise OSError("transaction write failed")
         real_write(path, payload)
 
-    monkeypatch.setattr(active_writes, "_write_json_atomic", selective_write)
+    monkeypatch.setattr(storage_primitives, "write_json_atomic", selective_write)
 
     with pytest.raises(OSError, match="transaction write failed"):
         active_writes._persist_operation_and_transaction(

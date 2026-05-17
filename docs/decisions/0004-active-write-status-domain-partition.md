@@ -65,12 +65,15 @@ cheap to close.
   scaffolding for a non-gating reader; the deliverable that prevents
   regressions is Task 3.
 - The partition (two domains) is documented and runtime-enforced on every
-  `_write_json_atomic` status write site — all 12 lifecycle/recovery
-  drivers (incl. recovery-success and begin-time auto-expire), with
-  coverage asserted per status domain, not as a domain-blind union.
-- pyright remains advisory; broad payload typing AND the
-  `ActiveWriteReservation.status` validating-coercion remain the named
-  next follow-up if the upgrade signal fires.
+  `storage_primitives.write_json_atomic` status write site — all 12
+  lifecycle/recovery drivers (incl. recovery-success and begin-time
+  auto-expire), with coverage asserted per status domain, not as a
+  domain-blind union.
+- pyright remains advisory; broad payload typing remains deferred until the
+  documented upgrade signal fires. The narrower
+  `ActiveWriteReservation.status` validating-coercion is tracked separately as
+  T-20260517-01 so it can be resolved without widening into the broad
+  TypedDict pass.
 - Residual risk: an advisory CI job can rot if unowned. `unreadable` is
   the one status pinned statically but not runtime-observed — it is a
   synthetic in-memory record from `_unreadable_active_write_record`, never

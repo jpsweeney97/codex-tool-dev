@@ -40,9 +40,6 @@ from turbo_mode_handoff_runtime.storage_primitives import (
 from turbo_mode_handoff_runtime.storage_primitives import (
     sha256_file_or_none as _sha256_path,
 )
-from turbo_mode_handoff_runtime.storage_primitives import (
-    write_json_atomic as _write_json_atomic,
-)
 
 
 class ActiveWriteError(RuntimeError):
@@ -66,7 +63,7 @@ class ActiveWriteError(RuntimeError):
 # PR #15 class of bug. Every member below is emitted by this module: each
 # has a verified write site, EXCEPT the synthetic read-path "unreadable"
 # record (built by _unreadable_active_write_record and returned by the
-# read-only list_active_writes; never persisted via _write_json_atomic).
+# read-only list_active_writes; never persisted via write_json_atomic).
 # See docs/superpowers/plans/2026-05-16-handoff-active-write-status-
 # partition.md.
 ActiveWriteOperationStateStatus = Literal[
@@ -261,8 +258,8 @@ def begin_active_write(
             created_at=acquired_at,
             updated_at=acquired_at,
         )
-        _write_json_atomic(operation_state_path, reservation.to_payload())
-        _write_json_atomic(
+        _storage_primitives.write_json_atomic(operation_state_path, reservation.to_payload())
+        _storage_primitives.write_json_atomic(
             transaction_path,
             {
                 **reservation.to_payload(),
@@ -446,8 +443,8 @@ def _auto_expire_pre_output_reservation(
     if expires >= now:
         return False
     updated = {**record, "status": "reservation_expired", "updated_at": now.isoformat()}
-    _write_json_atomic(operation_state_path, updated)
-    _write_json_atomic(
+    _storage_primitives.write_json_atomic(operation_state_path, updated)
+    _storage_primitives.write_json_atomic(
         Path(str(transaction_path_value)), {**updated, "status": "reservation_expired"}
     )
     return True
@@ -556,11 +553,11 @@ def _persist_operation_and_transaction(
     transaction mirrors ``state`` with its own ``status`` and, when supplied,
     an ``active_path``. Returns the transaction dict written.
     """
-    _write_json_atomic(operation_state_path, state)
+    _storage_primitives.write_json_atomic(operation_state_path, state)
     transaction: dict[str, object] = {**state, "status": transaction_status}
     if transaction_active_path is not None:
         transaction["active_path"] = transaction_active_path
-    _write_json_atomic(transaction_path, transaction)
+    _storage_primitives.write_json_atomic(transaction_path, transaction)
     return transaction
 
 
@@ -624,7 +621,7 @@ def write_active_handoff(
                 if state.get("status") != "committed":
                     state["status"] = "content_mismatch"
                     state["updated_at"] = datetime.now(UTC).isoformat()
-                    _write_json_atomic(operation_state_path, state)
+                    _storage_primitives.write_json_atomic(operation_state_path, state)
                 raise ActiveWriteError(
                     "write-active-handoff failed: active output content mismatch. "
                     f"Got: {str(active_path)!r:.100}"
@@ -757,13 +754,13 @@ def abandon_active_write(
                 "updated_at": updated_at,
             }
         )
-        _write_json_atomic(operation_state_path, state)
+        _storage_primitives.write_json_atomic(operation_state_path, state)
         transaction_path = Path(str(state["transaction_path"]))
         transaction = {
             **state,
             "status": "abandoned",
         }
-        _write_json_atomic(transaction_path, transaction)
+        _storage_primitives.write_json_atomic(transaction_path, transaction)
         return transaction
     finally:
         _release_lock(lock_path)
@@ -798,9 +795,9 @@ def recover_active_write_transaction(
         if not active_path.exists():
             state["status"] = "pending_before_write"
             state["updated_at"] = datetime.now(UTC).isoformat()
-            _write_json_atomic(operation_state_path, state)
+            _storage_primitives.write_json_atomic(operation_state_path, state)
             transaction_path = Path(str(state["transaction_path"]))
-            _write_json_atomic(
+            _storage_primitives.write_json_atomic(
                 transaction_path,
                 {
                     **state,
@@ -819,9 +816,9 @@ def recover_active_write_transaction(
         ):
             state["status"] = "content_mismatch"
             state["updated_at"] = datetime.now(UTC).isoformat()
-            _write_json_atomic(operation_state_path, state)
+            _storage_primitives.write_json_atomic(operation_state_path, state)
             transaction_path = Path(str(state["transaction_path"]))
-            _write_json_atomic(
+            _storage_primitives.write_json_atomic(
                 transaction_path,
                 {
                     **state,
@@ -848,14 +845,14 @@ def recover_active_write_transaction(
                 "updated_at": updated_at,
             }
         )
-        _write_json_atomic(operation_state_path, state)
+        _storage_primitives.write_json_atomic(operation_state_path, state)
         transaction_path = Path(str(state["transaction_path"]))
         transaction = {
             **state,
             "status": "completed",
             "active_path": str(active_path),
         }
-        _write_json_atomic(transaction_path, transaction)
+        _storage_primitives.write_json_atomic(transaction_path, transaction)
         return state
     finally:
         _release_lock(lock_path)
@@ -990,9 +987,9 @@ def _ensure_reservation_is_fresh(
             "updated_at": updated_at,
         }
     )
-    _write_json_atomic(operation_state_path, state)
+    _storage_primitives.write_json_atomic(operation_state_path, state)
     transaction_path = Path(str(state["transaction_path"]))
-    _write_json_atomic(
+    _storage_primitives.write_json_atomic(
         transaction_path,
         {
             **state,
@@ -1029,9 +1026,9 @@ def _ensure_state_snapshot_is_current(
             "updated_at": updated_at,
         }
     )
-    _write_json_atomic(operation_state_path, state)
+    _storage_primitives.write_json_atomic(operation_state_path, state)
     transaction_path = Path(str(state["transaction_path"]))
-    _write_json_atomic(
+    _storage_primitives.write_json_atomic(
         transaction_path,
         {
             **state,
@@ -1070,8 +1067,8 @@ def _ensure_transaction_watermark_is_current(
             "updated_at": updated_at,
         }
     )
-    _write_json_atomic(operation_state_path, state)
-    _write_json_atomic(
+    _storage_primitives.write_json_atomic(operation_state_path, state)
+    _storage_primitives.write_json_atomic(
         transaction_path,
         {
             **state,
