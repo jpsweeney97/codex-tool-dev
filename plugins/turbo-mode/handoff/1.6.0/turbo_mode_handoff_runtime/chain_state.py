@@ -22,9 +22,6 @@ from turbo_mode_handoff_runtime.storage_layout import StorageLayout, get_storage
 from turbo_mode_handoff_runtime.storage_primitives import (
     sha256_regular_file_or_none as _content_sha256,
 )
-from turbo_mode_handoff_runtime.storage_primitives import (
-    write_json_atomic as _write_json_atomic,
-)
 
 
 class ChainStateDiagnosticError(RuntimeError):
@@ -172,8 +169,8 @@ def mark_chain_state_consumed(
         "created_at": marked_at,
         "completed_at": marked_at,
     }
-    _write_json_atomic(marker_path, marker)
-    _write_json_atomic(transaction_path, transaction)
+    _storage_primitives.write_json_atomic(marker_path, marker)
+    _storage_primitives.write_json_atomic(transaction_path, transaction)
     return {
         "status": "consumed",
         "marker_path": str(marker_path),
@@ -269,9 +266,9 @@ def continue_chain_state(
         "created_at": now,
         "completed_at": now,
     }
-    _write_json_atomic(primary_state_path, primary_payload)
-    _write_json_atomic(marker_path, marker)
-    _write_json_atomic(transaction_path, transaction)
+    _storage_primitives.write_json_atomic(primary_state_path, primary_payload)
+    _storage_primitives.write_json_atomic(marker_path, marker)
+    _storage_primitives.write_json_atomic(transaction_path, transaction)
     return {
         "status": "continued",
         "state_path": str(primary_state_path),
@@ -342,7 +339,7 @@ def abandon_primary_chain_state(
         "created_at": now,
         "completed_at": now,
     }
-    _write_json_atomic(transaction_path, transaction)
+    _storage_primitives.write_json_atomic(transaction_path, transaction)
     return {
         "status": "abandoned",
         "state_path": str(source_path),
