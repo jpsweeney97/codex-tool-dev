@@ -2,19 +2,43 @@
 
 ## Status
 
-This document is a design spec only. It does not authorize an implementation until a separate implementation plan exists.
+This document is historical. It records the abandoned installed-cache
+refresh/certification design and is no longer the normal Turbo Mode development
+baseline.
 
-Supersession note: the previously proposed low-risk `--refresh --smoke light`
-maintenance lane is not an implemented command surface. Routine covered
-source/cache drift is handled by the developer lane:
+Current baseline:
+
+- Repo source is authoritative:
+  - `plugins/turbo-mode/handoff/1.6.0`
+  - `plugins/turbo-mode/ticket/1.4.0`
+- Personal plugin copies live under:
+  - `~/.codex/plugins/handoff`
+  - `~/.codex/plugins/ticket`
+- The personal marketplace file is `~/.agents/plugins/marketplace.json`.
+- Personal marketplace `source.path` values point at:
+  - `./.codex/plugins/handoff`
+  - `./.codex/plugins/ticket`
+- Inspect the planned copy operations and intended marketplace JSON with:
 
 ```bash
-npm run turbo:dev-refresh
+npm run turbo:plan-personal-plugins
 ```
 
-The `refresh` planner axis and `refresh-allowed` terminal status remain risk
-classification concepts for covered drift, not authorization to run
-`refresh_installed_turbo_mode.py --refresh`.
+- Copy repo source into the personal plugin directories with:
+
+```bash
+npm run turbo:sync-personal-plugins
+```
+
+After syncing, restart Codex so the local plugin loader sees the copied plugin
+directories. Syncing files is not runtime proof: do not claim installed runtime
+behavior from repo source or copied files alone. Runtime proof remains a
+separate inventory/smoke activity.
+
+Do not use this document's app-server `plugin/install`, source/cache equality,
+guarded-refresh, retained-run certification, or Gate 5 machinery as routine
+development infrastructure unless installed-cache certification is explicitly
+reopened.
 
 ## Purpose
 

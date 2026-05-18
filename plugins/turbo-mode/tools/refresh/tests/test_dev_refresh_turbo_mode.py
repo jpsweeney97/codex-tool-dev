@@ -339,13 +339,23 @@ def test_run_dev_refresh_ignores_generated_residue_in_dev_manifest(
     } in summary["generated_residue_ignored"]
 
 
-def test_package_alias_points_at_dev_refresh_lane() -> None:
+def test_package_alias_points_at_personal_plugin_sync_lane() -> None:
     package = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))
-    script = package["scripts"]["turbo:dev-refresh"]
+    scripts = package["scripts"]
 
-    assert "plugins/turbo-mode/tools/dev_refresh_turbo_mode.py --verify --json" in script
-    assert "refresh_installed_turbo_mode.py" not in script
-    assert "--guarded-refresh" not in script
+    assert "turbo:dev-refresh" not in scripts
+    assert (
+        "plugins/turbo-mode/tools/sync_personal_plugins.py"
+        in scripts["turbo:plan-personal-plugins"]
+    )
+    assert "--sync" not in scripts["turbo:plan-personal-plugins"]
+    assert (
+        "plugins/turbo-mode/tools/sync_personal_plugins.py --sync"
+        in scripts["turbo:sync-personal-plugins"]
+    )
+    assert "dev_refresh_turbo_mode.py" not in scripts["turbo:sync-personal-plugins"]
+    assert "refresh_installed_turbo_mode.py" not in scripts["turbo:sync-personal-plugins"]
+    assert "--guarded-refresh" not in scripts["turbo:sync-personal-plugins"]
 
 
 def test_dev_refresh_lane_does_not_import_planner() -> None:
