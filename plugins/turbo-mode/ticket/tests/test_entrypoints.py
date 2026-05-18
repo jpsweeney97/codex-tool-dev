@@ -1,4 +1,5 @@
 """Tests for engine entrypoints — ticket_engine_user.py and ticket_engine_agent.py."""
+
 from __future__ import annotations
 
 import json
@@ -28,8 +29,80 @@ def run_entrypoint(script: str, subcommand: str, payload: dict, tmp_path: Path) 
         text=True,
         cwd=str(tmp_path),
     )
-    assert result.returncode in (0, 1, 2), f"Unexpected exit code: {result.returncode}\nstderr: {result.stderr}"
+    assert result.returncode in (0, 1, 2), (
+        f"Unexpected exit code: {result.returncode}\nstderr: {result.stderr}"
+    )
     return json.loads(result.stdout)
+
+
+def run_capture_entrypoint(
+    subcommand: str,
+    payload: dict,
+    tmp_path: Path,
+    *extra_args: str,
+) -> dict:
+    """Run ticket_capture.py as a subprocess and return parsed JSON output."""
+    git_marker = tmp_path / ".git"
+    if not git_marker.exists():
+        git_marker.mkdir()
+
+    payload_file = tmp_path / "capture-input.json"
+    payload_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPTS_DIR / "ticket_capture.py"),
+            subcommand,
+            str(payload_file),
+            *extra_args,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+    )
+    assert result.returncode in (0, 1, 2), (
+        f"Unexpected exit code: {result.returncode}\nstderr: {result.stderr}"
+    )
+    return json.loads(result.stdout)
+
+
+def capture_payload(tmp_path: Path) -> dict:
+    return {
+        "tickets_dir": str(tmp_path / "docs" / "tickets"),
+        "session_id": "test-session",
+        "hook_injected": True,
+        "hook_request_origin": "user",
+        "capture": {
+            "title": "Capture entrypoint preview",
+            "captured_request": "Create a follow-up for the capture entrypoint.",
+            "problem": "The capture entrypoint needs CLI coverage.",
+            "next_action": "Verify prepare emits a compact preview.",
+            "capture_confidence": "medium",
+            "tags": ["test"],
+            "acceptance_criteria": ["Capture entrypoint prepare is covered"],
+        },
+    }
+
+
+class TestCaptureEntrypoint:
+    def test_prepare_returns_ready_preview(self, tmp_path: Path) -> None:
+        output = run_capture_entrypoint("prepare", capture_payload(tmp_path), tmp_path)
+
+        assert output["state"] == "ready_to_execute"
+        assert output["data"]["preview"]["title"] == "Capture entrypoint preview"
+
+    def test_prepare_edit_option_updates_preview(self, tmp_path: Path) -> None:
+        output = run_capture_entrypoint(
+            "prepare",
+            capture_payload(tmp_path),
+            tmp_path,
+            "--edit",
+            "make it high priority",
+        )
+
+        assert output["state"] == "ready_to_execute"
+        assert output["data"]["preview"]["priority"] == "high"
 
 
 class TestUserEntrypoint:
@@ -202,7 +275,12 @@ class TestEntrypointErrors:
         payload_file = tmp_path / "input.json"
         payload_file.write_text("not json", encoding="utf-8")
         result = subprocess.run(
-            [sys.executable, str(SCRIPTS_DIR / "ticket_engine_user.py"), "classify", str(payload_file)],
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "ticket_engine_user.py"),
+                "classify",
+                str(payload_file),
+            ],
             capture_output=True,
             text=True,
             cwd=str(tmp_path),
@@ -220,7 +298,9 @@ class TestExecuteTrustTriple:
             "fields": {"title": "Test", "problem": "Problem", "priority": "medium"},
         }
         result = run_entrypoint("ticket_engine_user.py", "execute", payload, tmp_path)
-        assert result.get("error_code") == "policy_blocked" or result.get("state") == "policy_blocked"
+        assert (
+            result.get("error_code") == "policy_blocked" or result.get("state") == "policy_blocked"
+        )
 
     def test_user_execute_without_session_id_rejected(self, tmp_path):
         """User execute with hook_injected but empty session_id is rejected."""
@@ -232,7 +312,9 @@ class TestExecuteTrustTriple:
             "session_id": "",
         }
         result = run_entrypoint("ticket_engine_user.py", "execute", payload, tmp_path)
-        assert result.get("error_code") == "policy_blocked" or result.get("state") == "policy_blocked"
+        assert (
+            result.get("error_code") == "policy_blocked" or result.get("state") == "policy_blocked"
+        )
 
     def test_user_execute_without_hook_request_origin_rejected(self, tmp_path):
         """User execute with hook_injected but missing hook_request_origin is rejected."""
@@ -244,7 +326,10 @@ class TestExecuteTrustTriple:
             # hook_request_origin missing
         }
         result = run_entrypoint("ticket_engine_user.py", "execute", payload, tmp_path)
-        assert result.get("error_code") in ("policy_blocked", "origin_mismatch") or result.get("state") == "policy_blocked"
+        assert (
+            result.get("error_code") in ("policy_blocked", "origin_mismatch")
+            or result.get("state") == "policy_blocked"
+        )
 
     def test_agent_execute_without_hook_rejected(self, tmp_path):
         """Agent execute without hook_injected is rejected."""
@@ -253,7 +338,9 @@ class TestExecuteTrustTriple:
             "fields": {"title": "Test", "problem": "Problem", "priority": "medium"},
         }
         result = run_entrypoint("ticket_engine_agent.py", "execute", payload, tmp_path)
-        assert result.get("error_code") == "policy_blocked" or result.get("state") == "policy_blocked"
+        assert (
+            result.get("error_code") == "policy_blocked" or result.get("state") == "policy_blocked"
+        )
 
     def test_user_classify_without_hook_allowed(self, tmp_path):
         """Non-execute stages remain directly runnable without hook metadata."""
@@ -435,7 +522,9 @@ class TestEntrypointProjectRootDiscovery:
             text=True,
             cwd=str(nested),
         )
-        assert result.returncode in (0, 1, 2), f"Unexpected exit code: {result.returncode}\nstderr: {result.stderr}"
+        assert result.returncode in (0, 1, 2), (
+            f"Unexpected exit code: {result.returncode}\nstderr: {result.stderr}"
+        )
         return json.loads(result.stdout)
 
     def test_user_rejects_when_no_project_root(self, tmp_path: Path) -> None:
@@ -471,7 +560,12 @@ class TestEntrypointProjectRootDiscovery:
         payload_file.write_text(json.dumps(payload), encoding="utf-8")
 
         result = subprocess.run(
-            [sys.executable, str(SCRIPTS_DIR / "ticket_engine_user.py"), "execute", str(payload_file)],
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "ticket_engine_user.py"),
+                "execute",
+                str(payload_file),
+            ],
             capture_output=True,
             text=True,
             cwd=str(nested),
@@ -480,4 +574,6 @@ class TestEntrypointProjectRootDiscovery:
         assert output["state"] == "ok_create"
         # Ticket should be created under project root, not under nested cwd.
         tickets_in_root = tmp_path / "docs" / "tickets"
-        assert tickets_in_root.exists(), f"Expected tickets at {tickets_in_root}, not under {nested}"
+        assert tickets_in_root.exists(), (
+            f"Expected tickets at {tickets_in_root}, not under {nested}"
+        )

@@ -16,6 +16,7 @@ Payload injection (atomic):
 
 Exit code always 0 (fail-open on crash — accepted v1.0 limitation).
 """
+
 from __future__ import annotations
 
 import json
@@ -28,13 +29,15 @@ from pathlib import Path
 
 VALID_SUBCOMMANDS = frozenset({"classify", "plan", "preflight", "execute", "ingest"})
 VALID_WORKFLOW_SUBCOMMANDS = frozenset({"prepare", "execute", "recover"})
-VALID_WORKFLOW_RECOVERY_ACTIONS = frozenset({
-    "cancel",
-    "close_wontfix",
-    "create_anyway",
-    "set_field",
-    "set_status",
-})
+VALID_WORKFLOW_RECOVERY_ACTIONS = frozenset(
+    {
+        "cancel",
+        "close_wontfix",
+        "create_anyway",
+        "set_field",
+        "set_status",
+    }
+)
 WORKFLOW_RECOVERY_EXTRA_ARG_COUNTS = {
     "cancel": 0,
     "close_wontfix": 0,
@@ -42,6 +45,7 @@ WORKFLOW_RECOVERY_EXTRA_ARG_COUNTS = {
     "set_field": 2,
     "set_status": 1,
 }
+VALID_CAPTURE_SUBCOMMANDS = frozenset({"prepare", "execute"})
 
 # Shell metacharacters that indicate command chaining or redirection.
 SHELL_METACHAR_RE = re.compile(r"[|;&`$><\n\r]")
@@ -71,20 +75,21 @@ def _build_readonly_pattern(plugin_root: str) -> re.Pattern[str]:
 def _build_audit_pattern(plugin_root: str) -> re.Pattern[str]:
     """Build pattern for ticket_audit.py (user-only, no payload injection)."""
     escaped = re.escape(plugin_root)
-    return re.compile(
-        rf"^python3(?:\s+-B)?\s+{escaped}/scripts/ticket_audit\.py\s+(\w+)\s+(.+)$"
-    )
+    return re.compile(rf"^python3(?:\s+-B)?\s+{escaped}/scripts/ticket_audit\.py\s+(\w+)\s+(.+)$")
 
 
 # Known ticket script basenames for candidate detection.
-_TICKET_SCRIPT_BASENAMES = frozenset({
-    "ticket_engine_user.py",
-    "ticket_engine_agent.py",
-    "ticket_read.py",
-    "ticket_triage.py",
-    "ticket_audit.py",
-    "ticket_workflow.py",
-})
+_TICKET_SCRIPT_BASENAMES = frozenset(
+    {
+        "ticket_engine_user.py",
+        "ticket_engine_agent.py",
+        "ticket_read.py",
+        "ticket_triage.py",
+        "ticket_audit.py",
+        "ticket_workflow.py",
+        "ticket_capture.py",
+    }
+)
 
 # Broad pattern for any ticket_*.py script — catches unknown/rogue scripts
 # so they route to branch 3 (deny) rather than bypassing the hook entirely.
@@ -231,7 +236,9 @@ def _is_ticket_candidate(command: str) -> bool:
 
     script_path = tokens[script_idx]
     script_basename = script_path.rsplit("/", 1)[-1] if "/" in script_path else script_path
-    return script_basename in _TICKET_SCRIPT_BASENAMES or bool(_TICKET_SCRIPT_RE.match(script_basename))
+    return script_basename in _TICKET_SCRIPT_BASENAMES or bool(
+        _TICKET_SCRIPT_RE.match(script_basename)
+    )
 
 
 def _make_allow(reason: str) -> dict:
@@ -254,7 +261,16 @@ def _make_deny(reason: str) -> dict:
     }
 
 
-def _parse_workflow_invocation(command_clean: str, plugin_root: str) -> tuple[str, str, list[str]] | None:
+def _malformed_session_id_reason(session_id: object) -> str:
+    return (
+        "Malformed session_id: expected non-empty string, got "
+        f"{type(session_id).__name__}={session_id!r:.50}"
+    )
+
+
+def _parse_workflow_invocation(
+    command_clean: str, plugin_root: str
+) -> tuple[str, str, list[str]] | None:
     """Parse only canonical ticket_workflow.py invocations."""
     try:
         tokens = shlex.split(command_clean)
@@ -279,7 +295,38 @@ def _parse_workflow_invocation(command_clean: str, plugin_root: str) -> tuple[st
     payload_path = tokens[script_idx + 2]
     if any(char.isspace() for char in payload_path):
         return None
-    extra_args = tokens[script_idx + 3:]
+    extra_args = tokens[script_idx + 3 :]
+    return subcommand, payload_path, extra_args
+
+
+def _parse_capture_invocation(
+    command_clean: str, plugin_root: str
+) -> tuple[str, str, list[str]] | None:
+    """Parse only canonical ticket_capture.py invocations."""
+    try:
+        tokens = shlex.split(command_clean)
+    except ValueError:
+        return None
+    if len(tokens) < 3:
+        return None
+    if tokens[0] != "python3":
+        return None
+
+    script_idx = 1
+    if tokens[script_idx] == "-B":
+        script_idx += 1
+
+    expected_script = str(Path(plugin_root) / "scripts" / "ticket_capture.py")
+    if script_idx >= len(tokens) or tokens[script_idx] != expected_script:
+        return None
+    if len(tokens) < script_idx + 3:
+        return None
+
+    subcommand = tokens[script_idx + 1]
+    payload_path = tokens[script_idx + 2]
+    if any(char.isspace() for char in payload_path):
+        return None
+    extra_args = tokens[script_idx + 3 :]
     return subcommand, payload_path, extra_args
 
 
@@ -292,7 +339,12 @@ def _validate_doctor_readonly_invocation(command_clean: str, plugin_root: str) -
     expected_script = str(Path(plugin_root) / "scripts" / "ticket_triage.py")
     if tokens[:2] == ["python3", "-B"]:
         tokens = [tokens[0], *tokens[2:]]
-    if len(tokens) < 7 or tokens[0] != "python3" or tokens[1] != expected_script or tokens[2] != "doctor":
+    if (
+        len(tokens) < 7
+        or tokens[0] != "python3"
+        or tokens[1] != expected_script
+        or tokens[2] != "doctor"
+    ):
         return "ticket_triage.py doctor must use canonical python3 [-B] invocation"
 
     args = tokens[3:]
@@ -317,12 +369,20 @@ def _validate_doctor_readonly_invocation(command_clean: str, plugin_root: str) -
         return "ticket_triage.py doctor --plugin-root must equal the running plugin root"
     expected_cache = "/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0"
     if values.get("--cache-root") not in {plugin_root, expected_cache}:
-        return "ticket_triage.py doctor --cache-root must equal the running plugin root or expected Ticket cache root"
+        return (
+            "ticket_triage.py doctor --cache-root must equal the running plugin root "
+            "or expected Ticket cache root"
+        )
     probe = values.get("--runtime-probe-output")
     if probe is not None:
         probe_path = Path(probe)
-        if probe_path.parent != Path("/private/tmp") or not probe_path.name.startswith("ticket-ux-"):
-            return "ticket_triage.py doctor --runtime-probe-output must be a ticket-ux artifact under /private/tmp"
+        if probe_path.parent != Path("/private/tmp") or not probe_path.name.startswith(
+            "ticket-ux-"
+        ):
+            return (
+                "ticket_triage.py doctor --runtime-probe-output must be a "
+                "ticket-ux artifact under /private/tmp"
+            )
     return None
 
 
@@ -403,9 +463,7 @@ def _resolve_payload_path(payload_path: str, workspace_root: str) -> tuple[Path 
     return resolved, None
 
 
-def _resolve_origin(
-    event: dict, *, is_ticket_candidate: bool
-) -> tuple[str | None, str | None]:
+def _resolve_origin(event: dict, *, is_ticket_candidate: bool) -> tuple[str | None, str | None]:
     """Determine request origin from agent_id field.
 
     Returns (origin, error):
@@ -463,9 +521,13 @@ def main() -> None:
 
     # Block shell metacharacters.
     if SHELL_METACHAR_RE.search(command_clean):
-        print(json.dumps(_make_deny(
-            f"Shell metacharacters detected in ticket engine command. Got: {command!r:.100}"
-        )))
+        print(
+            json.dumps(
+                _make_deny(
+                    f"Shell metacharacters detected in ticket engine command. Got: {command!r:.100}"
+                )
+            )
+        )
         return
 
     # Branch 1: Engine exact allowlist → validate subcommand/payload + inject.
@@ -479,96 +541,36 @@ def main() -> None:
 
         # Validate subcommand.
         if subcommand not in VALID_SUBCOMMANDS:
-            print(json.dumps(_make_deny(
-                f"Unknown subcommand '{subcommand}'. Valid: {sorted(VALID_SUBCOMMANDS)}"
-            )))
+            print(
+                json.dumps(
+                    _make_deny(
+                        f"Unknown subcommand '{subcommand}'. Valid: {sorted(VALID_SUBCOMMANDS)}"
+                    )
+                )
+            )
             return
 
         # Check for extra arguments (payload_path should not contain whitespace).
         if re.search(r"\s", payload_path):
-            print(json.dumps(_make_deny(
-                f"Extra arguments after payload path. Got: {command!r:.100}"
-            )))
+            print(
+                json.dumps(_make_deny(f"Extra arguments after payload path. Got: {command!r:.100}"))
+            )
             return
 
         workspace_root = event.get("cwd", "")
         resolved_path, path_error = _resolve_payload_path(payload_path, workspace_root)
         if path_error is not None or resolved_path is None:
-            print(json.dumps(_make_deny(
-                f"Payload path validation failed: {path_error or 'unknown error'}"
-            )))
+            print(
+                json.dumps(
+                    _make_deny(f"Payload path validation failed: {path_error or 'unknown error'}")
+                )
+            )
             return
 
         # Inject trust fields into payload.
         session_id = event.get("session_id")
         if not isinstance(session_id, str) or not session_id:
-            print(json.dumps(_make_deny(
-                f"Malformed session_id: expected non-empty string, got {type(session_id).__name__}={session_id!r:.50}"
-            )))
-            return
-        effective_origin, origin_error = _resolve_origin(event, is_ticket_candidate=True)
-        if origin_error is not None:
-            print(json.dumps(_make_deny(origin_error)))
-            return
-        if effective_origin is None:
-            print(json.dumps(_make_deny(
-                "Origin resolution failed: internal invariant violation"
-            )))
-            return
-        error = _inject_payload(str(resolved_path), session_id, effective_origin)
-        if error is not None:
-            print(json.dumps(_make_deny(f"Payload injection failed: {error}")))
-            return
-
-        print(json.dumps(_make_allow(
-            f"Ticket engine {entrypoint_type}/{subcommand} validated and payload injected"
-        )))
-        return
-
-    workflow_invocation = _parse_workflow_invocation(command_clean, plugin_root)
-    if workflow_invocation is not None:
-        subcommand, payload_path, extra_args = workflow_invocation
-        if subcommand not in VALID_WORKFLOW_SUBCOMMANDS:
-            print(json.dumps(_make_deny(
-                f"Unknown workflow subcommand '{subcommand}'. Valid: {sorted(VALID_WORKFLOW_SUBCOMMANDS)}"
-            )))
-            return
-        if subcommand in {"prepare", "execute"} and extra_args:
-            print(json.dumps(_make_deny(
-                f"Extra arguments after payload path. Got: {command!r:.100}"
-            )))
-            return
-        if subcommand == "recover":
-            if not extra_args:
-                print(json.dumps(_make_deny(
-                    "ticket_workflow.py recover requires a recovery action after the payload path"
-                )))
-                return
-            recovery_action = extra_args[0]
-            if recovery_action not in VALID_WORKFLOW_RECOVERY_ACTIONS:
-                print(json.dumps(_make_deny(
-                    f"Unknown workflow recovery action '{recovery_action}'. Valid: {sorted(VALID_WORKFLOW_RECOVERY_ACTIONS)}"
-                )))
-                return
-            expected_count = WORKFLOW_RECOVERY_EXTRA_ARG_COUNTS[recovery_action]
-            actual_count = len(extra_args) - 1
-            if actual_count != expected_count:
-                print(json.dumps(_make_deny(
-                    f"Recovery action '{recovery_action}' expects {expected_count} argument(s), got {actual_count}"
-                )))
-                return
-        workspace_root = event.get("cwd", "")
-        resolved_path, path_error = _resolve_payload_path(payload_path, workspace_root)
-        if path_error is not None or resolved_path is None:
-            print(json.dumps(_make_deny(
-                f"Payload path validation failed: {path_error or 'unknown error'}"
-            )))
-            return
-        session_id = event.get("session_id")
-        if not isinstance(session_id, str) or not session_id:
-            print(json.dumps(_make_deny(
-                f"Malformed session_id: expected non-empty string, got {type(session_id).__name__}={session_id!r:.50}"
-            )))
+            print(json.dumps(_make_deny(_malformed_session_id_reason(session_id))))
             return
         effective_origin, origin_error = _resolve_origin(event, is_ticket_candidate=True)
         if origin_error is not None:
@@ -581,9 +583,135 @@ def main() -> None:
         if error is not None:
             print(json.dumps(_make_deny(f"Payload injection failed: {error}")))
             return
-        print(json.dumps(_make_allow(
-            f"Ticket workflow/{subcommand} validated and payload injected"
-        )))
+
+        print(
+            json.dumps(
+                _make_allow(
+                    f"Ticket engine {entrypoint_type}/{subcommand} validated and payload injected"
+                )
+            )
+        )
+        return
+
+    workflow_invocation = _parse_workflow_invocation(command_clean, plugin_root)
+    if workflow_invocation is not None:
+        subcommand, payload_path, extra_args = workflow_invocation
+        if subcommand not in VALID_WORKFLOW_SUBCOMMANDS:
+            reason = (
+                f"Unknown workflow subcommand '{subcommand}'. "
+                f"Valid: {sorted(VALID_WORKFLOW_SUBCOMMANDS)}"
+            )
+            print(json.dumps(_make_deny(reason)))
+            return
+        if subcommand in {"prepare", "execute"} and extra_args:
+            print(
+                json.dumps(_make_deny(f"Extra arguments after payload path. Got: {command!r:.100}"))
+            )
+            return
+        if subcommand == "recover":
+            if not extra_args:
+                reason = (
+                    "ticket_workflow.py recover requires a recovery action after the payload path"
+                )
+                print(json.dumps(_make_deny(reason)))
+                return
+            recovery_action = extra_args[0]
+            if recovery_action not in VALID_WORKFLOW_RECOVERY_ACTIONS:
+                reason = (
+                    f"Unknown workflow recovery action '{recovery_action}'. "
+                    f"Valid: {sorted(VALID_WORKFLOW_RECOVERY_ACTIONS)}"
+                )
+                print(json.dumps(_make_deny(reason)))
+                return
+            expected_count = WORKFLOW_RECOVERY_EXTRA_ARG_COUNTS[recovery_action]
+            actual_count = len(extra_args) - 1
+            if actual_count != expected_count:
+                reason = (
+                    f"Recovery action '{recovery_action}' expects "
+                    f"{expected_count} argument(s), got {actual_count}"
+                )
+                print(json.dumps(_make_deny(reason)))
+                return
+        workspace_root = event.get("cwd", "")
+        resolved_path, path_error = _resolve_payload_path(payload_path, workspace_root)
+        if path_error is not None or resolved_path is None:
+            print(
+                json.dumps(
+                    _make_deny(f"Payload path validation failed: {path_error or 'unknown error'}")
+                )
+            )
+            return
+        session_id = event.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            print(json.dumps(_make_deny(_malformed_session_id_reason(session_id))))
+            return
+        effective_origin, origin_error = _resolve_origin(event, is_ticket_candidate=True)
+        if origin_error is not None:
+            print(json.dumps(_make_deny(origin_error)))
+            return
+        if effective_origin is None:
+            print(json.dumps(_make_deny("Origin resolution failed: internal invariant violation")))
+            return
+        error = _inject_payload(str(resolved_path), session_id, effective_origin)
+        if error is not None:
+            print(json.dumps(_make_deny(f"Payload injection failed: {error}")))
+            return
+        print(
+            json.dumps(_make_allow(f"Ticket workflow/{subcommand} validated and payload injected"))
+        )
+        return
+
+    capture_invocation = _parse_capture_invocation(command_clean, plugin_root)
+    if capture_invocation is not None:
+        subcommand, payload_path, extra_args = capture_invocation
+        if subcommand not in VALID_CAPTURE_SUBCOMMANDS:
+            reason = (
+                f"Unknown capture subcommand '{subcommand}'. "
+                f"Valid: {sorted(VALID_CAPTURE_SUBCOMMANDS)}"
+            )
+            print(json.dumps(_make_deny(reason)))
+            return
+        if subcommand == "execute" and extra_args:
+            print(
+                json.dumps(_make_deny(f"Extra arguments after payload path. Got: {command!r:.100}"))
+            )
+            return
+        if (
+            subcommand == "prepare"
+            and extra_args
+            and (len(extra_args) != 2 or extra_args[0] != "--edit")
+        ):
+            print(
+                json.dumps(_make_deny(f"Extra arguments after payload path. Got: {command!r:.100}"))
+            )
+            return
+        workspace_root = event.get("cwd", "")
+        resolved_path, path_error = _resolve_payload_path(payload_path, workspace_root)
+        if path_error is not None or resolved_path is None:
+            print(
+                json.dumps(
+                    _make_deny(f"Payload path validation failed: {path_error or 'unknown error'}")
+                )
+            )
+            return
+        session_id = event.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            print(json.dumps(_make_deny(_malformed_session_id_reason(session_id))))
+            return
+        effective_origin, origin_error = _resolve_origin(event, is_ticket_candidate=True)
+        if origin_error is not None:
+            print(json.dumps(_make_deny(origin_error)))
+            return
+        if effective_origin is None:
+            print(json.dumps(_make_deny("Origin resolution failed: internal invariant violation")))
+            return
+        error = _inject_payload(str(resolved_path), session_id, effective_origin)
+        if error is not None:
+            print(json.dumps(_make_deny(f"Payload injection failed: {error}")))
+            return
+        print(
+            json.dumps(_make_allow(f"Ticket capture/{subcommand} validated and payload injected"))
+        )
         return
 
     # Branch 2: Read-only scripts (ticket_read.py, ticket_triage.py) → allow, no injection.
@@ -597,9 +725,7 @@ def main() -> None:
             if doctor_error is not None:
                 print(json.dumps(_make_deny(doctor_error)))
                 return
-        print(json.dumps(_make_allow(
-            f"Ticket {script_name}/{subcommand} validated (read-only)"
-        )))
+        print(json.dumps(_make_allow(f"Ticket {script_name}/{subcommand} validated (read-only)")))
         return
 
     # Branch 2b: Audit script (ticket_audit.py) → allow for users, deny for agents.
@@ -611,20 +737,20 @@ def main() -> None:
             print(json.dumps(_make_deny(origin_error)))
             return
         if origin == "agent":
-            print(json.dumps(_make_deny(
-                "Ticket audit is user-only — agents cannot invoke audit repair"
-            )))
+            print(
+                json.dumps(
+                    _make_deny("Ticket audit is user-only — agents cannot invoke audit repair")
+                )
+            )
             return
         subcommand = audit_match.group(1)
-        print(json.dumps(_make_allow(
-            f"Ticket audit/{subcommand} validated (user-only)"
-        )))
+        print(json.dumps(_make_allow(f"Ticket audit/{subcommand} validated (user-only)")))
         return
 
     # Branch 3: Unrecognized ticket script invocation → deny.
-    print(json.dumps(_make_deny(
-        f"Command invokes unrecognized ticket script. Got: {command!r:.100}"
-    )))
+    print(
+        json.dumps(_make_deny(f"Command invokes unrecognized ticket script. Got: {command!r:.100}"))
+    )
 
 
 if __name__ == "__main__":

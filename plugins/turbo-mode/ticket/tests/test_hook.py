@@ -3,6 +3,7 @@
 Tests invoke the hook via subprocess.run with JSON on stdin,
 using sys.executable as the Python interpreter.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -380,6 +381,41 @@ def test_hook_allows_ticket_workflow_prepare_and_injects_payload(tmp_path: Path)
     assert injected["hook_request_origin"] == "user"
 
 
+def test_hook_allows_ticket_capture_prepare_and_injects_payload(tmp_path: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    payload = tmp_path / "payload.json"
+    payload.write_text('{"tickets_dir":"docs/tickets","capture":{}}', encoding="utf-8")
+    event = make_hook_input(
+        f"python3 -B {plugin_root}/scripts/ticket_capture.py prepare {payload}",
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(plugin_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
+    injected = json.loads(payload.read_text(encoding="utf-8"))
+    assert injected["hook_injected"] is True
+    assert injected["hook_request_origin"] == "user"
+
+
+def test_hook_denies_noncanonical_ticket_capture_command_shape(tmp_path: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    payload = tmp_path / "payload.json"
+    payload.write_text('{"tickets_dir":"docs/tickets","capture":{}}', encoding="utf-8")
+    event = make_hook_input(
+        f"python3 -BB {plugin_root}/scripts/ticket_capture.py prepare {payload}",
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(plugin_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
 def test_hook_workflow_valid_agent_id_injects_agent_origin(tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     payload = tmp_path / "payload.json"
@@ -421,7 +457,9 @@ def test_hook_workflow_malformed_agent_id_denied(tmp_path: Path, agent_id: objec
 def test_hook_allows_ticket_workflow_recover_and_injects_payload(tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     payload = tmp_path / "payload.json"
-    payload.write_text('{"action":"create","duplicate_of":"T-20260503-01","fields":{}}', encoding="utf-8")
+    payload.write_text(
+        '{"action":"create","duplicate_of":"T-20260503-01","fields":{}}', encoding="utf-8"
+    )
     event = make_hook_input(
         f"python3 -B {plugin_root}/scripts/ticket_workflow.py recover {payload} create_anyway",
         plugin_root=str(plugin_root),
@@ -441,7 +479,7 @@ def test_hook_allows_ticket_workflow_recover_set_field_with_quoted_json(tmp_path
     event = make_hook_input(
         (
             f"python3 -B {plugin_root}/scripts/ticket_workflow.py "
-            f"recover {payload} set_field tags '[\"ux\", \"ticket\"]'"
+            f'recover {payload} set_field tags \'["ux", "ticket"]\''
         ),
         plugin_root=str(plugin_root),
         cwd=str(tmp_path),
@@ -453,14 +491,16 @@ def test_hook_allows_ticket_workflow_recover_set_field_with_quoted_json(tmp_path
     assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
-def test_hook_denies_ticket_workflow_recover_set_field_shell_metacharacter_json(tmp_path: Path) -> None:
+def test_hook_denies_ticket_workflow_recover_set_field_shell_metacharacter_json(
+    tmp_path: Path,
+) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     payload = tmp_path / "payload.json"
     payload.write_text('{"action":"create","fields":{}}', encoding="utf-8")
     event = make_hook_input(
         (
             f"python3 -B {plugin_root}/scripts/ticket_workflow.py "
-            f"recover {payload} set_field note '{{\"note\":\"x>y\"}}'"
+            f'recover {payload} set_field note \'{{"note":"x>y"}}\''
         ),
         plugin_root=str(plugin_root),
         cwd=str(tmp_path),
@@ -492,11 +532,14 @@ def test_hook_allows_ticket_triage_doctor_with_expected_roots(tmp_path: Path) ->
     assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
-@pytest.mark.parametrize("doctor_args", [
-    "docs/tickets --plugin-root / --cache-root /",
-    "docs/tickets --plugin-root /Users/jp --cache-root /Users/jp",
-    "docs/tickets --cache-root /tmp/cache --plugin-root /tmp/plugin",
-])
+@pytest.mark.parametrize(
+    "doctor_args",
+    [
+        "docs/tickets --plugin-root / --cache-root /",
+        "docs/tickets --plugin-root /Users/jp --cache-root /Users/jp",
+        "docs/tickets --cache-root /tmp/cache --plugin-root /tmp/plugin",
+    ],
+)
 def test_hook_denies_ticket_triage_doctor_arbitrary_roots(tmp_path: Path, doctor_args: str) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     event = make_hook_input(
@@ -512,17 +555,20 @@ def test_hook_denies_ticket_triage_doctor_arbitrary_roots(tmp_path: Path, doctor
     assert "doctor" in result["hookSpecificOutput"]["permissionDecisionReason"].lower()
 
 
-@pytest.mark.parametrize("command_template", [
-    "/usr/bin/python3 {root}/scripts/ticket_workflow.py prepare {payload}",
-    "python3.11 {root}/scripts/ticket_workflow.py prepare {payload}",
-    "env python3 {root}/scripts/ticket_workflow.py prepare {payload}",
-    "python3 -u {root}/scripts/ticket_workflow.py prepare {payload}",
-    "python3 -X dev {root}/scripts/ticket_workflow.py prepare {payload}",
-    "python3 -m pdb {root}/scripts/ticket_workflow.py prepare {payload}",
-    "python3 -B -B {root}/scripts/ticket_workflow.py prepare {payload}",
-    "python3 {root}/scripts/../scripts/ticket_workflow.py prepare {payload}",
-    "python3 -B {root}/scripts/ticket_workflow.py prepare '{space_payload}'",
-])
+@pytest.mark.parametrize(
+    "command_template",
+    [
+        "/usr/bin/python3 {root}/scripts/ticket_workflow.py prepare {payload}",
+        "python3.11 {root}/scripts/ticket_workflow.py prepare {payload}",
+        "env python3 {root}/scripts/ticket_workflow.py prepare {payload}",
+        "python3 -u {root}/scripts/ticket_workflow.py prepare {payload}",
+        "python3 -X dev {root}/scripts/ticket_workflow.py prepare {payload}",
+        "python3 -m pdb {root}/scripts/ticket_workflow.py prepare {payload}",
+        "python3 -B -B {root}/scripts/ticket_workflow.py prepare {payload}",
+        "python3 {root}/scripts/../scripts/ticket_workflow.py prepare {payload}",
+        "python3 -B {root}/scripts/ticket_workflow.py prepare '{space_payload}'",
+    ],
+)
 def test_hook_denies_noncanonical_ticket_workflow_command_shapes(
     tmp_path: Path,
     command_template: str,
@@ -551,7 +597,9 @@ def test_hook_denies_noncanonical_ticket_workflow_command_shapes(
 def test_hook_denies_ticket_workflow_recover_without_action(tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     payload = tmp_path / "payload.json"
-    payload.write_text('{"action":"create","duplicate_of":"T-20260503-01","fields":{}}', encoding="utf-8")
+    payload.write_text(
+        '{"action":"create","duplicate_of":"T-20260503-01","fields":{}}', encoding="utf-8"
+    )
     event = make_hook_input(
         f"python3 -B {plugin_root}/scripts/ticket_workflow.py recover {payload}",
         plugin_root=str(plugin_root),
@@ -579,7 +627,9 @@ def test_hook_denies_ticket_workflow_recover_set_field_missing_json_value(tmp_pa
     result = run_hook(event, plugin_root=str(plugin_root))
 
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert "expects 2 argument(s), got 1" in result["hookSpecificOutput"]["permissionDecisionReason"]
+    assert (
+        "expects 2 argument(s), got 1" in result["hookSpecificOutput"]["permissionDecisionReason"]
+    )
 
 
 def test_hook_denies_ticket_workflow_recover_set_field_extra_argument(tmp_path: Path) -> None:
@@ -599,15 +649,20 @@ def test_hook_denies_ticket_workflow_recover_set_field_extra_argument(tmp_path: 
     result = run_hook(event, plugin_root=str(plugin_root))
 
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert "expects 2 argument(s), got 3" in result["hookSpecificOutput"]["permissionDecisionReason"]
+    assert (
+        "expects 2 argument(s), got 3" in result["hookSpecificOutput"]["permissionDecisionReason"]
+    )
 
 
 def test_preserves_existing_payload_fields(tmp_path: Path) -> None:
-    payload_file = make_payload_file(tmp_path, {
-        "action": "plan",
-        "ticket_id": "T-20260303-01",
-        "custom_field": [1, 2, 3],
-    })
+    payload_file = make_payload_file(
+        tmp_path,
+        {
+            "action": "plan",
+            "ticket_id": "T-20260303-01",
+            "custom_field": [1, 2, 3],
+        },
+    )
     plugin_root = str(tmp_path / "plugin")
     (Path(plugin_root) / "scripts").mkdir(parents=True)
 
@@ -776,7 +831,9 @@ class TestPayloadPathBoundaries:
         assert _decision(output) == "deny"
         assert "outside workspace root" in _reason(output).lower()
 
-    def test_payload_path_resolution_oserror_returns_deny_reason(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_payload_path_resolution_oserror_returns_deny_reason(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         guard = load_guard_module()
 
         def fail_resolve(_: Path) -> Path:
@@ -1037,10 +1094,11 @@ class TestExecutionShapeMatching:
 
     def test_env_with_var_python3_denied(self):
         """`env VAR=value python3` engine invocation is denied."""
+        command = (
+            f"env PYTHONPATH=. python3 {FAKE_ROOT}/scripts/ticket_engine_user.py plan payload.json"
+        )
         result = run_hook(
-            make_hook_input(
-                f"env PYTHONPATH=. python3 {FAKE_ROOT}/scripts/ticket_engine_user.py plan payload.json",
-            ),
+            make_hook_input(command),
             plugin_root=FAKE_ROOT,
         )
         decision = result.get("hookSpecificOutput", {})
@@ -1093,7 +1151,10 @@ class TestCandidateDetection:
     def test_env_with_var_denied(self, tmp_path: Path) -> None:
         plugin_root = str(Path(__file__).parent.parent)
         payload = make_payload_file(tmp_path)
-        cmd = f"env PYTHONPATH=. python3 {plugin_root}/scripts/ticket_engine_user.py classify {payload}"
+        cmd = (
+            f"env PYTHONPATH=. python3 {plugin_root}/scripts/ticket_engine_user.py "
+            f"classify {payload}"
+        )
         result = run_hook(make_hook_input(cmd, cwd=str(tmp_path)))
         assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
 
@@ -1110,10 +1171,7 @@ class TestCandidateDetection:
     def test_env_split_string_python_denied(self, tmp_path: Path) -> None:
         plugin_root = str(Path(__file__).parent.parent)
         payload = make_payload_file(tmp_path)
-        cmd = (
-            f'env -S "python3 {plugin_root}/scripts/ticket_engine_user.py '
-            f'classify {payload}"'
-        )
+        cmd = f'env -S "python3 {plugin_root}/scripts/ticket_engine_user.py classify {payload}"'
         result = run_hook(make_hook_input(cmd, cwd=str(tmp_path)))
         assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
 
@@ -1177,12 +1235,16 @@ class TestCandidateDetection:
     def test_non_ticket_python_passes_through(self, tmp_path: Path) -> None:
         """Python invocations that don't target ticket scripts pass through."""
         result = run_hook(make_hook_input("python3 setup.py install", cwd=str(tmp_path)))
-        assert result == {} or result.get("hookSpecificOutput", {}).get("permissionDecision") != "deny"
+        assert (
+            result == {} or result.get("hookSpecificOutput", {}).get("permissionDecision") != "deny"
+        )
 
     def test_grep_for_ticket_script_name_passes_through(self, tmp_path: Path) -> None:
         """Non-python commands mentioning ticket script basenames pass through."""
         result = run_hook(make_hook_input("rg ticket_engine_user.py README.md", cwd=str(tmp_path)))
-        assert result == {} or result.get("hookSpecificOutput", {}).get("permissionDecision") != "deny"
+        assert (
+            result == {} or result.get("hookSpecificOutput", {}).get("permissionDecision") != "deny"
+        )
 
     # --- Malformed quoting with ticket basename → deny ---
     def test_malformed_quoting_with_ticket_basename_denied(self, tmp_path: Path) -> None:
@@ -1203,7 +1265,9 @@ class TestCandidateDetection:
     def test_malformed_quoting_without_ticket_basename_passes(self, tmp_path: Path) -> None:
         cmd = "python3 'some_other_script.py"
         result = run_hook(make_hook_input(cmd, cwd=str(tmp_path)))
-        assert result == {} or result.get("hookSpecificOutput", {}).get("permissionDecision") != "deny"
+        assert (
+            result == {} or result.get("hookSpecificOutput", {}).get("permissionDecision") != "deny"
+        )
 
     @pytest.mark.parametrize("python_prefix", ["-u", "-X dev", "-m pdb"])
     def test_python_flags_before_script_denied(self, tmp_path: Path, python_prefix: str) -> None:

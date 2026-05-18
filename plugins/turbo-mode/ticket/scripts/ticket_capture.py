@@ -1,0 +1,686 @@
+#!/usr/bin/env python3
+"""Capture-first ticket creation entrypoint."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import sys
+import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from scripts.ticket_dedup import normalize  # noqa: E402
+from scripts.ticket_engine_runner import dispatch_stage, load_runner_context  # noqa: E402
+from scripts.ticket_paths import discover_project_root, resolve_tickets_dir  # noqa: E402
+from scripts.ticket_read import find_ticket_by_id, list_tickets  # noqa: E402
+from scripts.ticket_validate import CONTROLLED_CAPTURE_TAGS, validate_fields  # noqa: E402
+
+_RAW_USER_WORDING_KEYS = frozenset(
+    {
+        "raw_user_text",
+        "raw_request",
+        "transcript_excerpt",
+    }
+)
+_REQUIRED_CAPTURE_FIELDS = (
+    "title",
+    "captured_request",
+    "problem",
+    "next_action",
+)
+_ALLOWED_CAPTURE_FIELDS = frozenset(
+    {
+        "title",
+        "captured_request",
+        "problem",
+        "next_action",
+        "capture_confidence",
+        "refinement_status",
+        "component",
+        "related_paths",
+        "priority",
+        "tags",
+        "acceptance_criteria",
+    }
+)
+_PROMPT = "Create this ticket? [create / edit / cancel]"
+
+
+def _response(
+    state: str,
+    message: str,
+    *,
+    error_code: str | None = None,
+    data: dict[str, Any] | None = None,
+    ticket_id: str | None = None,
+) -> dict[str, Any]:
+    response: dict[str, Any] = {
+        "state": state,
+        "message": message,
+        "data": data or {},
+    }
+    if error_code is not None:
+        response["error_code"] = error_code
+    if ticket_id is not None:
+        response["ticket_id"] = ticket_id
+    return response
+
+
+def _engine_response_to_dict(response: Any) -> dict[str, Any]:
+    data = response.to_dict()
+    if "data" not in data:
+        data["data"] = {}
+    return data
+
+
+def _write_payload_atomic(payload_path: Path, payload: dict[str, Any]) -> None:
+    parent = payload_path.parent
+    tmp_path: str | None = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(dir=str(parent), suffix=".tmp")
+        try:
+            os.write(fd, json.dumps(payload, indent=2).encode("utf-8"))
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(tmp_path, str(payload_path))
+    except OSError as exc:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise OSError(f"payload write failed: {exc}. Got: {str(payload_path)!r:.100}") from exc
+
+
+def _validate_payload_path(payload_path: Path, project_root: Path) -> str | None:
+    payload_str = str(payload_path)
+    if any(char.isspace() for char in payload_str):
+        return f"Payload path must not contain whitespace. Got: {payload_str!r:.100}"
+    if not payload_path.is_absolute():
+        return f"Payload path must be absolute. Got: {payload_str!r:.100}"
+    try:
+        resolved = payload_path.resolve()
+        root = project_root.resolve()
+    except OSError as exc:
+        return f"Payload path resolution failed: {exc}. Got: {payload_str!r:.100}"
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        return f"Payload path outside workspace root {str(root)!r}. Got: {payload_str!r:.100}"
+    return None
+
+
+def _load_capture_context(
+    subcommand: str,
+    payload_path: Path,
+) -> tuple[dict[str, Any] | None, Path | None, str | None, dict[str, Any] | None]:
+    project_root = discover_project_root(Path.cwd())
+    if project_root is None:
+        return (
+            None,
+            None,
+            None,
+            _response(
+                "policy_blocked",
+                "Cannot determine project root: no .codex/ or .git/ marker "
+                "found in ancestors of cwd",
+                error_code="policy_blocked",
+            ),
+        )
+    path_error = _validate_payload_path(payload_path, project_root)
+    if path_error is not None:
+        return (
+            None,
+            None,
+            None,
+            _response("policy_blocked", path_error, error_code="policy_blocked"),
+        )
+
+    try:
+        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return (
+            None,
+            None,
+            None,
+            _response(
+                "escalate",
+                f"Cannot read payload: {exc}",
+                error_code="parse_error",
+            ),
+        )
+    if not isinstance(payload, dict):
+        return (
+            None,
+            None,
+            None,
+            _response(
+                "escalate",
+                f"Payload is not a JSON object, got {type(payload).__name__}",
+                error_code="parse_error",
+            ),
+        )
+
+    tickets_dir, tickets_error = resolve_tickets_dir(
+        payload.get("tickets_dir", "docs/tickets"),
+        project_root=project_root,
+    )
+    if tickets_error is not None or tickets_dir is None:
+        return (
+            None,
+            None,
+            None,
+            _response(
+                "policy_blocked",
+                tickets_error or "tickets_dir validation failed",
+                error_code="policy_blocked",
+            ),
+        )
+
+    if subcommand == "execute":
+        context, error = load_runner_context(None, "execute", payload_path)
+        if error is not None:
+            return None, None, None, _engine_response_to_dict(error)
+        assert context is not None
+        context.payload["tickets_dir"] = str(context.tickets_dir)
+        return context.payload, context.tickets_dir, context.request_origin, None
+
+    request_origin = payload.get("hook_request_origin") or payload.get("request_origin") or "user"
+    if not isinstance(request_origin, str) or not request_origin:
+        return (
+            None,
+            None,
+            None,
+            _response(
+                "escalate",
+                f"Invalid request origin. Got: {request_origin!r:.100}",
+                error_code="parse_error",
+            ),
+        )
+    payload["request_origin"] = request_origin
+    payload["tickets_dir"] = str(tickets_dir)
+    return payload, tickets_dir, request_origin, None
+
+
+def _raw_wording_path(value: Any, path: str = "capture") -> str | None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_path = f"{path}.{key}"
+            if key in _RAW_USER_WORDING_KEYS:
+                return key_path
+            found = _raw_wording_path(item, key_path)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            found = _raw_wording_path(item, f"{path}[{index}]")
+            if found is not None:
+                return found
+    return None
+
+
+def _infer_priority(capture: dict[str, Any]) -> str:
+    existing = capture.get("priority")
+    if isinstance(existing, str) and existing:
+        return existing
+    text = " ".join(
+        str(capture.get(key, "")) for key in ("title", "captured_request", "problem", "next_action")
+    ).lower()
+    if any(
+        signal in text
+        for signal in (
+            "production",
+            "data loss",
+            "security",
+            "release-blocking",
+            "release blocking",
+        )
+    ):
+        return "critical"
+    if any(signal in text for signal in ("blocker", "regression", "ci red", "cannot ship")):
+        return "high"
+    if any(signal in text for signal in ("cleanup", "polish", "nice-to-have", "nice to have")):
+        return "low"
+    return "medium"
+
+
+def _apply_edit(capture: dict[str, Any], edit_text: str) -> dict[str, Any]:
+    updated = dict(capture)
+    lowered = edit_text.lower()
+    if "critical priority" in lowered or "make it critical" in lowered:
+        updated["priority"] = "critical"
+    elif "high priority" in lowered or "make it high" in lowered:
+        updated["priority"] = "high"
+    elif "low priority" in lowered or "make it low" in lowered:
+        updated["priority"] = "low"
+    elif "medium priority" in lowered or "make it medium" in lowered:
+        updated["priority"] = "medium"
+    return updated
+
+
+def _append_edit_history(payload: dict[str, Any], edit_text: str) -> None:
+    history = payload.get("edit_history")
+    if not isinstance(history, list):
+        history = []
+    history.append(
+        {
+            "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "instruction": edit_text,
+        }
+    )
+    payload["edit_history"] = history
+
+
+def _capture_fields(
+    payload: dict[str, Any],
+    *,
+    edit_text: str | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    capture = payload.get("capture")
+    if not isinstance(capture, dict):
+        return None, _response(
+            "need_fields",
+            "capture must be a JSON object",
+            error_code="need_fields",
+            data={"missing_fields": ["capture"]},
+        )
+    raw_path = _raw_wording_path(capture)
+    if raw_path is not None:
+        return None, _response(
+            "need_fields",
+            f"capture rejected raw user wording key: {raw_path}",
+            error_code="raw_user_wording",
+            data={"field": raw_path},
+        )
+
+    unsupported = sorted(key for key in capture if key not in _ALLOWED_CAPTURE_FIELDS)
+    if unsupported:
+        return None, _response(
+            "need_fields",
+            f"Unsupported capture fields: {', '.join(unsupported)}",
+            error_code="unsupported_capture_fields",
+            data={"unsupported_fields": unsupported},
+        )
+
+    if edit_text:
+        _append_edit_history(payload, edit_text)
+        capture = _apply_edit(capture, edit_text)
+        payload["capture"] = capture
+
+    missing = [
+        field
+        for field in _REQUIRED_CAPTURE_FIELDS
+        if not isinstance(capture.get(field), str) or not capture.get(field, "").strip()
+    ]
+    if missing:
+        return None, _response(
+            "need_fields",
+            f"Missing required capture fields: {', '.join(missing)}",
+            error_code="need_fields",
+            data={"missing_fields": missing},
+        )
+
+    priority = _infer_priority(capture)
+    fields = {key: value for key, value in capture.items() if key in _ALLOWED_CAPTURE_FIELDS}
+    fields["priority"] = priority
+    fields["capture_confidence"] = fields.get("capture_confidence") or "medium"
+    fields["capture_source"] = "conversation"
+    fields["source"] = {
+        "type": "capture",
+        "ref": "",
+        "session": str(payload.get("session_id", "")),
+    }
+    if "acceptance_criteria" not in fields:
+        if fields.get("refinement_status") == "needs_refinement":
+            fields["acceptance_criteria"] = ["Needs refinement"]
+        else:
+            fields["acceptance_criteria"] = [str(fields["next_action"])]
+
+    tags = fields.get("tags", [])
+    if not isinstance(tags, list):
+        return None, _response(
+            "need_fields",
+            "tags must be a list",
+            error_code="need_fields",
+            data={"validation_errors": ["tags must be a list"]},
+        )
+    unknown_tags = [
+        tag for tag in tags if isinstance(tag, str) and tag not in CONTROLLED_CAPTURE_TAGS
+    ]
+    if unknown_tags:
+        return None, _response(
+            "need_fields",
+            f"capture tags must be controlled tags: {', '.join(unknown_tags)}",
+            error_code="need_fields",
+            data={"validation_errors": [f"unsupported capture tag: {tag}" for tag in unknown_tags]},
+        )
+
+    validation_errors = validate_fields(fields)
+    if validation_errors:
+        return None, _response(
+            "need_fields",
+            f"Field validation failed: {'; '.join(validation_errors)}",
+            error_code="need_fields",
+            data={"missing_fields": [], "validation_errors": validation_errors},
+        )
+    return fields, None
+
+
+def _path_cores(paths: Any) -> set[str]:
+    if not isinstance(paths, list):
+        return set()
+    return {Path(path).name for path in paths if isinstance(path, str) and path}
+
+
+def _duplicate_from_target(payload: dict[str, Any], tickets_dir: Path) -> Any | None:
+    target_ticket_id = payload.get("target_ticket_id")
+    if not isinstance(target_ticket_id, str) or not target_ticket_id:
+        return None
+    return find_ticket_by_id(tickets_dir, target_ticket_id, include_closed=True)
+
+
+def _duplicate_from_title(fields: dict[str, Any], tickets_dir: Path) -> tuple[Any | None, bool]:
+    normalized_title = normalize(str(fields.get("title", "")))
+    component = fields.get("component")
+    related_cores = _path_cores(fields.get("related_paths"))
+    if not normalized_title:
+        return None, False
+    for ticket in list_tickets(tickets_dir, include_closed=True):
+        if normalize(ticket.title) != normalized_title:
+            continue
+        same_component = isinstance(component, str) and component and ticket.component == component
+        same_path = bool(related_cores & _path_cores(ticket.related_paths))
+        return ticket, same_component or same_path
+    return None, False
+
+
+def _duplicate_info(
+    payload: dict[str, Any],
+    fields: dict[str, Any],
+    plan_response: dict[str, Any],
+    tickets_dir: Path,
+) -> dict[str, Any]:
+    target_ticket = _duplicate_from_target(payload, tickets_dir)
+    title_ticket, title_is_strong = _duplicate_from_title(fields, tickets_dir)
+    duplicate_of = plan_response.get("data", {}).get("duplicate_of")
+    plan_ticket = (
+        find_ticket_by_id(tickets_dir, duplicate_of, include_closed=True)
+        if isinstance(duplicate_of, str) and duplicate_of
+        else None
+    )
+    ticket = target_ticket or title_ticket or plan_ticket
+    if ticket is None:
+        return {
+            "label": "none",
+            "ticket_id": None,
+            "title": "",
+            "default_action": "create_anyway",
+        }
+    default_action = (
+        "update_existing" if target_ticket is not None or title_is_strong else "create_anyway"
+    )
+    return {
+        "label": "possible",
+        "ticket_id": ticket.id,
+        "title": ticket.title,
+        "default_action": default_action,
+    }
+
+
+def _exceptional_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    exceptional: dict[str, Any] = {}
+    confidence = fields.get("capture_confidence", "medium")
+    priority = fields.get("priority", "medium")
+    if priority != "medium" or confidence == "low":
+        exceptional["priority"] = priority
+    for key in ("refinement_status", "component", "related_paths"):
+        value = fields.get(key)
+        if value:
+            exceptional[key] = value
+    return exceptional
+
+
+def _preview(fields: dict[str, Any], duplicate: dict[str, Any]) -> dict[str, Any]:
+    confidence = str(fields.get("capture_confidence", "medium"))
+    preview: dict[str, Any] = {
+        "title": fields["title"],
+        "problem": fields["problem"],
+        "next_action": fields["next_action"],
+        "confidence": confidence,
+        "duplicate": duplicate,
+        "prompt": _PROMPT,
+        "exceptional_fields": _exceptional_fields(fields),
+    }
+    priority = str(fields.get("priority", "medium"))
+    if priority != "medium" or confidence == "low":
+        preview["priority"] = priority
+    return preview
+
+
+def _json_fingerprint(value: Any) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _prepare_fingerprint(fields: dict[str, Any]) -> str:
+    return _json_fingerprint(fields)
+
+
+def _suggested_next_capture(edit_text: str | None) -> str:
+    if edit_text and "split" in edit_text.lower() and "two ticket" in edit_text.lower():
+        return "Capture the second requested ticket as a separate follow-up."
+    return ""
+
+
+def _prepare(payload_path: Path, edit_text: str | None) -> dict[str, Any]:
+    payload, tickets_dir, request_origin, error = _load_capture_context("prepare", payload_path)
+    if error is not None:
+        return error
+    assert payload is not None and tickets_dir is not None and request_origin is not None
+
+    fields, field_error = _capture_fields(payload, edit_text=edit_text)
+    if field_error is not None or fields is None:
+        try:
+            _write_payload_atomic(payload_path, payload)
+        except OSError:
+            pass
+        return field_error or _response(
+            "need_fields", "capture fields invalid", error_code="need_fields"
+        )
+
+    current = dict(payload)
+    current["action"] = "create"
+    current["args"] = {}
+    current["fields"] = fields
+    current["tickets_dir"] = str(tickets_dir)
+
+    classify_response = _engine_response_to_dict(
+        dispatch_stage("classify", current, tickets_dir, request_origin)
+    )
+    if classify_response.get("state") != "ok":
+        return classify_response
+    current.update(classify_response.get("data", {}))
+
+    plan_response = _engine_response_to_dict(
+        dispatch_stage("plan", current, tickets_dir, request_origin)
+    )
+    if plan_response.get("state") not in {"ok", "duplicate_candidate"}:
+        return plan_response
+    current.update(plan_response.get("data", {}))
+    duplicate = _duplicate_info(payload, fields, plan_response, tickets_dir)
+    if current.get("duplicate_of"):
+        current["dedup_override"] = True
+
+    preflight_response = _engine_response_to_dict(
+        dispatch_stage("preflight", current, tickets_dir, request_origin)
+    )
+    if preflight_response.get("state") != "ok":
+        return preflight_response
+    current.update(preflight_response.get("data", {}))
+
+    preview = _preview(fields, duplicate)
+    prepare_artifact = {
+        "state": "ready_to_execute",
+        "fingerprint": _prepare_fingerprint(fields),
+        "capture_fingerprint": _json_fingerprint(current["capture"]),
+        "preview": preview,
+        "preview_fingerprint": _json_fingerprint(preview),
+    }
+    current["capture_prepare"] = prepare_artifact
+    current["capture"] = dict(payload["capture"])
+    if "edit_history" in payload:
+        current["edit_history"] = payload["edit_history"]
+    suggested_next = _suggested_next_capture(edit_text)
+    if suggested_next:
+        current["suggested_next_capture"] = suggested_next
+
+    try:
+        _write_payload_atomic(payload_path, current)
+    except OSError as exc:
+        return _response("escalate", str(exc), error_code="io_error")
+
+    data: dict[str, Any] = {"preview": preview}
+    if suggested_next:
+        data["suggested_next_capture"] = suggested_next
+    return _response(
+        "ready_to_execute",
+        "Capture preview ready",
+        data=data,
+    )
+
+
+def _execute(payload_path: Path) -> dict[str, Any]:
+    payload, tickets_dir, request_origin, error = _load_capture_context("execute", payload_path)
+    if error is not None:
+        return error
+    assert payload is not None and tickets_dir is not None and request_origin is not None
+
+    prepare_artifact = payload.get("capture_prepare")
+    if (
+        not isinstance(prepare_artifact, dict)
+        or prepare_artifact.get("state") != "ready_to_execute"
+    ):
+        return _response(
+            "preflight_failed",
+            "Capture execute requires a successful prepare preview",
+            error_code="stale_plan",
+        )
+    fields = payload.get("fields")
+    if not isinstance(fields, dict):
+        return _response(
+            "preflight_failed",
+            "Capture execute requires prepared fields",
+            error_code="stale_plan",
+        )
+    preview = prepare_artifact.get("preview")
+    if not isinstance(preview, dict):
+        return _response(
+            "preflight_failed",
+            "Capture execute requires prepared preview data",
+            error_code="stale_plan",
+        )
+    if prepare_artifact.get("fingerprint") != _prepare_fingerprint(fields):
+        return _response(
+            "preflight_failed",
+            "Capture preview is stale; rerun prepare",
+            error_code="stale_plan",
+        )
+    capture = payload.get("capture")
+    if (
+        not isinstance(capture, dict)
+        or prepare_artifact.get("capture_fingerprint") != _json_fingerprint(capture)
+    ):
+        return _response(
+            "preflight_failed",
+            "Capture input changed since prepare; rerun prepare",
+            error_code="stale_plan",
+        )
+    if prepare_artifact.get("preview_fingerprint") != _json_fingerprint(preview):
+        return _response(
+            "preflight_failed",
+            "Capture preview is stale; rerun prepare",
+            error_code="stale_plan",
+        )
+    fields = dict(fields)
+    fields["capture_source"] = "conversation"
+    fields["source"] = {
+        "type": "capture",
+        "ref": "",
+        "session": str(payload.get("session_id", "")),
+    }
+    payload["fields"] = fields
+
+    response = _engine_response_to_dict(
+        dispatch_stage("execute", payload, tickets_dir, request_origin)
+    )
+    return response
+
+
+def run_capture(
+    subcommand: str,
+    payload_path: Path,
+    *,
+    edit_text: str | None = None,
+) -> dict[str, Any]:
+    if subcommand == "prepare":
+        return _prepare(payload_path, edit_text)
+    if subcommand == "execute":
+        if edit_text is not None:
+            return _response(
+                "escalate",
+                "execute does not accept --edit",
+                error_code="intent_mismatch",
+            )
+        return _execute(payload_path)
+    return _response(
+        "escalate",
+        f"Unknown capture subcommand: {subcommand!r}",
+        error_code="intent_mismatch",
+    )
+
+
+def _exit_code(state: str) -> int:
+    if state in {"ready_to_execute", "ok_create"}:
+        return 0
+    if state == "need_fields":
+        return 2
+    return 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if len(args) < 2:
+        print(
+            json.dumps(
+                {"error": "Usage: ticket_capture.py prepare|execute <payload_file> [--edit TEXT]"}
+            )
+        )
+        return 1
+
+    subcommand = args[0]
+    payload_path = Path(args[1])
+    edit_text: str | None = None
+    if len(args) > 2:
+        if subcommand != "prepare" or len(args) != 4 or args[2] != "--edit":
+            print(
+                json.dumps(
+                    {"error": "Usage: ticket_capture.py prepare <payload_file> [--edit TEXT]"}
+                )
+            )
+            return 1
+        edit_text = args[3]
+
+    response = run_capture(subcommand, payload_path, edit_text=edit_text)
+    print(json.dumps(response))
+    return _exit_code(str(response.get("state", "")))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
