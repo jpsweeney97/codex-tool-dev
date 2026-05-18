@@ -8,6 +8,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Capture-first skill split: `ticket-capture`, `ticket-find`, `ticket-update`,
+  `ticket-review`, and explicit-only `ticket-doctor` replace the old broad
+  user-facing Ticket skill.
+- Purpose-built capture, update, review, and doctor entrypoints:
+  `ticket_capture.py`, `ticket_update.py`, `ticket_review.py`, and
+  `ticket_doctor.py`.
+- Capture metadata and refinement schema fields for synthesized tickets,
+  including `capture_confidence`, `capture_source`, and
+  `refinement_status: needs_refinement`.
+- Source manifest readiness URLs for website, privacy policy, and terms of
+  service. This is source metadata only, not installed runtime proof.
 - Guided ticket UX plan: workflow prepare/execute, mutation previews,
   recovery options, close-readiness checks, triage next actions, and static
   doctor diagnostics

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 CAPTURE_SKILL = PLUGIN_ROOT / "skills" / "ticket-capture" / "SKILL.md"
@@ -24,7 +25,6 @@ REMOVED_SKILL_FILES = [
 ]
 SKILL_FILES = NEW_SKILL_FILES
 CURRENT_FACING_DOCS = SKILL_FILES + [
-    PLUGIN_ROOT / "skills" / "ticket" / "references" / "pipeline-guide.md",
     PLUGIN_ROOT / "README.md",
     PLUGIN_ROOT / "HANDBOOK.md",
     PLUGIN_ROOT / "references" / "ticket-contract.md",
@@ -83,6 +83,12 @@ def test_ticket_capture_skill_exists() -> None:
 def test_old_broad_skill_files_do_not_exist() -> None:
     for path in REMOVED_SKILL_FILES:
         assert not path.exists(), str(path)
+
+
+def test_retired_pipeline_guide_is_not_current_source() -> None:
+    assert not (
+        PLUGIN_ROOT / "skills" / "ticket" / "references" / "pipeline-guide.md"
+    ).exists()
 
 
 def test_task4_split_skill_files_exist() -> None:
@@ -366,8 +372,10 @@ def test_ticket_review_skill_contract_is_read_only_and_capture_prompt_only() -> 
     assert isinstance(description, str)
     assert "Read-only" in description
     assert "may suggest capture prompts but must not write tickets" in description
-    assert "ticket_triage.py dashboard" in text
-    assert "ticket_triage.py audit" in text
+    assert "ticket_review.py review" in text
+    assert "ticket_review.py audit" in text
+    assert "ticket_triage.py dashboard" not in text
+    assert "ticket_triage.py audit" not in text
     normalized = _normalize_whitespace(text)
     assert "Do not create, update, close, reopen, doctor, or repair tickets" in normalized
     assert "suggest a concrete `ticket-capture` prompt instead of writing the ticket" in normalized
@@ -388,7 +396,10 @@ def test_ticket_doctor_skill_contract_is_explicit_maintenance_only() -> None:
     assert "repair corrupt ticket audit logs" in description
     assert "validate ticket plugin health" in description
     assert "Do not trigger on casual audit, review, triage, or backlog-health language" in text
-    assert "ticket_audit.py repair <TICKETS_DIR> --dry-run" in text
+    assert "ticket_doctor.py diagnose" in text
+    assert "ticket_doctor.py repair-audit <TICKETS_DIR>" in text
+    assert "ticket_doctor.py repair-audit <TICKETS_DIR> --confirm-repair" in text
+    assert "ticket_audit.py repair <TICKETS_DIR>" not in text
     assert "ask before any mutation" in text
 
 
@@ -447,10 +458,14 @@ def test_split_skills_document_check_review_and_doctor_surfaces() -> None:
     review_text = _read_text(REVIEW_SKILL)
     doctor_text = _read_text(DOCTOR_SKILL)
     assert "ticket_read.py check" in find_text
-    assert "ticket_triage.py dashboard" in review_text
-    assert "ticket_triage.py audit" in review_text
+    assert "ticket_review.py review" in review_text
+    assert "ticket_review.py audit" in review_text
+    assert "ticket_triage.py dashboard" not in review_text
+    assert "ticket_triage.py audit" not in review_text
     assert "ticket_triage.py doctor" not in review_text
-    assert "ticket_triage.py doctor" in doctor_text
+    assert "ticket_triage.py doctor" not in doctor_text
+    assert "ticket_doctor.py diagnose" in doctor_text
+    assert "ticket_doctor.py repair-audit" in doctor_text
     assert "<CACHE_ROOT>" in doctor_text
     assert "/Users/jp/.codex/plugins/cache/" not in find_text
     assert "/Users/jp/.codex/plugins/cache/" not in review_text
@@ -459,9 +474,55 @@ def test_split_skills_document_check_review_and_doctor_surfaces() -> None:
 
 def test_readme_documents_ticket_ux_commands() -> None:
     text = (PLUGIN_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "ticket_capture.py` | `prepare <payload_file>` / `execute <payload_file>`" in text
+    assert "ticket_update.py` | `prepare <payload_file>` / `execute <payload_file>`" in text
+    assert "ticket_review.py` | `review <tickets_dir>` / `audit <tickets_dir> [--days N]`" in text
+    assert (
+        "ticket_doctor.py` | `diagnose <tickets_dir> --plugin-root <plugin_root> "
+        "--cache-root <cache_root>`"
+    ) in text
+    assert "ticket_doctor.py` | `repair-audit <tickets_dir> [--confirm-repair]`" in text
     assert "ticket_workflow.py" in text
+    assert "Internal/debugging legacy workflow runner" in text
     assert "ticket_read.py` | `check" in text
-    assert "ticket_triage.py` | `doctor" in text
+    assert "| doctor/repair | explicit maintenance request | `ticket_doctor.py diagnose`" in text
+    assert "skills/ticket/references/pipeline-guide.md" not in text
+
+
+def test_readme_and_handbook_use_source_authority_installed_boundary() -> None:
+    for path in (PLUGIN_ROOT / "README.md", PLUGIN_ROOT / "HANDBOOK.md"):
+        text = _read_text(path)
+        normalized = _normalize_whitespace(text)
+        assert "~/.codex/plugins/ticket" not in text
+        assert "source-authority" in text
+        assert "Source edits here do not prove installed Codex behavior" in normalized
+        assert "cache-refresh or runtime-proof lane" in normalized
+
+
+def test_manifest_documents_required_interface_urls() -> None:
+    manifest = json.loads(_read_text(MANIFEST))
+    interface = manifest["interface"]
+    expected_urls = {
+        "websiteURL": (
+            "https://github.com/jpsweeney97/codex-tool-dev/tree/main/"
+            "plugins/turbo-mode/ticket"
+        ),
+        "privacyPolicyURL": (
+            "https://github.com/jpsweeney97/codex-tool-dev/blob/main/"
+            "plugins/turbo-mode/ticket/PRIVACY.md"
+        ),
+        "termsOfServiceURL": (
+            "https://github.com/jpsweeney97/codex-tool-dev/blob/main/"
+            "plugins/turbo-mode/ticket/TERMS.md"
+        ),
+    }
+    for key, expected_url in expected_urls.items():
+        assert interface[key] == expected_url
+
+    for key in ("privacyPolicyURL", "termsOfServiceURL"):
+        url_path = Path(urlparse(interface[key]).path)
+        assert url_path.parts[-4:-1] == ("plugins", "turbo-mode", "ticket")
+        assert (PLUGIN_ROOT / url_path.name).exists(), key
 
 
 def test_plugin_default_prompts_are_capture_first() -> None:
@@ -512,10 +573,13 @@ def test_task4_docs_do_not_overclaim_current_placeholder_refinement() -> None:
 
     handbook = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
     normalized_handbook = _normalize_whitespace(handbook).lower()
-    assert "metadata/refinement updates" not in normalized_handbook
     assert "lifecycle, metadata, and placeholder refinement" not in normalized_handbook
-    assert "existing-ticket lifecycle and frontmatter metadata updates" in normalized_handbook
-    assert "future dedicated `ticket_update.py` backend" in normalized_handbook
+    assert "future dedicated `ticket_update.py` backend" not in normalized_handbook
+    assert "no dedicated `ticket_update.py` backend exists yet" not in normalized_handbook
+    assert "ticket_update.py prepare" in normalized_handbook
+    assert "ticket_update.py execute" in normalized_handbook
+    assert "ticket_workflow.py prepare" not in normalized_handbook
+    assert "ticket_workflow.py execute" not in normalized_handbook
 
 
 def test_docs_describe_capture_first_five_skill_surface() -> None:

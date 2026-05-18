@@ -30,7 +30,7 @@ not invent an installed cache path.
 For static plugin and storage diagnostics, run:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_triage.py doctor <TICKETS_DIR> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>
+python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <TICKETS_DIR> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>
 ```
 
 Report the diagnostic result as source/cache/storage evidence. Do not describe
@@ -41,14 +41,14 @@ it as live runtime proof.
 Always dry-run audit repair first:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_audit.py repair <TICKETS_DIR> --dry-run
+python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <TICKETS_DIR>
 ```
 
 Show the dry-run result and ask before any mutation. If the user explicitly
 approves repair, run:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_audit.py repair <TICKETS_DIR>
+python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <TICKETS_DIR> --confirm-repair
 ```
 
 Stop on parse, path, permission, or backup errors. Report the failing command

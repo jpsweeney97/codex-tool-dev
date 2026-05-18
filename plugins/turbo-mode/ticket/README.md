@@ -2,12 +2,12 @@
 
 A Codex plugin for capture-first repo-local ticket management from within Codex sessions.
 
-Tickets are stored as Markdown files with fenced YAML frontmatter in `docs/tickets/`. User-facing creation now flows through `ticket-capture`, which synthesizes a compact preview from natural language and writes only after explicit confirmation. Existing-ticket changes still flow through `ticket_workflow.py prepare` and `ticket_workflow.py execute`, which reuse the same engine, guard hook, and trust model as the lower-level 4-stage pipeline, with a full JSONL audit trail.
+Tickets are stored as Markdown files with fenced YAML frontmatter in `docs/tickets/`. User-facing creation flows through `ticket-capture`, which synthesizes a compact preview from natural language and writes only after explicit confirmation. Existing-ticket lifecycle, metadata, and focused refinement changes flow through `ticket_update.py prepare` and `ticket_update.py execute`, which reuse the same engine, guard hook, and trust model as the lower-level 4-stage pipeline, with a full JSONL audit trail.
 
-This directory is the source package for the Ticket plugin. Normal local
-development syncs this stable source root into `~/.codex/plugins/ticket`;
-installed runtime artifacts are separate and may diverge until Codex is
-restarted after sync.
+This directory is the source-authority package for the Ticket plugin. Installed
+cache and runtime artifacts are separate proof surfaces and may diverge until an
+explicit cache-refresh or runtime-proof lane verifies them. Source edits here do
+not prove installed Codex behavior.
 
 ## Installation
 
@@ -27,10 +27,10 @@ The plugin registers its hook, skills, and scripts automatically. No build step 
 ## What It Does
 
 - **Capture tickets** from natural language with synthesized fields, duplicate checks, and explicit create confirmation
-- **Update existing tickets** with scoped lifecycle and frontmatter metadata changes through preview-first workflow commands
+- **Update existing tickets** with scoped lifecycle, frontmatter metadata, and focused refinement changes through preview-first `ticket_update.py` commands
 - **List, query, and check close readiness** with read-only filters and ID-prefix search
-- **Review backlog health** with read-only stale detection, blocked dependency chains, size warnings, and next-action recommendations
-- **Doctor storage and audit logs** only when explicitly requested, with dry-run repair before mutation
+- **Review backlog health** with the read-only `ticket_review.py` wrapper for stale detection, blocked dependency chains, size warnings, and next-action recommendations
+- **Doctor storage and audit logs** only when explicitly requested through `ticket_doctor.py`, with dry-run repair before mutation
 - **Agent autonomy** — external agents can create tickets autonomously, gated by a configurable policy and elevated confidence thresholds
 
 ## Components
@@ -41,9 +41,9 @@ The plugin registers its hook, skills, and scripts automatically. No build step 
 |-------|---------|---------|
 | `ticket-capture` | Track, file, capture, ticket, or remember follow-up work | Create one ticket from natural language after preview confirmation |
 | `ticket-find` | Show, list, find, open, or check close readiness | Read-only `ticket_read.py list`, `query`, and `check` |
-| `ticket-update` | Update existing ticket metadata or lifecycle | Preview-first frontmatter updates via `ticket_workflow.py` |
-| `ticket-review` | Backlog health, stale, blocked, or next-work questions | Read-only dashboard and audit summary; may suggest capture prompts |
-| `ticket-doctor` | Explicit storage/plugin diagnostics or audit repair | Maintenance-only diagnostics and dry-run-first repair |
+| `ticket-update` | Update existing ticket metadata, lifecycle, or focused refinement fields | Preview-first updates via `ticket_update.py prepare` and `execute` |
+| `ticket-review` | Backlog health, stale, blocked, or next-work questions | Read-only `ticket_review.py review` and `audit`; may suggest capture prompts |
+| `ticket-doctor` | Explicit storage/plugin diagnostics or audit repair | Maintenance-only `ticket_doctor.py diagnose` and dry-run-first `repair-audit` |
 
 Generic creation through the old broad `ticket` skill is no longer user-facing.
 Use `ticket-capture` for new tickets. Low-confidence captures are allowed when a
@@ -56,11 +56,11 @@ not a lifecycle status.
 | Operation | Required Args | Pipeline |
 |-----------|--------------|----------|
 | capture | natural-language follow-up | `ticket_capture.py prepare` then `execute` |
-| update metadata | ticket_id plus scoped frontmatter fields | `ticket_workflow.py prepare` then `execute` |
-| close/reopen | ticket_id plus required resolution or reopen reason | `ticket_workflow.py prepare` then `execute` |
+| update metadata/refinement | ticket_id plus scoped update fields | `ticket_update.py prepare` then `execute` |
+| close/reopen | ticket_id plus required resolution or reopen reason | `ticket_update.py prepare` then `execute` |
 | list/query/check | filters, ID prefix, or ticket_id | Direct read (`ticket_read.py`) |
-| backlog review | tickets directory | Read-only `ticket_triage.py dashboard` and `audit` |
-| doctor/repair | explicit maintenance request | `ticket_triage.py doctor` or dry-run-first `ticket_audit.py repair` |
+| backlog review | tickets directory | Read-only `ticket_review.py review` and `audit` |
+| doctor/repair | explicit maintenance request | `ticket_doctor.py diagnose` or dry-run-first `repair-audit` |
 
 All mutations display a confirmation prompt (`y / edit / n`) before executing. No bypass flag exists.
 
@@ -77,7 +77,7 @@ Intercepts all Bash commands, detects ticket script invocations, and:
 
 Security: blocks shell metacharacters (`|;&`$><\n\r`), enforces path containment, uses atomic writes (temp + fsync + os.replace).
 
-### Scripts (15 modules in `scripts/`)
+### Scripts
 
 Source code lives in `scripts/`, not a standard Python package directory. Skills resolve the plugin root from their own installed location and invoke scripts through the canonical Bash launcher `python3 -B <PLUGIN_ROOT>/scripts/<script>.py`.
 
@@ -93,6 +93,8 @@ python3 -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/tickets
 |--------|-----------|---------|
 | `ticket_engine_user.py` | `<subcommand> <payload_file>` | User-origin mutations |
 | `ticket_engine_agent.py` | `<subcommand> <payload_file>` | Agent-origin mutations |
+| `ticket_capture.py` | `prepare <payload_file>` / `execute <payload_file>` | User-facing capture-first ticket creation |
+| `ticket_update.py` | `prepare <payload_file>` / `execute <payload_file>` | User-facing existing-ticket lifecycle, metadata, and focused refinement updates |
 
 Both delegate to `ticket_engine_runner.py`, which dispatches to `ticket_engine_core.py`.
 
@@ -105,9 +107,12 @@ Both delegate to `ticket_engine_runner.py`, which dispatches to `ticket_engine_c
 | `ticket_read.py` | `check <tickets_dir> <ticket_id>` | Close-readiness check |
 | `ticket_triage.py` | `dashboard <tickets_dir>` | Health dashboard |
 | `ticket_triage.py` | `audit <tickets_dir> [--days N]` | Audit trail summary (default 7 days) |
+| `ticket_review.py` | `review <tickets_dir>` / `audit <tickets_dir> [--days N]` | User-facing read-only backlog review wrapper |
+| `ticket_doctor.py` | `diagnose <tickets_dir> --plugin-root <plugin_root> --cache-root <cache_root>` | User-facing explicit diagnostics wrapper |
+| `ticket_doctor.py` | `repair-audit <tickets_dir> [--confirm-repair]` | User-facing dry-run-first audit repair wrapper |
 | `ticket_triage.py` | `doctor <tickets_dir> --plugin-root <plugin_root> --cache-root <cache_root>` | Static source/cache/project diagnostic |
 | `ticket_audit.py` | `repair <tickets_dir> [--dry-run]` | Repair corrupt JSONL audit logs (user-only) |
-| `ticket_workflow.py` | `prepare <payload_file>` / `execute <payload_file>` / `recover <payload_file> <action>` | High-level mutation runner that returns previews and applies supported recovery patches |
+| `ticket_workflow.py` | `prepare <payload_file>` / `execute <payload_file>` / `recover <payload_file> <action>` | Internal/debugging legacy workflow runner for lower-level mutation orchestration |
 
 **Response envelope (all engine commands):**
 
@@ -122,7 +127,6 @@ Exit codes: `0` (success), `1` (engine error), `2` (validation failure / need_fi
 | Document | Path | Purpose |
 |----------|------|---------|
 | Ticket Contract | `references/ticket-contract.md` | Single source of truth: schema, states, error codes, transitions, autonomy, dedup |
-| Pipeline Guide | `skills/ticket/references/pipeline-guide.md` | Payload schemas, state propagation, response-to-UX mapping for engine debugging |
 | Operator Handbook | `HANDBOOK.md` | Bring-up, operational runbooks, failure recovery, internals |
 | Changelog | `CHANGELOG.md` | Version history and release notes |
 
@@ -198,11 +202,11 @@ Tickets use fenced YAML blocks (` ```yaml `, not `---` frontmatter).
 The user-facing creation path is `ticket-capture`. It writes a capture payload,
 runs `ticket_capture.py prepare`, presents a compact preview, and writes only
 after explicit `create` confirmation. Existing-ticket changes use
-`ticket_workflow.py prepare` to run classify, plan, preflight, and read-only
-execute-policy checks, then present one preview before
-`ticket_workflow.py execute`. The lower-level engine stages remain available
-for debugging and tests. The workflow runner preserves the hook-injected trust
-triple and does not write tickets until execute.
+`ticket_update.py prepare` to validate scoped lifecycle, metadata, or focused
+refinement fields, then present one preview before `ticket_update.py execute`.
+The lower-level engine stages and `ticket_workflow.py` remain available for
+debugging and tests. The update runner preserves the hook-injected trust triple
+and does not write tickets until execute.
 
 ### Capture a ticket
 
@@ -350,7 +354,7 @@ Tests map 1:1 to source modules plus pipeline-stage and integration tests. Fixtu
 ### Project Structure
 
 ```
-scripts/          # 15 source modules
+scripts/          # plugin script entrypoints and support modules
 hooks/            # Guard hook + registration
 skills/           # ticket-capture, find, update, review, and doctor skill definitions
 tests/            # pytest suite + support fixtures

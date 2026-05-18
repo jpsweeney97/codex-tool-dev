@@ -31,6 +31,9 @@
       "Find open ticket work",
       "Review ticket backlog health"
     ],
+    "websiteURL": "https://github.com/jpsweeney97/codex-tool-dev/tree/main/plugins/turbo-mode/ticket",
+    "privacyPolicyURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/ticket/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/ticket/TERMS.md",
     "brandColor": "#0F766E",
     "screenshots": []
   }

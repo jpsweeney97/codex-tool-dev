@@ -2,17 +2,17 @@
 
 ## Overview
 
-The ticket plugin provides capture-first structured work tracking for Codex sessions. It manages tickets as markdown files with YAML frontmatter. New-ticket creation is user-facing through `ticket-capture`; existing-ticket mutations use `ticket_workflow.py` while preserving the underlying 4-stage mutation pipeline (classify → plan → preflight → execute) for engine dispatch and debugging.
+The ticket plugin provides capture-first structured work tracking for Codex sessions. It manages tickets as markdown files with YAML frontmatter. New-ticket creation is user-facing through `ticket-capture`; existing-ticket lifecycle, metadata, and focused refinement mutations use `ticket_update.py` while preserving the underlying 4-stage mutation pipeline (classify → plan → preflight → execute) for engine dispatch and debugging.
 
 **Scope:** Ticket capture, existing-ticket lifecycle mutations, scoped frontmatter metadata updates, read queries, backlog health review, explicit diagnostics, and audit trail repair.
 
 **Not covered:** External issue tracker integrations, UI rendering, cross-project ticket syncing, or agent-orchestration workflows (roadmap).
 
-**Source scope:** This handbook describes the stable source package at
+**Source scope:** This handbook describes the source-authority package at
 `plugins/turbo-mode/ticket/` in `/Users/jp/Projects/active/codex-tool-dev`.
-Normal local development syncs that source root into `~/.codex/plugins/ticket`;
-installed runtime artifacts are separate and may diverge until Codex is
-restarted after sync.
+Installed cache and runtime artifacts are separate proof surfaces and may
+diverge until an explicit cache-refresh or runtime-proof lane verifies them.
+Source edits here do not prove installed Codex behavior.
 
 ---
 
@@ -38,7 +38,11 @@ Low-confidence captures are allowed when a next action exists; they should carry
 |--------|--------|---------|
 | `scripts/ticket_engine_user.py` | User | Mutation pipeline with `request_origin="user"` |
 | `scripts/ticket_engine_agent.py` | Agent | Mutation pipeline with `request_origin="agent"` (autonomy-gated) |
-| `scripts/ticket_workflow.py` | Any | Guided prepare/execute/recover workflow runner |
+| `scripts/ticket_capture.py` | User | Capture-first prepare/execute workflow for new tickets |
+| `scripts/ticket_update.py` | User | Preview-first prepare/execute workflow for existing tickets |
+| `scripts/ticket_review.py` | Any | User-facing read-only review and audit wrapper |
+| `scripts/ticket_doctor.py` | User | Explicit-only diagnostics and dry-run-first audit repair wrapper |
+| `scripts/ticket_workflow.py` | Any | Internal/debugging legacy prepare/execute/recover workflow runner |
 | `scripts/ticket_read.py` | Any | Read-only: list, query by ID-prefix, and close-readiness check |
 | `scripts/ticket_triage.py` | Any | Read-only: dashboard counts, stale/blocked detection, audit summary |
 | `scripts/ticket_audit.py` | Any | Audit trail validation and corrupt-line repair |
@@ -109,7 +113,8 @@ python3 -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/tickets
 - Python ≥ 3.11
 - `pyyaml` ≥ 6.0
 - A project with a `.git/` or `.codex/` directory (required for project root discovery)
-- Plugin installed at `~/.codex/plugins/ticket/` or via `codex plugin install`
+- For installed-runtime checks, explicit install/cache-refresh evidence is
+  required; this source checkout alone is not runtime proof
 
 ### Autonomy Configuration
 
@@ -226,28 +231,36 @@ read-only and calls only `ticket_read.py list`, `query`, and `check`.
 Update an existing ticket's lifecycle, priority, tags, blockers, source, defer,
 capture metadata, component, or related paths. Do not use it for arbitrary
 body-section editing in v1. Placeholder problem, next action, and acceptance
-criteria refinement needs the future dedicated `ticket_update.py` backend.
+criteria refinement uses the focused `ticket_update.py` backend.
 
 **Flow**
 1. Resolve plugin root
 2. Resolve `PROJECT_ROOT` from the current working directory
 3. Create an absolute payload under `<PROJECT_ROOT>/.codex/ticket-tmp/`
-4. Run `ticket_workflow.py prepare`
+4. Run `ticket_update.py prepare`
 5. Show the preview and wait for explicit confirmation
-6. Run `ticket_workflow.py execute` only after confirmation
+6. Run `ticket_update.py execute` only after confirmation
+
+---
+
+### `ticket_update.py`
+
+Use for user-facing existing-ticket mutations. `prepare` validates scoped
+lifecycle, metadata, and focused refinement fields, then returns a preview.
+`execute` performs the write after user confirmation. These workflow commands
+require canonical Bash invocation so the guard hook can inject trust fields.
+Payload paths must be absolute, must live inside the active workspace root, and
+must not contain whitespace. Recreate unsupported payloads under a path such as
+`<PROJECT_ROOT>/.codex/ticket-tmp/payload.json`.
 
 ---
 
 ### `ticket_workflow.py`
 
-Use for existing-ticket mutations. `prepare` hydrates the payload, returns a
-preview, and records recovery options. `execute` performs the write after user
-confirmation. `recover` applies supported user-selected payload patches. No
-dedicated `ticket_update.py` backend exists yet. These workflow commands require
-canonical Bash invocation so the guard hook can inject trust fields. Payload
-paths must be absolute, must live inside the active workspace root, and must not
-contain whitespace. Recreate unsupported payloads under a path such as
-`<PROJECT_ROOT>/.codex/ticket-tmp/payload.json`.
+Use as an internal/debugging legacy workflow runner when diagnosing the
+lower-level mutation pipeline. It is not the current user-facing update path.
+`prepare` hydrates a legacy payload, `execute` performs the write after user
+confirmation, and `recover` applies supported user-selected payload patches.
 
 ---
 
@@ -262,8 +275,8 @@ suggest `ticket-capture` prompts but must not write tickets.
 1. Resolve plugin root
 2. Resolve `PROJECT_ROOT` from the current working directory
 3. Resolve `TICKETS_DIR` as `<PROJECT_ROOT>/docs/tickets/`
-4. Run `ticket_triage.py dashboard` → counts by status, stale list, blocked chain detection, size warnings
-5. Run `ticket_triage.py audit` → aggregate by action/result/session from `.audit/` JSONL
+4. Run `ticket_review.py review` → counts by status, stale list, blocked chain detection, size warnings
+5. Run `ticket_review.py audit` → aggregate by action/result/session from `.audit/` JSONL
 6. Format and render recommendations
 
 **Failure modes**
@@ -285,9 +298,9 @@ repair corrupt audit logs. Casual audit, triage, or review language belongs to
 1. Resolve plugin root
 2. Resolve `PROJECT_ROOT` from the current working directory
 3. Resolve `TICKETS_DIR` as `<PROJECT_ROOT>/docs/tickets/`
-4. For diagnostics, run `ticket_triage.py doctor`
-5. For audit repair, run `ticket_audit.py repair --dry-run`
-6. Ask before any non-dry-run repair mutation
+4. For diagnostics, run `ticket_doctor.py diagnose`
+5. For audit repair, run `ticket_doctor.py repair-audit`
+6. Run `ticket_doctor.py repair-audit --confirm-repair` only after explicit approval
 
 ---
 
@@ -348,7 +361,7 @@ python3 -B <PLUGIN_ROOT>/scripts/ticket_read.py check <tickets_dir> <ticket_id> 
 ### `ticket_triage.py`
 
 **When to use**
-Standalone health check; called by `ticket-review`. Produces dashboard and audit summary without mutations.
+Lower-level health check backend; called by `ticket_review.py`. Produces dashboard and audit summary without mutations.
 
 **Inputs**
 ```bash
@@ -366,7 +379,9 @@ python3 -B <PLUGIN_ROOT>/scripts/ticket_triage.py audit <tickets_dir> [--days <N
 ### `ticket_audit.py`
 
 **When to use**
-Repair corrupted audit trail JSONL files. Always run with `--dry-run` first.
+Lower-level audit repair backend; called by `ticket_doctor.py repair-audit`.
+Direct use is for debugging. User-facing repair should go through
+`ticket_doctor.py`, which always dry-runs first.
 
 **Inputs**
 ```bash
@@ -468,7 +483,7 @@ At preflight, the engine takes a fingerprint snapshot of any existing ticket bei
 | `session_cap_exceeded` | Agent created ≥ `max_creates_per_session` tickets this session | Check `max_creates_per_session` in `.codex/ticket.local.md` | Raise cap or start a new session |
 | `audit_write_failed` blocks agent mutation | Disk full, permission error, or `.audit/` not writable | Check disk space and permissions on `docs/tickets/.audit/` | Fix underlying issue; mutation will proceed once audit write succeeds |
 | `toctou_conflict` on update | Concurrent write between preflight and execute | Inspect ticket file mtime | Re-run update after verifying current state |
-| Corrupt audit JSONL lines | Interrupted write (crash during mutation) | Run `python3 -B <PLUGIN_ROOT>/scripts/ticket_audit.py repair <tickets_dir> --dry-run` | Run `python3 -B <PLUGIN_ROOT>/scripts/ticket_audit.py repair <tickets_dir>` to repair with backup |
+| Corrupt audit JSONL lines | Interrupted write (crash during mutation) | Run `python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir>` | After explicit approval, run `python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir> --confirm-repair` |
 | Stale tickets not surfaced by triage | Missing `updated` field in old ticket YAML | Inspect ticket frontmatter | Triage falls back to file mtime; results are approximate for legacy tickets |
 | `path_outside_cwd` from hook | Project root not at Codex launch directory | Check hook's `event.cwd` vs actual tickets path | Launch Codex from the project root containing `.git/` or `.codex/` |
 
@@ -574,7 +589,7 @@ python3 -B <PLUGIN_ROOT>/scripts/ticket_engine_user.py classify /tmp/test_payloa
 ls docs/tickets/.audit/
 # Should show YYYY-MM-DD/ directory with at least one .jsonl file
 
-python3 -B <PLUGIN_ROOT>/scripts/ticket_audit.py repair <PROJECT_ROOT>/docs/tickets --dry-run
+python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <PROJECT_ROOT>/docs/tickets
 # Should complete with no errors
 ```
 

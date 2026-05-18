@@ -976,6 +976,30 @@ class TestTriageAllowlist:
         assert "validated (read-only)" in decision.get("permissionDecisionReason", "")
 
 
+class TestReviewWrapperAllowlist:
+    def test_review_wrapper_allowed(self):
+        result = run_hook(
+            make_hook_input(
+                f"python3 -B {FAKE_ROOT}/scripts/ticket_review.py review /tmp/tickets",
+            ),
+            plugin_root=FAKE_ROOT,
+        )
+        decision = result.get("hookSpecificOutput", {})
+        assert decision.get("permissionDecision") == "allow"
+        assert "read-only" in decision.get("permissionDecisionReason", "").lower()
+
+    def test_review_wrapper_audit_allowed(self):
+        result = run_hook(
+            make_hook_input(
+                f"python3 -B {FAKE_ROOT}/scripts/ticket_review.py audit /tmp/tickets",
+            ),
+            plugin_root=FAKE_ROOT,
+        )
+        decision = result.get("hookSpecificOutput", {})
+        assert decision.get("permissionDecision") == "allow"
+        assert "read-only" in decision.get("permissionDecisionReason", "").lower()
+
+
 class TestAuditAllowlist:
     def test_audit_allowed_for_user(self):
         """ticket_audit.py is allowed for user invocations."""
@@ -1032,6 +1056,29 @@ class TestAuditAllowlist:
         decision = result.get("hookSpecificOutput", {})
         assert decision.get("permissionDecision") == "allow"
         assert "validated (user-only)" in decision.get("permissionDecisionReason", "")
+
+
+class TestDoctorWrapperAllowlist:
+    def test_doctor_wrapper_allowed_for_user(self):
+        result = run_hook(
+            make_hook_input(
+                f"python3 -B {FAKE_ROOT}/scripts/ticket_doctor.py repair-audit /tmp/tickets",
+            ),
+            plugin_root=FAKE_ROOT,
+        )
+        decision = result.get("hookSpecificOutput", {})
+        assert decision.get("permissionDecision") == "allow"
+        assert "user-only" in decision.get("permissionDecisionReason", "").lower()
+
+    def test_doctor_wrapper_denied_for_agent(self):
+        hook_input = make_hook_input(
+            f"python3 -B {FAKE_ROOT}/scripts/ticket_doctor.py repair-audit /tmp/tickets",
+        )
+        hook_input["agent_id"] = "subagent-123"
+        result = run_hook(hook_input, plugin_root=FAKE_ROOT)
+        decision = result.get("hookSpecificOutput", {})
+        assert decision.get("permissionDecision") == "deny"
+        assert "user-only" in decision.get("permissionDecisionReason", "").lower()
 
 
 class TestExecutionShapeMatching:

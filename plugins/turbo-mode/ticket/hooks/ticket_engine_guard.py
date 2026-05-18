@@ -3,8 +3,10 @@
 
 Decision branches:
 - Branch 1: exact engine allowlist -> validate subcommand/payload + inject trust fields.
-- Branch 2: exact read-only allowlist (`ticket_read.py`, `ticket_triage.py`) -> allow.
-- Branch 2b: exact audit allowlist (`ticket_audit.py`) -> allow for users, deny for agents.
+- Branch 2: exact read-only allowlist (`ticket_read.py`, `ticket_triage.py`,
+  `ticket_review.py`) -> allow.
+- Branch 2b: exact audit/doctor allowlist (`ticket_audit.py`,
+  `ticket_doctor.py`) -> allow for users, deny for agents.
 - Branch 3: any other Python invocation targeting `ticket_*.py` -> deny.
 - Branch 4: non-ticket Bash commands -> pass through silently (empty JSON).
 
@@ -69,14 +71,16 @@ def _build_readonly_pattern(plugin_root: str) -> re.Pattern[str]:
     """Build pattern for read-only ticket scripts (no payload injection)."""
     escaped = re.escape(plugin_root)
     return re.compile(
-        rf"^python3(?:\s+-B)?\s+{escaped}/scripts/ticket_(read|triage)\.py\s+(\w+)\s+(.+)$"
+        rf"^python3(?:\s+-B)?\s+{escaped}/scripts/ticket_(read|triage|review)\.py\s+(\w+)\s+(.+)$"
     )
 
 
 def _build_audit_pattern(plugin_root: str) -> re.Pattern[str]:
-    """Build pattern for ticket_audit.py (user-only, no payload injection)."""
+    """Build pattern for user-only maintenance scripts (no payload injection)."""
     escaped = re.escape(plugin_root)
-    return re.compile(rf"^python3(?:\s+-B)?\s+{escaped}/scripts/ticket_audit\.py\s+(\w+)\s+(.+)$")
+    return re.compile(
+        rf"^python3(?:\s+-B)?\s+{escaped}/scripts/ticket_(audit|doctor)\.py\s+([\w-]+)\s+(.+)$"
+    )
 
 
 # Known ticket script basenames for candidate detection.
@@ -90,6 +94,8 @@ _TICKET_SCRIPT_BASENAMES = frozenset(
         "ticket_workflow.py",
         "ticket_capture.py",
         "ticket_update.py",
+        "ticket_review.py",
+        "ticket_doctor.py",
     }
 )
 
@@ -789,7 +795,8 @@ def main() -> None:
         print(json.dumps(_make_allow(f"Ticket update/{subcommand} validated and payload injected")))
         return
 
-    # Branch 2: Read-only scripts (ticket_read.py, ticket_triage.py) → allow, no injection.
+    # Branch 2: Read-only scripts (ticket_read.py, ticket_triage.py, ticket_review.py)
+    # → allow, no injection.
     readonly_pattern = _build_readonly_pattern(plugin_root)
     readonly_match = readonly_pattern.match(command_clean)
     if readonly_match:
@@ -803,7 +810,8 @@ def main() -> None:
         print(json.dumps(_make_allow(f"Ticket {script_name}/{subcommand} validated (read-only)")))
         return
 
-    # Branch 2b: Audit script (ticket_audit.py) → allow for users, deny for agents.
+    # Branch 2b: Maintenance scripts (ticket_audit.py, ticket_doctor.py)
+    # → allow for users, deny for agents.
     audit_pattern = _build_audit_pattern(plugin_root)
     audit_match = audit_pattern.match(command_clean)
     if audit_match:
@@ -814,12 +822,16 @@ def main() -> None:
         if origin == "agent":
             print(
                 json.dumps(
-                    _make_deny("Ticket audit is user-only — agents cannot invoke audit repair")
+                    _make_deny(
+                        "Ticket maintenance is user-only — agents cannot invoke "
+                        "audit repair or doctor"
+                    )
                 )
             )
             return
-        subcommand = audit_match.group(1)
-        print(json.dumps(_make_allow(f"Ticket audit/{subcommand} validated (user-only)")))
+        script_name = audit_match.group(1)
+        subcommand = audit_match.group(2)
+        print(json.dumps(_make_allow(f"Ticket {script_name}/{subcommand} validated (user-only)")))
         return
 
     # Branch 3: Unrecognized ticket script invocation → deny.
