@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from scripts.ticket_dedup import normalize  # noqa: E402
 from scripts.ticket_engine_runner import dispatch_stage, load_runner_context  # noqa: E402
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir  # noqa: E402
+from scripts.ticket_payloads import TicketPayloadPathError, delete_consumed_payload  # noqa: E402
 from scripts.ticket_read import find_ticket_by_id, list_tickets  # noqa: E402
 from scripts.ticket_validate import (  # noqa: E402
     CAPTURE_INPUT_FIELDS,
@@ -669,9 +670,25 @@ def _execute(payload_path: Path) -> dict[str, Any]:
         )
     payload["fields"] = dict(fields)
 
+    project_root = discover_project_root(tickets_dir)
+    if project_root is None:
+        return _response(
+            "policy_blocked",
+            "Cannot determine project root for payload cleanup: no .codex/ or .git/ marker found",
+            error_code="policy_blocked",
+        )
+
     response = _engine_response_to_dict(
         dispatch_stage("execute", payload, tickets_dir, request_origin)
     )
+    if response.get("state") == "ok_create":
+        try:
+            response.setdefault("data", {})["payload_deleted"] = delete_consumed_payload(
+                payload_path,
+                project_root,
+            )
+        except (OSError, TicketPayloadPathError) as exc:
+            response.setdefault("data", {})["payload_cleanup_error"] = str(exc)
     return response
 
 

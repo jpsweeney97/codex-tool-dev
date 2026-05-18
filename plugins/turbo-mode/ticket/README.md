@@ -30,7 +30,7 @@ The plugin registers its hook, skills, and scripts automatically. No build step 
 - **Update existing tickets** with scoped lifecycle, frontmatter metadata, and focused refinement changes through preview-first `ticket_update.py` commands
 - **List, query, and check close readiness** with read-only filters and ID-prefix search
 - **Review backlog health** with the read-only `ticket_review.py` wrapper for stale detection, blocked dependency chains, size warnings, and next-action recommendations
-- **Doctor storage and audit logs** only when explicitly requested through `ticket_doctor.py`, with dry-run repair before mutation
+- **Doctor storage and audit logs** only when explicitly requested through `ticket_doctor.py`, with dry-run repair before mutation and confirmed stale payload cleanup
 - **Agent autonomy** — external agents can create tickets autonomously, gated by a configurable policy and elevated confidence thresholds
 
 ## Components
@@ -43,7 +43,7 @@ The plugin registers its hook, skills, and scripts automatically. No build step 
 | `ticket-find` | Show, list, find, open, or check close readiness | Read-only `ticket_read.py list`, `query`, and `check` |
 | `ticket-update` | Update existing ticket metadata, lifecycle, or focused refinement fields | Preview-first updates via `ticket_update.py prepare` and `execute` |
 | `ticket-review` | Backlog health, stale, blocked, or next-work questions | Read-only `ticket_review.py review` and `audit`; may suggest capture prompts |
-| `ticket-doctor` | Explicit storage/plugin diagnostics or audit repair | Maintenance-only `ticket_doctor.py diagnose` and dry-run-first `repair-audit` |
+| `ticket-doctor` | Explicit storage/plugin diagnostics, stale payload cleanup, or audit repair | Maintenance-only `ticket_doctor.py diagnose`, confirmed `clean-stale-payloads`, and dry-run-first `repair-audit` |
 
 Generic creation through the old broad `ticket` skill is no longer user-facing.
 Use `ticket-capture` for new tickets. Low-confidence captures are allowed when a
@@ -60,7 +60,7 @@ not a lifecycle status.
 | close/reopen | ticket_id plus required resolution or reopen reason | `ticket_update.py prepare` then `execute` |
 | list/query/check | filters, ID prefix, or ticket_id | Direct read (`ticket_read.py`) |
 | backlog review | tickets directory | Read-only `ticket_review.py review` and `audit` |
-| doctor/repair | explicit maintenance request | `ticket_doctor.py diagnose` or dry-run-first `repair-audit` |
+| doctor/repair | explicit maintenance request | `ticket_doctor.py diagnose`, confirmed `clean-stale-payloads`, or dry-run-first `repair-audit` |
 
 #### Supported Mutation Surfaces
 
@@ -121,6 +121,7 @@ Both delegate to `ticket_engine_runner.py`, which dispatches to `ticket_engine_c
 | `ticket_triage.py` | `audit <tickets_dir> [--days N]` | Audit trail summary (default 7 days) |
 | `ticket_review.py` | `review <tickets_dir>` / `audit <tickets_dir> [--days N]` | User-facing read-only backlog review wrapper |
 | `ticket_doctor.py` | `diagnose <tickets_dir> --plugin-root <plugin_root> --cache-root <cache_root>` | User-facing explicit diagnostics wrapper |
+| `ticket_doctor.py` | `clean-stale-payloads <tickets_dir> [--confirm-clean-stale-payloads]` | User-facing confirmed cleanup for stale prepare payloads |
 | `ticket_doctor.py` | `repair-audit <tickets_dir> [--confirm-repair]` | User-facing dry-run-first audit repair wrapper |
 | `ticket_triage.py` | `doctor <tickets_dir> --plugin-root <plugin_root> --cache-root <cache_root>` | Static source/cache/project diagnostic |
 | `ticket_audit.py` | `repair <tickets_dir> [--dry-run]` | Repair corrupt JSONL audit logs (user-only) |
@@ -261,6 +262,17 @@ Review ticket backlog health.
 ```
 
 Produces a structured report: ticket counts by status/priority, stale tickets (>7 days), blocked dependency chains, size warnings, and suggested next actions.
+
+### Doctor stale payloads
+
+`ticket_doctor.py diagnose` reports stale `.codex/ticket-tmp/` payloads older
+than 24 hours; diagnose reports stale `.codex/ticket-tmp/` payloads without
+mutating them. Cleanup is TTL-scoped and confirmation-gated: first run
+`ticket_doctor.py clean-stale-payloads <TICKETS_DIR>` to see that cleanup
+requires confirmation, then run
+`ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads`
+only after explicit approval. The confirmation flag is
+`--confirm-clean-stale-payloads`.
 
 ## Architecture
 

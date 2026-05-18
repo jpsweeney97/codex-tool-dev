@@ -14,6 +14,11 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir  # noqa: E402
+from scripts.ticket_payloads import (  # noqa: E402
+    DEFAULT_STALE_PAYLOAD_TTL,
+    TicketPayloadPathError,
+    stale_payloads,
+)
 
 _TERMINAL_STATUSES = frozenset({"done", "wontfix"})
 _DOCTOR_MAX_FILES = 5000
@@ -219,8 +224,25 @@ def ticket_doctor(
 ) -> dict[str, Any]:
     """Build a static ticket plugin diagnostic report."""
     plugin_root, cache_root = _validate_doctor_roots(plugin_root, cache_root)
-    project_root = discover_project_root(tickets_dir) or tickets_dir.parent.parent
+    project_root = discover_project_root(tickets_dir)
+    if project_root is None:
+        raise DoctorInputError(
+            "doctor project_root failed: no .codex/ or .git/ marker found. "
+            f"Got: {str(tickets_dir)!r:.100}"
+        )
     config_path = project_root / ".codex" / "ticket.local.md"
+    try:
+        stale_payload_rows = [
+            {
+                "path": str(item.path),
+                "age_seconds": item.age_seconds,
+                "size_bytes": item.size_bytes,
+                "modified_at": item.modified_at,
+            }
+            for item in stale_payloads(project_root)
+        ]
+    except TicketPayloadPathError as exc:
+        raise DoctorInputError(str(exc)) from exc
     return {
         "project": {
             "project_root": str(project_root),
@@ -231,6 +253,12 @@ def ticket_doctor(
         },
         "plugin": _source_cache_report(plugin_root, cache_root),
         "runtime": _runtime_probe_status(runtime_probe_output, plugin_root),
+        "payloads": {
+            "tmp_dir": str(project_root / ".codex" / "ticket-tmp"),
+            "stale_after_hours": int(DEFAULT_STALE_PAYLOAD_TTL.total_seconds() // 3600),
+            "stale_count": len(stale_payload_rows),
+            "stale": stale_payload_rows,
+        },
     }
 
 

@@ -26,7 +26,7 @@ Source edits here do not prove installed Codex behavior.
 | `ticket-find` | `skills/ticket-find/SKILL.md` | Read-only show, list, query, and close-readiness checks |
 | `ticket-update` | `skills/ticket-update/SKILL.md` | Existing-ticket lifecycle and frontmatter metadata updates |
 | `ticket-review` | `skills/ticket-review/SKILL.md` | Read-only backlog health, stale, blocked, and next-action review |
-| `ticket-doctor` | `skills/ticket-doctor/SKILL.md` | Explicit-only storage/plugin diagnostics and audit repair |
+| `ticket-doctor` | `skills/ticket-doctor/SKILL.md` | Explicit-only storage/plugin diagnostics, stale payload cleanup, and audit repair |
 
 Generic creation through the old broad `ticket` skill is no longer user-facing.
 Low-confidence captures are allowed when a next action exists; they should carry
@@ -317,8 +317,15 @@ repair corrupt audit logs. Casual audit, triage, or review language belongs to
 2. Resolve `PROJECT_ROOT` from the current working directory
 3. Resolve `TICKETS_DIR` as `<PROJECT_ROOT>/docs/tickets/`
 4. For diagnostics, run `ticket_doctor.py diagnose`
-5. For audit repair, run `ticket_doctor.py repair-audit`
-6. Run `ticket_doctor.py repair-audit --confirm-repair` only after explicit approval
+5. For stale payload cleanup, run `ticket_doctor.py clean-stale-payloads <TICKETS_DIR>` first
+6. Run `ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads` only after explicit approval
+7. For audit repair, run `ticket_doctor.py repair-audit`
+8. Run `ticket_doctor.py repair-audit --confirm-repair` only after explicit approval
+
+**Stale payload cleanup:** `ticket_doctor.py diagnose` reports stale
+`.codex/ticket-tmp/` payloads older than 24 hours; diagnose reports stale `.codex/ticket-tmp/` payloads without mutating them. Cleanup is TTL-scoped to
+stale JSON payloads under `<PROJECT_ROOT>/.codex/ticket-tmp/` and is
+confirmation-gated with `--confirm-clean-stale-payloads`.
 
 ---
 
@@ -502,6 +509,7 @@ At preflight, the engine takes a fingerprint snapshot of any existing ticket bei
 | `audit_write_failed` blocks agent mutation | Disk full, permission error, or `.audit/` not writable | Check disk space and permissions on `docs/tickets/.audit/` | Fix underlying issue; mutation will proceed once audit write succeeds |
 | `stale_plan` on update | Concurrent write between preflight and execute | Inspect ticket file mtime | Re-run update after verifying current state |
 | Corrupt audit JSONL lines | Interrupted write (crash during mutation) | Run `python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir>` | After explicit approval, run `python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir> --confirm-repair` |
+| Stale `.codex/ticket-tmp/` payloads | Interrupted or abandoned prepare/execute flow | Run `python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <tickets_dir> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>` | After explicit approval, run `python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads` |
 | Stale tickets not surfaced by triage | Missing `updated` field in old ticket YAML | Inspect ticket frontmatter | Triage falls back to file mtime; results are approximate for legacy tickets |
 | `path_outside_cwd` from hook | Project root not at Codex launch directory | Check hook's `event.cwd` vs actual tickets path | Launch Codex from the project root containing `.git/` or `.codex/` |
 

@@ -519,8 +519,27 @@ def test_ticket_doctor_skill_contract_is_explicit_maintenance_only() -> None:
     assert "ticket_doctor.py diagnose" in text
     assert "ticket_doctor.py repair-audit <TICKETS_DIR>" in text
     assert "ticket_doctor.py repair-audit <TICKETS_DIR> --confirm-repair" in text
+    assert "ticket_doctor.py clean-stale-payloads <TICKETS_DIR>" in text
+    assert (
+        "ticket_doctor.py clean-stale-payloads <TICKETS_DIR> "
+        "--confirm-clean-stale-payloads"
+    ) in text
+    assert "stale `.codex/ticket-tmp/` payloads" in text
+    assert "24 hours" in text
+    assert "ask before any cleanup mutation" in text
     assert "ticket_audit.py repair <TICKETS_DIR>" not in text
     assert "ask before any mutation" in text
+
+
+def test_doctor_docs_describe_confirmed_stale_payload_cleanup() -> None:
+    readme = _read_text(PLUGIN_ROOT / "README.md")
+    handbook = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
+    skill = _read_text(DOCTOR_SKILL)
+    for text in [readme, handbook, skill]:
+        assert "diagnose reports stale `.codex/ticket-tmp/` payloads" in text
+        assert "24 hours" in text
+        assert "`ticket_doctor.py clean-stale-payloads <TICKETS_DIR>`" in text
+        assert "`--confirm-clean-stale-payloads`" in text
 
 
 def test_skill_docs_use_project_root_marker_walk_not_git_rev_parse() -> None:

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+import scripts.ticket_payloads as ticket_payloads
 from scripts.ticket_triage import (
     DoctorInputError,
     _source_cache_report,
@@ -28,6 +31,314 @@ def test_ticket_doctor_reports_project_and_plugin_paths(tmp_tickets: Path) -> No
     assert report["plugin"]["cache_root"] == str(plugin_root)
     assert report["plugin"]["source_cache_equal"] is True
     assert report["runtime"]["live_hook_probe"] == "not_run"
+
+
+def test_ticket_doctor_reports_stale_ticket_tmp_payloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    payload_dir = tmp_path / ".codex" / "ticket-tmp"
+    payload_dir.mkdir(parents=True)
+    payload = payload_dir / "old.json"
+    payload.write_text("{}", encoding="utf-8")
+    old_time = 1_700_000_000
+    os.utime(payload, (old_time, old_time))
+    monkeypatch.chdir(tmp_path)
+
+    plugin_root = Path(__file__).resolve().parents[1]
+    report = ticket_doctor(tickets_dir, plugin_root=plugin_root, cache_root=plugin_root)
+
+    assert report["payloads"]["tmp_dir"] == str(payload_dir)
+    assert report["payloads"]["stale_count"] == 1
+    assert report["payloads"]["stale"][0]["path"] == str(payload)
+
+
+def test_ticket_doctor_clean_stale_payloads_requires_confirmation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    payload_dir = tmp_path / ".codex" / "ticket-tmp"
+    payload_dir.mkdir(parents=True)
+    payload = payload_dir / "old.json"
+    payload.write_text("{}", encoding="utf-8")
+    old_time = 1_700_000_000
+    os.utime(payload, (old_time, old_time))
+    monkeypatch.chdir(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(DOCTOR_SCRIPT),
+            "clean-stale-payloads",
+            str(tickets_dir),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert payload.exists()
+    assert "requires --confirm-clean-stale-payloads" in completed.stdout
+
+
+def test_ticket_doctor_clean_stale_payloads_deletes_only_with_confirmation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    payload_dir = tmp_path / ".codex" / "ticket-tmp"
+    payload_dir.mkdir(parents=True)
+    payload = payload_dir / "old.json"
+    payload.write_text("{}", encoding="utf-8")
+    old_time = 1_700_000_000
+    os.utime(payload, (old_time, old_time))
+    monkeypatch.chdir(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(DOCTOR_SCRIPT),
+            "clean-stale-payloads",
+            str(tickets_dir),
+            "--confirm-clean-stale-payloads",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    response = json.loads(completed.stdout)
+
+    assert completed.returncode == 0
+    assert response["state"] == "ok"
+    assert response["data"]["deleted_count"] == 1
+    assert not payload.exists()
+
+
+def test_ticket_doctor_clean_stale_payloads_rejects_symlink_escape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    external_dir = tmp_path.parent / f"{tmp_path.name}-external-ticket-tmp"
+    external_dir.mkdir()
+    payload = external_dir / "old.json"
+    payload.write_text("{}", encoding="utf-8")
+    old_time = 1_700_000_000
+    os.utime(payload, (old_time, old_time))
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    (codex_dir / "ticket-tmp").symlink_to(external_dir, target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(DOCTOR_SCRIPT),
+            "clean-stale-payloads",
+            str(tickets_dir),
+            "--confirm-clean-stale-payloads",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert payload.exists()
+    response = json.loads(completed.stdout)
+    assert "containment failed" in response["message"]
+
+
+def test_ticket_doctor_clean_stale_payloads_rejects_in_project_tmp_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    payload = tickets_dir / "old.json"
+    payload.write_text("{}", encoding="utf-8")
+    old_time = 1_700_000_000
+    os.utime(payload, (old_time, old_time))
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    (codex_dir / "ticket-tmp").symlink_to(tickets_dir, target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(DOCTOR_SCRIPT),
+            "clean-stale-payloads",
+            str(tickets_dir),
+            "--confirm-clean-stale-payloads",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    response = json.loads(completed.stdout)
+
+    assert completed.returncode != 0
+    assert payload.exists()
+    assert response["state"] == "policy_blocked"
+    assert "must not be a symlink" in response["message"]
+
+
+def test_ticket_doctor_clean_stale_payloads_rejects_codex_parent_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    external_codex = tmp_path.parent / f"{tmp_path.name}-external-codex"
+    external_payload_dir = external_codex / "ticket-tmp"
+    external_payload_dir.mkdir(parents=True)
+    payload = external_payload_dir / "old.json"
+    payload.write_text("{}", encoding="utf-8")
+    old_time = 1_700_000_000
+    os.utime(payload, (old_time, old_time))
+    (tmp_path / ".codex").symlink_to(external_codex, target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(DOCTOR_SCRIPT),
+            "clean-stale-payloads",
+            str(tickets_dir),
+            "--confirm-clean-stale-payloads",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    response = json.loads(completed.stdout)
+
+    assert completed.returncode != 0
+    assert payload.exists()
+    assert response["state"] == "policy_blocked"
+    assert "symlink" in response["message"]
+
+
+def test_ticket_doctor_clean_stale_payloads_rejects_symlink_payload_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    payload_dir = tmp_path / ".codex" / "ticket-tmp"
+    payload_dir.mkdir(parents=True)
+    target = tmp_path / "target.json"
+    target.write_text("{}", encoding="utf-8")
+    payload = payload_dir / "old.json"
+    payload.symlink_to(target)
+    old_time = 1_700_000_000
+    os.utime(payload, (old_time, old_time), follow_symlinks=False)
+    monkeypatch.chdir(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(DOCTOR_SCRIPT),
+            "clean-stale-payloads",
+            str(tickets_dir),
+            "--confirm-clean-stale-payloads",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    response = json.loads(completed.stdout)
+
+    assert completed.returncode != 0
+    assert target.exists()
+    assert payload.is_symlink()
+    assert response["state"] == "policy_blocked"
+    assert "symlink" in response["message"]
+
+
+def test_clean_stale_payloads_deletes_from_opened_dir_when_tmp_swapped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    payload_dir = tmp_path / ".codex" / "ticket-tmp"
+    payload_dir.mkdir(parents=True)
+    payload = payload_dir / "old.json"
+    payload.write_text("{}", encoding="utf-8")
+    old_time = 1_700_000_000
+    os.utime(payload, (old_time, old_time))
+    original_payload_dir = tmp_path / ".codex" / "ticket-tmp-original"
+    replacement_payload = payload_dir / "old.json"
+    original_unlink = ticket_payloads.os.unlink
+    swapped = False
+
+    def unlink_after_swap(path: str, *, dir_fd: int | None = None) -> None:
+        nonlocal swapped, replacement_payload
+        if not swapped:
+            swapped = True
+            payload_dir.rename(original_payload_dir)
+            payload_dir.mkdir()
+            replacement_payload = payload_dir / "old.json"
+            replacement_payload.write_text("replacement", encoding="utf-8")
+        original_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(ticket_payloads.os, "unlink", unlink_after_swap)
+
+    deleted = ticket_payloads.clean_stale_payloads(tmp_path)
+
+    assert swapped
+    assert len(deleted) == 1
+    assert not (original_payload_dir / "old.json").exists()
+    assert replacement_payload.exists()
+
+
+def test_delete_consumed_payload_deletes_from_opened_dir_when_tmp_swapped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    payload_dir = tmp_path / ".codex" / "ticket-tmp"
+    payload_dir.mkdir(parents=True)
+    payload = payload_dir / "capture.json"
+    payload.write_text("{}", encoding="utf-8")
+    original_payload_dir = tmp_path / ".codex" / "ticket-tmp-original"
+    replacement_payload = payload_dir / "capture.json"
+    original_unlink = ticket_payloads.os.unlink
+    swapped = False
+
+    def unlink_after_swap(path: str, *, dir_fd: int | None = None) -> None:
+        nonlocal swapped, replacement_payload
+        if not swapped:
+            swapped = True
+            payload_dir.rename(original_payload_dir)
+            payload_dir.mkdir()
+            replacement_payload = payload_dir / "capture.json"
+            replacement_payload.write_text("replacement", encoding="utf-8")
+        original_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(ticket_payloads.os, "unlink", unlink_after_swap)
+
+    deleted = ticket_payloads.delete_consumed_payload(payload, tmp_path)
+
+    assert swapped
+    assert deleted is True
+    assert not (original_payload_dir / "capture.json").exists()
+    assert replacement_payload.exists()
 
 
 def test_source_cache_report_reports_missing_cache(tmp_tickets: Path, tmp_path: Path) -> None:
