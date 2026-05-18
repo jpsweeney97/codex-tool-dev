@@ -17,7 +17,8 @@ from refresh.models import (
     SelectedMutationMode,
     TerminalPlanStatus,
 )
-from refresh.planner import RefreshPaths, RefreshPlanResult
+from refresh.paths import RefreshPaths
+from refresh.planner import RefreshPlanResult
 
 
 def empty_result(tmp_path: Path) -> RefreshPlanResult:
@@ -56,6 +57,7 @@ def test_evidence_payload_serializes_axes_and_terminal_status(tmp_path: Path) ->
     assert payload["terminal_plan_status"] == "filesystem-no-drift"
     assert payload["app_server_inventory_status"] == "not-requested"
     assert payload["app_server_inventory_failure_reason"] is None
+    assert payload["dev_refresh_command"] is None
     assert payload["axes"]["filesystem_state"] == "no-drift"
     assert payload["omission_reasons"]["app_server_inventory"] == "not-requested"
 

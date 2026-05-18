@@ -20,8 +20,8 @@ from refresh.command_projection import (
 from refresh.models import CoverageStatus, DiffKind, MutationMode, PathOutcome
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
-HANDOFF_ROOT = REPO_ROOT / "plugins/turbo-mode/handoff/1.6.0"
-TICKET_ROOT = REPO_ROOT / "plugins/turbo-mode/ticket/1.4.0"
+HANDOFF_ROOT = REPO_ROOT / "plugins/turbo-mode/handoff"
+TICKET_ROOT = REPO_ROOT / "plugins/turbo-mode/ticket"
 HANDOFF_STATE_HELPER_DOC_FIXTURES = json.loads(
     (
         Path(__file__).parent / "fixtures" / "handoff_state_helper_doc_migration.json"
@@ -29,77 +29,82 @@ HANDOFF_STATE_HELPER_DOC_FIXTURES = json.loads(
 )
 
 EXPECTED_COMMAND_SURFACE_PATHS = (
-    "handoff/1.6.0/.codex-plugin/plugin.json",
-    "handoff/1.6.0/hooks/hooks.json",
-    "handoff/1.6.0/scripts/defer.py",
-    "handoff/1.6.0/scripts/distill.py",
-    "handoff/1.6.0/scripts/list_handoffs.py",
-    "handoff/1.6.0/scripts/load_transactions.py",
-    "handoff/1.6.0/scripts/plugin_siblings.py",
-    "handoff/1.6.0/scripts/search.py",
-    "handoff/1.6.0/scripts/session_state.py",
-    "handoff/1.6.0/scripts/triage.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/active_writes.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/cleanup.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/defer.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/distill.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/handoff_parsing.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/installed_host_harness.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/list_handoffs.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/load_transactions.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/plugin_siblings.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/project_paths.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/provenance.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/quality_check.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/search.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/session_state.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority_inventory.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/storage_primitives.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/ticket_parsing.py",
-    "handoff/1.6.0/turbo_mode_handoff_runtime/triage.py",
-    "ticket/1.4.0/.codex-plugin/plugin.json",
-    "ticket/1.4.0/hooks/hooks.json",
-    "ticket/1.4.0/hooks/ticket_engine_guard.py",
-    "ticket/1.4.0/scripts/__init__.py",
-    "ticket/1.4.0/scripts/ticket_audit.py",
-    "ticket/1.4.0/scripts/ticket_dedup.py",
-    "ticket/1.4.0/scripts/ticket_engine_agent.py",
-    "ticket/1.4.0/scripts/ticket_engine_core.py",
-    "ticket/1.4.0/scripts/ticket_engine_runner.py",
-    "ticket/1.4.0/scripts/ticket_engine_user.py",
-    "ticket/1.4.0/scripts/ticket_envelope.py",
-    "ticket/1.4.0/scripts/ticket_id.py",
-    "ticket/1.4.0/scripts/ticket_parse.py",
-    "ticket/1.4.0/scripts/ticket_paths.py",
-    "ticket/1.4.0/scripts/ticket_read.py",
-    "ticket/1.4.0/scripts/ticket_render.py",
-    "ticket/1.4.0/scripts/ticket_stage_models.py",
-    "ticket/1.4.0/scripts/ticket_triage.py",
-    "ticket/1.4.0/scripts/ticket_trust.py",
-    "ticket/1.4.0/scripts/ticket_ux.py",
-    "ticket/1.4.0/scripts/ticket_validate.py",
-    "ticket/1.4.0/scripts/ticket_workflow.py",
+    "handoff/.codex-plugin/plugin.json",
+    "handoff/hooks/hooks.json",
+    "handoff/scripts/defer.py",
+    "handoff/scripts/distill.py",
+    "handoff/scripts/list_handoffs.py",
+    "handoff/scripts/load_transactions.py",
+    "handoff/scripts/plugin_siblings.py",
+    "handoff/scripts/search.py",
+    "handoff/scripts/session_state.py",
+    "handoff/scripts/triage.py",
+    "handoff/turbo_mode_handoff_runtime/active_writes.py",
+    "handoff/turbo_mode_handoff_runtime/chain_state.py",
+    "handoff/turbo_mode_handoff_runtime/cleanup.py",
+    "handoff/turbo_mode_handoff_runtime/defer.py",
+    "handoff/turbo_mode_handoff_runtime/distill.py",
+    "handoff/turbo_mode_handoff_runtime/handoff_parsing.py",
+    "handoff/turbo_mode_handoff_runtime/installed_host_harness.py",
+    "handoff/turbo_mode_handoff_runtime/list_handoffs.py",
+    "handoff/turbo_mode_handoff_runtime/load_transactions.py",
+    "handoff/turbo_mode_handoff_runtime/plugin_siblings.py",
+    "handoff/turbo_mode_handoff_runtime/project_paths.py",
+    "handoff/turbo_mode_handoff_runtime/provenance.py",
+    "handoff/turbo_mode_handoff_runtime/quality_check.py",
+    "handoff/turbo_mode_handoff_runtime/search.py",
+    "handoff/turbo_mode_handoff_runtime/session_state.py",
+    "handoff/turbo_mode_handoff_runtime/storage_authority.py",
+    "handoff/turbo_mode_handoff_runtime/storage_authority_inventory.py",
+    "handoff/turbo_mode_handoff_runtime/storage_inspection.py",
+    "handoff/turbo_mode_handoff_runtime/storage_layout.py",
+    "handoff/turbo_mode_handoff_runtime/storage_primitives.py",
+    "handoff/turbo_mode_handoff_runtime/ticket_parsing.py",
+    "handoff/turbo_mode_handoff_runtime/triage.py",
+    "ticket/.codex-plugin/plugin.json",
+    "ticket/hooks/hooks.json",
+    "ticket/hooks/ticket_engine_guard.py",
+    "ticket/scripts/__init__.py",
+    "ticket/scripts/ticket_audit.py",
+    "ticket/scripts/ticket_dedup.py",
+    "ticket/scripts/ticket_engine_agent.py",
+    "ticket/scripts/ticket_engine_core.py",
+    "ticket/scripts/ticket_engine_runner.py",
+    "ticket/scripts/ticket_engine_user.py",
+    "ticket/scripts/ticket_envelope.py",
+    "ticket/scripts/ticket_id.py",
+    "ticket/scripts/ticket_parse.py",
+    "ticket/scripts/ticket_paths.py",
+    "ticket/scripts/ticket_read.py",
+    "ticket/scripts/ticket_render.py",
+    "ticket/scripts/ticket_stage_models.py",
+    "ticket/scripts/ticket_triage.py",
+    "ticket/scripts/ticket_trust.py",
+    "ticket/scripts/ticket_ux.py",
+    "ticket/scripts/ticket_validate.py",
+    "ticket/scripts/ticket_workflow.py",
 )
 
 EXPECTED_MARKDOWN_PROJECTION_PATHS = (
-    "handoff/1.6.0/CHANGELOG.md",
-    "handoff/1.6.0/README.md",
-    "handoff/1.6.0/references/handoff-contract.md",
-    "handoff/1.6.0/skills/defer/SKILL.md",
-    "handoff/1.6.0/skills/distill/SKILL.md",
-    "handoff/1.6.0/skills/load/SKILL.md",
-    "handoff/1.6.0/skills/quicksave/SKILL.md",
-    "handoff/1.6.0/skills/save/SKILL.md",
-    "handoff/1.6.0/skills/search/SKILL.md",
-    "handoff/1.6.0/skills/summary/SKILL.md",
-    "handoff/1.6.0/skills/triage/SKILL.md",
-    "ticket/1.4.0/CHANGELOG.md",
-    "ticket/1.4.0/HANDBOOK.md",
-    "ticket/1.4.0/README.md",
-    "ticket/1.4.0/skills/ticket/SKILL.md",
-    "ticket/1.4.0/skills/ticket/references/pipeline-guide.md",
-    "ticket/1.4.0/skills/ticket-triage/SKILL.md",
+    "handoff/CHANGELOG.md",
+    "handoff/CONTRIBUTING.md",
+    "handoff/README.md",
+    "handoff/references/ARCHITECTURE.md",
+    "handoff/references/handoff-contract.md",
+    "handoff/skills/defer/SKILL.md",
+    "handoff/skills/distill/SKILL.md",
+    "handoff/skills/load/SKILL.md",
+    "handoff/skills/quicksave/SKILL.md",
+    "handoff/skills/save/SKILL.md",
+    "handoff/skills/search/SKILL.md",
+    "handoff/skills/summary/SKILL.md",
+    "handoff/skills/triage/SKILL.md",
+    "ticket/CHANGELOG.md",
+    "ticket/HANDBOOK.md",
+    "ticket/README.md",
+    "ticket/skills/ticket/SKILL.md",
+    "ticket/skills/ticket/references/pipeline-guide.md",
+    "ticket/skills/ticket-triage/SKILL.md",
 )
 
 
@@ -125,7 +130,7 @@ def test_current_source_tree_surfaces_match_pinned_fixture_lists() -> None:
     assert tuple(_discover_command_surface_paths()) == EXPECTED_COMMAND_SURFACE_PATHS
     projection_paths: list[str] = []
 
-    for plugin_root, prefix in ((HANDOFF_ROOT, "handoff/1.6.0"), (TICKET_ROOT, "ticket/1.4.0")):
+    for plugin_root, prefix in ((HANDOFF_ROOT, "handoff"), (TICKET_ROOT, "ticket")):
         for path in sorted(plugin_root.rglob("*.md")):
             projection = extract_command_projection(path.read_text(encoding="utf-8"))
             assert projection.parser_warnings == ()
@@ -137,7 +142,7 @@ def test_current_source_tree_surfaces_match_pinned_fixture_lists() -> None:
 
 def _discover_command_surface_paths() -> list[str]:
     paths: list[str] = []
-    for plugin_root, prefix in ((HANDOFF_ROOT, "handoff/1.6.0"), (TICKET_ROOT, "ticket/1.4.0")):
+    for plugin_root, prefix in ((HANDOFF_ROOT, "handoff"), (TICKET_ROOT, "ticket")):
         for relative in (".codex-plugin/plugin.json", "hooks/hooks.json"):
             path = plugin_root / relative
             if path.exists():
@@ -150,7 +155,7 @@ def _discover_command_surface_paths() -> list[str]:
             f"{prefix}/{path.relative_to(plugin_root).as_posix()}"
             for path in sorted((plugin_root / "scripts").glob("*.py"))
         )
-        if prefix == "handoff/1.6.0":
+        if prefix == "handoff":
             paths.extend(
                 f"{prefix}/{path.relative_to(plugin_root).as_posix()}"
                 for path in sorted((plugin_root / "turbo_mode_handoff_runtime").glob("*.py"))
@@ -833,11 +838,11 @@ def test_handoff_storage_gate5_refresh_contract_source_hash_matches_live_file(
 
 def test_handoff_storage_gate5_refresh_contract_rejects_hash_drift() -> None:
     contract = HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS[
-        "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority.py"
+        "handoff/turbo_mode_handoff_runtime/storage_authority.py"
     ]
 
     result = classify_diff_path(
-        "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority.py",
+        "handoff/turbo_mode_handoff_runtime/storage_authority.py",
         kind=contract.kind,
         source_text="print('changed')\n",
         cache_text="",
@@ -867,7 +872,10 @@ def test_handoff_storage_gate5_refresh_contract_rejects_hash_drift() -> None:
         ("handoff/1.6.0/turbo_mode_handoff_runtime/quality_check.py", PathOutcome.GUARDED_ONLY),
         ("handoff/1.6.0/scripts/search.py", PathOutcome.FAST_SAFE_WITH_COVERED_SMOKE),
         ("handoff/1.6.0/scripts/session_state.py", PathOutcome.FAST_SAFE_WITH_COVERED_SMOKE),
-        ("handoff/1.6.0/turbo_mode_handoff_runtime/storage_primitives.py", PathOutcome.GUARDED_ONLY),
+        (
+            "handoff/1.6.0/turbo_mode_handoff_runtime/storage_primitives.py",
+            PathOutcome.GUARDED_ONLY,
+        ),
         ("handoff/1.6.0/turbo_mode_handoff_runtime/ticket_parsing.py", PathOutcome.GUARDED_ONLY),
         ("handoff/1.6.0/scripts/triage.py", PathOutcome.FAST_SAFE_WITH_COVERED_SMOKE),
         ("ticket/1.4.0/.codex-plugin/plugin.json", PathOutcome.COVERAGE_GAP_FAIL),

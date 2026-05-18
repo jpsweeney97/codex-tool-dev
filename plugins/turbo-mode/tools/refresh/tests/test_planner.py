@@ -24,8 +24,8 @@ from refresh.models import (
     SelectedMutationMode,
     TerminalPlanStatus,
 )
+from refresh.paths import build_paths
 from refresh.planner import (
-    build_paths,
     build_plugin_specs,
     plan_refresh,
     read_runtime_config_state,
@@ -49,9 +49,9 @@ def test_build_plugin_specs_uses_repo_source_and_codex_cache_roots(tmp_path: Pat
         ("handoff", "1.6.0"),
         ("ticket", "1.4.0"),
     ]
-    assert specs[0].source_root == repo_root / "plugins/turbo-mode/handoff/1.6.0"
+    assert specs[0].source_root == repo_root / "plugins/turbo-mode/handoff"
     assert specs[0].cache_root == codex_home / "plugins/cache/turbo-mode/handoff/1.6.0"
-    assert specs[1].source_root == repo_root / "plugins/turbo-mode/ticket/1.4.0"
+    assert specs[1].source_root == repo_root / "plugins/turbo-mode/ticket"
     assert specs[1].cache_root == codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
 
 
@@ -71,7 +71,7 @@ def test_build_paths_normalizes_relative_repo_root(
 
 
 def test_planner_passes_manifest_hashes_to_exact_storage_contract(tmp_path: Path) -> None:
-    path = "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority.py"
+    path = "handoff/turbo_mode_handoff_runtime/storage_authority.py"
     contract = HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS[path]
     source = ManifestEntry(
         canonical_path=path,
@@ -102,7 +102,7 @@ def test_planner_passes_manifest_hashes_to_exact_storage_contract(tmp_path: Path
 def write_marketplace(
     path: Path,
     *,
-    ticket_path: str = "./plugins/turbo-mode/ticket/1.4.0",
+    ticket_path: str = "./plugins/turbo-mode/ticket",
 ) -> None:
     path.parent.mkdir(parents=True)
     path.write_text(
@@ -114,7 +114,7 @@ def write_marketplace(
                         "name": "handoff",
                         "source": {
                             "source": "local",
-                            "path": "./plugins/turbo-mode/handoff/1.6.0",
+                            "path": "./plugins/turbo-mode/handoff",
                         },
                     },
                     {
@@ -135,8 +135,8 @@ def test_validate_repo_marketplace_accepts_expected_local_plugins(tmp_path: Path
     result = validate_repo_marketplace(marketplace)
 
     assert result == {
-        "handoff": "./plugins/turbo-mode/handoff/1.6.0",
-        "ticket": "./plugins/turbo-mode/ticket/1.4.0",
+        "handoff": "./plugins/turbo-mode/handoff",
+        "ticket": "./plugins/turbo-mode/ticket",
     }
 
 
@@ -400,7 +400,7 @@ def write_plugin_pair(
     source_text: str,
     cache_text: str,
 ) -> None:
-    source = repo_root / f"plugins/turbo-mode/{plugin}/{version}" / rel
+    source = repo_root / f"plugins/turbo-mode/{plugin}" / rel
     cache = codex_home / f"plugins/cache/turbo-mode/{plugin}/{version}" / rel
     source.parent.mkdir(parents=True, exist_ok=True)
     cache.parent.mkdir(parents=True, exist_ok=True)
@@ -458,8 +458,8 @@ def aligned_inventory() -> AppServerInventoryCheck:
         state="aligned",
         identity=identity,
         plugin_read_sources={
-            "handoff": "/repo/plugins/turbo-mode/handoff/1.6.0",
-            "ticket": "/repo/plugins/turbo-mode/ticket/1.4.0",
+            "handoff": "/repo/plugins/turbo-mode/handoff",
+            "ticket": "/repo/plugins/turbo-mode/ticket",
         },
         plugin_list=("handoff@turbo-mode", "ticket@turbo-mode"),
         skills=("handoff:save", "ticket:ticket"),
@@ -716,6 +716,33 @@ def test_plan_refresh_fast_safe_drift_allows_refresh(tmp_path: Path) -> None:
     ]
 
 
+def test_plan_refresh_fast_safe_drift_recommends_dev_refresh(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    write_plugin_pair(
+        repo_root,
+        codex_home,
+        plugin="handoff",
+        version="1.6.0",
+        rel="scripts/search.py",
+        source_text="print('new')\n",
+        cache_text="print('old')\n",
+    )
+
+    result = plan_refresh(repo_root=repo_root, codex_home=codex_home, mode="plan-refresh")
+
+    assert result.axes.selected_mutation_mode == SelectedMutationMode.REFRESH
+    assert result.mutation_command_available is False
+    assert result.requires_plan is None
+    assert result.future_external_command is None
+    assert result.dev_refresh_command == "npm run turbo:sync-personal-plugins"
+
+
 def test_plan_refresh_guarded_drift_requires_guarded_refresh(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     codex_home = tmp_path / ".codex"
@@ -801,7 +828,7 @@ def test_plan_refresh_added_command_bearing_doc_is_coverage_gap(tmp_path: Path) 
     write_valid_marketplace(repo_root)
     write_aligned_config(codex_home, repo_root)
     ensure_complete_plugin_roots(repo_root, codex_home)
-    source_doc = repo_root / "plugins/turbo-mode/ticket/1.4.0/skills/ticket/references/new.md"
+    source_doc = repo_root / "plugins/turbo-mode/ticket/skills/ticket/references/new.md"
     source_doc.parent.mkdir(parents=True, exist_ok=True)
     source_doc.write_text("```bash\npython3 scripts/ticket_read.py list\n```\n", encoding="utf-8")
 
@@ -1053,7 +1080,7 @@ def test_plan_refresh_repairable_mismatch_suppresses_future_advice_for_coverage_
         encoding="utf-8",
     )
     ensure_complete_plugin_roots(repo_root, codex_home)
-    source_doc = repo_root / "plugins/turbo-mode/ticket/1.4.0/skills/ticket/references/new.md"
+    source_doc = repo_root / "plugins/turbo-mode/ticket/skills/ticket/references/new.md"
     source_doc.parent.mkdir(parents=True, exist_ok=True)
     source_doc.write_text("```bash\npython3 scripts/ticket_read.py list\n```\n", encoding="utf-8")
 
@@ -1075,7 +1102,8 @@ def test_plan_refresh_manifest_symlink_failure_becomes_blocked_result(
     ensure_complete_plugin_roots(repo_root, codex_home)
     outside = tmp_path / "outside.md"
     outside.write_text("outside\n", encoding="utf-8")
-    link = repo_root / "plugins/turbo-mode/handoff/1.6.0/skills"
+    link = repo_root / "plugins/turbo-mode/handoff/skills"
+    link.parent.mkdir(parents=True, exist_ok=True)
     link.symlink_to(outside)
 
     result = plan_refresh(repo_root=repo_root, codex_home=codex_home, mode="dry-run")

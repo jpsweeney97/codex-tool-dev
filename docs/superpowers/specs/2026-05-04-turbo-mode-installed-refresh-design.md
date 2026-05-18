@@ -2,7 +2,41 @@
 
 ## Status
 
-This document is a design spec only. It does not authorize an implementation until a    separate implementation plan exists.
+This document is historical. It records the abandoned installed-cache
+refresh/certification design and is no longer the normal Turbo Mode development
+baseline.
+
+Current baseline:
+
+- Repo source is authoritative:
+  - Stable Turbo Mode plugin source roots live at `plugins/turbo-mode/<plugin-name>/`.
+  - Current roots include `plugins/turbo-mode/handoff/` and `plugins/turbo-mode/ticket/`.
+- Personal plugin copies live under:
+  - `~/.codex/plugins/<plugin-name>`
+- The personal marketplace file is `~/.agents/plugins/marketplace.json`.
+- Personal marketplace `source.path` values point at:
+  - `./.codex/plugins/<plugin-name>`
+- Inspect the planned copy operations and intended marketplace JSON with:
+
+```bash
+npm run turbo:plan-personal-plugins
+```
+
+- Copy repo source into the personal plugin directories with:
+
+```bash
+npm run turbo:sync-personal-plugins
+```
+
+After syncing, restart Codex so it loads the synced personal plugin copies.
+Syncing files is not runtime proof: do not claim installed runtime behavior from
+repo source or copied files alone. Runtime proof remains a separate
+inventory/smoke activity.
+
+Do not use this document's app-server `plugin/install`, source/cache equality,
+guarded-refresh, retained-run certification, or Gate 5 machinery as routine
+development infrastructure unless installed-cache certification is explicitly
+reopened.
 
 ## Purpose
 
@@ -26,9 +60,9 @@ Editing repo source does not update the installed runtime cache by itself. The r
 Tool path:
 
 ```bash
+npm run turbo:dev-refresh
 python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py --dry-run
 python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py --plan-refresh
-python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py --refresh --smoke light
 python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py --guarded-refresh --smoke standard
 ```
 
@@ -36,13 +70,16 @@ The tool should share small helper functions with migration tooling only after t
 
 The command help and startup banner must make the UX split explicit:
 
+- `npm run turbo:dev-refresh` is the routine developer command for installing
+  repo-local Turbo Mode source into the local installed cache and then verifying
+  source/cache and runtime alignment.
 - `--dry-run` and `--plan-refresh` are routine commands and may be run from a Codex session because they do not mutate the installed cache.
-- `--refresh` and `--guarded-refresh` are external-shell maintenance operations. Running either mutation mode from an active Codex Desktop or Codex CLI conversation is expected to self-block.
+- `--guarded-refresh` is an external-shell maintenance operation. Running it from an active Codex Desktop or Codex CLI conversation is expected to self-block.
 
 Terminology:
 
 - **Non-mutating routine developer commands**: `--dry-run`, `--plan-refresh`, local-only evidence review, and local-only prune preview. These may run from Codex sessions because they do not mutate installed cache, global config, or runtime state.
-- **Maintenance-window mutation**: `--refresh`, `--guarded-refresh`, and explicit recovery runs launched from an external shell during an operator-enforced exclusive maintenance window. These are allowed by this design when their gates pass.
+- **Maintenance-window mutation**: `--guarded-refresh` and explicit recovery runs launched from an external shell during an operator-enforced exclusive maintenance window. These are allowed by this design when their gates pass.
 - **Routine mutation**: any installed-cache, global-config, or runtime mutation attempted as a normal in-session developer convenience command without the external-shell maintenance-window contract. Routine mutation remains blocked until sentinel-aware hook consumers or another enforceable exclusion mechanism is certified.
 
 ## Modes
@@ -110,7 +147,7 @@ If the required inputs cannot be computed consistently, the status is `blocked-p
 
 | Status | Meaning |
 | --- | --- |
-| `refresh-allowed` | source/cache drift exists, all changed paths are `fast-safe-with-covered-smoke`, and preflight state allows external-shell `--refresh` if the later mutation process gate passes |
+| `refresh-allowed` | source/cache drift exists, all changed paths are `fast-safe-with-covered-smoke`, and the drift is eligible for the routine developer refresh lane rather than guarded-refresh certification |
 | `guarded-refresh-required` | source/cache drift exists, at least one changed path is `guarded-only`, all changed paths are covered, and preflight state allows external-shell `--guarded-refresh` if the later mutation process gate passes |
 | `coverage-gap-blocked` | at least one changed path is `coverage-gap-fail`; no mutation command may be emitted |
 | `blocked-preflight` | generated residue, abandoned run state, missing roots, unparseable config, marketplace metadata failure, or other non-runtime preflight failure blocks planning |
@@ -123,7 +160,11 @@ If the required inputs cannot be computed consistently, the status is `blocked-p
 
 When `runtime_config_state=repairable-mismatch`, `selected_mutation_mode` must be `guarded-refresh`. `--plan-refresh` emits only a guarded external-shell command for that status, even if the source/cache diff would otherwise be `refresh-allowed`, because marketplace repair mutates global config and uses guarded config snapshot and rollback semantics.
 
-### `--refresh`
+### Superseded `--refresh` Fast Lane
+
+This section is retained as historical design context. The active command
+surface does not implement `--refresh`; covered low-risk drift should use
+`npm run turbo:dev-refresh`.
 
 External-shell maintenance refresh for low-risk source/cache diffs. This mode is narrower than `--guarded-refresh`, but it still mutates the installed cache and therefore must not run while hook-capable Codex sessions are present unless a future atomic install certification explicitly changes this rule.
 
@@ -294,7 +335,9 @@ Rationale:
 
 ### Fast-Safe With Covered Smoke Paths
 
-These paths may be refreshed through `--refresh` after the no-concurrent-hook-consumer check passes and after the required smoke mapping is selected:
+These paths are classified as covered routine drift and may be refreshed through
+`npm run turbo:dev-refresh`. The historical `--refresh` mutation lane is not an
+active command surface.
 
 ```text
 handoff/1.6.0/pyproject.toml
@@ -640,7 +683,7 @@ Retention policy:
 
 Local-only evidence requirements are mode-specific:
 
-| Artifact | `--dry-run` | `--plan-refresh` | `--refresh` | `--guarded-refresh` |
+| Artifact | `--dry-run` | `--plan-refresh` | superseded `--refresh` | `--guarded-refresh` |
 | --- | --- | --- | --- | --- |
 | run metadata with `RUN_ID`, evidence schema version, tool path, tool SHA256, repo `HEAD`, dirty-state policy, source roots, cache roots, marketplace path, and config path | required | required | required | required |
 | app-server/runtime identity with `codex --version`, executable path/hash or unavailable reason, `serverInfo`, protocol capabilities, parser version, and accepted response schema version | required only when read-only inventory is requested | required only when read-only inventory is requested | required before mutation | required before mutation |
@@ -674,7 +717,8 @@ Evidence requirements are also phase- and final-status-aware. Each final status 
 | `MUTATION_COMPLETE_EXCLUSIVITY_UNPROVEN` | full local-only mutation evidence through post-mutation census plus exclusivity-unproven final status | commit-safe certification that implies a clean maintenance window |
 | successful certified mutation | all required mutation artifacts, successful smoke summary, post-mutation census, `exclusivity_status=exclusive_window_observed_by_process_samples`, final status | restore/rollback success artifacts when no restore/rollback was attempted |
 
-Commit-safe evidence is opt-in for `--refresh`:
+Commit-safe evidence was historically specified as opt-in for the superseded
+`--refresh` lane:
 
 ```bash
 --record-summary

@@ -83,7 +83,7 @@ def context(tmp_path: Path, *, codex_home: Path | None = None) -> MutationContex
 
 def seed_plugins(ctx: MutationContext, *, cache_text: str = "same") -> None:
     for plugin, version in (("handoff", "1.6.0"), ("ticket", "1.4.0")):
-        source = ctx.repo_root / f"plugins/turbo-mode/{plugin}/{version}"
+        source = ctx.repo_root / f"plugins/turbo-mode/{plugin}"
         cache = ctx.codex_home / f"plugins/cache/turbo-mode/{plugin}/{version}"
         source.mkdir(parents=True, exist_ok=True)
         cache.mkdir(parents=True, exist_ok=True)
@@ -599,7 +599,7 @@ def install_source_plugins_for_test(
     assert callable(restore_config_before_post_install)
     restore_config_before_post_install()
     for plugin, version in (("handoff", "1.6.0"), ("ticket", "1.4.0")):
-        source = active_context.repo_root / f"plugins/turbo-mode/{plugin}/{version}"
+        source = active_context.repo_root / f"plugins/turbo-mode/{plugin}"
         cache = active_context.codex_home / f"plugins/cache/turbo-mode/{plugin}/{version}"
         if cache.exists():
             shutil.rmtree(cache)
@@ -3023,12 +3023,12 @@ def test_verify_source_cache_equality_detects_drift(tmp_path: Path) -> None:
     with pytest.raises(RefreshError, match="source/cache manifest mismatch"):
         verify_source_cache_equality(ctx)
     shutil.copytree(
-        ctx.repo_root / "plugins/turbo-mode/handoff/1.6.0",
+        ctx.repo_root / "plugins/turbo-mode/handoff",
         ctx.codex_home / "plugins/cache/turbo-mode/handoff/1.6.0",
         dirs_exist_ok=True,
     )
     shutil.copytree(
-        ctx.repo_root / "plugins/turbo-mode/ticket/1.4.0",
+        ctx.repo_root / "plugins/turbo-mode/ticket",
         ctx.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0",
         dirs_exist_ok=True,
     )
@@ -3040,7 +3040,7 @@ def test_verify_source_cache_equality_accepts_ticket_hook_manifest_localization(
 ) -> None:
     ctx = context(tmp_path)
     seed_plugins(ctx)
-    source_hooks = ctx.repo_root / "plugins/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+    source_hooks = ctx.repo_root / "plugins/turbo-mode/ticket/hooks/hooks.json"
     cache_hooks = ctx.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
     source_hooks.parent.mkdir(parents=True)
     cache_hooks.parent.mkdir(parents=True)
@@ -3066,7 +3066,7 @@ def test_verify_source_cache_equality_rejects_ticket_hook_wrong_source_layout(
 ) -> None:
     ctx = context(tmp_path)
     seed_plugins(ctx)
-    source_hooks = ctx.repo_root / "plugins/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+    source_hooks = ctx.repo_root / "plugins/turbo-mode/ticket/hooks/hooks.json"
     cache_hooks = ctx.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
     source_hooks.parent.mkdir(parents=True)
     cache_hooks.parent.mkdir(parents=True)
@@ -3100,7 +3100,7 @@ def test_verify_source_cache_equality_rejects_extra_ticket_hook_manifest_drift(
 ) -> None:
     ctx = context(tmp_path)
     seed_plugins(ctx)
-    source_hooks = ctx.repo_root / "plugins/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+    source_hooks = ctx.repo_root / "plugins/turbo-mode/ticket/hooks/hooks.json"
     cache_hooks = ctx.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
     source_hooks.parent.mkdir(parents=True)
     cache_hooks.parent.mkdir(parents=True)

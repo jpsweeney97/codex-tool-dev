@@ -11,11 +11,9 @@ from .app_server_inventory import collect_readonly_runtime_inventory
 from .evidence import SCHEMA_VERSION as LOCAL_ONLY_SCHEMA_VERSION
 from .manifests import build_manifest
 from .models import RefreshError
+from .paths import MARKETPLACE_RELATIVE_PATH, RefreshPaths, build_paths
 from .planner import (
-    MARKETPLACE_RELATIVE_PATH,
-    RefreshPaths,
     RefreshPlanResult,
-    build_paths,
     build_plugin_specs,
     read_runtime_config_state,
 )
@@ -25,8 +23,8 @@ COMMIT_SAFE_SCHEMA_VERSION = "turbo-mode-refresh-commit-safe-plan-06"
 DIRTY_STATE_POLICY = "fail-relevant-dirty-state"
 RELEVANT_DIRTY_PATHS = (
     ".agents/plugins/marketplace.json",
-    "plugins/turbo-mode/handoff/1.6.0",
-    "plugins/turbo-mode/ticket/1.4.0",
+    "plugins/turbo-mode/handoff",
+    "plugins/turbo-mode/ticket",
     "plugins/turbo-mode/tools/refresh",
     "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
     "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",

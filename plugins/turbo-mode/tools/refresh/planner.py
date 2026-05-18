@@ -39,24 +39,16 @@ from .models import (
     TerminalPlanStatus,
     fail,
 )
+from .paths import RefreshPaths, build_paths
 from .state_machine import derive_terminal_plan_status
 
 TOOL_RELATIVE_PATH = "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py"
-MARKETPLACE_RELATIVE_PATH = ".agents/plugins/marketplace.json"
+DEV_REFRESH_COMMAND = "npm run turbo:sync-personal-plugins"
 EXPECTED_MARKETPLACE_SOURCES = {
-    "handoff": "./plugins/turbo-mode/handoff/1.6.0",
-    "ticket": "./plugins/turbo-mode/ticket/1.4.0",
+    "handoff": "./plugins/turbo-mode/handoff",
+    "ticket": "./plugins/turbo-mode/ticket",
 }
 EXPECTED_CONFIG_PLUGINS = ("handoff@turbo-mode", "ticket@turbo-mode")
-
-
-@dataclass(frozen=True)
-class RefreshPaths:
-    repo_root: Path
-    codex_home: Path
-    marketplace_path: Path
-    config_path: Path
-    local_only_root: Path
 
 
 InventoryCollector = Callable[
@@ -85,6 +77,7 @@ class RefreshPlanResult:
     axes: PlanAxes
     terminal_status: TerminalPlanStatus
     future_external_command: str | None = None
+    dev_refresh_command: str | None = None
     mutation_command_available: bool = False
     requires_plan: str | None = None
     app_server_inventory: AppServerInventoryCheck | None = None
@@ -93,34 +86,18 @@ class RefreshPlanResult:
     app_server_inventory_failure_reason: str | None = None
 
 
-def build_paths(
-    *,
-    repo_root: Path,
-    codex_home: Path,
-) -> RefreshPaths:
-    normalized_repo_root = repo_root.expanduser().resolve(strict=True)
-    normalized_codex_home = codex_home.expanduser().resolve(strict=False)
-    return RefreshPaths(
-        repo_root=normalized_repo_root,
-        codex_home=normalized_codex_home,
-        marketplace_path=normalized_repo_root / MARKETPLACE_RELATIVE_PATH,
-        config_path=normalized_codex_home / "config.toml",
-        local_only_root=normalized_codex_home / "local-only/turbo-mode-refresh",
-    )
-
-
 def build_plugin_specs(*, repo_root: Path, codex_home: Path) -> list[PluginSpec]:
     return [
         PluginSpec(
             name="handoff",
             version="1.6.0",
-            source_root=repo_root / "plugins/turbo-mode/handoff/1.6.0",
+            source_root=repo_root / "plugins/turbo-mode/handoff",
             cache_root=codex_home / "plugins/cache/turbo-mode/handoff/1.6.0",
         ),
         PluginSpec(
             name="ticket",
             version="1.4.0",
-            source_root=repo_root / "plugins/turbo-mode/ticket/1.4.0",
+            source_root=repo_root / "plugins/turbo-mode/ticket",
             cache_root=codex_home / "plugins/cache/turbo-mode/ticket/1.4.0",
         ),
     ]
@@ -219,6 +196,7 @@ def plan_refresh(
     future_external_command = (
         select_future_external_command(axes) if mode == "plan-refresh" else None
     )
+    dev_refresh_command = select_dev_refresh_command(axes) if mode == "plan-refresh" else None
     return RefreshPlanResult(
         mode=mode,
         paths=paths,
@@ -229,6 +207,7 @@ def plan_refresh(
         axes=axes,
         terminal_status=terminal_status,
         future_external_command=future_external_command,
+        dev_refresh_command=dev_refresh_command,
         mutation_command_available=False,
         requires_plan="future-mutation-plan" if future_external_command is not None else None,
         app_server_inventory=app_server_inventory,
@@ -687,14 +666,6 @@ def select_future_external_command(axes: PlanAxes) -> str | None:
         )
     if (
         axes.filesystem_state == FilesystemState.DRIFT
-        and axes.selected_mutation_mode == SelectedMutationMode.REFRESH
-    ):
-        return (
-            "python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py "
-            "--refresh --smoke light"
-        )
-    if (
-        axes.filesystem_state == FilesystemState.DRIFT
         and axes.selected_mutation_mode == SelectedMutationMode.GUARDED_REFRESH
     ):
         return (
@@ -704,6 +675,23 @@ def select_future_external_command(axes: PlanAxes) -> str | None:
     return None
 
 
+def select_dev_refresh_command(axes: PlanAxes) -> str | None:
+    if axes.preflight_state != PreflightState.PASSED:
+        return None
+    if axes.filesystem_state != FilesystemState.DRIFT:
+        return None
+    if axes.coverage_state != CoverageState.COVERED:
+        return None
+    if axes.selected_mutation_mode != SelectedMutationMode.REFRESH:
+        return None
+    if axes.runtime_config_state not in {
+        RuntimeConfigState.ALIGNED,
+        RuntimeConfigState.UNCHECKED,
+    }:
+        return None
+    return DEV_REFRESH_COMMAND
+
+
 def future_external_command_allowed(axes: PlanAxes) -> bool:
     if axes.preflight_state != PreflightState.PASSED:
         return False
@@ -711,11 +699,7 @@ def future_external_command_allowed(axes: PlanAxes) -> bool:
         return (
             axes.filesystem_state == FilesystemState.DRIFT
             and axes.coverage_state == CoverageState.COVERED
-            and axes.selected_mutation_mode
-            in {
-                SelectedMutationMode.REFRESH,
-                SelectedMutationMode.GUARDED_REFRESH,
-            }
+            and axes.selected_mutation_mode == SelectedMutationMode.GUARDED_REFRESH
         )
     if axes.runtime_config_state == RuntimeConfigState.REPAIRABLE_MISMATCH:
         return axes.coverage_state in {

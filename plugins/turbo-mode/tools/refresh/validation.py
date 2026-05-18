@@ -267,8 +267,8 @@ EXPECTED_SOURCE_LOCAL_SUMMARY_SCHEMA_VERSION = "turbo-mode-refresh-plan-03"
 EXPECTED_COMMIT_SAFE_SCHEMA_VERSION = "turbo-mode-refresh-commit-safe-plan-06"
 ALLOWED_DIRTY_RELEVANT_PATHS = {
     ".agents/plugins/marketplace.json",
-    "plugins/turbo-mode/handoff/1.6.0",
-    "plugins/turbo-mode/ticket/1.4.0",
+    "plugins/turbo-mode/handoff",
+    "plugins/turbo-mode/ticket",
     "plugins/turbo-mode/tools/refresh",
     "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
     "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",

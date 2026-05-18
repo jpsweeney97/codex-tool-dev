@@ -39,14 +39,14 @@ def write_marketplace(path: Path) -> None:
                         "name": "handoff",
                         "source": {
                             "source": "local",
-                            "path": "./plugins/turbo-mode/handoff/1.6.0",
+                            "path": "./plugins/turbo-mode/handoff",
                         },
                     },
                     {
                         "name": "ticket",
                         "source": {
                             "source": "local",
-                            "path": "./plugins/turbo-mode/ticket/1.4.0",
+                            "path": "./plugins/turbo-mode/ticket",
                         },
                     },
                 ],
@@ -82,7 +82,7 @@ def write_plugin_pair(
     source_text: str,
     cache_text: str,
 ) -> None:
-    source = repo_root / f"plugins/turbo-mode/{plugin}/{version}" / rel
+    source = repo_root / f"plugins/turbo-mode/{plugin}" / rel
     cache = codex_home / f"plugins/cache/turbo-mode/{plugin}/{version}" / rel
     source.parent.mkdir(parents=True, exist_ok=True)
     cache.parent.mkdir(parents=True, exist_ok=True)
@@ -138,13 +138,14 @@ def write_plan05_seed_sources(repo_root: Path) -> None:
     )
     data = json.loads(fixture.read_text(encoding="utf-8"))
     for rel, record in data.items():
-        source = repo_root / f"plugins/turbo-mode/{rel}"
+        parts = Path(rel).parts
+        source = repo_root / "plugins/turbo-mode" / Path(parts[0], *parts[2:])
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text(record["source_text"], encoding="utf-8")
-    ticket = repo_root / "plugins/turbo-mode/ticket/1.4.0/README.md"
+    ticket = repo_root / "plugins/turbo-mode/ticket/README.md"
     ticket.parent.mkdir(parents=True, exist_ok=True)
     ticket.write_text("ticket source\n", encoding="utf-8")
-    ticket_hook = repo_root / "plugins/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+    ticket_hook = repo_root / "plugins/turbo-mode/ticket/hooks/hooks.json"
     ticket_hook.parent.mkdir(parents=True, exist_ok=True)
     ticket_hook.write_text(
         json.dumps(
@@ -170,7 +171,7 @@ def write_plan05_seed_sources(repo_root: Path) -> None:
         ),
         encoding="utf-8",
     )
-    ticket_guard = repo_root / "plugins/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py"
+    ticket_guard = repo_root / "plugins/turbo-mode/ticket/hooks/ticket_engine_guard.py"
     ticket_guard.write_text("#!/usr/bin/env python3\nprint('guard')\n", encoding="utf-8")
 
 
@@ -344,8 +345,7 @@ for line in sys.stdin:
         }
     elif method == "plugin/read":
         plugin = request["params"]["pluginName"]
-        version = "1.6.0" if plugin == "handoff" else "1.4.0"
-        result = {"source": {"path": f"{repo}/plugins/turbo-mode/{plugin}/{version}"}}
+        result = {"source": {"path": f"{repo}/plugins/turbo-mode/{plugin}"}}
     elif method == "plugin/list":
         result = {"plugins": ["handoff@turbo-mode", "ticket@turbo-mode"]}
     elif method == "skills/list":
@@ -502,7 +502,7 @@ def test_cli_inventory_check_collects_runtime_inventory(tmp_path: Path) -> None:
     assert transcript.is_file()
 
 
-def test_cli_plan_refresh_emits_future_command_advice_for_fast_safe_drift(
+def test_cli_plan_refresh_emits_dev_refresh_advice_for_fast_safe_drift(
     tmp_path: Path,
 ) -> None:
     repo_root = tmp_path / "repo"
@@ -539,8 +539,9 @@ def test_cli_plan_refresh_emits_future_command_advice_for_fast_safe_drift(
     assert payload["axes"]["filesystem_state"] == "drift"
     assert payload["axes"]["runtime_config_state"] == "unchecked"
     assert payload["mutation_command_available"] is False
-    assert payload["requires_plan"] == "future-mutation-plan"
-    assert payload["future_external_command"].endswith("--refresh --smoke light")
+    assert payload["requires_plan"] is None
+    assert payload["future_external_command"] is None
+    assert payload["dev_refresh_command"] == "npm run turbo:sync-personal-plugins"
 
 
 def test_cli_bare_invocation_does_not_write_bytecode(tmp_path: Path) -> None:
@@ -659,19 +660,18 @@ def test_cli_evidence_path_errors_report_without_traceback(tmp_path: Path) -> No
     assert "Traceback" not in completed.stderr
 
 
-def test_cli_rejects_mutation_modes_in_plan_02() -> None:
-    completed = run_tool(["--refresh"])
+def test_cli_rejects_refresh_as_unknown_mode() -> None:
+    completed = run_tool(["--dry-run", "--refresh"])
 
     assert completed.returncode == 2
-    assert "--refresh is outside non-mutating refresh planning" in completed.stderr
+    assert "unrecognized arguments: --refresh" in completed.stderr
 
 
-def test_cli_rejects_refresh_future_command_shape_with_plan_neutral_message() -> None:
-    refresh = run_tool(["--refresh", "--smoke", "light"])
+def test_cli_rejects_light_smoke_tier() -> None:
+    refresh = run_tool(["--dry-run", "--smoke", "light"])
 
     assert refresh.returncode == 2
-    assert "--refresh is outside non-mutating refresh planning" in refresh.stderr
-    assert "unrecognized arguments" not in refresh.stderr
+    assert "invalid choice: 'light'" in refresh.stderr
 
 
 def test_cli_guarded_refresh_requires_source_identity_before_planning(tmp_path: Path) -> None:
@@ -2290,8 +2290,8 @@ def test_cli_record_summary_fails_before_candidate_when_relevant_dirty(
 @pytest.mark.parametrize(
     "dirty_path",
     [
-        "plugins/turbo-mode/handoff/1.6.0/README.md",
-        "plugins/turbo-mode/ticket/1.4.0/README.md",
+        "plugins/turbo-mode/handoff/README.md",
+        "plugins/turbo-mode/ticket/README.md",
     ],
 )
 def test_cli_record_summary_fails_when_plugin_source_surfaces_are_dirty(
@@ -2319,7 +2319,7 @@ def test_cli_record_summary_fails_when_plugin_source_surfaces_are_dirty(
     assert not (codex_home / "local-only/turbo-mode-refresh/dirty-plugin-source").exists()
 
 
-def test_cli_refresh_modes_use_plan_neutral_error_wording(tmp_path: Path) -> None:
+def test_cli_refresh_mode_is_not_a_command_surface(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     codex_home = tmp_path / ".codex"
     write_valid_marketplace(repo_root)
@@ -2328,6 +2328,7 @@ def test_cli_refresh_modes_use_plan_neutral_error_wording(tmp_path: Path) -> Non
 
     completed = run_tool(
         [
+            "--dry-run",
             "--refresh",
             "--repo-root",
             str(repo_root),
@@ -2337,8 +2338,7 @@ def test_cli_refresh_modes_use_plan_neutral_error_wording(tmp_path: Path) -> Non
     )
 
     assert completed.returncode == 2
-    assert "outside non-mutating refresh planning" in completed.stderr
-    assert "outside Plan 04" not in completed.stderr
+    assert "unrecognized arguments: --refresh" in completed.stderr
 
 
 def test_cli_record_summary_allows_unrelated_dirty_path(tmp_path: Path) -> None:

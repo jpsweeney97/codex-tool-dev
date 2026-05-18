@@ -33,6 +33,7 @@ def evidence_payload(result: RefreshPlanResult, *, run_id: str) -> dict[str, Any
         "axes": _json_safe(result.axes),
         "terminal_plan_status": result.terminal_status.value,
         "future_external_command": result.future_external_command,
+        "dev_refresh_command": result.dev_refresh_command,
         "mutation_command_available": result.mutation_command_available,
         "requires_plan": result.requires_plan,
         "omission_reasons": _omission_reasons(result),

@@ -1261,7 +1261,7 @@ def validate_plugin_read_response(
     plugin: str,
     version: str,
 ) -> str:
-    expected = str(paths.repo_root / f"plugins/turbo-mode/{plugin}/{version}")
+    expected = str(paths.repo_root / f"plugins/turbo-mode/{plugin}")
     if json_contains(response, "/plugin-dev/"):
         fail("inventory contract", "plugin/read contains plugin-dev path", plugin)
     source_path = plugin_read_source_path(response)
