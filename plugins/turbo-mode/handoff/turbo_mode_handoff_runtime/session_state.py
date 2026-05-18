@@ -492,6 +492,21 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _dispatch(args: argparse.Namespace) -> int:
+    for dispatcher in (
+        _dispatch_resume_state_command,
+        _dispatch_chain_state_query_command,
+        _dispatch_chain_state_mutation_command,
+        _dispatch_active_write_setup_command,
+        _dispatch_active_write_management_command,
+        _dispatch_active_writer_flow_command,
+    ):
+        result = dispatcher(args)
+        if result is not None:
+            return result
+    return 1
+
+
+def _dispatch_resume_state_command(args: argparse.Namespace) -> int | None:
     if args.command == "archive":
         source = Path(args.source)
         archive_dir = Path(args.archive_dir)
@@ -525,7 +540,10 @@ def _dispatch(args: argparse.Namespace) -> int:
         deleted = prune_old_state_files(args.max_age_hours, state_dir=Path(args.state_dir))
         json.dump({"deleted": [str(path) for path in deleted]}, sys.stdout)
         return 0
+    return None
 
+
+def _dispatch_chain_state_query_command(args: argparse.Namespace) -> int | None:
     if args.command in {"chain-state-recovery-inventory", "list-chain-state"}:
         from turbo_mode_handoff_runtime.chain_state import chain_state_recovery_inventory
 
@@ -555,7 +573,10 @@ def _dispatch(args: argparse.Namespace) -> int:
         if payload["status"] == "absent":
             return 1
         return _emit(payload, args.field)
+    return None
 
+
+def _dispatch_chain_state_mutation_command(args: argparse.Namespace) -> int | None:
     if args.command == "mark-chain-state-consumed":
         from turbo_mode_handoff_runtime.chain_state import (
             ChainStateDiagnosticError,
@@ -614,7 +635,10 @@ def _dispatch(args: argparse.Namespace) -> int:
             print()
             return 2
         return _emit(payload, args.field)
+    return None
 
+
+def _dispatch_active_write_setup_command(args: argparse.Namespace) -> int | None:
     if args.command == "allocate-active-path":
         from turbo_mode_handoff_runtime.active_writes import ActiveWriteError, allocate_active_path
 
@@ -660,6 +684,10 @@ def _dispatch(args: argparse.Namespace) -> int:
             print(exc, file=sys.stderr)
             return 1
         return _emit(payload, args.field)
+    return None
+
+
+def _dispatch_active_write_management_command(args: argparse.Namespace) -> int | None:
     if args.command == "list-active-writes":
         from turbo_mode_handoff_runtime.active_writes import list_active_writes
 
@@ -699,6 +727,10 @@ def _dispatch(args: argparse.Namespace) -> int:
             print(exc, file=sys.stderr)
             return 1
         return _emit(payload, args.field)
+    return None
+
+
+def _dispatch_active_writer_flow_command(args: argparse.Namespace) -> int | None:
     if args.command == "active-writer-flow":
         from turbo_mode_handoff_runtime.active_writes import (
             ActiveWriteError,
@@ -744,7 +776,7 @@ def _dispatch(args: argparse.Namespace) -> int:
             print(exc, file=sys.stderr)
             return 1
         return _emit(payload, args.field)
-    return 1
+    return None
 
 
 def _single_pending_active_write(records: list[dict[str, object]]) -> dict[str, object]:

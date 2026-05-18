@@ -1,7 +1,6 @@
 ---
 name: search
 description: Search across handoff history for decisions, learnings, and context. Use when user says "search handoffs", "find in handoffs", "what did we decide about", or runs /search.
-argument-hint: "<query> [--regex]"
 ---
 
 # Search
