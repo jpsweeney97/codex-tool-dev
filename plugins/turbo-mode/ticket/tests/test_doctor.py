@@ -5,8 +5,14 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from scripts.ticket_triage import (
+    DoctorInputError,
+    _source_cache_report,
+    _tree_manifest,
+    ticket_doctor,
+)
 
-from scripts.ticket_triage import DoctorInputError, _source_cache_report, _tree_manifest, ticket_doctor
+DOCTOR_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "ticket_doctor.py"
 
 
 def test_ticket_doctor_reports_project_and_plugin_paths(tmp_tickets: Path) -> None:
@@ -34,7 +40,10 @@ def test_source_cache_report_reports_missing_cache(tmp_tickets: Path, tmp_path: 
     assert report["source_cache_equal"] is False
 
 
-def test_ticket_doctor_detects_same_size_content_divergence(tmp_tickets: Path, tmp_path: Path) -> None:
+def test_ticket_doctor_detects_same_size_content_divergence(
+    tmp_tickets: Path,
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "source"
     cache = tmp_path / "cache"
     source.mkdir()
@@ -48,7 +57,10 @@ def test_ticket_doctor_detects_same_size_content_divergence(tmp_tickets: Path, t
     assert report["source_cache_mismatches"] == ["same.py"]
 
 
-def test_ticket_doctor_source_cache_equal_is_exact_not_filtered(tmp_tickets: Path, tmp_path: Path) -> None:
+def test_ticket_doctor_source_cache_equal_is_exact_not_filtered(
+    tmp_tickets: Path,
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "source"
     cache = tmp_path / "cache"
     source.mkdir()
@@ -62,7 +74,10 @@ def test_ticket_doctor_source_cache_equal_is_exact_not_filtered(tmp_tickets: Pat
     assert report["source_cache_mismatches"] == [".audit/source-only.jsonl"]
 
 
-def test_ticket_doctor_source_cache_equal_detects_empty_directory_difference(tmp_tickets: Path, tmp_path: Path) -> None:
+def test_ticket_doctor_source_cache_equal_detects_empty_directory_difference(
+    tmp_tickets: Path,
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "source"
     cache = tmp_path / "cache"
     source.mkdir()
@@ -75,7 +90,10 @@ def test_ticket_doctor_source_cache_equal_detects_empty_directory_difference(tmp
     assert report["source_cache_mismatches"] == ["empty-source-only"]
 
 
-def test_ticket_doctor_source_cache_equal_detects_file_kind_difference(tmp_tickets: Path, tmp_path: Path) -> None:
+def test_ticket_doctor_source_cache_equal_detects_file_kind_difference(
+    tmp_tickets: Path,
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "source"
     cache = tmp_path / "cache"
     source.mkdir()
@@ -89,7 +107,10 @@ def test_ticket_doctor_source_cache_equal_detects_file_kind_difference(tmp_ticke
     assert report["source_cache_mismatches"] == ["kind"]
 
 
-def test_ticket_doctor_reports_generated_residue_separately(tmp_tickets: Path, tmp_path: Path) -> None:
+def test_ticket_doctor_reports_generated_residue_separately(
+    tmp_tickets: Path,
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "source"
     cache = tmp_path / "cache"
     source.mkdir()
@@ -247,6 +268,19 @@ def test_cli_doctor_rejects_arbitrary_roots(tmp_tickets: Path) -> None:
     output = json.loads(completed.stdout)
     assert output["state"] == "escalate"
     assert output["error_code"] == "invalid_doctor_root"
+
+
+def test_ticket_doctor_wrapper_rejects_fix_without_confirmation(tmp_tickets: Path) -> None:
+    completed = subprocess.run(
+        ["python3", "-B", str(DOCTOR_SCRIPT), "repair-audit", str(tmp_tickets), "--fix"],
+        cwd=str(tmp_tickets.parent.parent),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert "--confirm-repair" in completed.stderr
 
 
 def test_tree_manifest_enforces_scale_limits(tmp_path: Path) -> None:

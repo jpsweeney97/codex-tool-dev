@@ -5,7 +5,7 @@ import hashlib
 import json
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +13,7 @@ sys.dont_write_bytecode = True
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.ticket_paths import discover_project_root, resolve_tickets_dir
+from scripts.ticket_paths import discover_project_root, resolve_tickets_dir  # noqa: E402
 
 _TERMINAL_STATUSES = frozenset({"done", "wontfix"})
 _DOCTOR_MAX_FILES = 5000
@@ -60,7 +60,8 @@ def _validate_doctor_roots(plugin_root: Path, cache_root: Path) -> tuple[Path, P
     allowed_cache_roots = {script_root, _EXPECTED_CACHE_ROOT.resolve()}
     if resolved_cache not in allowed_cache_roots:
         raise DoctorInputError(
-            "doctor cache_root failed: must equal the running plugin root or the expected Ticket cache root. "
+            "doctor cache_root failed: must equal the running plugin root or the expected "
+            "Ticket cache root. "
             f"Got: {str(cache_root)!r:.100}"
         )
     return resolved_plugin, resolved_cache
@@ -90,13 +91,15 @@ def _tree_manifest(
             file_count += 1
             if file_count > max_files:
                 raise DoctorInputError(
-                    f"doctor tree manifest failed: file count limit exceeded. Got: {file_count!r:.100}"
+                    "doctor tree manifest failed: file count limit exceeded. "
+                    f"Got: {file_count!r:.100}"
                 )
             size = path.stat().st_size
             hashed_bytes += size
             if hashed_bytes > max_bytes:
                 raise DoctorInputError(
-                    f"doctor tree manifest failed: hashed bytes limit exceeded. Got: {hashed_bytes!r:.100}"
+                    "doctor tree manifest failed: hashed bytes limit exceeded. "
+                    f"Got: {hashed_bytes!r:.100}"
                 )
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             result[rel] = f"file:{digest}"
@@ -196,7 +199,9 @@ def _source_cache_report(plugin_root: Path, cache_root: Path) -> dict[str, Any]:
         "plugin_root_exists": plugin_root.is_dir(),
         "cache_root": str(cache_root),
         "cache_exists": cache_root.is_dir(),
-        "source_cache_equal": plugin_root.is_dir() and cache_root.is_dir() and source_fp == cache_fp,
+        "source_cache_equal": (
+            plugin_root.is_dir() and cache_root.is_dir() and source_fp == cache_fp
+        ),
         "source_cache_mismatches": mismatches,
         "generated_residue": _generated_residue(plugin_root, label="source")
         + _generated_residue(cache_root, label="cache"),
@@ -261,6 +266,7 @@ def triage_dashboard(tickets_dir: Path) -> dict[str, Any]:
             "title": ticket.title,
             "status": ticket.status,
             "priority": ticket.priority,
+            "refinement_status": ticket.refinement_status,
             "blocked_by": ticket.blocked_by,
             "date": ticket.date,
         })
@@ -293,6 +299,7 @@ def triage_dashboard(tickets_dir: Path) -> dict[str, Any]:
         "stale": stale,
         "blocked_chains": blocked_chains,
         "next_actions": _next_actions(active_ticket_rows),
+        "suggested_capture_prompts": _suggested_capture_prompts(active_ticket_rows),
         "size_warnings": size_warnings,
     }
 
@@ -300,21 +307,25 @@ def triage_dashboard(tickets_dir: Path) -> dict[str, Any]:
 def _next_actions(active_ticket_rows: list[dict[str, Any]]) -> list[dict[str, str]]:
     """Recommend next actions from dashboard rows only."""
     actions: list[dict[str, str]] = []
-    for row in active_ticket_rows:
+    executable_rows = [
+        row for row in active_ticket_rows
+        if row.get("refinement_status") != "needs_refinement"
+    ]
+    for row in executable_rows:
         if row["priority"] == "critical" and row["status"] == "open":
             actions.append({
                 "action": "start_or_assign_critical",
                 "ticket_id": row["id"],
                 "reason": "Critical ticket is open and not in progress",
             })
-    for row in active_ticket_rows:
+    for row in executable_rows:
         if row["status"] == "blocked" and row["blocked_by"]:
             actions.append({
                 "action": "resolve_blocker",
                 "ticket_id": row["id"],
                 "reason": "Blocked ticket has unresolved blockers",
             })
-    for row in active_ticket_rows:
+    for row in executable_rows:
         if row["status"] == "in_progress":
             actions.append({
                 "action": "review_in_progress",
@@ -322,6 +333,19 @@ def _next_actions(active_ticket_rows: list[dict[str, Any]]) -> list[dict[str, st
                 "reason": "In-progress ticket should have recent activity or be moved back to open",
             })
     return actions[:5]
+
+
+def _suggested_capture_prompts(active_ticket_rows: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Return capture prompts for placeholders that need more definition."""
+    prompts: list[dict[str, str]] = []
+    for row in active_ticket_rows:
+        if row.get("refinement_status") != "needs_refinement":
+            continue
+        prompts.append({
+            "ticket_id": row["id"],
+            "prompt": f"Use ticket-capture to refine {row['id']}: {row['title']}",
+        })
+    return prompts
 
 
 def _is_stale(ticket: Any, cutoff_days: int = 7) -> bool:
@@ -332,8 +356,8 @@ def _is_stale(ticket: Any, cutoff_days: int = 7) -> bool:
     if ticket.status not in ("open", "in_progress"):
         return False
     try:
-        ticket_date = datetime.strptime(ticket.date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        return (datetime.now(timezone.utc) - ticket_date).days > cutoff_days
+        ticket_date = datetime.strptime(ticket.date, "%Y-%m-%d").replace(tzinfo=UTC)
+        return (datetime.now(UTC) - ticket_date).days > cutoff_days
     except ValueError:
         return True
 
@@ -384,7 +408,7 @@ def triage_audit_report(tickets_dir: Path, days: int = 7) -> dict[str, Any]:
         return {"total_entries": 0, "by_action": {}, "by_result": {}, "sessions": 0,
                 "skipped_lines": 0, "read_errors": 0}
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days)
     entries: list[dict[str, Any]] = []
     session_ids: set[str] = set()
@@ -395,7 +419,7 @@ def triage_audit_report(tickets_dir: Path, days: int = 7) -> dict[str, Any]:
         if not date_dir.is_dir():
             continue
         try:
-            dir_date = datetime.strptime(date_dir.name, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            dir_date = datetime.strptime(date_dir.name, "%Y-%m-%d").replace(tzinfo=UTC)
         except ValueError:
             continue
         if dir_date < cutoff:
@@ -458,7 +482,12 @@ def triage_orphan_detection(
     read_errors: list[str] = []
 
     if not handoffs_dir.is_dir():
-        return {"matched": matched, "orphaned": orphaned, "total_items": 0, "read_errors": read_errors}
+        return {
+            "matched": matched,
+            "orphaned": orphaned,
+            "total_items": 0,
+            "read_errors": read_errors,
+        }
 
     for hf in sorted(handoffs_dir.glob("*.md")):
         try:

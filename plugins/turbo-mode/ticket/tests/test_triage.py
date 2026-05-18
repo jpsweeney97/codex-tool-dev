@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -69,12 +69,44 @@ def test_dashboard_includes_recommended_next_actions(tmp_tickets: Path) -> None:
     assert dashboard["next_actions"][0]["ticket_id"] == "T-20260420-01"
 
 
+def test_dashboard_next_actions_exclude_needs_refinement_placeholders(
+    tmp_tickets: Path,
+) -> None:
+    from scripts.ticket_triage import triage_dashboard
+
+    make_ticket(
+        tmp_tickets,
+        "2026-05-18-critical-placeholder.md",
+        id="T-20260518-01",
+        date="2026-05-18",
+        status="open",
+        priority="critical",
+        title="Placeholder capture",
+        extra_yaml="refinement_status: needs_refinement\n        ",
+    )
+    make_ticket(
+        tmp_tickets,
+        "2026-05-18-ready-critical.md",
+        id="T-20260518-02",
+        date="2026-05-18",
+        status="open",
+        priority="critical",
+        title="Ready critical work",
+    )
+
+    dashboard = triage_dashboard(tmp_tickets)
+
+    assert [action["ticket_id"] for action in dashboard["next_actions"]] == [
+        "T-20260518-02"
+    ]
+
+
 class TestStaleDetection:
     """Test stale ticket detection."""
 
     def test_stale_ticket_detected(self, tmp_tickets):
         """Ticket older than 7 days in open status -> stale."""
-        old_date = (datetime.now(timezone.utc) - timedelta(days=10)).strftime("%Y-%m-%d")
+        old_date = (datetime.now(UTC) - timedelta(days=10)).strftime("%Y-%m-%d")
         make_ticket(tmp_tickets, "old.md", id="T-20260220-01", date=old_date, status="open")
         from scripts.ticket_triage import triage_dashboard
         result = triage_dashboard(tmp_tickets)
@@ -84,7 +116,7 @@ class TestStaleDetection:
 
     def test_recent_ticket_not_stale(self, tmp_tickets):
         """Ticket from today -> not stale."""
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         make_ticket(tmp_tickets, "new.md", id="T-20260302-01", date=today, status="open")
         from scripts.ticket_triage import triage_dashboard
         result = triage_dashboard(tmp_tickets)
@@ -92,7 +124,7 @@ class TestStaleDetection:
 
     def test_done_ticket_not_stale(self, tmp_tickets):
         """Done tickets are never stale (regardless of age)."""
-        old_date = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+        old_date = (datetime.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d")
         make_ticket(tmp_tickets, "done.md", id="T-20260201-01", date=old_date, status="done")
         from scripts.ticket_triage import triage_dashboard
         result = triage_dashboard(tmp_tickets)
@@ -175,7 +207,7 @@ class TestAuditReport:
     @pytest.fixture
     def audit_env(self, tmp_tickets):
         """Create audit trail with sample entries."""
-        date_dir = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_dir = tmp_tickets / ".audit" / date_dir
         audit_dir.mkdir(parents=True)
 
@@ -229,21 +261,30 @@ class TestAuditReport:
         from scripts.ticket_triage import triage_audit_report
 
         # Create an audit entry exactly 7 days ago (at midnight).
-        boundary_date = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+        boundary_date = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%d")
         audit_dir = tmp_tickets / ".audit" / boundary_date
         audit_dir.mkdir(parents=True)
         s_file = audit_dir / "boundary-session.jsonl"
         s_file.write_text(
-            json.dumps({"action": "create", "result": "ok_create", "session_id": "boundary-session"}) + "\n"
+            json.dumps(
+                {
+                    "action": "create",
+                    "result": "ok_create",
+                    "session_id": "boundary-session",
+                }
+            )
+            + "\n"
         )
 
         result = triage_audit_report(tmp_tickets, days=7)
-        assert result["total_entries"] == 1, "Boundary day should be included in the lookback window"
+        assert result["total_entries"] == 1, (
+            "Boundary day should be included in the lookback window"
+        )
 
     def test_skipped_lines_counted(self, tmp_tickets):
         """Corrupt JSONL lines are counted in skipped_lines."""
         from scripts.ticket_triage import triage_audit_report
-        date_dir = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_dir = tmp_tickets / ".audit" / date_dir
         audit_dir.mkdir(parents=True)
         s_file = audit_dir / "corrupt-session.jsonl"
@@ -263,7 +304,7 @@ class TestAuditReport:
         if sys.platform == "win32":
             pytest.skip("chmod not effective on Windows")
         from scripts.ticket_triage import triage_audit_report
-        date_dir = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_dir = tmp_tickets / ".audit" / date_dir
         audit_dir.mkdir(parents=True)
         s_file = audit_dir / "unreadable-session.jsonl"
@@ -290,8 +331,9 @@ class TestStaleEdgeCases:
         """Missing/unreadable ticket files get a size warning."""
         make_ticket(tmp_tickets, "test.md", status="open")
         # Corrupt the path so stat fails.
-        from scripts.ticket_triage import _check_doc_size
         from types import SimpleNamespace
+
+        from scripts.ticket_triage import _check_doc_size
         fake_ticket = SimpleNamespace(path="/nonexistent/path.md")
         assert _check_doc_size(fake_ticket) == "error: file unreadable"
 

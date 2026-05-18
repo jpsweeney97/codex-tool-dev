@@ -172,6 +172,20 @@ def query_tickets_payload(tickets: list[ParsedTicket], search_term: str) -> dict
     }
 
 
+def list_tickets_payload(tickets: list[ParsedTicket]) -> dict:
+    """Return list payload while grouping refinement placeholders separately."""
+    groups = split_refinement_tickets(tickets)
+    return {
+        "tickets": [_ticket_to_dict(ticket) for ticket in tickets],
+        "ticket_groups": {
+            "ready": [_ticket_to_dict(ticket) for ticket in groups["ready"]],
+            "needs_refinement": [
+                _ticket_to_dict(ticket) for ticket in groups["needs_refinement"]
+            ],
+        },
+    }
+
+
 def main() -> None:
     import argparse
     import json
@@ -238,7 +252,7 @@ def main() -> None:
             json.dumps(
                 {
                     "state": "ok",
-                    "data": {"tickets": [_ticket_to_dict(t) for t in tickets]},
+                    "data": list_tickets_payload(tickets),
                 }
             )
         )
