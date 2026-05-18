@@ -36,6 +36,9 @@ python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <TICKETS_DIR> --plugi
 Report the diagnostic result as source/cache/storage evidence. Do not describe
 it as live runtime proof.
 
+`diagnose` reports stale `.codex/ticket-tmp/` payloads older than 24 hours
+without mutating them.
+
 ## Audit Repair
 
 Always dry-run audit repair first:
@@ -53,3 +56,25 @@ python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <TICKETS_DIR> --c
 
 Stop on parse, path, permission, or backup errors. Report the failing command
 and do not try alternate repair paths unless the user asks.
+
+## Stale Payload Cleanup
+
+Always run diagnostics first. Show the stale `.codex/ticket-tmp/` payloads
+report and ask before any cleanup mutation. If the user explicitly approves
+stale payload cleanup, run:
+
+```bash
+python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads
+```
+
+The unconfirmed command is:
+
+```bash
+python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR>
+```
+
+Short form: `ticket_doctor.py clean-stale-payloads <TICKETS_DIR>`.
+
+Cleanup is limited to stale JSON payloads under
+`<PROJECT_ROOT>/.codex/ticket-tmp/` and uses a 24 hours TTL. The confirmation
+flag is `--confirm-clean-stale-payloads`.

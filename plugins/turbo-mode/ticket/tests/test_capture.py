@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 import scripts.ticket_capture as ticket_capture
 from scripts.ticket_capture import run_capture
 from scripts.ticket_parse import parse_ticket
@@ -489,6 +490,149 @@ def test_execute_writes_one_capture_created_ticket_after_prepare_with_provenance
     assert ticket.sections["Next Action"] == (
         "Clarify the expected preview behavior for hook guard failures."
     )
+
+
+def test_successful_capture_execute_deletes_ticket_tmp_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    monkeypatch.chdir(tmp_path)
+    payload_path = tmp_path / ".codex" / "ticket-tmp" / "capture.json"
+    payload_path.parent.mkdir(parents=True)
+    payload_path.write_text(
+        json.dumps(
+            {
+                "capture": {
+                    "captured_request": "Track timeout cleanup",
+                    "title": "Track timeout cleanup",
+                    "problem": "Timeout cleanup needs tracking.",
+                    "next_action": "Review timeout cleanup.",
+                },
+                "session_id": "test-session",
+                "hook_injected": True,
+                "hook_request_origin": "user",
+                "tickets_dir": "docs/tickets",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    prepare = run_capture("prepare", payload_path)
+    assert prepare["state"] == "ready_to_execute"
+    execute = run_capture("execute", payload_path)
+
+    assert execute["state"] == "ok_create"
+    assert execute["data"]["payload_deleted"] is True
+    assert not payload_path.exists()
+
+
+def test_failed_capture_execute_preserves_ticket_tmp_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    monkeypatch.chdir(tmp_path)
+    payload_path = tmp_path / ".codex" / "ticket-tmp" / "capture.json"
+    payload_path.parent.mkdir(parents=True)
+    payload_path.write_text(json.dumps({"tickets_dir": "docs/tickets"}), encoding="utf-8")
+
+    execute = run_capture("execute", payload_path)
+
+    assert execute["state"] in {"preflight_failed", "policy_blocked", "escalate"}
+    assert payload_path.exists()
+
+
+def test_successful_capture_execute_does_not_delete_symlink_payload_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    monkeypatch.chdir(tmp_path)
+    payload_path = tmp_path / ".codex" / "ticket-tmp" / "capture.json"
+    payload_path.parent.mkdir(parents=True)
+    payload_path.write_text(
+        json.dumps(
+            {
+                "capture": {
+                    "captured_request": "Track timeout cleanup",
+                    "title": "Track timeout cleanup",
+                    "problem": "Timeout cleanup needs tracking.",
+                    "next_action": "Review timeout cleanup.",
+                },
+                "session_id": "test-session",
+                "hook_injected": True,
+                "hook_request_origin": "user",
+                "tickets_dir": "docs/tickets",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    prepare = run_capture("prepare", payload_path)
+    assert prepare["state"] == "ready_to_execute"
+    target = payload_path.parent / "payload-target.json"
+    target.write_text(payload_path.read_text(encoding="utf-8"), encoding="utf-8")
+    payload_path.unlink()
+    payload_path.symlink_to(target)
+    execute = run_capture("execute", payload_path)
+
+    assert execute["state"] == "ok_create"
+    assert target.exists()
+    assert payload_path.is_symlink()
+    assert "payload_cleanup_error" in execute["data"]
+
+
+def test_successful_capture_execute_does_not_delete_external_codex_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    monkeypatch.chdir(tmp_path)
+    payload_path = tmp_path / ".codex" / "ticket-tmp" / "capture.json"
+    payload_path.parent.mkdir(parents=True)
+    external_codex = tmp_path.parent / f"{tmp_path.name}-external-codex"
+    external_payload_dir = external_codex / "ticket-tmp"
+    external_payload_dir.mkdir(parents=True)
+    external_payload = external_payload_dir / "capture.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "capture": {
+                    "captured_request": "Track timeout cleanup",
+                    "title": "Track timeout cleanup",
+                    "problem": "Timeout cleanup needs tracking.",
+                    "next_action": "Review timeout cleanup.",
+                },
+                "session_id": "test-session",
+                "hook_injected": True,
+                "hook_request_origin": "user",
+                "tickets_dir": "docs/tickets",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    original_dispatch = ticket_capture.dispatch_stage
+
+    def dispatch_and_swap_codex(stage, payload, tickets_dir, request_origin):
+        response = original_dispatch(stage, payload, tickets_dir, request_origin)
+        if stage == "execute":
+            external_payload.write_text(json.dumps(payload), encoding="utf-8")
+            (tmp_path / ".codex").rename(tmp_path / ".codex-real")
+            (tmp_path / ".codex").symlink_to(external_codex, target_is_directory=True)
+        return response
+
+    monkeypatch.setattr(ticket_capture, "dispatch_stage", dispatch_and_swap_codex)
+
+    prepare = run_capture("prepare", payload_path)
+    assert prepare["state"] == "ready_to_execute"
+    execute = run_capture("execute", payload_path)
+
+    assert execute["state"] == "ok_create"
+    assert external_payload.exists()
+    assert "payload_cleanup_error" in execute["data"]
+    assert "symlink" in execute["data"]["payload_cleanup_error"]
 
 
 def test_execute_rejects_prepared_payload_with_missing_preview(

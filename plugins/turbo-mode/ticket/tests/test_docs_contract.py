@@ -7,6 +7,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+ENGINE_RUNNER = PLUGIN_ROOT / "scripts" / "ticket_engine_runner.py"
+TICKET_PAYLOADS = PLUGIN_ROOT / "scripts" / "ticket_payloads.py"
 CAPTURE_SKILL = PLUGIN_ROOT / "skills" / "ticket-capture" / "SKILL.md"
 FIND_SKILL = PLUGIN_ROOT / "skills" / "ticket-find" / "SKILL.md"
 UPDATE_SKILL = PLUGIN_ROOT / "skills" / "ticket-update" / "SKILL.md"
@@ -49,6 +51,117 @@ def _json_code_blocks(text: str) -> list[dict[str, object]]:
         assert isinstance(parsed, dict)
         blocks.append(parsed)
     return blocks
+
+
+def test_readme_states_supported_high_level_mutation_surfaces() -> None:
+    text = _read_text(PLUGIN_ROOT / "README.md")
+
+    supported_surfaces = (
+        "Ticket has exactly three supported high-level mutation surfaces: "
+        "`capture`, `update`, and `ingest`."
+    )
+    ingest_surface = (
+        "`ingest`: `ticket_engine_user.py ingest <payload_file>` or "
+        "`ticket_engine_agent.py ingest <payload_file>`"
+    )
+    assert supported_surfaces in text
+    assert "`capture` and `update` use their preview-first prepare/execute wrappers." in text
+    assert ingest_surface in text
+    assert "Direct engine `classify`/`plan`/`preflight`/`execute`" in text
+    assert "They are not normal user-facing mutation interfaces" in text
+    assert "`ticket_workflow.py` is a compatibility/debug runner" in text
+    assert "`ticket_workflow.py` is not a supported user-facing mutation surface" in text
+
+
+def test_handbook_states_supported_high_level_mutation_surfaces() -> None:
+    text = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
+
+    supported_surfaces = (
+        "Ticket has exactly three supported high-level mutation surfaces: "
+        "`capture`, `update`, and `ingest`."
+    )
+    assert supported_surfaces in text
+    assert "`ingest` uses the guarded engine entrypoints" in text
+    assert "Direct engine `classify`/`plan`/`preflight`/`execute`" in text
+    assert "`ticket_workflow.py` is a compatibility/debug runner" in text
+    assert "ticket_workflow.py is a compatibility/debug runner, not" not in text
+    assert "not normal user-facing mutation interfaces" in text
+
+
+def test_contract_states_supported_high_level_mutation_surfaces() -> None:
+    text = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
+
+    supported_surfaces = (
+        "Ticket has exactly three supported high-level mutation surfaces: "
+        "`capture`, `update`, and `ingest`."
+    )
+    assert supported_surfaces in text
+    assert "`ingest` uses the guarded engine entrypoints" in text
+    assert "Direct engine `classify`/`plan`/`preflight`/`execute`" in text
+    assert "must not be documented as the preferred way to create or mutate tickets" in text
+
+
+def test_engine_docs_state_runner_is_not_public_mutation_surface() -> None:
+    text = _read_text(ENGINE_RUNNER)
+
+    assert "This module is never invoked directly." in text
+    assert (
+        "The public guarded engine entrypoints are ticket_engine_user.py "
+        "and ticket_engine_agent.py."
+    ) in text
+    assert (
+        "Direct engine stages are low-level compatibility, debug, "
+        "and agent-internal paths."
+    ) in text
+    assert "not normal user-facing mutation interfaces" in text
+
+
+def test_docs_describe_current_auto_audit_boundary_without_activation_readiness() -> None:
+    readme = _read_text(PLUGIN_ROOT / "README.md")
+    handbook = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
+    contract = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
+    current_boundary = (
+        "Current agent-origin `auto_audit` execute remains governed by the existing "
+        "guarded provenance/trust model"
+    )
+    for text in [readme, handbook, contract]:
+        assert current_boundary in text
+        assert "hook-injected payload fields" in text
+        assert "matching `hook_request_origin`" in text
+        assert "This slice does not add activation-capable runtime readiness" in text
+        assert "does not write `.codex/ticket-runtime-proof.json`" in text
+        assert "does not add a new execute readiness gate" in text
+        assert "live app-server inventory and live hook-mediated smoke" in text
+
+
+def test_stale_plan_is_only_public_toctou_error_code() -> None:
+    for path in CURRENT_FACING_DOCS:
+        text = _read_text(path)
+        normalized = _normalize_whitespace(text).lower()
+        assert "error_code: toctou_conflict" not in normalized
+        assert "error code `toctou_conflict`" not in normalized
+        assert "blocked with a `toctou_conflict` error" not in normalized
+        assert "| `toctou_conflict`" not in text
+    contract = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
+    assert "`stale_plan`" in contract
+    handbook = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
+    assert "`toctou_conflict` is descriptive prose only, not a public error code." in handbook
+
+
+def test_ingest_contract_documents_filename_id_and_indefinite_processed_retention() -> None:
+    contract = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
+    privacy = _read_text(PLUGIN_ROOT / "PRIVACY.md")
+    assert "For v1.0, the envelope id is the envelope filename" in contract
+    assert "Processed envelopes are retained indefinitely" in contract
+    assert "duplicate/replay" in contract
+    assert "preserves the incoming envelope" in contract
+    assert "Processed envelopes are retained indefinitely" in privacy
+
+
+def test_project_local_ticket_tmp_payloads_are_ignored() -> None:
+    gitignore = _read_text(PLUGIN_ROOT.parents[2] / ".gitignore")
+
+    assert ".codex/ticket-tmp/" in gitignore.splitlines()
 
 
 def _strip_frontmatter_scalar(value: str) -> str:
@@ -408,8 +521,36 @@ def test_ticket_doctor_skill_contract_is_explicit_maintenance_only() -> None:
     assert "ticket_doctor.py diagnose" in text
     assert "ticket_doctor.py repair-audit <TICKETS_DIR>" in text
     assert "ticket_doctor.py repair-audit <TICKETS_DIR> --confirm-repair" in text
+    assert "ticket_doctor.py clean-stale-payloads <TICKETS_DIR>" in text
+    assert (
+        "ticket_doctor.py clean-stale-payloads <TICKETS_DIR> "
+        "--confirm-clean-stale-payloads"
+    ) in text
+    assert "stale `.codex/ticket-tmp/` payloads" in text
+    assert "24 hours" in text
+    assert "ask before any cleanup mutation" in text
     assert "ticket_audit.py repair <TICKETS_DIR>" not in text
     assert "ask before any mutation" in text
+
+
+def test_ticket_payloads_does_not_expose_boolean_security_gate_helpers() -> None:
+    text = _read_text(TICKET_PAYLOADS)
+
+    assert "def ticket_tmp_dir(" not in text
+    assert "def is_ticket_tmp_payload(" not in text
+
+
+def test_doctor_docs_describe_confirmed_stale_payload_cleanup() -> None:
+    readme = _read_text(PLUGIN_ROOT / "README.md")
+    handbook = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
+    skill = _read_text(DOCTOR_SKILL)
+    for text in [readme, handbook, skill]:
+        normalized = _normalize_whitespace(text)
+        assert "reports stale `.codex/ticket-tmp/` payloads" in normalized
+        assert "older than 24 hours; diagnose reports stale" not in normalized
+        assert "24 hours" in text
+        assert "`ticket_doctor.py clean-stale-payloads <TICKETS_DIR>`" in text
+        assert "`--confirm-clean-stale-payloads`" in text
 
 
 def test_skill_docs_use_project_root_marker_walk_not_git_rev_parse() -> None:
@@ -605,8 +746,8 @@ def test_task4_docs_do_not_overclaim_current_placeholder_refinement() -> None:
     assert "no dedicated `ticket_update.py` backend exists yet" not in normalized_handbook
     assert "ticket_update.py prepare" in normalized_handbook
     assert "ticket_update.py execute" in normalized_handbook
-    assert "ticket_workflow.py prepare" not in normalized_handbook
-    assert "ticket_workflow.py execute" not in normalized_handbook
+    assert "preferred way to create or mutate tickets" not in normalized_handbook
+    assert "`ticket_workflow.py` is a compatibility/debug runner" in normalized_handbook
 
 
 def test_docs_describe_capture_first_five_skill_surface() -> None:

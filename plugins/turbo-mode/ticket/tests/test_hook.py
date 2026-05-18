@@ -241,7 +241,7 @@ class TestAllowlist:
         scripts_dir = Path(plugin_root) / "scripts"
         scripts_dir.mkdir(parents=True)
 
-        for subcommand in ("classify", "plan", "preflight", "execute"):
+        for subcommand in ("classify", "plan", "preflight", "execute", "ingest"):
             payload_file = make_payload_file(tmp_path, {"action": subcommand})
             inp = make_hook_input(
                 f"python3 {plugin_root}/scripts/ticket_engine_user.py {subcommand} {payload_file}",
@@ -377,6 +377,34 @@ def test_hook_allows_ticket_workflow_prepare_and_injects_payload(tmp_path: Path)
 
     assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
     injected = json.loads(payload.read_text(encoding="utf-8"))
+    assert injected["hook_injected"] is True
+    assert injected["hook_request_origin"] == "user"
+
+
+def test_hook_allows_ticket_engine_ingest_and_injects_payload(tmp_path: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    payload = tmp_path / "payload.json"
+    payload.write_text(
+        json.dumps(
+            {
+                "tickets_dir": "docs/tickets",
+                "envelope_path": "docs/tickets/.envelopes/2026-05-18T120000Z-test.json",
+            }
+        ),
+        encoding="utf-8",
+    )
+    event = make_hook_input(
+        f"python3 -B {plugin_root}/scripts/ticket_engine_user.py ingest {payload}",
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(plugin_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
+    injected = json.loads(payload.read_text(encoding="utf-8"))
+    assert injected["session_id"] == "session-hook"
     assert injected["hook_injected"] is True
     assert injected["hook_request_origin"] == "user"
 

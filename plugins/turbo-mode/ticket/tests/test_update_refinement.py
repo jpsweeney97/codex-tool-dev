@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from scripts.ticket_parse import extract_fenced_yaml, parse_ticket, parse_yaml_block
 from scripts.ticket_render import render_ticket
 from scripts.ticket_update import run_update
@@ -150,6 +151,46 @@ def test_execute_clears_refinement_status_and_tag_for_concrete_refinement(
     assert "Preview reports when needs-refinement will be cleared." in parsed.sections[
         "Acceptance Criteria"
     ]
+
+
+def test_successful_update_execute_deletes_ticket_tmp_payload(
+    tmp_tickets: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    _make_refinement_ticket(tmp_tickets)
+    payload_path = project_root / ".codex" / "ticket-tmp" / "update.json"
+    payload_path.parent.mkdir(parents=True)
+    payload_path.write_text(
+        json.dumps(_payload(tmp_tickets, {"priority": "high"})),
+        encoding="utf-8",
+    )
+
+    prepare = run_update("prepare", payload_path)
+    assert prepare["state"] == "ready_to_execute"
+    execute = run_update("execute", payload_path)
+
+    assert execute["state"] == "ok_update"
+    assert execute["data"]["payload_deleted"] is True
+    assert not payload_path.exists()
+
+
+def test_failed_update_execute_preserves_ticket_tmp_payload(
+    tmp_tickets: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    payload_path = project_root / ".codex" / "ticket-tmp" / "update.json"
+    payload_path.parent.mkdir(parents=True)
+    payload_path.write_text(json.dumps({"tickets_dir": str(tmp_tickets)}), encoding="utf-8")
+
+    execute = run_update("execute", payload_path)
+
+    assert execute["state"] in {"preflight_failed", "policy_blocked", "escalate"}
+    assert payload_path.exists()
 
 
 def test_priority_and_tags_only_keep_refinement_status(

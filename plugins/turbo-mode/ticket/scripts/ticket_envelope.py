@@ -215,6 +215,20 @@ def read_envelope(path: Path) -> tuple[dict[str, Any] | None, list[str]]:
     return data, []
 
 
+def envelope_id_from_path(envelope_path: Path) -> str:
+    """Return the v1.0 DeferredWorkEnvelope id.
+
+    The v1.0 JSON schema has no id field; the filename under
+    docs/tickets/.envelopes/ is the durable idempotency key.
+    """
+    return envelope_path.name
+
+
+def processed_path_for_envelope(envelope_path: Path) -> Path:
+    """Return the processed ledger path for a DeferredWorkEnvelope filename."""
+    return envelope_path.parent / ".processed" / envelope_id_from_path(envelope_path)
+
+
 def move_to_processed(envelope_path: Path) -> Path:
     """Move a consumed envelope to the .processed/ subdirectory.
 
@@ -222,9 +236,9 @@ def move_to_processed(envelope_path: Path) -> Path:
     Raises FileExistsError if the destination already exists (prevents
     silent overwrite of previously processed envelopes).
     """
-    processed_dir = envelope_path.parent / ".processed"
+    dest = processed_path_for_envelope(envelope_path)
+    processed_dir = dest.parent
     processed_dir.mkdir(parents=True, exist_ok=True)
-    dest = processed_dir / envelope_path.name
     if dest.exists():
         raise FileExistsError(
             f"move_to_processed failed: {dest} already exists. "

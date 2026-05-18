@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from scripts.ticket_engine_core import _evaluate_workflow_policy  # noqa: E402
 from scripts.ticket_engine_runner import dispatch_stage, load_runner_context  # noqa: E402
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir  # noqa: E402
+from scripts.ticket_payloads import TicketPayloadPathError, delete_consumed_payload  # noqa: E402
 from scripts.ticket_read import find_ticket_by_id  # noqa: E402
 
 _ALLOWED_UPDATE_FIELDS = frozenset(
@@ -487,11 +488,27 @@ def _execute(payload_path: Path) -> dict[str, Any]:
             error_code="stale_plan",
         )
 
+    project_root = discover_project_root(tickets_dir)
+    if project_root is None:
+        return _response(
+            "policy_blocked",
+            "Cannot determine project root for payload cleanup: no .codex/ or .git/ marker found",
+            error_code="policy_blocked",
+        )
+
     response = _engine_response_to_dict(
         dispatch_stage("execute", payload, tickets_dir, request_origin)
     )
     if response.get("state") == "ok_update":
         response.setdefault("data", {})["preview"] = preview
+    if response.get("state") in {"ok_update", "ok_close", "ok_reopen"}:
+        try:
+            response.setdefault("data", {})["payload_deleted"] = delete_consumed_payload(
+                payload_path,
+                project_root,
+            )
+        except (OSError, TicketPayloadPathError) as exc:
+            response.setdefault("data", {})["payload_cleanup_error"] = str(exc)
     return response
 
 
