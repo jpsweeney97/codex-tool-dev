@@ -43,10 +43,10 @@ from .paths import RefreshPaths, build_paths
 from .state_machine import derive_terminal_plan_status
 
 TOOL_RELATIVE_PATH = "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py"
-DEV_REFRESH_COMMAND = "npm run turbo:dev-refresh"
+DEV_REFRESH_COMMAND = "npm run turbo:sync-personal-plugins"
 EXPECTED_MARKETPLACE_SOURCES = {
-    "handoff": "./plugins/turbo-mode/handoff/1.6.0",
-    "ticket": "./plugins/turbo-mode/ticket/1.4.0",
+    "handoff": "./plugins/turbo-mode/handoff",
+    "ticket": "./plugins/turbo-mode/ticket",
 }
 EXPECTED_CONFIG_PLUGINS = ("handoff@turbo-mode", "ticket@turbo-mode")
 
@@ -91,13 +91,13 @@ def build_plugin_specs(*, repo_root: Path, codex_home: Path) -> list[PluginSpec]
         PluginSpec(
             name="handoff",
             version="1.6.0",
-            source_root=repo_root / "plugins/turbo-mode/handoff/1.6.0",
+            source_root=repo_root / "plugins/turbo-mode/handoff",
             cache_root=codex_home / "plugins/cache/turbo-mode/handoff/1.6.0",
         ),
         PluginSpec(
             name="ticket",
             version="1.4.0",
-            source_root=repo_root / "plugins/turbo-mode/ticket/1.4.0",
+            source_root=repo_root / "plugins/turbo-mode/ticket",
             cache_root=codex_home / "plugins/cache/turbo-mode/ticket/1.4.0",
         ),
     ]

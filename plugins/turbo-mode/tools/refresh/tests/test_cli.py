@@ -39,14 +39,14 @@ def write_marketplace(path: Path) -> None:
                         "name": "handoff",
                         "source": {
                             "source": "local",
-                            "path": "./plugins/turbo-mode/handoff/1.6.0",
+                            "path": "./plugins/turbo-mode/handoff",
                         },
                     },
                     {
                         "name": "ticket",
                         "source": {
                             "source": "local",
-                            "path": "./plugins/turbo-mode/ticket/1.4.0",
+                            "path": "./plugins/turbo-mode/ticket",
                         },
                     },
                 ],
@@ -82,7 +82,7 @@ def write_plugin_pair(
     source_text: str,
     cache_text: str,
 ) -> None:
-    source = repo_root / f"plugins/turbo-mode/{plugin}/{version}" / rel
+    source = repo_root / f"plugins/turbo-mode/{plugin}" / rel
     cache = codex_home / f"plugins/cache/turbo-mode/{plugin}/{version}" / rel
     source.parent.mkdir(parents=True, exist_ok=True)
     cache.parent.mkdir(parents=True, exist_ok=True)
@@ -541,7 +541,7 @@ def test_cli_plan_refresh_emits_dev_refresh_advice_for_fast_safe_drift(
     assert payload["mutation_command_available"] is False
     assert payload["requires_plan"] is None
     assert payload["future_external_command"] is None
-    assert payload["dev_refresh_command"] == "npm run turbo:dev-refresh"
+    assert payload["dev_refresh_command"] == "npm run turbo:sync-personal-plugins"
 
 
 def test_cli_bare_invocation_does_not_write_bytecode(tmp_path: Path) -> None:
