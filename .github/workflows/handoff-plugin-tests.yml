@@ -4,13 +4,13 @@ on:
   pull_request:
     paths:
       - ".github/workflows/handoff-plugin-tests.yml"
-      - "plugins/turbo-mode/handoff/1.6.0/**"
+      - "plugins/turbo-mode/handoff/**"
   push:
     branches:
       - main
     paths:
       - ".github/workflows/handoff-plugin-tests.yml"
-      - "plugins/turbo-mode/handoff/1.6.0/**"
+      - "plugins/turbo-mode/handoff/**"
 
 jobs:
   test:
@@ -42,18 +42,18 @@ jobs:
         run: |
           PYTHONDONTWRITEBYTECODE=1 \
           PYTHONPYCACHEPREFIX="${RUNNER_TEMP}/codex-tool-dev-pycache" \
-          uv run --directory plugins/turbo-mode/handoff/1.6.0 pytest --collect-only -q -p no:cacheprovider
+          uv run --directory plugins/turbo-mode/handoff pytest --collect-only -q -p no:cacheprovider
 
       - name: Run Handoff tests
         run: |
           PYTHONDONTWRITEBYTECODE=1 \
           PYTHONPYCACHEPREFIX="${RUNNER_TEMP}/codex-tool-dev-pycache" \
-          uv run --directory plugins/turbo-mode/handoff/1.6.0 pytest -q -p no:cacheprovider
+          uv run --directory plugins/turbo-mode/handoff pytest -q -p no:cacheprovider
 
       - name: Advisory pyright (non-blocking)
         continue-on-error: true
         run: |
           PYTHONDONTWRITEBYTECODE=1 \
           PYTHONPYCACHEPREFIX="${RUNNER_TEMP}/codex-tool-dev-pycache" \
-          uv run --directory plugins/turbo-mode/handoff/1.6.0 --with pyright \
+          uv run --directory plugins/turbo-mode/handoff --with pyright \
           sh -c 'pyright --version && pyright --stats turbo_mode_handoff_runtime/'
