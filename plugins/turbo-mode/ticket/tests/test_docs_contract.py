@@ -499,6 +499,24 @@ def test_readme_and_handbook_use_source_authority_installed_boundary() -> None:
         assert "cache-refresh or runtime-proof lane" in normalized
 
 
+def test_handbook_update_surface_matches_focused_backend() -> None:
+    text = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
+    normalized = _normalize_whitespace(text)
+    assert "source, defer, capture metadata" not in normalized
+    assert "Source, defer, and capture provenance metadata are not supported" in normalized
+    assert "lifecycle, priority, tags, blockers, component, related paths" in normalized
+    assert "focused refinement fields" in normalized
+
+
+def test_handbook_smoke_uses_capture_preview_with_workspace_payload() -> None:
+    text = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
+    assert "/tmp/test_payload.json" not in text
+    assert "ticket_engine_user.py classify" not in text
+    assert "ticket_capture.py prepare <PROJECT_ROOT>/.codex/ticket-tmp/capture-smoke.json" in text
+    assert "mkdir -p <PROJECT_ROOT>/.codex/ticket-tmp" in text
+    assert "do not run execute unless you intend to create the ticket" in text
+
+
 def test_manifest_documents_required_interface_urls() -> None:
     manifest = json.loads(_read_text(MANIFEST))
     interface = manifest["interface"]

@@ -228,10 +228,11 @@ read-only and calls only `ticket_read.py list`, `query`, and `check`.
 ### `ticket-update` skill
 
 **When to use**
-Update an existing ticket's lifecycle, priority, tags, blockers, source, defer,
-capture metadata, component, or related paths. Do not use it for arbitrary
-body-section editing in v1. Placeholder problem, next action, and acceptance
-criteria refinement uses the focused `ticket_update.py` backend.
+Update an existing ticket's lifecycle, priority, tags, blockers, component,
+related paths, or focused refinement fields. Do not use it for arbitrary
+body-section editing in v1. Source, defer, and capture provenance metadata are
+not supported by `ticket_update.py` in v1. Placeholder problem, next action, and
+acceptance criteria refinement uses the focused `ticket_update.py` backend.
 
 **Flow**
 1. Resolve plugin root
@@ -556,30 +557,31 @@ python3 -B <PLUGIN_ROOT>/scripts/ticket_triage.py dashboard <PROJECT_ROOT>/docs/
 # Should return JSON with counts (all zeros valid for empty directory)
 ```
 
-### 6. Mutation Smoke Test (user origin)
+### 6. Capture Preview Smoke Test
 
 ```bash
-cat > /tmp/test_payload.json << 'EOF'
+mkdir -p <PROJECT_ROOT>/.codex/ticket-tmp
+cat > <PROJECT_ROOT>/.codex/ticket-tmp/capture-smoke.json << 'EOF'
 {
-  "action": "create",
-  "args": "Handbook verification test",
-  "problem": "Handbook verification test",
-  "priority": "low",
-  "source": {"type": "ad-hoc", "ref": "", "session": "test-session"},
-  "session_id": "test-session",
-  "hook_injected": true,
-  "request_origin": "user",
-  "fields": {
+  "tickets_dir": "docs/tickets",
+  "capture": {
     "title": "Handbook verification test",
-    "problem": "Handbook verification test",
+    "captured_request": "Verify the capture preview path from the handbook.",
+    "problem": "The handbook capture smoke should exercise the user-facing preview path.",
+    "next_action": "Run the capture prepare command and inspect the compact preview.",
+    "capture_confidence": "high",
+    "capture_source": "manual-smoke",
     "priority": "low",
-    "source": {"type": "ad-hoc", "ref": "", "session": "test-session"}
+    "tags": ["test"],
+    "acceptance_criteria": [
+      "Capture prepare returns a preview without writing a ticket."
+    ]
   }
 }
 EOF
 
-python3 -B <PLUGIN_ROOT>/scripts/ticket_engine_user.py classify /tmp/test_payload.json
-# Expected: {"state": "ok", ...}
+python3 -B <PLUGIN_ROOT>/scripts/ticket_capture.py prepare <PROJECT_ROOT>/.codex/ticket-tmp/capture-smoke.json
+# Expected: {"state": "ready_to_execute", ...}; do not run execute unless you intend to create the ticket.
 ```
 
 ### 7. Audit Trail Verification
