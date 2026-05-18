@@ -1,4 +1,5 @@
 """Release provenance checks for installed Ticket runtime surfaces."""
+
 from __future__ import annotations
 
 import json
@@ -7,7 +8,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 HOOKS_JSON = PLUGIN_ROOT / "hooks" / "hooks.json"
@@ -24,7 +24,10 @@ def test_guard_hook_manifest_command_is_cache_local() -> None:
     ]
 
     assert commands == [
-        "python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py"
+        (
+            "python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/hooks/"
+            "ticket_engine_guard.py"
+        )
     ]
     assert all("/plugin-dev/" not in command for command in commands)
 
@@ -32,7 +35,12 @@ def test_guard_hook_manifest_command_is_cache_local() -> None:
 def test_user_entrypoint_with_dash_b_does_not_create_cache_pycache(tmp_path: Path) -> None:
     """The documented python3 -B entrypoint contract must not write bytecode residue."""
     package_root = tmp_path / "ticket"
-    shutil.copytree(PLUGIN_ROOT / "scripts", package_root / "scripts")
+    shutil.copytree(
+        PLUGIN_ROOT / "scripts",
+        package_root / "scripts",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    assert not list((package_root / "scripts").glob("__pycache__"))
     env = os.environ.copy()
     env.pop("PYTHONDONTWRITEBYTECODE", None)
 

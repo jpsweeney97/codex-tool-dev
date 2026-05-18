@@ -1,6 +1,6 @@
 ---
 name: ticket-review
-description: "Review ticket backlog health and recommend next actions. Use when the user asks what needs attention, what to work on next, what is stale or blocked, or asks for ticket backlog triage. Read-only; may suggest capture prompts but must not write tickets."
+description: "Review ticket backlog health and recommend next actions. Use when the user asks what needs attention, what to work on next, what is stale or blocked, or asks for ticket backlog triage. Read-only; may suggest capture prompts but must not write tickets. Do not use for direct show, list, search, ticket lookup, or close-readiness requests; use ticket-find."
 allowed-tools:
   - Bash
   - Read

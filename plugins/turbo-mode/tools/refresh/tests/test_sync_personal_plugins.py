@@ -7,9 +7,11 @@ from types import SimpleNamespace
 import pytest
 import sync_personal_plugins as sync_module
 from sync_personal_plugins import (
+    SyncPersonalPluginsError,
     build_personal_marketplace_payload,
     build_sync_plan,
     main,
+    reject_unexpected_symlinks,
     sync_personal_plugins,
 )
 
@@ -149,6 +151,28 @@ def test_sync_copies_sources_and_excludes_generated_residue(tmp_path: Path) -> N
     assert not (codex_home / "plugins/handoff/.mypy_cache").exists()
     assert not (codex_home / "plugins/handoff/.venv").exists()
     assert not (codex_home / "plugins/handoff/loose.pyc").exists()
+
+
+def test_reject_unexpected_symlinks_rejects_file_symlink(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    source_root = seed_plugin_source(repo_root, "handoff", "1.7.0")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n", encoding="utf-8")
+    (source_root / "outside-link.txt").symlink_to(outside)
+
+    with pytest.raises(SyncPersonalPluginsError, match="symlinks are not allowed"):
+        reject_unexpected_symlinks(source_root)
+
+
+def test_reject_unexpected_symlinks_rejects_directory_symlink(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    source_root = seed_plugin_source(repo_root, "handoff", "1.7.0")
+    outside = tmp_path / "outside-dir"
+    outside.mkdir()
+    (source_root / "outside-dir-link").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(SyncPersonalPluginsError, match="symlinks are not allowed"):
+        reject_unexpected_symlinks(source_root)
 
 
 def test_default_cli_is_non_mutating_and_prints_plan_and_marketplace(

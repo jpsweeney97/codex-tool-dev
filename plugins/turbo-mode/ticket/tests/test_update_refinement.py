@@ -236,6 +236,39 @@ def test_acceptance_criteria_only_does_not_clear_refinement_status(
     assert "needs-refinement" in parsed.tags
 
 
+def test_concrete_criteria_with_placeholder_problem_does_not_clear_refinement_status(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    ticket_path = _make_refinement_ticket(tmp_tickets)
+    payload_path = _payload_file(
+        project_root,
+        _payload(
+            tmp_tickets,
+            {
+                "problem": "Needs refinement",
+                "next_action": "Add regression coverage for refinement clearing.",
+                "acceptance_criteria": [
+                    "Regression coverage proves placeholder problem keeps refinement.",
+                ],
+            },
+        ),
+    )
+
+    prepare = run_update("prepare", payload_path)
+    assert prepare["state"] == "ready_to_execute"
+    assert prepare["data"]["preview"]["refinement"] == "unchanged"
+    execute = run_update("execute", payload_path)
+
+    assert execute["state"] == "ok_update"
+    parsed = parse_ticket(ticket_path)
+    assert parsed is not None
+    assert parsed.refinement_status == "needs_refinement"
+    assert "needs-refinement" in parsed.tags
+
+
 def test_arbitrary_body_section_fields_are_rejected(
     tmp_tickets: Path,
     monkeypatch,

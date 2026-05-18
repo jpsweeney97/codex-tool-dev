@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import scripts.ticket_capture as ticket_capture
 from scripts.ticket_capture import run_capture
 from scripts.ticket_parse import parse_ticket
 
@@ -162,6 +163,45 @@ def test_prepare_rejects_raw_user_wording_keys(
     assert "transcript_excerpt" in response["message"]
 
 
+def test_prepare_rejects_raw_user_wording_keys_inside_lists(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    payload_path = _payload_file(
+        project_root,
+        _payload(
+            tmp_tickets,
+            extra_capture={"details": [{"notes": {"raw_user_text": "verbatim user wording"}}]},
+        ),
+    )
+
+    response = run_capture("prepare", payload_path)
+
+    assert response["state"] == "need_fields"
+    assert response["error_code"] == "raw_user_wording"
+    assert "capture.details[0].notes.raw_user_text" in response["message"]
+
+
+def test_prepare_rejects_raw_request_key(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    payload_path = _payload_file(
+        project_root,
+        _payload(tmp_tickets, extra_capture={"raw_request": "verbatim user wording"}),
+    )
+
+    response = run_capture("prepare", payload_path)
+
+    assert response["state"] == "need_fields"
+    assert response["error_code"] == "raw_user_wording"
+    assert "capture.raw_request" in response["message"]
+
+
 def test_prepare_rejects_unsupported_hidden_persisted_capture_fields(
     tmp_tickets: Path,
     monkeypatch,
@@ -208,6 +248,66 @@ def test_prepare_rejects_user_supplied_key_file_paths(
     assert response["error_code"] == "unsupported_capture_fields"
     assert response["data"]["unsupported_fields"] == ["key_file_paths"]
     assert list(tmp_tickets.glob("*.md")) == []
+
+
+def test_prepare_accepts_capture_source_but_keeps_conversation_source(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    payload_path = _payload_file(
+        project_root,
+        _payload(tmp_tickets, extra_capture={"capture_source": "manual"}),
+    )
+
+    response = run_capture("prepare", payload_path)
+
+    assert response["state"] == "ready_to_execute"
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    assert payload["fields"]["capture_source"] == "conversation"
+
+
+def test_prepare_does_not_escalate_negated_security_language(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    payload_path = _payload_file(
+        project_root,
+        _payload(
+            tmp_tickets,
+            problem="This is not a security issue; the preview wording is confusing.",
+        ),
+    )
+
+    response = run_capture("prepare", payload_path)
+
+    assert response["state"] == "ready_to_execute"
+    assert "priority" not in response["data"]["preview"]
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    assert payload["fields"]["priority"] == "medium"
+
+
+def test_prepare_escalates_explicit_credential_leak(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    payload_path = _payload_file(
+        project_root,
+        _payload(
+            tmp_tickets,
+            problem="A credential leak in capture payload logging exposes secrets.",
+        ),
+    )
+
+    response = run_capture("prepare", payload_path)
+
+    assert response["state"] == "ready_to_execute"
+    assert response["data"]["preview"]["priority"] == "critical"
 
 
 def test_prepare_rejects_relative_payload_path(
@@ -435,6 +535,26 @@ def test_execute_rejects_when_capture_changes_after_prepare_until_rerun(
     assert len(list(tmp_tickets.glob("*.md"))) == 1
 
 
+def test_execute_rejects_when_session_id_changes_after_prepare(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    payload_path = _payload_file(project_root, _payload(tmp_tickets))
+
+    prepare = run_capture("prepare", payload_path)
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    payload["session_id"] = "session-2"
+    _write_payload(payload_path, payload)
+    execute = run_capture("execute", payload_path)
+
+    assert prepare["state"] == "ready_to_execute"
+    assert execute["state"] == "preflight_failed"
+    assert execute["error_code"] == "stale_plan"
+    assert list(tmp_tickets.glob("*.md")) == []
+
+
 def test_execute_does_not_persist_edit_history(
     tmp_tickets: Path,
     monkeypatch,
@@ -471,6 +591,25 @@ def test_edit_appends_payload_history_and_regenerates_preview_without_write(
     assert payload["edit_history"][0]["instruction"] == "make it high priority"
 
 
+def test_unapplied_edit_returns_need_fields_without_history(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    payload_path = _payload_file(project_root, _payload(tmp_tickets))
+
+    response = run_capture("prepare", payload_path, edit_text="change the title")
+
+    assert response["state"] == "need_fields"
+    assert response["error_code"] == "need_fields"
+    assert "edit instruction was not applied" in response["message"]
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    assert "edit_history" not in payload
+    assert payload["capture"]["title"] == "Capture follow-up for hook guard preview"
+    assert list(tmp_tickets.glob("*.md")) == []
+
+
 def test_split_request_returns_single_ticket_preview_plus_suggested_next_capture(
     tmp_tickets: Path,
     monkeypatch,
@@ -485,3 +624,32 @@ def test_split_request_returns_single_ticket_preview_plus_suggested_next_capture
     assert response["data"]["preview"]["title"] == "Capture follow-up for hook guard preview"
     assert response["data"]["suggested_next_capture"]
     assert list(tmp_tickets.glob("*.md")) == []
+
+
+def test_prepare_surfaces_payload_write_failure_for_field_error(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    payload_path = _payload_file(
+        project_root,
+        _payload(
+            tmp_tickets,
+            next_action="",
+            extra_capture={"refinement_status": "needs_refinement", "tags": ["needs-refinement"]},
+        ),
+    )
+
+    def fail_write(payload_path: Path, payload: dict) -> None:
+        raise OSError(
+            f"payload write failed: simulated write error. Got: {str(payload_path)!r:.100}"
+        )
+
+    monkeypatch.setattr(ticket_capture, "_write_payload_atomic", fail_write)
+
+    response = run_capture("prepare", payload_path)
+
+    assert response["state"] == "escalate"
+    assert response["error_code"] == "io_error"
+    assert "payload write failed: simulated write error" in response["message"]

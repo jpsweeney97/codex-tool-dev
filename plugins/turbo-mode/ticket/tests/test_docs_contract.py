@@ -284,7 +284,11 @@ def test_ticket_find_skill_contract_is_read_only() -> None:
         "show open work",
         "check close readiness",
         "Read-only",
-        "do not create, update, close, reopen, triage, or repair tickets",
+        (
+            "do not create, update, close, reopen, triage, repair, prioritize, "
+            "or answer what to work on next"
+        ),
+        "use ticket-review for backlog health and next-action analysis",
     ):
         assert snippet in description
     assert "ticket_read.py list" in text
@@ -372,6 +376,11 @@ def test_ticket_review_skill_contract_is_read_only_and_capture_prompt_only() -> 
     assert isinstance(description, str)
     assert "Read-only" in description
     assert "may suggest capture prompts but must not write tickets" in description
+    assert (
+        "Do not use for direct show, list, search, ticket lookup, or close-readiness requests"
+        in description
+    )
+    assert "use ticket-find" in description
     assert "ticket_review.py review" in text
     assert "ticket_review.py audit" in text
     assert "ticket_triage.py dashboard" not in text

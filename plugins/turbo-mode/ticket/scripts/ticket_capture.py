@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 from datetime import UTC, datetime
@@ -19,7 +20,11 @@ from scripts.ticket_dedup import normalize  # noqa: E402
 from scripts.ticket_engine_runner import dispatch_stage, load_runner_context  # noqa: E402
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir  # noqa: E402
 from scripts.ticket_read import find_ticket_by_id, list_tickets  # noqa: E402
-from scripts.ticket_validate import CONTROLLED_CAPTURE_TAGS, validate_fields  # noqa: E402
+from scripts.ticket_validate import (  # noqa: E402
+    CAPTURE_INPUT_FIELDS,
+    CONTROLLED_CAPTURE_TAGS,
+    validate_fields,
+)
 
 _RAW_USER_WORDING_KEYS = frozenset(
     {
@@ -34,22 +39,54 @@ _REQUIRED_CAPTURE_FIELDS = (
     "problem",
     "next_action",
 )
-_ALLOWED_CAPTURE_FIELDS = frozenset(
-    {
-        "title",
-        "captured_request",
-        "problem",
-        "next_action",
-        "capture_confidence",
-        "refinement_status",
-        "component",
-        "related_paths",
-        "priority",
-        "tags",
-        "acceptance_criteria",
-    }
-)
+_ALLOWED_CAPTURE_FIELDS = CAPTURE_INPUT_FIELDS
 _PROMPT = "Create this ticket? [create / edit / cancel]"
+_EXECUTE_FINGERPRINT_KEYS = (
+    "action",
+    "ticket_id",
+    "fields",
+    "tickets_dir",
+    "target_fingerprint",
+    "classify_intent",
+    "classify_confidence",
+    "dedup_override",
+    "dependency_override",
+    "dedup_fingerprint",
+    "duplicate_of",
+    "autonomy_config",
+    "session_id",
+    "hook_injected",
+    "hook_request_origin",
+)
+_NEGATED_PRIORITY_PATTERNS = (
+    r"\b(?:not|no)\s+(?:a\s+)?security\s+(?:issue|incident|bug|vulnerability)\b",
+    r"\b(?:not|no)\s+data[- ]loss\b",
+    r"\b(?:not|no)\s+(?:a\s+)?credential\s+leak\b",
+    r"\b(?:does\s+not|doesn't|not)\s+block\s+release\b",
+    r"\b(?:not|no)\s+release[- ]blocking\b",
+    r"\b(?:not|no)\s+(?:a\s+)?regression\b",
+    r"\b(?:not|no)\s+(?:a\s+)?blocker\b",
+)
+_CRITICAL_PRIORITY_PATTERNS = (
+    r"\bprod(?:uction)?\s+(?:is\s+)?down\b",
+    r"\bdata[- ]loss\b",
+    r"\bsecurity\s+(?:issue|incident|bug|vulnerability)\b",
+    r"\bcredential(?:s)?\s+(?:leak|leaked|exposed)\b",
+    r"\bblocks?\s+release\b",
+    r"\brelease[- ]blocking\b",
+)
+_HIGH_PRIORITY_PATTERNS = (
+    r"\bblocking\s+me\b",
+    r"\bblocker\b",
+    r"\bci\s+(?:is\s+)?red\b",
+    r"\bcannot\s+ship\b",
+    r"\bregression\b",
+)
+_LOW_PRIORITY_PATTERNS = (
+    r"\bcleanup\b",
+    r"\bpolish\b",
+    r"\bnice[- ]to[- ]have\b",
+)
 
 
 def _response(
@@ -233,25 +270,24 @@ def _infer_priority(capture: dict[str, Any]) -> str:
     text = " ".join(
         str(capture.get(key, "")) for key in ("title", "captured_request", "problem", "next_action")
     ).lower()
-    if any(
-        signal in text
-        for signal in (
-            "production",
-            "data loss",
-            "security",
-            "release-blocking",
-            "release blocking",
-        )
-    ):
+    signal_text = text
+    for pattern in _NEGATED_PRIORITY_PATTERNS:
+        signal_text = re.sub(pattern, " ", signal_text)
+    if any(re.search(pattern, signal_text) for pattern in _CRITICAL_PRIORITY_PATTERNS):
         return "critical"
-    if any(signal in text for signal in ("blocker", "regression", "ci red", "cannot ship")):
+    if any(re.search(pattern, signal_text) for pattern in _HIGH_PRIORITY_PATTERNS):
         return "high"
-    if any(signal in text for signal in ("cleanup", "polish", "nice-to-have", "nice to have")):
+    if any(re.search(pattern, signal_text) for pattern in _LOW_PRIORITY_PATTERNS):
         return "low"
     return "medium"
 
 
-def _apply_edit(capture: dict[str, Any], edit_text: str) -> dict[str, Any]:
+def _is_split_edit(edit_text: str) -> bool:
+    lowered = edit_text.lower()
+    return "split" in lowered and ("two ticket" in lowered or "two separate" in lowered)
+
+
+def _apply_edit(capture: dict[str, Any], edit_text: str) -> tuple[dict[str, Any], bool]:
     updated = dict(capture)
     lowered = edit_text.lower()
     if "critical priority" in lowered or "make it critical" in lowered:
@@ -262,7 +298,11 @@ def _apply_edit(capture: dict[str, Any], edit_text: str) -> dict[str, Any]:
         updated["priority"] = "low"
     elif "medium priority" in lowered or "make it medium" in lowered:
         updated["priority"] = "medium"
-    return updated
+    elif _is_split_edit(edit_text):
+        return updated, True
+    else:
+        return updated, False
+    return updated, True
 
 
 def _append_edit_history(payload: dict[str, Any], edit_text: str) -> None:
@@ -310,8 +350,15 @@ def _capture_fields(
         )
 
     if edit_text:
+        capture, edit_applied = _apply_edit(capture, edit_text)
+        if not edit_applied:
+            return None, _response(
+                "need_fields",
+                "edit instruction was not applied; update the capture payload and rerun prepare",
+                error_code="need_fields",
+                data={"edit_applied": False},
+            )
         _append_edit_history(payload, edit_text)
-        capture = _apply_edit(capture, edit_text)
         payload["capture"] = capture
 
     missing = [
@@ -473,8 +520,13 @@ def _prepare_fingerprint(fields: dict[str, Any]) -> str:
     return _json_fingerprint(fields)
 
 
+def _execute_fingerprint(payload: dict[str, Any]) -> str:
+    prepared = {key: payload.get(key) for key in _EXECUTE_FINGERPRINT_KEYS}
+    return _json_fingerprint(prepared)
+
+
 def _suggested_next_capture(edit_text: str | None) -> str:
-    if edit_text and "split" in edit_text.lower() and "two ticket" in edit_text.lower():
+    if edit_text and _is_split_edit(edit_text):
         return "Capture the second requested ticket as a separate follow-up."
     return ""
 
@@ -489,8 +541,8 @@ def _prepare(payload_path: Path, edit_text: str | None) -> dict[str, Any]:
     if field_error is not None or fields is None:
         try:
             _write_payload_atomic(payload_path, payload)
-        except OSError:
-            pass
+        except OSError as exc:
+            return _response("escalate", str(exc), error_code="io_error")
         return field_error or _response(
             "need_fields", "capture fields invalid", error_code="need_fields"
         )
@@ -530,6 +582,7 @@ def _prepare(payload_path: Path, edit_text: str | None) -> dict[str, Any]:
         "state": "ready_to_execute",
         "fingerprint": _prepare_fingerprint(fields),
         "capture_fingerprint": _json_fingerprint(current["capture"]),
+        "execute_fingerprint": _execute_fingerprint(current),
         "preview": preview,
         "preview_fingerprint": _json_fingerprint(preview),
     }
@@ -608,14 +661,13 @@ def _execute(payload_path: Path) -> dict[str, Any]:
             "Capture preview is stale; rerun prepare",
             error_code="stale_plan",
         )
-    fields = dict(fields)
-    fields["capture_source"] = "conversation"
-    fields["source"] = {
-        "type": "capture",
-        "ref": "",
-        "session": str(payload.get("session_id", "")),
-    }
-    payload["fields"] = fields
+    if prepare_artifact.get("execute_fingerprint") != _execute_fingerprint(payload):
+        return _response(
+            "preflight_failed",
+            "Capture execute payload changed since prepare; rerun prepare",
+            error_code="stale_plan",
+        )
+    payload["fields"] = dict(fields)
 
     response = _engine_response_to_dict(
         dispatch_stage("execute", payload, tickets_dir, request_origin)

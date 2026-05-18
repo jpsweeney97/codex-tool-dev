@@ -1,6 +1,6 @@
 ---
 name: ticket-find
-description: "Read, list, and search repo-local tickets. Use when the user asks to show a ticket, list tickets, find tickets about a topic, show open work, or check close readiness. Read-only; do not create, update, close, reopen, triage, or repair tickets."
+description: "Read, list, and search repo-local tickets. Use when the user asks to show a ticket, list tickets, find tickets about a topic, show open work, or check close readiness. Read-only; do not create, update, close, reopen, triage, repair, prioritize, or answer what to work on next; use ticket-review for backlog health and next-action analysis."
 allowed-tools:
   - Bash
   - Read

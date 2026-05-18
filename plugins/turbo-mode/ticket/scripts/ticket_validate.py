@@ -26,6 +26,22 @@ CONTROLLED_CAPTURE_TAGS = frozenset(
         "security",
     }
 )
+CAPTURE_INPUT_FIELDS = frozenset(
+    {
+        "title",
+        "captured_request",
+        "problem",
+        "next_action",
+        "capture_confidence",
+        "capture_source",
+        "refinement_status",
+        "component",
+        "related_paths",
+        "priority",
+        "tags",
+        "acceptance_criteria",
+    }
+)
 
 
 def _validate_string_field(fields: dict[str, Any], key: str, errors: list[str]) -> None:
