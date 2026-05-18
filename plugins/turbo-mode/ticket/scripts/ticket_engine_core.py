@@ -865,9 +865,13 @@ _UPDATE_FRONTMATTER_KEYS = frozenset(
         "defer",
     }
 )
+_UPDATE_FOCUSED_MODE = "focused_refinement"
+_UPDATE_INTERNAL_FIELDS = frozenset({"_update_mode", "_clear_refinement_status"})
+_UPDATE_FOCUSED_SECTION_FIELDS = frozenset({"problem", "next_action", "acceptance_criteria"})
 _UPDATE_SECTION_FIELDS = frozenset(
     {
         "problem",
+        "next_action",
         "context",
         "prior_investigation",
         "approach",
@@ -1032,6 +1036,8 @@ def _classify_update_fields(
     ticket_id_mismatch = False
 
     for key, value in fields.items():
+        if key in _UPDATE_INTERNAL_FIELDS:
+            continue
         if key in _UPDATE_IGNORED_FIELDS:
             if key == "ticket_id" and value != ticket_id:
                 ticket_id_mismatch = True
@@ -1049,6 +1055,42 @@ def _classify_update_fields(
         sorted(unknown_fields),
         ticket_id_mismatch,
     )
+
+
+_UPDATE_SECTION_HEADINGS = {
+    "problem": "Problem",
+    "next_action": "Next Action",
+    "acceptance_criteria": "Acceptance Criteria",
+}
+
+
+def _focused_section_fields_allowed(fields: dict[str, Any], section_fields: list[str]) -> bool:
+    """Return True only for the ticket_update.py focused refinement section path."""
+    return fields.get("_update_mode") == _UPDATE_FOCUSED_MODE and all(
+        field in _UPDATE_FOCUSED_SECTION_FIELDS for field in section_fields
+    )
+
+
+def _render_update_section_value(key: str, value: Any) -> str:
+    """Render focused section update values into markdown section content."""
+    if key == "acceptance_criteria":
+        if not isinstance(value, list):
+            return ""
+        return "\n".join(f"- [ ] {criterion}" for criterion in value)
+    return str(value)
+
+
+def _replace_or_append_section(text: str, heading: str, content: str) -> str:
+    """Replace a level-two section body, appending the section if it does not exist."""
+    replacement = f"## {heading}\n{content.rstrip()}\n\n"
+    pattern = re.compile(
+        rf"^## {re.escape(heading)}\n.*?(?=^## |\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    updated, count = pattern.subn(replacement, text, count=1)
+    if count:
+        return updated.rstrip() + "\n"
+    return text.rstrip() + "\n\n" + replacement
 
 
 def _is_valid_transition(current: str, target: str, action: str) -> bool:
@@ -1817,9 +1859,13 @@ def _evaluate_update_policy(
             ticket_id=ticket_id,
             error_code="intent_mismatch",
         )
-    if section_fields or unknown_fields:
+    section_fields_rejected = section_fields and not _focused_section_fields_allowed(
+        fields,
+        section_fields,
+    )
+    if section_fields_rejected or unknown_fields:
         parts: list[str] = []
-        if section_fields:
+        if section_fields_rejected:
             parts.append(f"section fields not supported by update: {', '.join(section_fields)}")
         if unknown_fields:
             parts.append(f"unknown fields: {', '.join(unknown_fields)}")
@@ -1899,9 +1945,13 @@ def _execute_update(
             ticket_id=ticket_id,
             error_code="intent_mismatch",
         )
-    if section_fields or unknown_fields:
+    section_fields_rejected = section_fields and not _focused_section_fields_allowed(
+        fields,
+        section_fields,
+    )
+    if section_fields_rejected or unknown_fields:
         parts: list[str] = []
-        if section_fields:
+        if section_fields_rejected:
             parts.append(f"section fields not supported by update: {', '.join(section_fields)}")
         if unknown_fields:
             parts.append(f"unknown fields: {', '.join(unknown_fields)}")
@@ -1918,6 +1968,18 @@ def _execute_update(
             changes["frontmatter"][key] = [data[key], value]
         data[key] = value
 
+    if fields.get("_update_mode") == _UPDATE_FOCUSED_MODE and fields.get(
+        "_clear_refinement_status"
+    ):
+        old_refinement_status = data.pop("refinement_status", None)
+        if old_refinement_status is not None:
+            changes["frontmatter"]["refinement_status"] = [old_refinement_status, None]
+        old_tags = data.get("tags")
+        if isinstance(old_tags, list) and "needs-refinement" in old_tags:
+            new_tags = [tag for tag in old_tags if tag != "needs-refinement"]
+            data["tags"] = new_tags
+            changes["frontmatter"]["tags"] = [old_tags, new_tags]
+
     data["contract_version"] = _CONTRACT_VERSION  # C-004: engine-owned, always latest.
 
     try:
@@ -1929,6 +1991,13 @@ def _execute_update(
             ticket_id=ticket_id,
             error_code="parse_error",
         )
+    for key in section_fields:
+        heading = _UPDATE_SECTION_HEADINGS[key]
+        rendered = _render_update_section_value(key, fields[key])
+        old_rendered = ticket.sections.get(heading, "")
+        if old_rendered.strip() != rendered.strip():
+            changes["sections_changed"].append(heading)
+        new_text = _replace_or_append_section(new_text, heading, rendered)
     ticket_path.write_text(new_text, encoding="utf-8")
 
     return EngineResponse(

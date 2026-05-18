@@ -400,12 +400,53 @@ def test_hook_allows_ticket_capture_prepare_and_injects_payload(tmp_path: Path) 
     assert injected["hook_request_origin"] == "user"
 
 
+def test_hook_allows_ticket_update_prepare_and_injects_payload(tmp_path: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    payload = tmp_path / "payload.json"
+    payload.write_text(
+        '{"tickets_dir":"docs/tickets","ticket_id":"T-20260518-01","update":{}}',
+        encoding="utf-8",
+    )
+    event = make_hook_input(
+        f"python3 -B {plugin_root}/scripts/ticket_update.py prepare {payload}",
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(plugin_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
+    injected = json.loads(payload.read_text(encoding="utf-8"))
+    assert injected["hook_injected"] is True
+    assert injected["hook_request_origin"] == "user"
+
+
 def test_hook_denies_noncanonical_ticket_capture_command_shape(tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     payload = tmp_path / "payload.json"
     payload.write_text('{"tickets_dir":"docs/tickets","capture":{}}', encoding="utf-8")
     event = make_hook_input(
         f"python3 -BB {plugin_root}/scripts/ticket_capture.py prepare {payload}",
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(plugin_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_hook_denies_noncanonical_ticket_update_command_shape(tmp_path: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    payload = tmp_path / "payload.json"
+    payload.write_text(
+        '{"tickets_dir":"docs/tickets","ticket_id":"T-20260518-01","update":{}}',
+        encoding="utf-8",
+    )
+    event = make_hook_input(
+        f"python3 -BB {plugin_root}/scripts/ticket_update.py prepare {payload}",
         plugin_root=str(plugin_root),
         cwd=str(tmp_path),
         session_id="session-hook",

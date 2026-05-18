@@ -5,7 +5,6 @@ import json
 import re
 from pathlib import Path
 
-
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 CAPTURE_SKILL = PLUGIN_ROOT / "skills" / "ticket-capture" / "SKILL.md"
 FIND_SKILL = PLUGIN_ROOT / "skills" / "ticket-find" / "SKILL.md"
@@ -309,29 +308,33 @@ def test_ticket_update_skill_contract_is_preview_first_and_scoped() -> None:
         "edit tags",
         "add blockers",
         "set component or related paths",
-        "change capture metadata",
+        "replace placeholder problem, next action, or acceptance criteria",
         "Requires preview before writing",
     ):
         assert snippet in description
-    for unsupported_trigger in ("placeholder problem", "next action", "acceptance criteria"):
-        assert unsupported_trigger not in description
     assert "Do not perform arbitrary body-section editing in v1" in text
     assert "Show the returned preview and wait for explicit user confirmation" in text
-    assert "ticket_workflow.py prepare" in text
-    assert "ticket_workflow.py execute" in text
-    assert "There is no dedicated `ticket_update.py` backend yet" in text
+    assert "ticket_update.py prepare" in text
+    assert "ticket_update.py execute" in text
+    assert "Refinement: will clear needs-refinement" in text
     normalized = _normalize_whitespace(text)
-    assert "existing-ticket lifecycle and frontmatter metadata updates" in normalized
-    assert "rejects section fields such as `problem` and `acceptance_criteria`" in normalized
-    assert "rejects unknown fields such as `next_action`" in normalized
-    assert "future dedicated `ticket_update.py` backend from Task 5" in normalized
-    assert "not available through the current workflow runner" in normalized
-    assert '"action": "update"' in text
-    assert '"action": "close"' in text
-    assert '"action": "reopen"' in text
+    assert "existing-ticket lifecycle, metadata, and focused refinement updates" in normalized
+    assert (
+        "Only the focused refinement fields `problem`, `next_action`, and "
+        "`acceptance_criteria` may change ticket body sections"
+    ) in normalized
+    assert "Reject requests to replace unrelated sections" in normalized
+    assert "Priority-only or tag-only updates keep `refinement_status`" in normalized
+    assert '"tickets_dir": "docs/tickets"' in text
+    assert '"update": {' in text
+    assert '"status": "done"' in text
+    assert '"status": "open"' in text
     assert '"ticket_id": "T-20260518-01"' in text
-    assert '"args": {"ticket_id": "T-20260518-01"}' in text
-    assert "fields" in text
+    assert "acceptance_criteria" in text
+    for block in _json_code_blocks(text):
+        assert "action" not in block
+        assert "args" not in block
+        assert "fields" not in block
     assert "Do not write `session_id`, `hook_injected`, or `hook_request_origin`" in normalized
     assert "canonical hook injects trust fields" in normalized
 
@@ -341,11 +344,16 @@ def test_ticket_update_json_examples_do_not_use_invalid_needs_refinement_tag() -
     examples = _json_code_blocks(text)
     assert examples
     for example in examples:
-        fields = example.get("fields")
-        assert isinstance(fields, dict)
-        tags = fields.get("tags")
+        update = example.get("update")
+        assert isinstance(update, dict)
+        tags = update.get("tags")
         if isinstance(tags, list) and "needs-refinement" in tags:
-            assert fields.get("refinement_status") == "needs_refinement"
+            problem = update.get("problem")
+            next_action = update.get("next_action")
+            criteria = update.get("acceptance_criteria")
+            assert isinstance(problem, str) and problem
+            assert isinstance(next_action, str) and next_action
+            assert isinstance(criteria, list) and criteria
 
 
 def test_ticket_review_skill_contract_is_read_only_and_capture_prompt_only() -> None:
@@ -420,17 +428,17 @@ def test_readme_and_handbook_do_not_advertise_counted_test_inventory() -> None:
         assert not COUNTED_TESTS_RE.search(_read_text(path)), str(path)
 
 
-def test_update_skill_uses_workflow_runner_as_mutation_path() -> None:
+def test_update_skill_uses_focused_update_backend_as_mutation_path() -> None:
     text = _read_text(UPDATE_SKILL)
-    assert "ticket_workflow.py prepare" in text
-    assert "ticket_workflow.py execute" in text
-    assert "<PLUGIN_ROOT>/scripts/ticket_workflow.py prepare <PAYLOAD_PATH>" in text
+    assert "ticket_update.py prepare" in text
+    assert "ticket_update.py execute" in text
+    assert "<PLUGIN_ROOT>/scripts/ticket_update.py prepare <PAYLOAD_PATH>" in text
     assert "<PROJECT_ROOT>/.codex/ticket-tmp/" in text
     assert "absolute path under" in text
     assert "preview" in text
-    assert "recover_command" in text
+    assert "Refinement: will clear needs-refinement" in text
     normalized = _normalize_whitespace(text)
-    assert "run only the returned recovery command" in normalized
+    assert "rerun `prepare` for the same `PAYLOAD_PATH`" in normalized
     assert "ticket_update.py" in text
 
 
@@ -480,7 +488,8 @@ def test_no_skill_description_advertises_old_single_surface() -> None:
         description = _frontmatter(_read_text(path))["description"]
         assert isinstance(description, str)
         lowered = description.lower()
-        assert not old_surface_terms.issubset(set(re.findall(r"[a-z]+(?: repair)?", lowered))), str(path)
+        terms = set(re.findall(r"[a-z]+(?: repair)?", lowered))
+        assert not old_surface_terms.issubset(terms), str(path)
         assert "create, update, close, reopen, list, query" not in lowered
         assert "full crud" not in lowered
 
@@ -488,14 +497,13 @@ def test_no_skill_description_advertises_old_single_surface() -> None:
 def test_task4_docs_do_not_overclaim_current_placeholder_refinement() -> None:
     update_description = _frontmatter(_read_text(UPDATE_SKILL))["description"]
     assert isinstance(update_description, str)
-    for unsupported in ("placeholder problem", "next action", "acceptance criteria"):
-        assert unsupported not in update_description
+    assert "replace placeholder problem, next action, or acceptance criteria" in update_description
 
     update_text = _normalize_whitespace(_read_text(UPDATE_SKILL))
-    assert "rejects section fields such as `problem` and `acceptance_criteria`" in update_text
-    assert "rejects unknown fields such as `next_action`" in update_text
-    assert "future dedicated `ticket_update.py` backend from Task 5" in update_text
-    assert "not available through the current workflow runner" in update_text
+    assert "Only the focused refinement fields `problem`, `next_action`, and" in update_text
+    assert "`acceptance_criteria` may change ticket body sections" in update_text
+    assert "Reject requests to replace unrelated sections" in update_text
+    assert "ticket_update.py prepare" in update_text
 
     readme = _read_text(PLUGIN_ROOT / "README.md")
     assert "placeholder-field updates through preview-first workflow commands" not in readme

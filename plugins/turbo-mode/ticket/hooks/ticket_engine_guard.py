@@ -46,6 +46,7 @@ WORKFLOW_RECOVERY_EXTRA_ARG_COUNTS = {
     "set_status": 1,
 }
 VALID_CAPTURE_SUBCOMMANDS = frozenset({"prepare", "execute"})
+VALID_UPDATE_SUBCOMMANDS = frozenset({"prepare", "execute"})
 
 # Shell metacharacters that indicate command chaining or redirection.
 SHELL_METACHAR_RE = re.compile(r"[|;&`$><\n\r]")
@@ -88,6 +89,7 @@ _TICKET_SCRIPT_BASENAMES = frozenset(
         "ticket_audit.py",
         "ticket_workflow.py",
         "ticket_capture.py",
+        "ticket_update.py",
     }
 )
 
@@ -317,6 +319,37 @@ def _parse_capture_invocation(
         script_idx += 1
 
     expected_script = str(Path(plugin_root) / "scripts" / "ticket_capture.py")
+    if script_idx >= len(tokens) or tokens[script_idx] != expected_script:
+        return None
+    if len(tokens) < script_idx + 3:
+        return None
+
+    subcommand = tokens[script_idx + 1]
+    payload_path = tokens[script_idx + 2]
+    if any(char.isspace() for char in payload_path):
+        return None
+    extra_args = tokens[script_idx + 3 :]
+    return subcommand, payload_path, extra_args
+
+
+def _parse_update_invocation(
+    command_clean: str, plugin_root: str
+) -> tuple[str, str, list[str]] | None:
+    """Parse only canonical ticket_update.py invocations."""
+    try:
+        tokens = shlex.split(command_clean)
+    except ValueError:
+        return None
+    if len(tokens) < 3:
+        return None
+    if tokens[0] != "python3":
+        return None
+
+    script_idx = 1
+    if tokens[script_idx] == "-B":
+        script_idx += 1
+
+    expected_script = str(Path(plugin_root) / "scripts" / "ticket_update.py")
     if script_idx >= len(tokens) or tokens[script_idx] != expected_script:
         return None
     if len(tokens) < script_idx + 3:
@@ -712,6 +745,48 @@ def main() -> None:
         print(
             json.dumps(_make_allow(f"Ticket capture/{subcommand} validated and payload injected"))
         )
+        return
+
+    update_invocation = _parse_update_invocation(command_clean, plugin_root)
+    if update_invocation is not None:
+        subcommand, payload_path, extra_args = update_invocation
+        if subcommand not in VALID_UPDATE_SUBCOMMANDS:
+            reason = (
+                f"Unknown update subcommand '{subcommand}'. "
+                f"Valid: {sorted(VALID_UPDATE_SUBCOMMANDS)}"
+            )
+            print(json.dumps(_make_deny(reason)))
+            return
+        if extra_args:
+            print(
+                json.dumps(_make_deny(f"Extra arguments after payload path. Got: {command!r:.100}"))
+            )
+            return
+        workspace_root = event.get("cwd", "")
+        resolved_path, path_error = _resolve_payload_path(payload_path, workspace_root)
+        if path_error is not None or resolved_path is None:
+            print(
+                json.dumps(
+                    _make_deny(f"Payload path validation failed: {path_error or 'unknown error'}")
+                )
+            )
+            return
+        session_id = event.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            print(json.dumps(_make_deny(_malformed_session_id_reason(session_id))))
+            return
+        effective_origin, origin_error = _resolve_origin(event, is_ticket_candidate=True)
+        if origin_error is not None:
+            print(json.dumps(_make_deny(origin_error)))
+            return
+        if effective_origin is None:
+            print(json.dumps(_make_deny("Origin resolution failed: internal invariant violation")))
+            return
+        error = _inject_payload(str(resolved_path), session_id, effective_origin)
+        if error is not None:
+            print(json.dumps(_make_deny(f"Payload injection failed: {error}")))
+            return
+        print(json.dumps(_make_allow(f"Ticket update/{subcommand} validated and payload injected")))
         return
 
     # Branch 2: Read-only scripts (ticket_read.py, ticket_triage.py) → allow, no injection.
