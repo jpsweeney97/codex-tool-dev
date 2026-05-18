@@ -1,8 +1,8 @@
 # Ticket Plugin
 
-A Codex plugin for structured ticket management — creating, updating, closing, triaging, and auditing work tickets from within Codex sessions.
+A Codex plugin for capture-first repo-local ticket management from within Codex sessions.
 
-Tickets are stored as Markdown files with fenced YAML frontmatter in `docs/tickets/`. Guided mutations flow through `ticket_workflow.py prepare` and `ticket_workflow.py execute`, which reuse the same engine, guard hook, and trust model as the lower-level 4-stage pipeline, with a full JSONL audit trail.
+Tickets are stored as Markdown files with fenced YAML frontmatter in `docs/tickets/`. User-facing creation now flows through `ticket-capture`, which synthesizes a compact preview from natural language and writes only after explicit confirmation. Existing-ticket changes still flow through `ticket_workflow.py prepare` and `ticket_workflow.py execute`, which reuse the same engine, guard hook, and trust model as the lower-level 4-stage pipeline, with a full JSONL audit trail.
 
 This directory is the source package for the Ticket plugin. Normal local
 development syncs this stable source root into `~/.codex/plugins/ticket`;
@@ -26,33 +26,41 @@ The plugin registers its hook, skills, and scripts automatically. No build step 
 
 ## What It Does
 
-- **Create tickets** with structured fields (priority, tags, effort, dependencies) via a guided pipeline that validates, deduplicates, and enforces schema
-- **Update, close, and reopen tickets** with status transition enforcement and confirmation gates
-- **List and query tickets** with filters (status, priority, tag) and ID-prefix search
-- **Triage** ticket health — stale detection (>7 days without update), blocked dependency chains, size warnings
-- **Audit** mutation history via append-only JSONL logs, with a repair utility for corrupt entries
+- **Capture tickets** from natural language with synthesized fields, duplicate checks, and explicit create confirmation
+- **Update existing tickets** with scoped lifecycle and frontmatter metadata changes through preview-first workflow commands
+- **List, query, and check close readiness** with read-only filters and ID-prefix search
+- **Review backlog health** with read-only stale detection, blocked dependency chains, size warnings, and next-action recommendations
+- **Doctor storage and audit logs** only when explicitly requested, with dry-run repair before mutation
 - **Agent autonomy** — external agents can create tickets autonomously, gated by a configurable policy and elevated confidence thresholds
 
 ## Components
 
-### Skills (2)
+### Skills (5)
 
 | Skill | Trigger | Purpose |
 |-------|---------|---------|
-| `/ticket` | Explicit invocation only (`disable-model-invocation: true`) | Full CRUD: create, update, close, reopen, list, query, audit repair |
-| `/ticket-triage` | Auto-triggerable by Codex | Read-only health dashboard and audit summary |
+| `ticket-capture` | Track, file, capture, ticket, or remember follow-up work | Create one ticket from natural language after preview confirmation |
+| `ticket-find` | Show, list, find, open, or check close readiness | Read-only `ticket_read.py list`, `query`, and `check` |
+| `ticket-update` | Update existing ticket metadata or lifecycle | Preview-first frontmatter updates via `ticket_workflow.py` |
+| `ticket-review` | Backlog health, stale, blocked, or next-work questions | Read-only dashboard and audit summary; may suggest capture prompts |
+| `ticket-doctor` | Explicit storage/plugin diagnostics or audit repair | Maintenance-only diagnostics and dry-run-first repair |
 
-**`/ticket` operations:**
+Generic creation through the old broad `ticket` skill is no longer user-facing.
+Use `ticket-capture` for new tickets. Low-confidence captures are allowed when a
+concrete next action can be synthesized; those tickets carry
+`refinement_status: needs_refinement`. `needs_refinement` is capture metadata,
+not a lifecycle status.
+
+**Skill-backed operations:**
 
 | Operation | Required Args | Pipeline |
 |-----------|--------------|----------|
-| `create` | title | 4-stage engine |
-| `update` | ticket_id | 4-stage engine |
-| `close` | ticket_id | 4-stage engine |
-| `reopen` | ticket_id, reopen_reason | 4-stage engine |
-| `list` | (none) | Direct read (`ticket_read.py`) |
-| `query` | id_prefix | Direct read (`ticket_read.py`) |
-| `audit repair` | (none) | Direct (`ticket_audit.py`) |
+| capture | natural-language follow-up | `ticket_capture.py prepare` then `execute` |
+| update metadata | ticket_id plus scoped frontmatter fields | `ticket_workflow.py prepare` then `execute` |
+| close/reopen | ticket_id plus required resolution or reopen reason | `ticket_workflow.py prepare` then `execute` |
+| list/query/check | filters, ID prefix, or ticket_id | Direct read (`ticket_read.py`) |
+| backlog review | tickets directory | Read-only `ticket_triage.py dashboard` and `audit` |
+| doctor/repair | explicit maintenance request | `ticket_triage.py doctor` or dry-run-first `ticket_audit.py repair` |
 
 All mutations display a confirmation prompt (`y / edit / n`) before executing. No bypass flag exists.
 
@@ -114,7 +122,7 @@ Exit codes: `0` (success), `1` (engine error), `2` (validation failure / need_fi
 | Document | Path | Purpose |
 |----------|------|---------|
 | Ticket Contract | `references/ticket-contract.md` | Single source of truth: schema, states, error codes, transitions, autonomy, dedup |
-| Pipeline Guide | `skills/ticket/references/pipeline-guide.md` | Payload schemas, state propagation, response-to-UX mapping |
+| Pipeline Guide | `skills/ticket/references/pipeline-guide.md` | Payload schemas, state propagation, response-to-UX mapping for engine debugging |
 | Operator Handbook | `HANDBOOK.md` | Bring-up, operational runbooks, failure recovery, internals |
 | Changelog | `CHANGELOG.md` | Version history and release notes |
 
@@ -187,30 +195,36 @@ Tickets use fenced YAML blocks (` ```yaml `, not `---` frontmatter).
 
 ### Guided UX Layer
 
-The user-facing `/ticket` path uses `ticket_workflow.py prepare` to run classify,
-plan, preflight, and read-only execute-policy checks, then presents one preview
-before `ticket_workflow.py execute`. The lower-level engine stages remain
-available for debugging and tests. The workflow runner preserves the
-hook-injected trust triple and does not write tickets until execute.
+The user-facing creation path is `ticket-capture`. It writes a capture payload,
+runs `ticket_capture.py prepare`, presents a compact preview, and writes only
+after explicit `create` confirmation. Existing-ticket changes use
+`ticket_workflow.py prepare` to run classify, plan, preflight, and read-only
+execute-policy checks, then present one preview before
+`ticket_workflow.py execute`. The lower-level engine stages remain available
+for debugging and tests. The workflow runner preserves the hook-injected trust
+triple and does not write tickets until execute.
 
-### Create a ticket
-
-```
-/ticket create "Authentication fails on expired tokens"
-```
-
-Codex guides you through the 4-stage pipeline: classifies intent, plans the ticket (checking for duplicates), runs preflight validation, and executes after confirmation.
-
-### Update a ticket
+### Capture a ticket
 
 ```
-/ticket update T-20260309-01 priority=critical tags=["auth","urgent"]
+Track this follow-up: authentication fails on expired tokens.
 ```
 
-### Close a ticket
+Codex uses `ticket-capture` to synthesize title, problem, next action,
+confidence, priority, tags, and acceptance criteria. If the request is vague
+but has a concrete next action, it can create a low-confidence ticket marked
+with `refinement_status: needs_refinement`.
+
+### Update an existing ticket
 
 ```
-/ticket close T-20260309-01
+Update T-20260309-01 priority to critical and add auth, urgent tags.
+```
+
+### Close or reopen a ticket
+
+```
+Close T-20260309-01 as done.
 ```
 
 Optionally specify resolution: `done` (default) or `wontfix`. Closed tickets are archived to `docs/tickets/closed-tickets/`.
@@ -218,14 +232,14 @@ Optionally specify resolution: `done` (default) or `wontfix`. Closed tickets are
 ### List and filter
 
 ```
-/ticket list --status open --priority high
-/ticket query T-2026
+Find open high-priority ticket work.
+Show ticket T-2026.
 ```
 
-### Triage ticket health
+### Review ticket health
 
 ```
-/ticket-triage
+Review ticket backlog health.
 ```
 
 Produces a structured report: ticket counts by status/priority, stale tickets (>7 days), blocked dependency chains, size warnings, and suggested next actions.
@@ -253,7 +267,7 @@ User/Agent Intent
 Ticket file on disk + JSONL audit entry
 ```
 
-The engine is **stateless** — each script invocation reads a payload file, processes one stage, prints JSON to stdout, and exits. The `/ticket` skill (SKILL.md instructions) orchestrates state between stages by merging response data into the payload file before each subsequent call.
+The engine is **stateless** — each script invocation reads a payload file, processes one stage, prints JSON to stdout, and exits. The update workflow skill instructions orchestrate state between stages by merging response data into the payload file before each subsequent call.
 
 ### Trust Model
 
@@ -338,7 +352,7 @@ Tests map 1:1 to source modules plus pipeline-stage and integration tests. Fixtu
 ```
 scripts/          # 15 source modules
 hooks/            # Guard hook + registration
-skills/           # /ticket and /ticket-triage skill definitions
+skills/           # ticket-capture, find, update, review, and doctor skill definitions
 tests/            # pytest suite + support fixtures
 references/       # Ticket contract (canonical schema)
 agents/           # Placeholder — consuming projects define their own

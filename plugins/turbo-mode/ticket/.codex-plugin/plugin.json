@@ -27,9 +27,9 @@
       "Write"
     ],
     "defaultPrompt": [
-      "Create a ticket for this work",
-      "Triage open tickets",
-      "Read the current ticket"
+      "Track this follow-up",
+      "Find open ticket work",
+      "Review ticket backlog health"
     ],
     "brandColor": "#0F766E",
     "screenshots": []
