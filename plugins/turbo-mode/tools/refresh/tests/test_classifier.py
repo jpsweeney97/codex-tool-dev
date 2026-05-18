@@ -40,6 +40,7 @@ EXPECTED_COMMAND_SURFACE_PATHS = (
     "handoff/1.6.0/scripts/session_state.py",
     "handoff/1.6.0/scripts/triage.py",
     "handoff/1.6.0/turbo_mode_handoff_runtime/active_writes.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/chain_state.py",
     "handoff/1.6.0/turbo_mode_handoff_runtime/cleanup.py",
     "handoff/1.6.0/turbo_mode_handoff_runtime/defer.py",
     "handoff/1.6.0/turbo_mode_handoff_runtime/distill.py",
@@ -55,6 +56,8 @@ EXPECTED_COMMAND_SURFACE_PATHS = (
     "handoff/1.6.0/turbo_mode_handoff_runtime/session_state.py",
     "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority.py",
     "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority_inventory.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/storage_inspection.py",
+    "handoff/1.6.0/turbo_mode_handoff_runtime/storage_layout.py",
     "handoff/1.6.0/turbo_mode_handoff_runtime/storage_primitives.py",
     "handoff/1.6.0/turbo_mode_handoff_runtime/ticket_parsing.py",
     "handoff/1.6.0/turbo_mode_handoff_runtime/triage.py",
@@ -84,7 +87,9 @@ EXPECTED_COMMAND_SURFACE_PATHS = (
 
 EXPECTED_MARKDOWN_PROJECTION_PATHS = (
     "handoff/1.6.0/CHANGELOG.md",
+    "handoff/1.6.0/CONTRIBUTING.md",
     "handoff/1.6.0/README.md",
+    "handoff/1.6.0/references/ARCHITECTURE.md",
     "handoff/1.6.0/references/handoff-contract.md",
     "handoff/1.6.0/skills/defer/SKILL.md",
     "handoff/1.6.0/skills/distill/SKILL.md",
@@ -867,7 +872,10 @@ def test_handoff_storage_gate5_refresh_contract_rejects_hash_drift() -> None:
         ("handoff/1.6.0/turbo_mode_handoff_runtime/quality_check.py", PathOutcome.GUARDED_ONLY),
         ("handoff/1.6.0/scripts/search.py", PathOutcome.FAST_SAFE_WITH_COVERED_SMOKE),
         ("handoff/1.6.0/scripts/session_state.py", PathOutcome.FAST_SAFE_WITH_COVERED_SMOKE),
-        ("handoff/1.6.0/turbo_mode_handoff_runtime/storage_primitives.py", PathOutcome.GUARDED_ONLY),
+        (
+            "handoff/1.6.0/turbo_mode_handoff_runtime/storage_primitives.py",
+            PathOutcome.GUARDED_ONLY,
+        ),
         ("handoff/1.6.0/turbo_mode_handoff_runtime/ticket_parsing.py", PathOutcome.GUARDED_ONLY),
         ("handoff/1.6.0/scripts/triage.py", PathOutcome.FAST_SAFE_WITH_COVERED_SMOKE),
         ("ticket/1.4.0/.codex-plugin/plugin.json", PathOutcome.COVERAGE_GAP_FAIL),

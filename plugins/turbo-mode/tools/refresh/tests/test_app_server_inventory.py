@@ -55,6 +55,12 @@ REAL_HOME_WRONG_TICKET_COMMAND = (
     "python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/"
     "hooks/not_ticket_engine_guard.py"
 )
+PLUGIN_CACHE_COPY_IGNORE = shutil.ignore_patterns(
+    "__pycache__",
+    ".pytest_cache",
+    ".venv",
+    ".DS_Store",
+)
 
 
 def test_real_codex_home_derives_from_operator_home(
@@ -254,20 +260,60 @@ def write_sha256_file(path: Path) -> Path:
     return sha_path
 
 
+def source_plugin_root(*, repo_root: Path, plugin_name: str) -> Path:
+    source_parent = repo_root / "plugins/turbo-mode" / plugin_name
+    roots = tuple(
+        sorted(
+            manifest.parent.parent
+            for manifest in source_parent.glob("*/.codex-plugin/plugin.json")
+        )
+    )
+    if len(roots) != 1:
+        raise AssertionError(
+            f"discover {plugin_name} source root failed: expected exactly one manifest. "
+            f"Got: {[str(root) for root in roots]!r:.100}"
+        )
+    return roots[0]
+
+
+def plugin_manifest_version(plugin_root: Path) -> str:
+    manifest_path = plugin_root / ".codex-plugin/plugin.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    version = manifest.get("version")
+    if not isinstance(version, str) or not version:
+        raise AssertionError(
+            f"read plugin manifest version failed: missing string version. "
+            f"Got: {manifest!r:.100}"
+        )
+    return version
+
+
+def copy_source_plugin_to_isolated_cache(
+    *,
+    repo_root: Path,
+    isolated_home: Path,
+    plugin_name: str,
+) -> Path:
+    plugin_root = source_plugin_root(repo_root=repo_root, plugin_name=plugin_name)
+    version = plugin_manifest_version(plugin_root)
+    cache_root = isolated_home / "plugins/cache/turbo-mode" / plugin_name / version
+    shutil.copytree(plugin_root, cache_root, ignore=PLUGIN_CACHE_COPY_IGNORE)
+    return cache_root
+
+
 def seed_isolated_codex_home(*, repo_root: Path, isolated_home: Path) -> None:
-    real_codex_home = Path("/Users/jp/.codex")
     (isolated_home / "plugins/cache/turbo-mode").mkdir(parents=True, exist_ok=True)
-    shutil.copytree(
-        real_codex_home / "plugins/cache/turbo-mode/handoff/1.6.0",
-        isolated_home / "plugins/cache/turbo-mode/handoff/1.6.0",
+    copy_source_plugin_to_isolated_cache(
+        repo_root=repo_root,
+        isolated_home=isolated_home,
+        plugin_name="handoff",
     )
-    shutil.copytree(
-        real_codex_home / "plugins/cache/turbo-mode/ticket/1.4.0",
-        isolated_home / "plugins/cache/turbo-mode/ticket/1.4.0",
+    ticket_plugin_root = copy_source_plugin_to_isolated_cache(
+        repo_root=repo_root,
+        isolated_home=isolated_home,
+        plugin_name="ticket",
     )
-    rewrite_ticket_hook_manifest(
-        ticket_plugin_root=isolated_home / "plugins/cache/turbo-mode/ticket/1.4.0"
-    )
+    rewrite_ticket_hook_manifest(ticket_plugin_root=ticket_plugin_root)
     (isolated_home / "config.toml").write_text(
         f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
         "[features]\nplugin_hooks = true\n"
@@ -1768,10 +1814,64 @@ def test_seed_isolated_codex_home_rewrites_ticket_hook_manifest_to_isolated_root
     tmp_path: Path,
 ) -> None:
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    handoff_source_root = repo_root / "plugins/turbo-mode/handoff/1.6.0"
+    (handoff_source_root / ".codex-plugin").mkdir(parents=True)
+    (handoff_source_root / ".codex-plugin/plugin.json").write_text(
+        json.dumps({"name": "handoff", "version": "1.7.0"}) + "\n",
+        encoding="utf-8",
+    )
+    (handoff_source_root / "skills/save").mkdir(parents=True)
+    (handoff_source_root / "skills/save/SKILL.md").write_text(
+        "# save\n",
+        encoding="utf-8",
+    )
+    (handoff_source_root / ".venv").mkdir()
+    (handoff_source_root / ".venv/pyvenv.cfg").write_text(
+        "synthetic residue\n",
+        encoding="utf-8",
+    )
+
+    ticket_source_root = repo_root / "plugins/turbo-mode/ticket/1.4.0"
+    (ticket_source_root / ".codex-plugin").mkdir(parents=True)
+    (ticket_source_root / ".codex-plugin/plugin.json").write_text(
+        json.dumps({"name": "ticket", "version": "1.4.0"}) + "\n",
+        encoding="utf-8",
+    )
+    (ticket_source_root / "hooks").mkdir(parents=True)
+    (ticket_source_root / "hooks/hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": REAL_HOME_TICKET_COMMAND,
+                                    "timeout": 10,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (ticket_source_root / "hooks/ticket_engine_guard.py").write_text(
+        "#!/usr/bin/env python3\n",
+        encoding="utf-8",
+    )
+
     isolated_home = tmp_path / ".codex"
 
     seed_isolated_codex_home(repo_root=repo_root, isolated_home=isolated_home)
+
+    handoff_cache = isolated_home / "plugins/cache/turbo-mode/handoff/1.7.0"
+    assert (handoff_cache / ".codex-plugin/plugin.json").exists()
+    assert not (handoff_cache / ".venv").exists()
 
     hooks_path = isolated_home / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
     payload = json.loads(hooks_path.read_text(encoding="utf-8"))
