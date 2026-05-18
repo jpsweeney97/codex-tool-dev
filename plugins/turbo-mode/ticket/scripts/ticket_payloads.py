@@ -22,11 +22,6 @@ class StalePayload:
     modified_at: str
 
 
-def ticket_tmp_dir(project_root: Path) -> Path:
-    """Return the project-local Ticket temporary payload directory."""
-    return project_root / ".codex" / "ticket-tmp"
-
-
 def _same_file(first: os.stat_result, second: os.stat_result) -> bool:
     return first.st_dev == second.st_dev and first.st_ino == second.st_ino
 
@@ -140,28 +135,6 @@ def resolved_ticket_tmp_dir(project_root: Path) -> Path:
     return root
 
 
-def is_ticket_tmp_payload(payload_path: Path, project_root: Path) -> bool:
-    """Return True when payload_path is a direct non-symlink temp payload."""
-    fd: int | None = None
-    try:
-        root, fd = _open_ticket_tmp_dir(project_root)
-        payload_path.relative_to(root)
-    except (OSError, ValueError, TicketPayloadPathError):
-        return False
-    if fd is None:
-        return False
-    try:
-        if payload_path.parent != root:
-            return False
-        name = payload_path.name
-        return _payload_stat_from_dir(fd, root, name) is not None
-    except (OSError, TicketPayloadPathError):
-        return False
-    finally:
-        if fd is not None:
-            os.close(fd)
-
-
 def delete_consumed_payload(payload_path: Path, project_root: Path) -> bool:
     """Delete a consumed prepare payload only inside project_root/.codex/ticket-tmp."""
     root, fd = _open_ticket_tmp_dir(project_root)
@@ -209,7 +182,7 @@ def stale_payloads(
                 continue
             modified = datetime.fromtimestamp(path_stat.st_mtime, tz=UTC)
             age = current - modified
-            if age < stale_after:
+            if age <= stale_after:
                 continue
             stale.append(
                 StalePayload(
@@ -245,7 +218,7 @@ def clean_stale_payloads(
                 continue
             modified = datetime.fromtimestamp(path_stat.st_mtime, tz=UTC)
             age = current - modified
-            if age < stale_after:
+            if age <= stale_after:
                 continue
             item = StalePayload(
                 path=root / name,

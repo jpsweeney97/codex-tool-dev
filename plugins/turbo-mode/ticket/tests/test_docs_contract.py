@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 ENGINE_RUNNER = PLUGIN_ROOT / "scripts" / "ticket_engine_runner.py"
+TICKET_PAYLOADS = PLUGIN_ROOT / "scripts" / "ticket_payloads.py"
 CAPTURE_SKILL = PLUGIN_ROOT / "skills" / "ticket-capture" / "SKILL.md"
 FIND_SKILL = PLUGIN_ROOT / "skills" / "ticket-find" / "SKILL.md"
 UPDATE_SKILL = PLUGIN_ROOT / "skills" / "ticket-update" / "SKILL.md"
@@ -83,6 +84,7 @@ def test_handbook_states_supported_high_level_mutation_surfaces() -> None:
     assert "`ingest` uses the guarded engine entrypoints" in text
     assert "Direct engine `classify`/`plan`/`preflight`/`execute`" in text
     assert "`ticket_workflow.py` is a compatibility/debug runner" in text
+    assert "ticket_workflow.py is a compatibility/debug runner, not" not in text
     assert "not normal user-facing mutation interfaces" in text
 
 
@@ -531,12 +533,21 @@ def test_ticket_doctor_skill_contract_is_explicit_maintenance_only() -> None:
     assert "ask before any mutation" in text
 
 
+def test_ticket_payloads_does_not_expose_boolean_security_gate_helpers() -> None:
+    text = _read_text(TICKET_PAYLOADS)
+
+    assert "def ticket_tmp_dir(" not in text
+    assert "def is_ticket_tmp_payload(" not in text
+
+
 def test_doctor_docs_describe_confirmed_stale_payload_cleanup() -> None:
     readme = _read_text(PLUGIN_ROOT / "README.md")
     handbook = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
     skill = _read_text(DOCTOR_SKILL)
     for text in [readme, handbook, skill]:
-        assert "diagnose reports stale `.codex/ticket-tmp/` payloads" in text
+        normalized = _normalize_whitespace(text)
+        assert "reports stale `.codex/ticket-tmp/` payloads" in normalized
+        assert "older than 24 hours; diagnose reports stale" not in normalized
         assert "24 hours" in text
         assert "`ticket_doctor.py clean-stale-payloads <TICKETS_DIR>`" in text
         assert "`--confirm-clean-stale-payloads`" in text
@@ -736,7 +747,7 @@ def test_task4_docs_do_not_overclaim_current_placeholder_refinement() -> None:
     assert "ticket_update.py prepare" in normalized_handbook
     assert "ticket_update.py execute" in normalized_handbook
     assert "preferred way to create or mutate tickets" not in normalized_handbook
-    assert "ticket_workflow.py is a compatibility/debug runner" in normalized_handbook
+    assert "`ticket_workflow.py` is a compatibility/debug runner" in normalized_handbook
 
 
 def test_docs_describe_capture_first_five_skill_surface() -> None:

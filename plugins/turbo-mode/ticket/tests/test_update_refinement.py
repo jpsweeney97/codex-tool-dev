@@ -173,6 +173,7 @@ def test_successful_update_execute_deletes_ticket_tmp_payload(
     execute = run_update("execute", payload_path)
 
     assert execute["state"] == "ok_update"
+    assert execute["data"]["payload_deleted"] is True
     assert not payload_path.exists()
 
 

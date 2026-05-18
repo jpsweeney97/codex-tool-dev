@@ -36,8 +36,8 @@ python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <TICKETS_DIR> --plugi
 Report the diagnostic result as source/cache/storage evidence. Do not describe
 it as live runtime proof.
 
-`diagnose` reports stale `.codex/ticket-tmp/` payloads older than 24 hours;
-diagnose reports stale `.codex/ticket-tmp/` payloads without mutating them.
+`diagnose` reports stale `.codex/ticket-tmp/` payloads older than 24 hours
+without mutating them.
 
 ## Audit Repair
 

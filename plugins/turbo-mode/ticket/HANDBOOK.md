@@ -63,7 +63,8 @@ Ticket has exactly three supported high-level mutation surfaces: `capture`, `upd
 
 `capture` and `update` use their preview-first prepare/execute wrappers. `ingest` uses the guarded engine entrypoints to consume a DeferredWorkEnvelope from `docs/tickets/.envelopes/<filename>.json`. Direct engine `classify`/`plan`/`preflight`/`execute` and `ticket_workflow.py prepare`/`execute` remain low-level compatibility, debug, and agent-internal paths, not normal user-facing mutation interfaces.
 
-`ticket_workflow.py` is a compatibility/debug runner kept for tests and low-level recovery work; ticket_workflow.py is a compatibility/debug runner, not a supported user-facing mutation surface.
+`ticket_workflow.py` is a compatibility/debug runner kept for tests and
+low-level recovery work, not a supported user-facing mutation surface.
 
 ### Hook
 
@@ -323,9 +324,10 @@ repair corrupt audit logs. Casual audit, triage, or review language belongs to
 8. Run `ticket_doctor.py repair-audit --confirm-repair` only after explicit approval
 
 **Stale payload cleanup:** `ticket_doctor.py diagnose` reports stale
-`.codex/ticket-tmp/` payloads older than 24 hours; diagnose reports stale `.codex/ticket-tmp/` payloads without mutating them. Cleanup is TTL-scoped to
-stale JSON payloads under `<PROJECT_ROOT>/.codex/ticket-tmp/` and is
-confirmation-gated with `--confirm-clean-stale-payloads`.
+`.codex/ticket-tmp/` payloads older than 24 hours without mutating them.
+Cleanup is TTL-scoped to stale JSON payloads under
+`<PROJECT_ROOT>/.codex/ticket-tmp/` and is confirmation-gated with
+`--confirm-clean-stale-payloads`.
 
 ---
 

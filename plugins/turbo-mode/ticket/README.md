@@ -266,8 +266,8 @@ Produces a structured report: ticket counts by status/priority, stale tickets (>
 ### Doctor stale payloads
 
 `ticket_doctor.py diagnose` reports stale `.codex/ticket-tmp/` payloads older
-than 24 hours; diagnose reports stale `.codex/ticket-tmp/` payloads without
-mutating them. Cleanup is TTL-scoped and confirmation-gated: first run
+than 24 hours without mutating them. Cleanup is TTL-scoped and
+confirmation-gated: first run
 `ticket_doctor.py clean-stale-payloads <TICKETS_DIR>` to see that cleanup
 requires confirmation, then run
 `ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads`

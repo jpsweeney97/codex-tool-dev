@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -121,6 +122,69 @@ def test_ticket_doctor_clean_stale_payloads_deletes_only_with_confirmation(
     assert response["state"] == "ok"
     assert response["data"]["deleted_count"] == 1
     assert not payload.exists()
+
+
+def test_stale_payloads_uses_strict_ttl_boundary(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    payload_dir = tmp_path / ".codex" / "ticket-tmp"
+    payload_dir.mkdir(parents=True)
+    now = datetime(2026, 5, 18, 12, 0, tzinfo=UTC)
+    stale_after = timedelta(hours=24)
+
+    just_under = payload_dir / "just-under.json"
+    exact = payload_dir / "exact.json"
+    just_over = payload_dir / "just-over.json"
+    old_text = payload_dir / "old.txt"
+    for path in [just_under, exact, just_over, old_text]:
+        path.write_text("{}", encoding="utf-8")
+    os.utime(just_under, (now.timestamp() - stale_after.total_seconds() + 1,) * 2)
+    os.utime(exact, (now.timestamp() - stale_after.total_seconds(),) * 2)
+    os.utime(just_over, (now.timestamp() - stale_after.total_seconds() - 1,) * 2)
+    os.utime(old_text, (now.timestamp() - stale_after.total_seconds() - 1,) * 2)
+
+    stale = ticket_payloads.stale_payloads(
+        tmp_path,
+        now=now,
+        stale_after=stale_after,
+    )
+
+    assert [item.path for item in stale] == [just_over]
+    assert old_text.exists()
+
+
+def test_clean_stale_payloads_deletes_only_json_older_than_ttl(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    payload_dir = tmp_path / ".codex" / "ticket-tmp"
+    payload_dir.mkdir(parents=True)
+    now = datetime(2026, 5, 18, 12, 0, tzinfo=UTC)
+    stale_after = timedelta(hours=24)
+
+    just_under = payload_dir / "just-under.json"
+    exact = payload_dir / "exact.json"
+    just_over = payload_dir / "just-over.json"
+    old_text = payload_dir / "old.txt"
+    for path in [just_under, exact, just_over, old_text]:
+        path.write_text("{}", encoding="utf-8")
+    os.utime(just_under, (now.timestamp() - stale_after.total_seconds() + 1,) * 2)
+    os.utime(exact, (now.timestamp() - stale_after.total_seconds(),) * 2)
+    os.utime(just_over, (now.timestamp() - stale_after.total_seconds() - 1,) * 2)
+    os.utime(old_text, (now.timestamp() - stale_after.total_seconds() - 1,) * 2)
+
+    deleted = ticket_payloads.clean_stale_payloads(
+        tmp_path,
+        now=now,
+        stale_after=stale_after,
+    )
+
+    assert [item.path for item in deleted] == [just_over]
+    assert just_under.exists()
+    assert exact.exists()
+    assert not just_over.exists()
+    assert old_text.exists()
 
 
 def test_ticket_doctor_clean_stale_payloads_rejects_symlink_escape(

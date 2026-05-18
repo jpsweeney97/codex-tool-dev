@@ -523,6 +523,7 @@ def test_successful_capture_execute_deletes_ticket_tmp_payload(
     execute = run_capture("execute", payload_path)
 
     assert execute["state"] == "ok_create"
+    assert execute["data"]["payload_deleted"] is True
     assert not payload_path.exists()
 
 
