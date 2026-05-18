@@ -62,6 +62,18 @@ not a lifecycle status.
 | backlog review | tickets directory | Read-only `ticket_review.py review` and `audit` |
 | doctor/repair | explicit maintenance request | `ticket_doctor.py diagnose` or dry-run-first `repair-audit` |
 
+#### Supported Mutation Surfaces
+
+Ticket has exactly three supported high-level mutation surfaces: `capture`, `update`, and `ingest`.
+
+- `capture`: `ticket_capture.py prepare` then `ticket_capture.py execute`
+- `update`: `ticket_update.py prepare` then `ticket_update.py execute`
+- `ingest`: `ticket_engine_user.py ingest <payload_file>` or `ticket_engine_agent.py ingest <payload_file>`, consuming a DeferredWorkEnvelope from `docs/tickets/.envelopes/<filename>.json`
+
+`capture` and `update` use their preview-first prepare/execute wrappers. `ingest` uses the guarded engine entrypoints to consume a DeferredWorkEnvelope from `docs/tickets/.envelopes/<filename>.json`. Direct engine `classify`/`plan`/`preflight`/`execute` and `ticket_workflow.py prepare`/`execute` remain low-level compatibility, debug, and agent-internal paths. They are not normal user-facing mutation interfaces and must not be documented as the preferred way to create or mutate tickets.
+
+`ticket_workflow.py` is a compatibility/debug runner kept for tests and low-level recovery work. `ticket_workflow.py` is not a supported user-facing mutation surface.
+
 All mutations display a confirmation prompt (`y / edit / n`) before executing. No bypass flag exists.
 
 ### Hook (1)
@@ -155,6 +167,8 @@ max_creates_per_session: 5
 | `auto_silent` | Reserved for v1.1 — not yet implemented, gated with explicit error |
 
 The agent entrypoint re-reads the live policy at execute time and blocks if it has changed since preflight — preventing policy drift during pipeline execution.
+
+`auto_audit` is single-writer. Do not intentionally launch two or more ticket-capable agents in the same Codex session. The operational trigger for future locking/queueing work is: any workflow intentionally launches two or more ticket-capable agents in the same Codex session, or `auto_audit` is enabled for delegated multi-agent work.
 
 ### Path Resolution
 
@@ -321,6 +335,8 @@ External agents can use `ticket_engine_agent.py` to create and manage tickets au
 5. **Session create cap** enforcement via audit trail (configurable via `max_creates_per_session`)
 6. **Reopen is user-only** in v1.0 — agents cannot reopen tickets
 
+Current agent-origin `auto_audit` execute remains governed by the existing guarded provenance/trust model: hook-injected payload fields, matching `hook_request_origin`, non-empty `session_id`, live autonomy config re-read, and the current engine trust checks. This slice does not add activation-capable runtime readiness, does not write `.codex/ticket-runtime-proof.json`, and does not add a new execute readiness gate. Stronger installed-runtime readiness, including live app-server inventory and live hook-mediated smoke, is future work and must land before any stronger trust claim or delegated multi-agent `auto_audit` rollout.
+
 The `agents/` directory is a placeholder (`.gitkeep` only) — consuming projects define their own agent definitions that invoke the agent entrypoint.
 
 ### Consuming Project Setup
@@ -377,9 +393,9 @@ Source lives in `scripts/` rather than a standard Python package directory. Modu
 
 ## Known Limitations
 
-- **No file locking for concurrent updates** — read-modify-write on ticket files is not atomic (v1.3 known limitation)
+- **Single-writer `auto_audit` boundary** — this source slice does not add locking or queueing. Run at most one ticket-capable agent in a Codex session; intentional delegated multi-agent `auto_audit` work is a future locking/queueing trigger.
 - **Triage detects linear dependency chains only**, not cycles
-- **Session create cap** is audit-based, not lock-based — race conditions possible under concurrent agent sessions
+- **Session create cap** is audit-based, not lock-based — it is not a hard safety boundary for intentionally parallel ticket-capable agents
 - **Guard hook is fail-open** at the top level — an unhandled exception allows the command through (prevents blocking all Bash commands)
 - **`auto_silent` mode** is defined in the contract but gated with an explicit error — reserved for v1.1
 

@@ -6,6 +6,9 @@ duplicated between ticket_engine_user.py and ticket_engine_agent.py.
 
 Entrypoints import and call run() with their hardcoded request_origin.
 This module is never invoked directly.
+The public guarded engine entrypoints are ticket_engine_user.py and ticket_engine_agent.py.
+Direct engine stages are low-level compatibility, debug, and agent-internal paths.
+They are not normal user-facing mutation interfaces.
 """
 
 from __future__ import annotations
@@ -98,7 +101,10 @@ def load_runner_context(
     if project_root is None:
         return None, EngineResponse(
             state="policy_blocked",
-            message="Cannot determine project root: no .codex/ or .git/ marker found in ancestors of cwd",
+            message=(
+                "Cannot determine project root: no .codex/ or .git/ marker found "
+                "in ancestors of cwd"
+            ),
             error_code="policy_blocked",
         )
 
@@ -201,7 +207,7 @@ def _dispatch_ingest(
     tickets_dir: Path,
     request_origin: str,
 ) -> EngineResponse:
-    """Orchestrate envelope ingestion: read -> validate -> map -> plan -> preflight -> execute -> move."""
+    """Orchestrate envelope ingestion through the create pipeline."""
     from scripts.ticket_envelope import map_envelope_to_fields, move_to_processed, read_envelope
 
     envelope_path = Path(inp.envelope_path)
@@ -215,14 +221,20 @@ def _dispatch_ingest(
     except (ValueError, OSError):
         return EngineResponse(
             state="policy_blocked",
-            message=f"envelope_path escapes containment boundary {str(envelopes_boundary)!r}. Got: {str(inp.envelope_path)!r:.100}",
+            message=(
+                f"envelope_path escapes containment boundary "
+                f"{str(envelopes_boundary)!r}. Got: {str(inp.envelope_path)!r:.100}"
+            ),
             error_code="policy_blocked",
         )
     try:
         resolved_envelope.relative_to(envelopes_boundary / ".processed")
         return EngineResponse(
             state="policy_blocked",
-            message=f"envelope_path points to processed envelope (replay rejected). Got: {str(inp.envelope_path)!r:.100}",
+            message=(
+                "envelope_path points to processed envelope "
+                f"(replay rejected). Got: {str(inp.envelope_path)!r:.100}"
+            ),
             error_code="policy_blocked",
         )
     except (ValueError, OSError):

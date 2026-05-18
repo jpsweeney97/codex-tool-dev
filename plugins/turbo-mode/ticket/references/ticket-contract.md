@@ -84,6 +84,10 @@ Exit codes: 0 (success), 1 (engine error), 2 (validation failure)
 - Error responses include `error_code` at the top level (one of the 12 defined error codes below). Success responses omit `error_code`.
 - Exit code 2 maps to `need_fields` and `invalid_transition` error codes. `parse_error` returns exit 1 (engine error) — it covers both malformed CLI payloads and corrupted stored ticket YAML.
 
+### Supported Mutation Surfaces
+
+Ticket has exactly three supported high-level mutation surfaces: `capture`, `update`, and `ingest`. `capture` and `update` use their preview-first prepare/execute wrappers. `ingest` uses the guarded engine entrypoints to consume a DeferredWorkEnvelope from `docs/tickets/.envelopes/<filename>.json`. Direct engine `classify`/`plan`/`preflight`/`execute` and `ticket_workflow.py prepare`/`execute` remain low-level compatibility, debug, and agent-internal paths. They are not normal user-facing mutation interfaces and must not be documented as the preferred way to create or mutate tickets.
+
 ### Subcommands
 
 | Subcommand | Input | Output `data` |
@@ -118,7 +122,7 @@ ok, ok_create, ok_update, ok_close, ok_close_archived, ok_reopen, need_fields, d
 
 ### Error Codes (12)
 
-need_fields, invalid_transition, policy_blocked, preflight_failed, stale_plan, duplicate_candidate, parse_error, io_error, not_found, dependency_blocked, intent_mismatch, origin_mismatch
+`need_fields`, `invalid_transition`, `policy_blocked`, `preflight_failed`, `stale_plan`, `duplicate_candidate`, `parse_error`, `io_error`, `not_found`, `dependency_blocked`, `intent_mismatch`, `origin_mismatch`
 
 ## 5. Autonomy Model
 
@@ -144,6 +148,8 @@ Execute prerequisites: execute requires prior-stage artifacts:
 Stage-specific missing-confidence behavior: preflight entrypoints coerce absent `classify_confidence` to `0.0` and fail the confidence gate; execute preserves absence as `null` and rejects it as a missing prerequisite.
 
 Agent execute re-reads live `.codex/ticket.local.md` policy and blocks if it diverges from the preflight snapshot.
+
+Current agent-origin `auto_audit` execute remains governed by the existing guarded provenance/trust model: hook-injected payload fields, matching `hook_request_origin`, non-empty `session_id`, live autonomy config re-read, and the current engine trust checks. This slice does not add activation-capable runtime readiness, does not write `.codex/ticket-runtime-proof.json`, and does not add a new execute readiness gate. Stronger installed-runtime readiness, including live app-server inventory and live hook-mediated smoke, is future work and must land before any stronger trust claim or delegated multi-agent `auto_audit` rollout.
 
 Field validation: title, problem, reopen_reason, captured_request, next_action, capture_source, and component must be strings when present. priority, status, resolution, capture_confidence, and refinement_status are validated against contract enums before writes. key_file_paths, related_paths, tags, blocked_by, blocks, and acceptance_criteria must be lists of strings. source must be a dict with string values. key_files must be a list of dicts. defer must be a dict. Invalid inputs are rejected (need_fields), not silently coerced.
 
@@ -236,11 +242,13 @@ Engine reads all versions; writes latest only.
 
 Bridge format for deferred work items from the handoff plugin. Envelopes are JSON files consumed by the ticket engine to create deferred tickets.
 
+For v1.0, the envelope id is the envelope filename under `docs/tickets/.envelopes/`. Ticket owns this input contract and uses that id for idempotency.
+
 ### Storage
 
 - Incoming: `docs/tickets/.envelopes/<timestamp>-<slug>.json`
 - Processed: `docs/tickets/.envelopes/.processed/<filename>`
-- Retention: processed envelopes follow the same retention policy as archived tickets
+- Retention: Processed envelopes are retained indefinitely for now as the idempotency ledger and cross-plugin audit trail.
 
 ### Required Fields
 
@@ -275,6 +283,8 @@ The ticket engine's envelope consumer:
 3. Sets `defer.reason` to `"deferred via envelope"` and `defer.deferred_at` to `emitted_at`
 4. Creates ticket through the normal engine pipeline
 5. Moves consumed envelope to `.processed/`
+
+Before creating a ticket, ingest checks whether `.processed/<filename>` already exists. If it does, ingest returns a duplicate/replay outcome, preserves the incoming envelope, and creates no ticket. Similar-content envelopes with different filenames go through normal duplicate detection and are not auto-collapsed.
 
 ### Invariants
 

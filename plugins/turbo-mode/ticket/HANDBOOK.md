@@ -53,6 +53,18 @@ Canonical Bash launcher for these scripts:
 python3 -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/tickets
 ```
 
+### Supported Mutation Surfaces
+
+Ticket has exactly three supported high-level mutation surfaces: `capture`, `update`, and `ingest`.
+
+- `capture`: `ticket_capture.py prepare` then `ticket_capture.py execute`
+- `update`: `ticket_update.py prepare` then `ticket_update.py execute`
+- `ingest`: `ticket_engine_user.py ingest <payload_file>` or `ticket_engine_agent.py ingest <payload_file>`
+
+`capture` and `update` use their preview-first prepare/execute wrappers. `ingest` uses the guarded engine entrypoints to consume a DeferredWorkEnvelope from `docs/tickets/.envelopes/<filename>.json`. Direct engine `classify`/`plan`/`preflight`/`execute` and `ticket_workflow.py prepare`/`execute` remain low-level compatibility, debug, and agent-internal paths, not normal user-facing mutation interfaces.
+
+`ticket_workflow.py` is a compatibility/debug runner kept for tests and low-level recovery work; ticket_workflow.py is a compatibility/debug runner, not a supported user-facing mutation surface.
+
 ### Hook
 
 | Hook | Event | Purpose |
@@ -172,6 +184,10 @@ Agent mutations face additional gating that user mutations do not:
 
 User mutations skip the autonomy policy check — they pass through regardless of `autonomy_mode`.
 
+Current agent-origin `auto_audit` execute remains governed by the existing guarded provenance/trust model: hook-injected payload fields, matching `hook_request_origin`, non-empty `session_id`, live autonomy config re-read, and the current engine trust checks. This slice does not add activation-capable runtime readiness, does not write `.codex/ticket-runtime-proof.json`, and does not add a new execute readiness gate. Stronger installed-runtime readiness, including live app-server inventory and live hook-mediated smoke, is future work.
+
+`auto_audit` is single-writer in this slice. Do not intentionally launch two or more ticket-capable agents in the same Codex session. Future locking/queueing work is triggered by any workflow that intentionally launches two or more ticket-capable agents in the same Codex session, or enables `auto_audit` for delegated multi-agent work.
+
 ### Audit Trail
 
 Located at `docs/tickets/.audit/YYYY-MM-DD/*.jsonl`. Each line is a JSON object recording one mutation event with action, result, session, and payload snapshot.
@@ -259,7 +275,8 @@ must not contain whitespace. Recreate unsupported payloads under a path such as
 ### `ticket_workflow.py`
 
 Use as an internal/debugging legacy workflow runner when diagnosing the
-lower-level mutation pipeline. It is not the current user-facing update path.
+lower-level mutation pipeline. `ticket_workflow.py` is a compatibility/debug
+runner. It is not the current user-facing update path.
 `prepare` hydrates a legacy payload, `execute` performs the write after user
 confirmation, and `recover` applies supported user-selected payload patches.
 
@@ -469,7 +486,7 @@ IDs follow `T-YYYYMMDD-NN` format (e.g., `T-20260309-01`). The allocator scans l
 
 ### TOCTOU Protection
 
-At preflight, the engine takes a fingerprint snapshot of any existing ticket being mutated. At execute, it re-reads and re-fingerprints before writing. If the live file changed between stages (concurrent write), the mutation is blocked with a `toctou_conflict` error.
+At preflight, the engine takes a fingerprint snapshot of any existing ticket being mutated. At execute, it re-reads and re-fingerprints before writing. If the live file changed between stages, the mutation is blocked with the public `stale_plan` error code. `toctou_conflict` is descriptive prose only, not a public error code.
 
 ---
 
@@ -483,7 +500,7 @@ At preflight, the engine takes a fingerprint snapshot of any existing ticket bei
 | `dedup_collision` on first create | Another ticket with same problem exists within 24 hours | Run `ticket_read.py list` and look for near-duplicate | Update existing ticket; or override dedup if content is genuinely distinct |
 | `session_cap_exceeded` | Agent created ≥ `max_creates_per_session` tickets this session | Check `max_creates_per_session` in `.codex/ticket.local.md` | Raise cap or start a new session |
 | `audit_write_failed` blocks agent mutation | Disk full, permission error, or `.audit/` not writable | Check disk space and permissions on `docs/tickets/.audit/` | Fix underlying issue; mutation will proceed once audit write succeeds |
-| `toctou_conflict` on update | Concurrent write between preflight and execute | Inspect ticket file mtime | Re-run update after verifying current state |
+| `stale_plan` on update | Concurrent write between preflight and execute | Inspect ticket file mtime | Re-run update after verifying current state |
 | Corrupt audit JSONL lines | Interrupted write (crash during mutation) | Run `python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir>` | After explicit approval, run `python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir> --confirm-repair` |
 | Stale tickets not surfaced by triage | Missing `updated` field in old ticket YAML | Inspect ticket frontmatter | Triage falls back to file mtime; results are approximate for legacy tickets |
 | `path_outside_cwd` from hook | Project root not at Codex launch directory | Check hook's `event.cwd` vs actual tickets path | Launch Codex from the project root containing `.git/` or `.codex/` |
@@ -492,7 +509,7 @@ At preflight, the engine takes a fingerprint snapshot of any existing ticket bei
 
 ## Known Limitations
 
-**Concurrent agent creates:** Session create cap and ID allocation are not fully serialized under parallel subagent execution. Parallel agents can each read the audit trail before either write completes, both see cap space, both allocate the same ID, and both proceed — overrunning the cap and colliding on IDs. Avoid running multiple ticket-creating agents in the same session in parallel.
+**Single-writer `auto_audit` boundary:** Session create cap and ID allocation are not fully serialized for intentional parallel ticket-capable agents. This slice does not add locking, queueing, activation-capable runtime readiness, `.codex/ticket-runtime-proof.json` writes, or a new execute readiness gate. Avoid running multiple ticket-creating agents in the same session in parallel.
 
 **`auto_silent` mode reserved:** The `auto_silent` autonomy mode is defined in the contract but not implemented. Setting it has undefined behavior — do not use until implemented.
 
