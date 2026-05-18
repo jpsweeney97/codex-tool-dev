@@ -7,6 +7,7 @@ and delegate to this module.
 Subcommand contract: each function returns an EngineResponse with
 {state, ticket_id, message, data}.
 """
+
 from __future__ import annotations
 
 import json
@@ -14,7 +15,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -28,7 +29,6 @@ from scripts.ticket_paths import discover_project_root
 from scripts.ticket_render import render_ticket, replace_fenced_yaml
 from scripts.ticket_trust import collect_trust_triple_errors
 from scripts.ticket_validate import validate_fields
-
 
 # --- Helpers ---
 
@@ -92,9 +92,16 @@ class EngineResponse:
     data: dict[str, Any] = field(default_factory=dict)
 
     _OK_STATES: frozenset[str] = field(
-        default=frozenset({
-            "ok", "ok_create", "ok_update", "ok_close", "ok_close_archived", "ok_reopen",
-        }),
+        default=frozenset(
+            {
+                "ok",
+                "ok_create",
+                "ok_update",
+                "ok_close",
+                "ok_close_archived",
+                "ok_reopen",
+            }
+        ),
         init=False,
         repr=False,
         compare=False,
@@ -335,7 +342,7 @@ def _plan_create(
     # Scan for duplicates within 24h window.
     duplicate_of = None
     dup_target_fp = None
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cutoff = now - timedelta(hours=_DEDUP_WINDOW_HOURS)
 
     existing = _list_tickets_with_closed(tickets_dir)
@@ -347,9 +354,9 @@ def _plan_create(
         # No filesystem dependency (mtime) — immune to git checkout/clone.
         if ticket.created_at:
             try:
-                ticket_time = datetime.strptime(
-                    ticket.created_at, "%Y-%m-%dT%H:%M:%SZ"
-                ).replace(tzinfo=timezone.utc)
+                ticket_time = datetime.strptime(ticket.created_at, "%Y-%m-%dT%H:%M:%SZ").replace(
+                    tzinfo=UTC
+                )
             except (ValueError, TypeError):
                 ticket_time = None
         else:
@@ -357,9 +364,7 @@ def _plan_create(
 
         if ticket_time is None:
             try:
-                day = datetime.strptime(ticket.date, "%Y-%m-%d").replace(
-                    tzinfo=timezone.utc
-                )
+                day = datetime.strptime(ticket.date, "%Y-%m-%d").replace(tzinfo=UTC)
                 # End-of-day: assume latest possible creation time on that date.
                 ticket_time = day.replace(hour=23, minute=59, second=59)
             except (ValueError, TypeError):
@@ -450,12 +455,17 @@ def read_autonomy_config(tickets_dir: Path) -> AutonomyConfig:
 
         text = config_path.read_text(encoding="utf-8")
         if not text.startswith("---"):
-            warnings.append("ticket.local.md: file exists but has no valid frontmatter (missing --- delimiters)")
+            warnings.append(
+                "ticket.local.md: file exists but has no valid frontmatter (missing --- delimiters)"
+            )
             print(f"WARNING: {warnings[-1]}", file=sys.stderr)
             return AutonomyConfig(warnings=tuple(warnings))
         parts = text.split("---", 2)
         if len(parts) < 3:
-            warnings.append("ticket.local.md: file exists but has no valid frontmatter (incomplete --- delimiters)")
+            warnings.append(
+                "ticket.local.md: file exists but has no valid frontmatter "
+                "(incomplete --- delimiters)"
+            )
             print(f"WARNING: {warnings[-1]}", file=sys.stderr)
             return AutonomyConfig(warnings=tuple(warnings))
         data = yaml.safe_load(parts[1])
@@ -479,9 +489,7 @@ def read_autonomy_config(tickets_dir: Path) -> AutonomyConfig:
     # Parse mode.
     mode = data.get("autonomy_mode", "suggest")
     if mode not in _VALID_AUTONOMY_MODES:
-        warnings.append(
-            f"ticket.local.md: unknown autonomy_mode {mode!r}, defaulting to 'suggest'"
-        )
+        warnings.append(f"ticket.local.md: unknown autonomy_mode {mode!r}, defaulting to 'suggest'")
         print(f"WARNING: {warnings[-1]}", file=sys.stderr)
         mode = "suggest"
 
@@ -562,7 +570,9 @@ def engine_preflight(
                 error_code="policy_blocked",
                 data={
                     "checks_passed": checks_passed,
-                    "checks_failed": [{"check": "agent_action_exclusion", "reason": "reopen is user-only"}],
+                    "checks_failed": [
+                        {"check": "agent_action_exclusion", "reason": "reopen is user-only"}
+                    ],
                     "autonomy_config": config.to_dict(),
                 },
             )
@@ -575,7 +585,12 @@ def engine_preflight(
                 error_code="policy_blocked",
                 data={
                     "checks_passed": checks_passed,
-                    "checks_failed": [{"check": "agent_override_rejection", "reason": "dedup_override not allowed for agents"}],
+                    "checks_failed": [
+                        {
+                            "check": "agent_override_rejection",
+                            "reason": "dedup_override not allowed for agents",
+                        }
+                    ],
                     "autonomy_config": config.to_dict(),
                 },
             )
@@ -586,7 +601,12 @@ def engine_preflight(
                 error_code="policy_blocked",
                 data={
                     "checks_passed": checks_passed,
-                    "checks_failed": [{"check": "agent_override_rejection", "reason": "dependency_override not allowed for agents"}],
+                    "checks_failed": [
+                        {
+                            "check": "agent_override_rejection",
+                            "reason": "dependency_override not allowed for agents",
+                        }
+                    ],
                     "autonomy_config": config.to_dict(),
                 },
             )
@@ -599,7 +619,9 @@ def engine_preflight(
                 error_code="policy_blocked",
                 data={
                     "checks_passed": checks_passed,
-                    "checks_failed": [{"check": "autonomy_mode", "reason": "suggest mode blocks agents"}],
+                    "checks_failed": [
+                        {"check": "autonomy_mode", "reason": "suggest mode blocks agents"}
+                    ],
                     "autonomy_config": config.to_dict(),
                 },
             )
@@ -611,7 +633,9 @@ def engine_preflight(
                 error_code="policy_blocked",
                 data={
                     "checks_passed": checks_passed,
-                    "checks_failed": [{"check": "autonomy_mode", "reason": "auto_silent gated in v1.0"}],
+                    "checks_failed": [
+                        {"check": "autonomy_mode", "reason": "auto_silent gated in v1.0"}
+                    ],
                     "autonomy_config": config.to_dict(),
                 },
             )
@@ -637,11 +661,16 @@ def engine_preflight(
                     error_code="policy_blocked",
                     data={
                         "checks_passed": checks_passed,
-                        "checks_failed": [{"check": "session_cap", "reason": f"{count}/{config.max_creates}"}],
+                        "checks_failed": [
+                            {"check": "session_cap", "reason": f"{count}/{config.max_creates}"}
+                        ],
                         "autonomy_config": config.to_dict(),
                     },
                 )
-            notification = f"Auto-audit: agent {action} approved (session creates: {count}/{config.max_creates})"
+            notification = (
+                f"Auto-audit: agent {action} approved "
+                f"(session creates: {count}/{config.max_creates})"
+            )
         elif config.mode == "auto_audit":
             notification = f"Auto-audit: agent {action} approved"
 
@@ -658,7 +687,9 @@ def engine_preflight(
             f"(threshold: {threshold:.2f}). Rephrase or specify the operation.",
             data={
                 "checks_passed": checks_passed,
-                "checks_failed": [{"check": "confidence", "reason": f"below threshold {threshold}"}],
+                "checks_failed": [
+                    {"check": "confidence", "reason": f"below threshold {threshold}"}
+                ],
             },
         )
     checks_passed.append("confidence")
@@ -667,7 +698,10 @@ def engine_preflight(
     if classify_intent != action:
         return EngineResponse(
             state="escalate",
-            message=f"Intent_mismatch: classify returned {classify_intent!r} but action is {action!r}",
+            message=(
+                f"Intent_mismatch: classify returned {classify_intent!r} "
+                f"but action is {action!r}"
+            ),
             error_code="intent_mismatch",
             data={
                 "checks_passed": checks_passed,
@@ -681,11 +715,16 @@ def engine_preflight(
         # C-008: dedup_override must be bound to a specific duplicate candidate.
         return EngineResponse(
             state="need_fields",
-            message="dedup_override requires duplicate_of identifying the specific duplicate candidate",
+            message=(
+                "dedup_override requires duplicate_of identifying the specific "
+                "duplicate candidate"
+            ),
             error_code="need_fields",
             data={
                 "checks_passed": checks_passed,
-                "checks_failed": [{"check": "dedup_binding", "reason": "dedup_override without duplicate_of"}],
+                "checks_failed": [
+                    {"check": "dedup_binding", "reason": "dedup_override without duplicate_of"}
+                ],
                 "missing_fields": ["duplicate_of"],
             },
         )
@@ -757,10 +796,12 @@ def engine_preflight(
                             error_code="dependency_blocked",
                             data={
                                 "checks_passed": checks_passed,
-                                "checks_failed": [{
-                                    "check": "dependencies",
-                                    "reason": f"unresolved={unresolved}, missing={missing}",
-                                }],
+                                "checks_failed": [
+                                    {
+                                        "check": "dependencies",
+                                        "reason": f"unresolved={unresolved}, missing={missing}",
+                                    }
+                                ],
                                 "blocking_ids": unresolved + missing,
                                 "unresolved_blockers": unresolved,
                                 "missing_blockers": missing,
@@ -805,29 +846,38 @@ def engine_preflight(
 # --- execute ---
 
 # Supported YAML frontmatter fields for update.
-_UPDATE_FRONTMATTER_KEYS = frozenset({
-    "id",
-    "date",
-    "status",
-    "priority",
-    "effort",
-    "source",
-    "tags",
-    "blocked_by",
-    "blocks",
-    "defer",
-})
-_UPDATE_SECTION_FIELDS = frozenset({
-    "problem",
-    "context",
-    "prior_investigation",
-    "approach",
-    "decisions_made",
-    "acceptance_criteria",
-    "verification",
-    "key_files",
-    "related",
-})
+_UPDATE_FRONTMATTER_KEYS = frozenset(
+    {
+        "id",
+        "date",
+        "status",
+        "priority",
+        "effort",
+        "source",
+        "capture_confidence",
+        "capture_source",
+        "refinement_status",
+        "component",
+        "related_paths",
+        "tags",
+        "blocked_by",
+        "blocks",
+        "defer",
+    }
+)
+_UPDATE_SECTION_FIELDS = frozenset(
+    {
+        "problem",
+        "context",
+        "prior_investigation",
+        "approach",
+        "decisions_made",
+        "acceptance_criteria",
+        "verification",
+        "key_files",
+        "related",
+    }
+)
 _UPDATE_IGNORED_FIELDS = frozenset({"ticket_id", "id"})
 
 # Valid status transitions for update action (from -> set of valid to statuses).
@@ -836,8 +886,8 @@ _VALID_TRANSITIONS: dict[str, set[str]] = {
     "open": {"in_progress", "blocked", "wontfix"},
     "in_progress": {"open", "blocked", "done", "wontfix"},
     "blocked": {"open", "in_progress", "wontfix"},
-    "done": set(),       # Terminal — reopen action required.
-    "wontfix": set(),    # Terminal — reopen action required.
+    "done": set(),  # Terminal — reopen action required.
+    "wontfix": set(),  # Terminal — reopen action required.
 }
 
 # Bounds archive collision search to avoid infinite loops in pathological trees.
@@ -856,6 +906,33 @@ _TRANSITION_PRECONDITIONS: dict[tuple[str, str], str] = {
 _TARGET_PRECONDITIONS: dict[str, str] = {
     "done": "acceptance_criteria_required",
 }
+
+
+def _normalize_acceptance_criterion(line: str) -> str:
+    """Return acceptance-criteria text without markdown checklist/bullet markers."""
+    stripped = line.strip()
+    stripped = re.sub(r"^- \[[ xX]\]\s*", "", stripped)
+    stripped = re.sub(r"^[-*]\s*", "", stripped)
+    return stripped.strip()
+
+
+def _acceptance_criteria_is_only_needs_refinement(section: str) -> bool:
+    """Return True when the AC section contains only the refinement placeholder."""
+    criteria = [
+        criterion
+        for criterion in (_normalize_acceptance_criterion(line) for line in section.splitlines())
+        if criterion
+    ]
+    return criteria == ["Needs refinement"]
+
+
+def _ticket_still_needs_refinement(ticket: Any) -> bool:
+    """Return True when ticket metadata or AC placeholder blocks done readiness."""
+    return getattr(
+        ticket, "refinement_status", ""
+    ) == "needs_refinement" or _acceptance_criteria_is_only_needs_refinement(
+        ticket.sections.get("Acceptance Criteria", "")
+    )
 
 
 def _transition_policy_data(
@@ -891,6 +968,13 @@ def _check_transition_preconditions_with_detail(
     target_precondition = _TARGET_PRECONDITIONS.get(target)
     if target_precondition == "acceptance_criteria_required":
         ac = ticket.sections.get("Acceptance Criteria", "")
+        if _ticket_still_needs_refinement(ticket):
+            return (
+                "Transition to 'done' requires concrete acceptance criteria; "
+                "ticket still needs refinement",
+                "missing_acceptance_criteria",
+                {"missing": ["acceptance_criteria"]},
+            )
         if not ac.strip():
             return (
                 "Transition to 'done' requires acceptance criteria section",
@@ -1009,9 +1093,14 @@ def _format_blocker_message(
     if missing:
         parts.append(f"Ticket has missing blocker references: {missing}.")
     if include_override:
-        parts.append("Resolve blockers, remove stale references, or pass dependency_override: true.")
+        parts.append(
+            "Resolve blockers, remove stale references, or pass dependency_override: true."
+        )
     else:
-        parts.append("Resolve open blockers and remove stale/missing blocker references before changing status.")
+        parts.append(
+            "Resolve open blockers and remove stale/missing blocker references "
+            "before changing status."
+        )
     return " ".join(parts)
 
 
@@ -1021,7 +1110,10 @@ def _autonomy_policy_fingerprint(config: AutonomyConfig) -> tuple[str, int]:
 
 
 def _check_transition_preconditions(
-    current: str, target: str, ticket: Any, tickets_dir: Path,
+    current: str,
+    target: str,
+    ticket: Any,
+    tickets_dir: Path,
     fields: dict[str, Any] | None = None,
 ) -> str | None:
     """Check transition preconditions. Returns error message or None if OK."""
@@ -1055,7 +1147,7 @@ def _audit_append(session_id: str, tickets_dir: Path, entry: dict[str, Any]) -> 
     """
     try:
         safe_id = _sanitize_session_id(session_id)
-        date_dir = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_dir = tickets_dir / ".audit" / date_dir
         audit_dir.mkdir(parents=True, exist_ok=True)
         audit_file = audit_dir / f"{safe_id}.jsonl"
@@ -1124,15 +1216,14 @@ def engine_count_session_creates(
             try:
                 entry = json.loads(line)
             except (json.JSONDecodeError, ValueError):
-                print(f"WARNING: corrupt audit line in {audit_file}: {line[:100]!r}", file=sys.stderr)
+                print(
+                    f"WARNING: corrupt audit line in {audit_file}: {line[:100]!r}", file=sys.stderr
+                )
                 continue
             if entry.get("request_origin") != request_origin:
                 continue
             # New format: attempt_started with intent field.
-            if (
-                entry.get("action") == "attempt_started"
-                and entry.get("intent") == "create"
-            ):
+            if entry.get("action") == "attempt_started" and entry.get("intent") == "create":
                 pending_create = True
                 attempts += 1
             # Create result entry — pair with preceding attempt_started if any.
@@ -1183,11 +1274,9 @@ def engine_execute(
     snapshot_config = autonomy_config
     if request_origin == "agent":
         config = read_autonomy_config(tickets_dir)
-        if (
-            snapshot_config is not None
-            and _autonomy_policy_fingerprint(snapshot_config)
-            != _autonomy_policy_fingerprint(config)
-        ):
+        if snapshot_config is not None and _autonomy_policy_fingerprint(
+            snapshot_config
+        ) != _autonomy_policy_fingerprint(config):
             policy_changed_data: dict[str, Any] = {"live_mode": config.mode}
             if config.warnings:
                 policy_changed_data["live_warnings"] = list(config.warnings)
@@ -1204,7 +1293,10 @@ def engine_execute(
     if hook_request_origin is not None and hook_request_origin != request_origin:
         return EngineResponse(
             state="escalate",
-            message=f"origin_mismatch: request_origin={request_origin!r}, hook_request_origin={hook_request_origin!r}",
+            message=(
+                f"origin_mismatch: request_origin={request_origin!r}, "
+                f"hook_request_origin={hook_request_origin!r}"
+            ),
             error_code="origin_mismatch",
         )
     trust_errors = collect_trust_triple_errors(
@@ -1327,7 +1419,9 @@ def engine_execute(
             )
         if action == "create":
             count = engine_count_session_creates(session_id, tickets_dir)
-            if count is AUDIT_UNAVAILABLE or (isinstance(count, int) and count >= config.max_creates):
+            if count is AUDIT_UNAVAILABLE or (
+                isinstance(count, int) and count >= config.max_creates
+            ):
                 return EngineResponse(
                     state="policy_blocked",
                     message=f"Defense-in-depth: session create cap ({config.max_creates})",
@@ -1338,7 +1432,10 @@ def engine_execute(
     if action == "create" and dedup_override and not duplicate_of:
         return EngineResponse(
             state="need_fields",
-            message="dedup_override requires duplicate_of identifying the specific duplicate candidate",
+            message=(
+                "dedup_override requires duplicate_of identifying the specific "
+                "duplicate candidate"
+            ),
             error_code="need_fields",
             data={"missing_fields": ["duplicate_of"]},
         )
@@ -1354,7 +1451,10 @@ def engine_execute(
             duplicate_of = plan_resp.data.get("duplicate_of")
             return EngineResponse(
                 state="duplicate_candidate",
-                message=f"Duplicate of {duplicate_of} detected in execute stage. Pass dedup_override=True to proceed.",
+                message=(
+                    f"Duplicate of {duplicate_of} detected in execute stage. "
+                    "Pass dedup_override=True to proceed."
+                ),
                 error_code="duplicate_candidate",
                 ticket_id=duplicate_of if isinstance(duplicate_of, str) else None,
                 data={
@@ -1387,7 +1487,10 @@ def engine_execute(
         if current_fp != target_fingerprint:
             return EngineResponse(
                 state="preflight_failed",
-                message="Stale fingerprint — ticket was modified since read. Re-run to get a fresh plan.",
+                message=(
+                    "Stale fingerprint — ticket was modified since read. "
+                    "Re-run to get a fresh plan."
+                ),
                 ticket_id=ticket_id,
                 error_code="stale_plan",
             )
@@ -1396,7 +1499,7 @@ def engine_execute(
     # "intent" records the action being attempted so counting can use attempt_started
     # entries when result writes fail (seals the create cap).
     base_entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "action": "attempt_started",
         "intent": action,
         "ticket_id": ticket_id,
@@ -1439,7 +1542,7 @@ def engine_execute(
     except Exception as exc:
         # Audit: error entry
         error_entry = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "action": action,
             "ticket_id": ticket_id,
             "session_id": session_id,
@@ -1456,7 +1559,7 @@ def engine_execute(
     # still escalate for agents because a missing result entry means the non-ok
     # subtraction won't work if this create failed — conservatively over-counting.
     result_entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "action": action,
         "ticket_id": resp.ticket_id if resp.ticket_id else ticket_id,
         "session_id": session_id,
@@ -1538,7 +1641,7 @@ def _execute_create(
 
     tickets_dir.mkdir(parents=True, exist_ok=True)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     today = now.date()
     title = fields.get("title", "Untitled")
 
@@ -1559,10 +1662,17 @@ def _execute_create(
             priority=fields.get("priority", "medium"),
             effort=fields.get("effort", ""),
             source=source,
+            capture_confidence=fields.get("capture_confidence", ""),
+            capture_source=fields.get("capture_source", ""),
+            refinement_status=fields.get("refinement_status", ""),
+            component=fields.get("component", ""),
+            related_paths=fields.get("related_paths"),
             tags=fields.get("tags", []),
             problem=fields.get("problem", ""),
+            captured_request=fields.get("captured_request", ""),
             approach=fields.get("approach", ""),
             acceptance_criteria=fields.get("acceptance_criteria"),
+            next_action=fields.get("next_action", ""),
             verification=fields.get("verification", ""),
             key_files=fields.get("key_files"),
             key_file_paths=fields.get("key_file_paths"),
@@ -1623,8 +1733,10 @@ def _evaluate_update_policy(
 
     new_status = fields.get("status")
     if new_status and new_status != ticket.status:
-        valid_recovery_statuses = [] if ticket.status in _TERMINAL_STATUSES else sorted(
-            _VALID_TRANSITIONS.get(ticket.status, set())
+        valid_recovery_statuses = (
+            []
+            if ticket.status in _TERMINAL_STATUSES
+            else sorted(_VALID_TRANSITIONS.get(ticket.status, set()))
         )
         requires_reopen = ticket.status in _TERMINAL_STATUSES
         if not _is_valid_transition(ticket.status, new_status, "update"):
@@ -1641,12 +1753,14 @@ def _evaluate_update_policy(
                     requires_reopen=requires_reopen,
                 ),
             )
-        precondition_error, precondition_code, precondition_detail = _check_transition_preconditions_with_detail(
-            ticket.status,
-            new_status,
-            ticket,
-            tickets_dir,
-            fields=fields,
+        precondition_error, precondition_code, precondition_detail = (
+            _check_transition_preconditions_with_detail(
+                ticket.status,
+                new_status,
+                ticket,
+                tickets_dir,
+                fields=fields,
+            )
         )
         if precondition_error:
             return EngineResponse(
@@ -1696,16 +1810,17 @@ def _evaluate_update_policy(
     if ticket_id_mismatch:
         return EngineResponse(
             state="escalate",
-            message=f"Update failed: fields.ticket_id must match top-level ticket_id. Got: {fields.get('ticket_id')!r:.100}",
+            message=(
+                "Update failed: fields.ticket_id must match top-level "
+                f"ticket_id. Got: {fields.get('ticket_id')!r:.100}"
+            ),
             ticket_id=ticket_id,
             error_code="intent_mismatch",
         )
     if section_fields or unknown_fields:
         parts: list[str] = []
         if section_fields:
-            parts.append(
-                f"section fields not supported by update: {', '.join(section_fields)}"
-            )
+            parts.append(f"section fields not supported by update: {', '.join(section_fields)}")
         if unknown_fields:
             parts.append(f"unknown fields: {', '.join(unknown_fields)}")
         return EngineResponse(
@@ -1727,13 +1842,20 @@ def _execute_update(
 ) -> EngineResponse:
     """Update an existing ticket's frontmatter fields."""
     if not ticket_id:
-        return EngineResponse(state="need_fields", message="ticket_id required for update", error_code="need_fields")
+        return EngineResponse(
+            state="need_fields", message="ticket_id required for update", error_code="need_fields"
+        )
 
     from scripts.ticket_read import find_ticket_by_id
 
     ticket = find_ticket_by_id(tickets_dir, ticket_id)
     if ticket is None:
-        return EngineResponse(state="not_found", message=f"No ticket matching {ticket_id}", ticket_id=ticket_id, error_code="not_found")
+        return EngineResponse(
+            state="not_found",
+            message=f"No ticket matching {ticket_id}",
+            ticket_id=ticket_id,
+            error_code="not_found",
+        )
 
     policy_error = _evaluate_update_policy(ticket_id, ticket, fields, tickets_dir)
     if policy_error is not None:
@@ -1745,11 +1867,21 @@ def _execute_update(
     # Update frontmatter fields.
     yaml_text = extract_fenced_yaml(text)
     if yaml_text is None:
-        return EngineResponse(state="escalate", message="Cannot parse ticket YAML", ticket_id=ticket_id, error_code="parse_error")
+        return EngineResponse(
+            state="escalate",
+            message="Cannot parse ticket YAML",
+            ticket_id=ticket_id,
+            error_code="parse_error",
+        )
 
     data = parse_yaml_block(yaml_text)
     if data is None:
-        return EngineResponse(state="escalate", message="Cannot parse ticket YAML", ticket_id=ticket_id, error_code="parse_error")
+        return EngineResponse(
+            state="escalate",
+            message="Cannot parse ticket YAML",
+            ticket_id=ticket_id,
+            error_code="parse_error",
+        )
 
     (
         frontmatter_updates,
@@ -1760,16 +1892,17 @@ def _execute_update(
     if ticket_id_mismatch:
         return EngineResponse(
             state="escalate",
-            message=f"Update failed: fields.ticket_id must match top-level ticket_id. Got: {fields.get('ticket_id')!r:.100}",
+            message=(
+                "Update failed: fields.ticket_id must match top-level "
+                f"ticket_id. Got: {fields.get('ticket_id')!r:.100}"
+            ),
             ticket_id=ticket_id,
             error_code="intent_mismatch",
         )
     if section_fields or unknown_fields:
         parts: list[str] = []
         if section_fields:
-            parts.append(
-                f"section fields not supported by update: {', '.join(section_fields)}"
-            )
+            parts.append(f"section fields not supported by update: {', '.join(section_fields)}")
         if unknown_fields:
             parts.append(f"unknown fields: {', '.join(unknown_fields)}")
         return EngineResponse(
@@ -1883,8 +2016,14 @@ def _evaluate_close_policy(
             ),
         )
 
-    precondition_error, precondition_code, precondition_detail = _check_transition_preconditions_with_detail(
-        ticket.status, resolution, ticket, tickets_dir, fields=fields,
+    precondition_error, precondition_code, precondition_detail = (
+        _check_transition_preconditions_with_detail(
+            ticket.status,
+            resolution,
+            ticket,
+            tickets_dir,
+            fields=fields,
+        )
     )
     if precondition_error:
         return EngineResponse(
@@ -1938,7 +2077,8 @@ def _close_readiness_data(
         "blocking_ids": unresolved + missing_refs,
         "unresolved_blockers": unresolved,
         "missing_blockers": missing_refs,
-        "allowed_actions": allowed_actions or ([f"close as {resolution}"] if ready else ["keep current status"]),
+        "allowed_actions": allowed_actions
+        or ([f"close as {resolution}"] if ready else ["keep current status"]),
     }
 
 
@@ -2126,7 +2266,9 @@ def _execute_close(
     from any non-terminal status.
     """
     if not ticket_id:
-        return EngineResponse(state="need_fields", message="ticket_id required for close", error_code="need_fields")
+        return EngineResponse(
+            state="need_fields", message="ticket_id required for close", error_code="need_fields"
+        )
 
     resolution = fields.get("resolution", "done")
     archive = fields.get("archive", False)
@@ -2135,7 +2277,12 @@ def _execute_close(
 
     ticket = find_ticket_by_id(tickets_dir, ticket_id)
     if ticket is None:
-        return EngineResponse(state="not_found", message=f"No ticket matching {ticket_id}", ticket_id=ticket_id, error_code="not_found")
+        return EngineResponse(
+            state="not_found",
+            message=f"No ticket matching {ticket_id}",
+            ticket_id=ticket_id,
+            error_code="not_found",
+        )
 
     policy_error = _evaluate_close_policy(
         ticket_id,
@@ -2151,11 +2298,21 @@ def _execute_close(
     text = ticket_path.read_text(encoding="utf-8")
     yaml_text = extract_fenced_yaml(text)
     if yaml_text is None:
-        return EngineResponse(state="escalate", message="Cannot parse ticket YAML", ticket_id=ticket_id, error_code="parse_error")
+        return EngineResponse(
+            state="escalate",
+            message="Cannot parse ticket YAML",
+            ticket_id=ticket_id,
+            error_code="parse_error",
+        )
 
     data = parse_yaml_block(yaml_text)
     if data is None:
-        return EngineResponse(state="escalate", message="Cannot parse ticket YAML", ticket_id=ticket_id, error_code="parse_error")
+        return EngineResponse(
+            state="escalate",
+            message="Cannot parse ticket YAML",
+            ticket_id=ticket_id,
+            error_code="parse_error",
+        )
 
     old_status = data.get("status", "")
     data["status"] = resolution
@@ -2192,7 +2349,10 @@ def _execute_close(
             else:
                 return EngineResponse(
                     state="escalate",
-                    message=f"archive collision resolution failed: exhausted suffix search. Got: {ticket_path.name!r:.100}",
+                    message=(
+                        "archive collision resolution failed: exhausted suffix "
+                        f"search. Got: {ticket_path.name!r:.100}"
+                    ),
                     ticket_id=ticket_id,
                     error_code="io_error",
                 )
@@ -2229,17 +2389,28 @@ def _execute_reopen(
 ) -> EngineResponse:
     """Reopen a done/wontfix ticket."""
     if not ticket_id:
-        return EngineResponse(state="need_fields", message="ticket_id required for reopen", error_code="need_fields")
+        return EngineResponse(
+            state="need_fields", message="ticket_id required for reopen", error_code="need_fields"
+        )
 
     reopen_reason = fields.get("reopen_reason", "")
     if not reopen_reason:
-        return EngineResponse(state="need_fields", message="reopen_reason required for reopen", error_code="need_fields")
+        return EngineResponse(
+            state="need_fields",
+            message="reopen_reason required for reopen",
+            error_code="need_fields",
+        )
 
     from scripts.ticket_read import find_ticket_by_id
 
     ticket = find_ticket_by_id(tickets_dir, ticket_id)
     if ticket is None:
-        return EngineResponse(state="not_found", message=f"No ticket matching {ticket_id}", ticket_id=ticket_id, error_code="not_found")
+        return EngineResponse(
+            state="not_found",
+            message=f"No ticket matching {ticket_id}",
+            ticket_id=ticket_id,
+            error_code="not_found",
+        )
 
     policy_error = _evaluate_reopen_policy(ticket_id, ticket, fields, tickets_dir)
     if policy_error is not None:
@@ -2250,11 +2421,21 @@ def _execute_reopen(
     text = ticket_path.read_text(encoding="utf-8")
     yaml_text = extract_fenced_yaml(text)
     if yaml_text is None:
-        return EngineResponse(state="escalate", message="Cannot parse ticket YAML", ticket_id=ticket_id, error_code="parse_error")
+        return EngineResponse(
+            state="escalate",
+            message="Cannot parse ticket YAML",
+            ticket_id=ticket_id,
+            error_code="parse_error",
+        )
 
     data = parse_yaml_block(yaml_text)
     if data is None:
-        return EngineResponse(state="escalate", message="Cannot parse ticket YAML", ticket_id=ticket_id, error_code="parse_error")
+        return EngineResponse(
+            state="escalate",
+            message="Cannot parse ticket YAML",
+            ticket_id=ticket_id,
+            error_code="parse_error",
+        )
 
     old_status = data.get("status", "")
     data["status"] = "open"
@@ -2270,13 +2451,13 @@ def _execute_reopen(
         )
 
     # Append to Reopen History section (newest-last).
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     reopen_entry = f"\n\n## Reopen History\n- **{now}**: {reopen_reason} (by {request_origin})"
 
     if "## Reopen History" in new_text:
         rh_match = re.search(r"## Reopen History\n", new_text)
         if rh_match:
-            next_heading = re.search(r"\n## ", new_text[rh_match.end():])
+            next_heading = re.search(r"\n## ", new_text[rh_match.end() :])
             if next_heading:
                 insert_pos = rh_match.end() + next_heading.start()
             else:
@@ -2303,7 +2484,10 @@ def _execute_reopen(
             else:
                 return EngineResponse(
                     state="escalate",
-                    message=f"un-archive collision resolution failed: exhausted suffix search. Got: {ticket_path.name!r:.100}",
+                    message=(
+                        "un-archive collision resolution failed: exhausted suffix "
+                        f"search. Got: {ticket_path.name!r:.100}"
+                    ),
                     ticket_id=ticket_id,
                     error_code="io_error",
                 )
@@ -2331,7 +2515,10 @@ def _execute_reopen(
                 rollback_failed = True
         msg = f"reopen write failed: {exc}. Got: {str(ticket_path)!r:.100}"
         if rollback_failed:
-            msg += f" ROLLBACK ALSO FAILED: ticket is at {str(ticket_path)!r:.100} with old status, needs manual fix"
+            msg += (
+                " ROLLBACK ALSO FAILED: ticket is at "
+                f"{str(ticket_path)!r:.100} with old status, needs manual fix"
+            )
         return EngineResponse(
             state="escalate",
             message=msg,

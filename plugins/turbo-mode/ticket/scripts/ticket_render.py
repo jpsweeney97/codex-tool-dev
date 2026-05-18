@@ -1,4 +1,5 @@
 """Template-based markdown rendering and canonical YAML serialization for tickets."""
+
 from __future__ import annotations
 
 import json
@@ -6,7 +7,6 @@ import re
 from typing import Any
 
 import yaml
-
 
 CANONICAL_FIELD_ORDER = [
     "id",
@@ -16,6 +16,11 @@ CANONICAL_FIELD_ORDER = [
     "priority",
     "effort",
     "source",
+    "capture_confidence",
+    "capture_source",
+    "refinement_status",
+    "component",
+    "related_paths",
     "tags",
     "blocked_by",
     "blocks",
@@ -24,9 +29,7 @@ CANONICAL_FIELD_ORDER = [
 
 _FENCED_YAML_BLOCK_RE = re.compile(r"^```ya?ml\s*\n.*?^```", re.MULTILINE | re.DOTALL)
 _PLAIN_YAML_SCALAR_RE = re.compile(r"^[A-Za-z0-9_./-]+$")
-_YAML_RESERVED_SCALARS = frozenset(
-    {"null", "~", "true", "false", "yes", "no", "on", "off"}
-)
+_YAML_RESERVED_SCALARS = frozenset({"null", "~", "true", "false", "yes", "no", "on", "off"})
 _INT_RE = re.compile(r"^[+-]?\d+$")
 _FLOAT_RE = re.compile(r"^[+-]?(?:\d+\.\d*|\.\d+|\d+[eE][+-]?\d+)$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -73,9 +76,7 @@ def _yaml_value(value: Any) -> str:
                 sort_keys=False,
             ).strip()
         except yaml.YAMLError as exc:
-            raise ValueError(
-                f"yaml serialization failed: {exc}. Got: {value!r:.100}"
-            ) from exc
+            raise ValueError(f"yaml serialization failed: {exc}. Got: {value!r:.100}") from exc
         if dumped.endswith("\n..."):
             dumped = dumped.rsplit("\n...", 1)[0]
         return dumped
@@ -161,13 +162,20 @@ def render_ticket(
     created_at: str = "",
     effort: str = "",
     source: dict[str, str] | None = None,
+    capture_confidence: str = "",
+    capture_source: str = "",
+    refinement_status: str = "",
+    component: str = "",
+    related_paths: list[str] | None = None,
     tags: list[str] | None = None,
     blocked_by: list[str] | None = None,
     blocks: list[str] | None = None,
     contract_version: str = "1.0",
     defer: dict[str, Any] | None = None,
+    captured_request: str = "",
     approach: str = "",
     acceptance_criteria: list[str] | None = None,
+    next_action: str = "",
     verification: str = "",
     key_files: list[dict[str, str]] | None = None,
     key_file_paths: list[str] | None = None,
@@ -179,10 +187,12 @@ def render_ticket(
     """Render a complete v1.0 ticket markdown file.
 
     Returns the full file content as a string.
-    Section ordering follows the contract: Problem -> Context -> Prior Investigation ->
-    Approach -> Decisions Made -> Acceptance Criteria -> Verification -> Key Files -> Related.
+    Section ordering follows the contract: Captured Request -> Problem -> Next Action
+    -> Context -> Prior Investigation -> Approach -> Decisions Made ->
+    Acceptance Criteria -> Verification -> Key Files -> Related.
     """
     source = source or {"type": "ad-hoc", "ref": "", "session": ""}
+    related_paths = related_paths or []
     tags = tags or []
     blocked_by = blocked_by or []
     blocks = blocks or []
@@ -204,6 +214,16 @@ def render_ticket(
         "ref": source.get("ref", ""),
         "session": source.get("session", ""),
     }
+    if capture_confidence:
+        frontmatter["capture_confidence"] = capture_confidence
+    if capture_source:
+        frontmatter["capture_source"] = capture_source
+    if refinement_status:
+        frontmatter["refinement_status"] = refinement_status
+    if component:
+        frontmatter["component"] = component
+    if related_paths:
+        frontmatter["related_paths"] = related_paths
     frontmatter["tags"] = tags
     frontmatter["blocked_by"] = blocked_by
     frontmatter["blocks"] = blocks
@@ -233,7 +253,11 @@ def render_ticket(
     ]
 
     # --- Required sections ---
+    if captured_request:
+        lines.extend(["## Captured Request", captured_request, ""])
     lines.extend(["## Problem", problem, ""])
+    if next_action:
+        lines.extend(["## Next Action", next_action, ""])
 
     # --- Optional sections (in contract order) ---
     if context:
@@ -257,23 +281,29 @@ def render_ticket(
 
     # Verification.
     if verification:
-        lines.extend([
-            "## Verification",
-            "```bash",
-            verification,
-            "```",
-            "",
-        ])
+        lines.extend(
+            [
+                "## Verification",
+                "```bash",
+                verification,
+                "```",
+                "",
+            ]
+        )
 
     # Key files.
     if key_files:
-        lines.extend([
-            "## Key Files",
-            "| File | Role | Look For |",
-            "|------|------|----------|",
-        ])
+        lines.extend(
+            [
+                "## Key Files",
+                "| File | Role | Look For |",
+                "|------|------|----------|",
+            ]
+        )
         for kf in key_files:
-            lines.append(f"| {kf.get('file', '')} | {kf.get('role', '')} | {kf.get('look_for', '')} |")
+            lines.append(
+                f"| {kf.get('file', '')} | {kf.get('role', '')} | {kf.get('look_for', '')} |"
+            )
         lines.append("")
 
     if related:

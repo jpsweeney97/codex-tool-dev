@@ -3,6 +3,7 @@
 Used by ticket-ops (query/list commands) and ticket-triage.
 Read-only — never modifies ticket files.
 """
+
 from __future__ import annotations
 
 import sys
@@ -12,8 +13,8 @@ sys.dont_write_bytecode = True
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.ticket_paths import discover_project_root, resolve_tickets_dir
-from scripts.ticket_parse import ParsedTicket, parse_ticket
+from scripts.ticket_parse import ParsedTicket, parse_ticket  # noqa: E402
+from scripts.ticket_paths import discover_project_root, resolve_tickets_dir  # noqa: E402
 
 
 def list_tickets(
@@ -95,6 +96,16 @@ def fuzzy_match_id(
     return [t for t in tickets if t.id.startswith(partial_id)]
 
 
+def split_refinement_tickets(tickets: list[ParsedTicket]) -> dict[str, list[ParsedTicket]]:
+    """Split tickets into refinement placeholders and ready candidates."""
+    return {
+        "needs_refinement": [
+            ticket for ticket in tickets if ticket.refinement_status == "needs_refinement"
+        ],
+        "ready": [ticket for ticket in tickets if ticket.refinement_status != "needs_refinement"],
+    }
+
+
 def _ticket_to_dict(ticket: ParsedTicket) -> dict:
     """Convert ParsedTicket to JSON-serializable dict."""
     from scripts.ticket_ux import humanize_state, ticket_identity
@@ -102,9 +113,13 @@ def _ticket_to_dict(ticket: ParsedTicket) -> dict:
     priority_rank = {"critical": "0", "high": "1", "medium": "2", "low": "3"}.get(
         ticket.priority, "9"
     )
-    status_rank = {"blocked": "0", "open": "1", "in_progress": "2", "done": "8", "wontfix": "9"}.get(
-        ticket.status, "7"
-    )
+    status_rank = {
+        "blocked": "0",
+        "open": "1",
+        "in_progress": "2",
+        "done": "8",
+        "wontfix": "9",
+    }.get(ticket.status, "7")
     return {
         "id": ticket.id,
         "title": ticket.title,
@@ -115,6 +130,13 @@ def _ticket_to_dict(ticket: ParsedTicket) -> dict:
         "blocked_by": ticket.blocked_by,
         "blocks": ticket.blocks,
         "path": str(ticket.path),
+        "capture": {
+            "confidence": ticket.capture_confidence,
+            "source": ticket.capture_source,
+            "refinement_status": ticket.refinement_status,
+            "component": ticket.component,
+            "related_paths": ticket.related_paths,
+        },
         "display": {
             "identity": ticket_identity(ticket),
             "status_label": humanize_state(ticket.status),
@@ -181,62 +203,89 @@ def main() -> None:
 
     project_root = discover_project_root(Path.cwd())
     if project_root is None:
-        print(json.dumps({
-            "state": "policy_blocked",
-            "message": "Cannot find project root (no .git or .codex marker in ancestors)",
-            "error_code": "policy_blocked",
-        }))
+        print(
+            json.dumps(
+                {
+                    "state": "policy_blocked",
+                    "message": "Cannot find project root (no .git or .codex marker in ancestors)",
+                    "error_code": "policy_blocked",
+                }
+            )
+        )
         sys.exit(1)
     tickets_dir, path_error = resolve_tickets_dir(args.tickets_dir, project_root=project_root)
     if path_error is not None or tickets_dir is None:
-        print(json.dumps({
-            "state": "policy_blocked",
-            "message": path_error or "tickets_dir validation failed",
-            "error_code": "policy_blocked",
-        }))
+        print(
+            json.dumps(
+                {
+                    "state": "policy_blocked",
+                    "message": path_error or "tickets_dir validation failed",
+                    "error_code": "policy_blocked",
+                }
+            )
+        )
         sys.exit(1)
 
     if args.subcommand == "list":
         tickets = list_tickets(tickets_dir, include_closed=args.include_closed)
         tickets = filter_tickets(
-            tickets, status=args.status, priority=args.priority, tag=args.tag,
+            tickets,
+            status=args.status,
+            priority=args.priority,
+            tag=args.tag,
         )
-        print(json.dumps({
-            "state": "ok",
-            "data": {"tickets": [_ticket_to_dict(t) for t in tickets]},
-        }))
+        print(
+            json.dumps(
+                {
+                    "state": "ok",
+                    "data": {"tickets": [_ticket_to_dict(t) for t in tickets]},
+                }
+            )
+        )
 
     elif args.subcommand == "query":
         all_tickets = list_tickets(tickets_dir, include_closed=True)
         payload = query_tickets_payload(all_tickets, args.search_term)
-        print(json.dumps({
-            "state": "ok",
-            "data": payload,
-        }))
+        print(
+            json.dumps(
+                {
+                    "state": "ok",
+                    "data": payload,
+                }
+            )
+        )
 
     elif args.subcommand == "check":
         from scripts.ticket_ux import close_readiness
 
         ticket = find_ticket_by_id(tickets_dir, args.ticket_id, include_closed=True)
         if ticket is None:
-            print(json.dumps({
-                "state": "not_found",
-                "message": f"Ticket {args.ticket_id} not found",
-                "error_code": "not_found",
-                "data": {"tickets": []},
-            }))
+            print(
+                json.dumps(
+                    {
+                        "state": "not_found",
+                        "message": f"Ticket {args.ticket_id} not found",
+                        "error_code": "not_found",
+                        "data": {"tickets": []},
+                    }
+                )
+            )
             sys.exit(1)
-        print(json.dumps({
-            "state": "ok",
-            "data": {
-                "ticket": _ticket_to_dict(ticket),
-                "close_readiness": close_readiness(
-                    ticket,
-                    tickets_dir,
-                    resolution=args.resolution,
-                ),
-            },
-        }))
+        print(
+            json.dumps(
+                {
+                    "state": "ok",
+                    "data": {
+                        "ticket": _ticket_to_dict(ticket),
+                        "close_readiness": close_readiness(
+                            ticket,
+                            tickets_dir,
+                            resolution=args.resolution,
+                        ),
+                    },
+                }
+            )
+        )
 
 
 if __name__ == "__main__":

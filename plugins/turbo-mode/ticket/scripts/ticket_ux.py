@@ -3,11 +3,11 @@
 This module contains pure formatting and guidance helpers. It does not mutate
 ticket files and does not bypass the ticket engine or guard hook.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-
 
 STATE_LABELS = {
     "ok": "Ready",

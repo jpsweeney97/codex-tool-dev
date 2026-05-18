@@ -44,6 +44,11 @@ Single source of truth for the ticket plugin. All components (skills, agents, en
 | `defer` | object | null | `{active: bool, reason: string, deferred_at: string}` |
 | `key_file_paths` | list[string] | [] | File paths for dedup fingerprinting (persisted on create) |
 | `created_at` | string | "" | ISO 8601 UTC creation timestamp (engine-written, never caller-set) |
+| `capture_confidence` | string | "" | Capture quality hint: low, medium, or high |
+| `capture_source` | string | "" | Capture provenance, e.g. `conversation` |
+| `refinement_status` | string | "" | Optional placeholder-quality marker; only `needs_refinement` is valid |
+| `component` | string | "" | Optional user-facing subsystem/component label |
+| `related_paths` | list[string] | [] | Optional paths mentioned by the captured work |
 
 ### Section Guidance
 
@@ -51,14 +56,25 @@ Recommended core sections: Problem, Approach, Acceptance Criteria, Verification,
 
 Runtime note (v1.0): missing sections are advisory warnings/process failures, not hard runtime schema rejections.
 Runtime note (v1.0): `update` mutates YAML frontmatter only. Section-backed fields are not writable through the `update` action.
+Capture-created tickets support these body sections: Captured Request, Problem, Next Action, Acceptance Criteria.
+Capture metadata never stores a raw user wording field; the rendered Captured Request section is a synthesized ticket section, not schema provenance.
 
 ### Optional Sections
 
-Context, Prior Investigation, Decisions Made, Related, Reopen History
+Captured Request, Next Action, Context, Prior Investigation, Decisions Made, Related, Reopen History
 
 ### Section Ordering
 
-Problem → Context → Prior Investigation → Approach → Decisions Made → Acceptance Criteria → Verification → Key Files → Related → Reopen History
+Captured Request → Problem → Next Action → Context → Prior Investigation → Approach → Decisions Made → Acceptance Criteria → Verification → Key Files → Related → Reopen History
+
+### Capture Refinement Semantics
+
+- `needs_refinement` is metadata, not a lifecycle status. Placeholder-quality tickets keep `status: open`.
+- `Acceptance Criteria: Needs refinement` is allowed only when `refinement_status: needs_refinement` is set.
+- A ticket cannot transition to `done` while `refinement_status: needs_refinement` remains set.
+- A ticket cannot transition to `done` when the only acceptance criterion is `Needs refinement`, even if the metadata was already cleared.
+- Close/readiness reports the precondition as `missing_acceptance_criteria` with the message `Transition to 'done' requires concrete acceptance criteria; ticket still needs refinement`.
+- Controlled auto-tags are `needs-refinement`, `bug`, `feature`, `docs`, `test`, `maintenance`, and `security`. These are not the only globally valid tags; the special coupling is that `needs-refinement` requires `refinement_status: needs_refinement`.
 
 ## 4. Engine Interface
 
@@ -129,7 +145,7 @@ Stage-specific missing-confidence behavior: preflight entrypoints coerce absent 
 
 Agent execute re-reads live `.codex/ticket.local.md` policy and blocks if it diverges from the preflight snapshot.
 
-Field validation: title, problem, and reopen_reason must be strings when present. priority, status, and resolution are validated against contract enums before writes. key_file_paths, tags, blocked_by, blocks, and acceptance_criteria must be lists of strings. source must be a dict with string values. key_files must be a list of dicts. defer must be a dict. Invalid inputs are rejected (need_fields), not silently coerced.
+Field validation: title, problem, reopen_reason, captured_request, next_action, capture_source, and component must be strings when present. priority, status, resolution, capture_confidence, and refinement_status are validated against contract enums before writes. key_file_paths, related_paths, tags, blocked_by, blocks, and acceptance_criteria must be lists of strings. source must be a dict with string values. key_files must be a list of dicts. defer must be a dict. Invalid inputs are rejected (need_fields), not silently coerced.
 
 Renderer invariant: `acceptance_criteria` is create-time `list[string]` input only. Bare strings are rejected before rendering and are not coerced into a single checklist item.
 
@@ -163,7 +179,7 @@ Defense-in-depth: execute stage repeats duplicate checks for create requests to 
 | open | blocked | blocked_by non-empty |
 | in_progress | open | none |
 | in_progress | blocked | blocked_by non-empty |
-| in_progress | done | acceptance criteria present |
+| in_progress | done | acceptance criteria present; no `refinement_status: needs_refinement`; criteria are concrete |
 | blocked | open | all blocked_by resolved (done or wontfix) |
 | blocked | in_progress | all blocked_by resolved |
 | * | wontfix | none |

@@ -7,6 +7,7 @@ and status normalization on read (never writes back).
 Based on handoff plugin's ticket_parsing.py with additions:
 section extraction, legacy detection, status normalization.
 """
+
 from __future__ import annotations
 
 import copy
@@ -102,6 +103,11 @@ class ParsedTicket:
     blocked_by: list[str] = field(default_factory=list)
     blocks: list[str] = field(default_factory=list)
     contract_version: str = ""
+    capture_confidence: str = ""
+    capture_source: str = ""
+    refinement_status: str = ""
+    component: str = ""
+    related_paths: list[str] = field(default_factory=list)
     defer: dict[str, Any] | None = None
     body: str = ""
 
@@ -173,7 +179,7 @@ def extract_title(text: str, ticket_id: str) -> str:
 
     prefix = f"{ticket_id}:"
     if heading.startswith(prefix):
-        return heading[len(prefix):].strip()
+        return heading[len(prefix) :].strip()
     return heading
 
 
@@ -324,7 +330,7 @@ def parse_ticket(path: Path) -> ParsedTicket | None:
 
     # Extract body (everything after the closing ``` of the YAML block).
     m = _FENCED_YAML_RE.search(text)
-    body = text[m.end():].strip() if m else ""
+    body = text[m.end() :].strip() if m else ""
 
     # Extract and rename sections.
     sections = extract_sections(body)
@@ -352,6 +358,11 @@ def parse_ticket(path: Path) -> ParsedTicket | None:
         blocked_by=frontmatter.get("blocked_by", []),
         blocks=frontmatter.get("blocks", []),
         contract_version=frontmatter.get("contract_version", ""),
+        capture_confidence=frontmatter.get("capture_confidence", ""),
+        capture_source=frontmatter.get("capture_source", ""),
+        refinement_status=frontmatter.get("refinement_status", ""),
+        component=frontmatter.get("component", ""),
+        related_paths=frontmatter.get("related_paths", []),
         defer=frontmatter.get("defer"),
         body=body,
     )

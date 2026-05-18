@@ -5,6 +5,7 @@ render_ticket(), or YAML replacement. Rejects invalid inputs; omitted
 fields are not errors (defaults are applied by the engine, not the
 validator).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -12,6 +13,19 @@ from typing import Any
 VALID_PRIORITIES = frozenset({"critical", "high", "medium", "low"})
 VALID_STATUSES = frozenset({"open", "in_progress", "blocked", "done", "wontfix"})
 VALID_RESOLUTIONS = frozenset({"done", "wontfix"})
+VALID_CAPTURE_CONFIDENCE = frozenset({"low", "medium", "high"})
+VALID_REFINEMENT_STATUSES = frozenset({"needs_refinement"})
+CONTROLLED_CAPTURE_TAGS = frozenset(
+    {
+        "needs-refinement",
+        "bug",
+        "feature",
+        "docs",
+        "test",
+        "maintenance",
+        "security",
+    }
+)
 
 
 def _validate_string_field(fields: dict[str, Any], key: str, errors: list[str]) -> None:
@@ -28,30 +42,44 @@ def validate_fields(fields: dict[str, Any]) -> list[str]:
     errors: list[str] = []
 
     # --- String fields ---
-    for key in ("title", "problem", "reopen_reason"):
+    for key in (
+        "title",
+        "problem",
+        "reopen_reason",
+        "captured_request",
+        "next_action",
+        "capture_source",
+        "component",
+    ):
         _validate_string_field(fields, key, errors)
 
     # --- Enum fields ---
     if "priority" in fields:
         v = fields["priority"]
         if not isinstance(v, str) or v not in VALID_PRIORITIES:
-            errors.append(
-                f"priority must be one of {sorted(VALID_PRIORITIES)}, got {v!r}"
-            )
+            errors.append(f"priority must be one of {sorted(VALID_PRIORITIES)}, got {v!r}")
 
     if "status" in fields:
         v = fields["status"]
         if not isinstance(v, str) or v not in VALID_STATUSES:
-            errors.append(
-                f"status must be one of {sorted(VALID_STATUSES)}, got {v!r}"
-            )
+            errors.append(f"status must be one of {sorted(VALID_STATUSES)}, got {v!r}")
 
     if "resolution" in fields:
         v = fields["resolution"]
         if not isinstance(v, str) or v not in VALID_RESOLUTIONS:
+            errors.append(f"resolution must be one of {sorted(VALID_RESOLUTIONS)}, got {v!r}")
+
+    if "capture_confidence" in fields:
+        v = fields["capture_confidence"]
+        if not isinstance(v, str) or v not in VALID_CAPTURE_CONFIDENCE:
             errors.append(
-                f"resolution must be one of {sorted(VALID_RESOLUTIONS)}, got {v!r}"
+                f"capture_confidence must be one of {sorted(VALID_CAPTURE_CONFIDENCE)}, got {v!r}"
             )
+
+    if "refinement_status" in fields:
+        v = fields["refinement_status"]
+        if not isinstance(v, str) or v not in VALID_REFINEMENT_STATUSES:
+            errors.append(f"refinement_status must be 'needs_refinement', got {v!r}")
 
     # --- List-of-string fields ---
     for key in ("tags", "blocked_by", "blocks", "acceptance_criteria"):
@@ -61,6 +89,31 @@ def validate_fields(fields: dict[str, Any]) -> list[str]:
                 errors.append(f"{key} must be a list, got {type(v).__name__}")
             elif not all(isinstance(item, str) for item in v):
                 errors.append(f"{key} must contain only strings")
+
+    if "related_paths" in fields:
+        v = fields["related_paths"]
+        if not isinstance(v, list):
+            errors.append(f"related_paths must be a list, got {type(v).__name__}")
+        elif not all(isinstance(item, str) for item in v):
+            errors.append("related_paths must contain only strings")
+
+    if (
+        fields.get("refinement_status") != "needs_refinement"
+        and "acceptance_criteria" in fields
+        and isinstance(fields["acceptance_criteria"], list)
+        and any(item == "Needs refinement" for item in fields["acceptance_criteria"])
+    ):
+        errors.append(
+            "acceptance_criteria Needs refinement requires refinement_status=needs_refinement"
+        )
+
+    if (
+        fields.get("refinement_status") != "needs_refinement"
+        and "tags" in fields
+        and isinstance(fields["tags"], list)
+        and "needs-refinement" in fields["tags"]
+    ):
+        errors.append("tag needs-refinement requires refinement_status=needs_refinement")
 
     # --- source: require {type, ref, session} per contract §3 ---
     if "source" in fields:
