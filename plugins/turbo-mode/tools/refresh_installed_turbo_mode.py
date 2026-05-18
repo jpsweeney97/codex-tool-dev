@@ -49,13 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument("--dry-run", action="store_true")
     modes.add_argument("--plan-refresh", action="store_true")
-    modes.add_argument("--refresh", action="store_true")
     modes.add_argument("--guarded-refresh", action="store_true")
     modes.add_argument("--recover", metavar="RUN_ID")
     modes.add_argument("--certify-retained-run", metavar="RUN_ID")
     modes.add_argument("--seed-isolated-rehearsal-home", action="store_true")
     modes.add_argument("--generate-guarded-refresh-approval", action="store_true")
-    parser.add_argument("--smoke", choices=("light", "standard"))
+    parser.add_argument("--smoke", choices=("standard",))
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--codex-home", type=Path, default=Path.home() / ".codex")
     parser.add_argument("--run-id")
@@ -76,8 +75,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.refresh:
-        parser.error("--refresh is outside non-mutating refresh planning")
     if args.isolated_rehearsal and not args.guarded_refresh:
         parser.error("--isolated-rehearsal requires --guarded-refresh")
     if args.smoke is not None and not args.guarded_refresh:
@@ -291,6 +288,8 @@ def main(argv: list[str] | None = None) -> int:
         if result.future_external_command is not None:
             print(f"future_external_command: {result.future_external_command}")
             print(f"requires_plan: {result.requires_plan}")
+        if result.dev_refresh_command is not None:
+            print(f"dev_refresh_command: {result.dev_refresh_command}")
     return 0
 
 

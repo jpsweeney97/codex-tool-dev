@@ -26,7 +26,8 @@ from refresh.models import (
     SelectedMutationMode,
     TerminalPlanStatus,
 )
-from refresh.planner import RefreshPaths, RefreshPlanResult, RuntimeConfigCheck
+from refresh.paths import RefreshPaths
+from refresh.planner import RefreshPlanResult, RuntimeConfigCheck
 
 TOOL_PATH = Path("plugins/turbo-mode/tools/refresh_installed_turbo_mode.py")
 MALICIOUS_FAILURE = (

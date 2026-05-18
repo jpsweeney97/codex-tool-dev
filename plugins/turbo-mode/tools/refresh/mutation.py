@@ -53,7 +53,8 @@ from .lock_state import (
 )
 from .manifests import build_manifest, diff_manifests
 from .models import DiffEntry, DiffKind, PluginSpec, RefreshError, fail
-from .planner import RefreshPaths, build_plugin_specs, plan_refresh
+from .paths import RefreshPaths
+from .planner import build_plugin_specs, plan_refresh
 from .process_gate import capture_process_gate
 from .publication import (
     PublicationReplayPaths,

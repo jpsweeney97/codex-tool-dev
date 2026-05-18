@@ -39,7 +39,7 @@ from refresh.app_server_inventory import (
     write_json_artifact,
 )
 from refresh.models import RefreshError
-from refresh.planner import RefreshPaths
+from refresh.paths import RefreshPaths
 
 REAL_HOME_TICKET_COMMAND = (
     "python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/"

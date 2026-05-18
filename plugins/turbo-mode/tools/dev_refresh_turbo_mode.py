@@ -41,8 +41,7 @@ from refresh.models import (  # noqa: E402
     ResidueIssue,
     fail,
 )
-from refresh.paths import canonical_key  # noqa: E402
-from refresh.planner import RefreshPaths, build_paths  # noqa: E402
+from refresh.paths import RefreshPaths, build_paths, canonical_key  # noqa: E402
 
 Roundtrip = Callable[..., list[dict[str, object]]]
 InventoryCollector = Callable[
@@ -88,6 +87,7 @@ def load_marketplace_plugin_specs(
             cache_root = Path("plugins/cache") / marketplace_name / name / version
         else:
             source_root = (repo_root / source_path).resolve(strict=False)
+            version = _read_plugin_manifest_version(source_root, expected_name=name)
             cache_root = codex_home / "plugins/cache" / marketplace_name / name / version
         specs.append(
             PluginSpec(
@@ -265,6 +265,27 @@ def _read_marketplace(marketplace_path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         fail("read dev marketplace", "marketplace payload must be an object", payload)
     return payload
+
+
+def _read_plugin_manifest_version(source_root: Path, *, expected_name: str) -> str:
+    manifest_path = source_root / ".codex-plugin/plugin.json"
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        fail("read dev plugin manifest", str(exc), str(manifest_path))
+    if not isinstance(payload, dict):
+        fail("read dev plugin manifest", "plugin manifest must be an object", payload)
+    name = payload.get("name")
+    if name != expected_name:
+        fail("read dev plugin manifest", "plugin manifest name mismatch", name)
+    version = payload.get("version")
+    if not isinstance(version, str) or not version:
+        fail(
+            "read dev plugin manifest",
+            "plugin manifest version must be a non-empty string",
+            version,
+        )
+    return version
 
 
 def _validate_dev_install_transcript(

@@ -24,8 +24,8 @@ from refresh.models import (
     SelectedMutationMode,
     TerminalPlanStatus,
 )
+from refresh.paths import build_paths
 from refresh.planner import (
-    build_paths,
     build_plugin_specs,
     plan_refresh,
     read_runtime_config_state,
@@ -714,6 +714,33 @@ def test_plan_refresh_fast_safe_drift_allows_refresh(tmp_path: Path) -> None:
     assert [item.outcome for item in result.diff_classification] == [
         PathOutcome.FAST_SAFE_WITH_COVERED_SMOKE
     ]
+
+
+def test_plan_refresh_fast_safe_drift_recommends_dev_refresh(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    write_plugin_pair(
+        repo_root,
+        codex_home,
+        plugin="handoff",
+        version="1.6.0",
+        rel="scripts/search.py",
+        source_text="print('new')\n",
+        cache_text="print('old')\n",
+    )
+
+    result = plan_refresh(repo_root=repo_root, codex_home=codex_home, mode="plan-refresh")
+
+    assert result.axes.selected_mutation_mode == SelectedMutationMode.REFRESH
+    assert result.mutation_command_available is False
+    assert result.requires_plan is None
+    assert result.future_external_command is None
+    assert result.dev_refresh_command == "npm run turbo:dev-refresh"
 
 
 def test_plan_refresh_guarded_drift_requires_guarded_refresh(tmp_path: Path) -> None:

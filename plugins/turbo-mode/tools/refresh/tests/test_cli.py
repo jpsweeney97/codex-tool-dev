@@ -502,7 +502,7 @@ def test_cli_inventory_check_collects_runtime_inventory(tmp_path: Path) -> None:
     assert transcript.is_file()
 
 
-def test_cli_plan_refresh_emits_future_command_advice_for_fast_safe_drift(
+def test_cli_plan_refresh_emits_dev_refresh_advice_for_fast_safe_drift(
     tmp_path: Path,
 ) -> None:
     repo_root = tmp_path / "repo"
@@ -539,8 +539,9 @@ def test_cli_plan_refresh_emits_future_command_advice_for_fast_safe_drift(
     assert payload["axes"]["filesystem_state"] == "drift"
     assert payload["axes"]["runtime_config_state"] == "unchecked"
     assert payload["mutation_command_available"] is False
-    assert payload["requires_plan"] == "future-mutation-plan"
-    assert payload["future_external_command"].endswith("--refresh --smoke light")
+    assert payload["requires_plan"] is None
+    assert payload["future_external_command"] is None
+    assert payload["dev_refresh_command"] == "npm run turbo:dev-refresh"
 
 
 def test_cli_bare_invocation_does_not_write_bytecode(tmp_path: Path) -> None:
@@ -659,19 +660,18 @@ def test_cli_evidence_path_errors_report_without_traceback(tmp_path: Path) -> No
     assert "Traceback" not in completed.stderr
 
 
-def test_cli_rejects_mutation_modes_in_plan_02() -> None:
-    completed = run_tool(["--refresh"])
+def test_cli_rejects_refresh_as_unknown_mode() -> None:
+    completed = run_tool(["--dry-run", "--refresh"])
 
     assert completed.returncode == 2
-    assert "--refresh is outside non-mutating refresh planning" in completed.stderr
+    assert "unrecognized arguments: --refresh" in completed.stderr
 
 
-def test_cli_rejects_refresh_future_command_shape_with_plan_neutral_message() -> None:
-    refresh = run_tool(["--refresh", "--smoke", "light"])
+def test_cli_rejects_light_smoke_tier() -> None:
+    refresh = run_tool(["--dry-run", "--smoke", "light"])
 
     assert refresh.returncode == 2
-    assert "--refresh is outside non-mutating refresh planning" in refresh.stderr
-    assert "unrecognized arguments" not in refresh.stderr
+    assert "invalid choice: 'light'" in refresh.stderr
 
 
 def test_cli_guarded_refresh_requires_source_identity_before_planning(tmp_path: Path) -> None:
@@ -2319,7 +2319,7 @@ def test_cli_record_summary_fails_when_plugin_source_surfaces_are_dirty(
     assert not (codex_home / "local-only/turbo-mode-refresh/dirty-plugin-source").exists()
 
 
-def test_cli_refresh_modes_use_plan_neutral_error_wording(tmp_path: Path) -> None:
+def test_cli_refresh_mode_is_not_a_command_surface(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     codex_home = tmp_path / ".codex"
     write_valid_marketplace(repo_root)
@@ -2328,6 +2328,7 @@ def test_cli_refresh_modes_use_plan_neutral_error_wording(tmp_path: Path) -> Non
 
     completed = run_tool(
         [
+            "--dry-run",
             "--refresh",
             "--repo-root",
             str(repo_root),
@@ -2337,8 +2338,7 @@ def test_cli_refresh_modes_use_plan_neutral_error_wording(tmp_path: Path) -> Non
     )
 
     assert completed.returncode == 2
-    assert "outside non-mutating refresh planning" in completed.stderr
-    assert "outside Plan 04" not in completed.stderr
+    assert "unrecognized arguments: --refresh" in completed.stderr
 
 
 def test_cli_record_summary_allows_unrelated_dirty_path(tmp_path: Path) -> None:

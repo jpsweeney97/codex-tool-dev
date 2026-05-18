@@ -26,7 +26,8 @@ from refresh.models import (
     SelectedMutationMode,
     TerminalPlanStatus,
 )
-from refresh.planner import RefreshPaths, RefreshPlanResult
+from refresh.paths import RefreshPaths
+from refresh.planner import RefreshPlanResult
 from refresh.validation import (
     assert_commit_safe_payload,
     projected_summary_for_validator_digest,

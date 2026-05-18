@@ -9,6 +9,7 @@ import pytest
 from dev_refresh_turbo_mode import (
     build_dev_install_requests,
     load_marketplace_plugin_names,
+    load_marketplace_plugin_specs,
     run_dev_refresh,
 )
 
@@ -49,9 +50,19 @@ def seed_source_marketplace(repo_root: Path, *, ticket_hook_command: str | None 
     ticket_root = repo_root / "plugins/turbo-mode/ticket/1.4.0"
     handoff_root.mkdir(parents=True)
     ticket_root.mkdir(parents=True)
+    (handoff_root / ".codex-plugin").mkdir()
+    (handoff_root / ".codex-plugin/plugin.json").write_text(
+        json.dumps({"name": "handoff", "version": "1.6.0"}),
+        encoding="utf-8",
+    )
     (handoff_root / "README.md").write_text("handoff source\n", encoding="utf-8")
     (handoff_root / "hooks").mkdir()
     (handoff_root / "hooks/hooks.json").write_text('{"hooks": {}}\n', encoding="utf-8")
+    (ticket_root / ".codex-plugin").mkdir()
+    (ticket_root / ".codex-plugin/plugin.json").write_text(
+        json.dumps({"name": "ticket", "version": "1.4.0"}),
+        encoding="utf-8",
+    )
     (ticket_root / "README.md").write_text("ticket source\n", encoding="utf-8")
     (ticket_root / "hooks").mkdir()
     (ticket_root / "hooks/ticket_engine_guard.py").write_text(
@@ -109,6 +120,33 @@ def test_build_dev_install_requests_refreshes_entire_marketplace(tmp_path: Path)
         "handoff",
         "ticket",
     ]
+
+
+def test_marketplace_specs_use_plugin_manifest_version_for_cache_root(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    repo_root.mkdir()
+    write_marketplace(repo_root)
+    seed_source_marketplace(repo_root)
+    handoff_manifest = (
+        repo_root
+        / "plugins/turbo-mode/handoff/1.6.0/.codex-plugin/plugin.json"
+    )
+    handoff_manifest.write_text(
+        json.dumps({"name": "handoff", "version": "1.7.0"}),
+        encoding="utf-8",
+    )
+
+    specs = load_marketplace_plugin_specs(
+        repo_root / ".agents/plugins/marketplace.json",
+        repo_root,
+        codex_home,
+    )
+
+    handoff_spec = next(spec for spec in specs if spec.name == "handoff")
+    assert handoff_spec.source_root == repo_root / "plugins/turbo-mode/handoff/1.6.0"
+    assert handoff_spec.version == "1.7.0"
+    assert handoff_spec.cache_root == codex_home / "plugins/cache/turbo-mode/handoff/1.7.0"
 
 
 def test_run_dev_refresh_installs_marketplace_and_writes_proof(
@@ -308,3 +346,11 @@ def test_package_alias_points_at_dev_refresh_lane() -> None:
     assert "plugins/turbo-mode/tools/dev_refresh_turbo_mode.py --verify --json" in script
     assert "refresh_installed_turbo_mode.py" not in script
     assert "--guarded-refresh" not in script
+
+
+def test_dev_refresh_lane_does_not_import_planner() -> None:
+    source = (REPO_ROOT / "plugins/turbo-mode/tools/dev_refresh_turbo_mode.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "from refresh.planner" not in source

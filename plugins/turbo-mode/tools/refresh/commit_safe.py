@@ -11,11 +11,9 @@ from .app_server_inventory import collect_readonly_runtime_inventory
 from .evidence import SCHEMA_VERSION as LOCAL_ONLY_SCHEMA_VERSION
 from .manifests import build_manifest
 from .models import RefreshError
+from .paths import MARKETPLACE_RELATIVE_PATH, RefreshPaths, build_paths
 from .planner import (
-    MARKETPLACE_RELATIVE_PATH,
-    RefreshPaths,
     RefreshPlanResult,
-    build_paths,
     build_plugin_specs,
     read_runtime_config_state,
 )
