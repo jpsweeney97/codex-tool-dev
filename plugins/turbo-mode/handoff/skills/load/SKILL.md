@@ -8,6 +8,10 @@ allowed-tools: Write, Read, Edit, Glob, Grep, Bash
 
 Resume work from an existing Handoff artifact. Loading may archive or copy the selected handoff and writes resume state under `<project_root>/.codex/handoffs/.session-state/handoff-<project>-<resume_token>.json`.
 
+The plugin writes filesystem artifacts only. It does not add gitignore rules, stage files, or auto-commit files. Whether `.codex/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
+
+Handoff does not ship plugin-bundled command hooks. Run the load helper directly with the resolved plugin root.
+
 Read these only when needed:
 - [handoff-contract.md](../../references/handoff-contract.md) for frontmatter, chain protocol, and type semantics.
 - [format-reference.md](../../references/format-reference.md) for document content expectations.
