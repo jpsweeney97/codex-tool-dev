@@ -8,7 +8,7 @@
       "name": "handoff",
       "source": {
         "source": "local",
-        "path": "./plugins/turbo-mode/handoff/1.7.0"
+        "path": "./plugins/turbo-mode/handoff"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -20,7 +20,7 @@
       "name": "ticket",
       "source": {
         "source": "local",
-        "path": "./plugins/turbo-mode/ticket/1.4.0"
+        "path": "./plugins/turbo-mode/ticket"
       },
       "policy": {
         "installation": "AVAILABLE",

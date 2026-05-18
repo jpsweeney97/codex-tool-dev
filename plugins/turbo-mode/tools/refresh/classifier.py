@@ -24,6 +24,7 @@ DOC_ROOT_PATTERNS = (
 
 HANDOFF_RUNTIME_SOURCE_PATTERNS = (
     "handoff/1.6.0/turbo_mode_handoff_runtime/*.py",
+    "handoff/turbo_mode_handoff_runtime/*.py",
 )
 
 GUARDED_ONLY_PATTERNS = (
@@ -430,102 +431,102 @@ HANDOFF_STATE_HELPER_DOC_CONTRACTS = {
 }
 
 HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS = {
-    "handoff/1.6.0/CHANGELOG.md": HandoffStorageGate5RefreshContract(
+    "handoff/CHANGELOG.md": HandoffStorageGate5RefreshContract(
         kind=DiffKind.CHANGED,
         source_sha256="44da8da20a199dbfb57e83aea1e4096b81e20908c799cad487bbf19c201bd076",
         cache_sha256="0ddec803b46490b5fbc73e19b5f3a02854d47329ff22c5f74ec47b3d049f7f9d",
     ),
-    "handoff/1.6.0/README.md": HandoffStorageGate5RefreshContract(
+    "handoff/README.md": HandoffStorageGate5RefreshContract(
         kind=DiffKind.CHANGED,
-        source_sha256="c63ea81ff3434d941f29497225d1744fd4a71f3199b32c9eb88ee071e2960550",
+        source_sha256="1eecffca229f37409a4062891edaf5687730c624dfd5e6503be1a918d35efc22",
         cache_sha256="00c3a9bce7a07ccff1ac6a138609045882662d04c059811ff16fbd24862d1aa8",
     ),
-    "handoff/1.6.0/references/format-reference.md": HandoffStorageGate5RefreshContract(
+    "handoff/references/format-reference.md": HandoffStorageGate5RefreshContract(
         kind=DiffKind.CHANGED,
         source_sha256="e01c801e822d51e027b165a790524dde46d41a8609e077ff32215da94d0fdb7e",
         cache_sha256="41e353acf8c373fa25c3de9109a3352253a11aa1d5993045785045c12120a451",
     ),
-    "handoff/1.6.0/references/handoff-contract.md": HandoffStorageGate5RefreshContract(
+    "handoff/references/handoff-contract.md": HandoffStorageGate5RefreshContract(
         kind=DiffKind.CHANGED,
         source_sha256="4fd1a12eb4eb6d81af4cbd7c5f0dda9d8df648b789b2f9bfb25b64f5c6b1d9eb",
         cache_sha256="381e32adf508b769c46ba3ab07d6d7414d95b72dccf51e8627ba878667137571",
     ),
-    "handoff/1.6.0/turbo_mode_handoff_runtime/active_writes.py": HandoffStorageGate5RefreshContract(
+    "handoff/turbo_mode_handoff_runtime/active_writes.py": HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
         source_sha256="87c9fb302f05fc214df75e4ab188506b82b59f720f6334b7aacfacff805185e8",
         cache_sha256=None,
     ),
-    "handoff/1.6.0/scripts/distill.py": HandoffStorageGate5RefreshContract(
+    "handoff/scripts/distill.py": HandoffStorageGate5RefreshContract(
         kind=DiffKind.CHANGED,
         source_sha256="089ea3a0616b5a239154f29881981fb62783f79b093b976eaacd65bd44c7169c",
         cache_sha256="83a60c1479cf8842645e131e4ae74215b8c49820c151dcb312ba592c100393c6",
     ),
     (
-        "handoff/1.6.0/turbo_mode_handoff_runtime/installed_host_harness.py"
+        "handoff/turbo_mode_handoff_runtime/installed_host_harness.py"
     ): HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
-        source_sha256="f8f459c16060db6e18f8c461bba34d49cc49e855cefaef6b0f722169f0af3800",
+        source_sha256="ab527f284db99416d74d19f28c9ab41f107afd514145192ae486d058ac27c236",
         cache_sha256=None,
     ),
-    "handoff/1.6.0/scripts/list_handoffs.py": HandoffStorageGate5RefreshContract(
+    "handoff/scripts/list_handoffs.py": HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
         source_sha256="b77c5557a7741c20f3e03533bcba1955500eda474ef9ed868774034bc05f6cb2",
         cache_sha256=None,
     ),
-    "handoff/1.6.0/scripts/load_transactions.py": HandoffStorageGate5RefreshContract(
+    "handoff/scripts/load_transactions.py": HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
         source_sha256="023a54db31ab3f73a5cf6b96179df572355b9a16fdc05e8d84c648b733f0ca5a",
         cache_sha256=None,
     ),
-    "handoff/1.6.0/turbo_mode_handoff_runtime/project_paths.py": HandoffStorageGate5RefreshContract(
+    "handoff/turbo_mode_handoff_runtime/project_paths.py": HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
         source_sha256="352ec06014bc149b1fbae365188335cc2001712b624d43e0060de8a1cf59719c",
         cache_sha256=None,
     ),
-    "handoff/1.6.0/turbo_mode_handoff_runtime/quality_check.py": HandoffStorageGate5RefreshContract(
+    "handoff/turbo_mode_handoff_runtime/quality_check.py": HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
-        source_sha256="ef891bdc8b5801f28f00d67c79e72677f0b871cdfcfbeaaca9c72538fffd2b8a",
+        source_sha256="b3022a1e22c29384e36137be49f7d726d848f0215e4ad8660aec9eb3414d22e3",
         cache_sha256=None,
     ),
     (
-        "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority.py"
+        "handoff/turbo_mode_handoff_runtime/storage_authority.py"
     ): HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
         source_sha256="1d2c6ba474e310746be0ebbc17db1538807e2034b9101e965bd9d1529ea288e6",
         cache_sha256=None,
     ),
     (
-        "handoff/1.6.0/turbo_mode_handoff_runtime/storage_authority_inventory.py"
+        "handoff/turbo_mode_handoff_runtime/storage_authority_inventory.py"
     ): HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
-        source_sha256="bd77e9e7770f676917f9b89d7a13c86e58110ec7b6e035c424b72003853f735b",
+        source_sha256="fe0581d0fa920f21eb9c56b94ed0e5cff12e417a2fff8e005b4faac611116b1c",
         cache_sha256=None,
     ),
     (
-        "handoff/1.6.0/turbo_mode_handoff_runtime/storage_primitives.py"
+        "handoff/turbo_mode_handoff_runtime/storage_primitives.py"
     ): HandoffStorageGate5RefreshContract(
         kind=DiffKind.ADDED,
         source_sha256="c03a85b69a0233b31b267d70e98a7e9efa2ad2b52beeb93750dc5d299956e8d3",
         cache_sha256=None,
     ),
-    "handoff/1.6.0/skills/load/SKILL.md": HandoffStorageGate5RefreshContract(
+    "handoff/skills/load/SKILL.md": HandoffStorageGate5RefreshContract(
         kind=DiffKind.CHANGED,
-        source_sha256="7b63bb75df63d4d0699559987a0775d64dc1166b9417627df8eb456d8e3393a9",
+        source_sha256="7e8e22f9837cf9cad2b50d599ad4f9079ad77cdf904998adc76d7ed4ca2eaa95",
         cache_sha256="ccbc7a20aa346d6d65e3861b62fd551d37ec44a43538685bfd09ef14b16b5698",
     ),
-    "handoff/1.6.0/skills/quicksave/SKILL.md": HandoffStorageGate5RefreshContract(
+    "handoff/skills/quicksave/SKILL.md": HandoffStorageGate5RefreshContract(
         kind=DiffKind.CHANGED,
-        source_sha256="d9eaaae771d9db3601ee25df8d979cc22b16ce3c5e9a65b0fae31ece7252b91e",
+        source_sha256="83ad9d86a6a22ee9f967f437c9ac65bdfa458ed423e32f371db5fb5de174cae2",
         cache_sha256="ac1430c96316f8fa60971bf20a7d55b98b60e03baac73e91cabbf2995cba56aa",
     ),
-    "handoff/1.6.0/skills/save/SKILL.md": HandoffStorageGate5RefreshContract(
+    "handoff/skills/save/SKILL.md": HandoffStorageGate5RefreshContract(
         kind=DiffKind.CHANGED,
-        source_sha256="e493daf679cb63f4ee222440dc22ae8700df4880dc8dc6f1912b53b879aebb1d",
+        source_sha256="147e1411c6b0ee3f249639155d795172c4628b2732598339c75f01f8132ffac4",
         cache_sha256="377609aefd7bd567c68ee71cbd620b0f03a16bcd4e04dd70a9310cc8132f37ae",
     ),
-    "handoff/1.6.0/skills/summary/SKILL.md": HandoffStorageGate5RefreshContract(
+    "handoff/skills/summary/SKILL.md": HandoffStorageGate5RefreshContract(
         kind=DiffKind.CHANGED,
-        source_sha256="8b3585333f2a5745dd603b2a586bde0e3f3dfff6ce377bffa0b2e22baa543771",
+        source_sha256="bd417cd918974ced7f6e6a2351da77c706663666b737bbb1fec8fdd9eecd0d55",
         cache_sha256="108c18afd8cf8716b058dbfc1aee8e6db6007f8828025faa74fac16993c576b0",
     ),
 }

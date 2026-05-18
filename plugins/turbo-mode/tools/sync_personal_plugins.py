@@ -13,18 +13,9 @@ from typing import Any
 
 sys.dont_write_bytecode = True
 
-PLUGIN_SOURCE_RELS: dict[str, Path] = {
-    "handoff": Path("plugins/turbo-mode/handoff/1.7.0"),
-    "ticket": Path("plugins/turbo-mode/ticket/1.4.0"),
-}
-PERSONAL_PLUGIN_TARGET_RELS: dict[str, Path] = {
-    "handoff": Path("plugins/handoff"),
-    "ticket": Path("plugins/ticket"),
-}
-PERSONAL_MARKETPLACE_RELATIVE_PATHS: dict[str, str] = {
-    "handoff": "./.codex/plugins/handoff",
-    "ticket": "./.codex/plugins/ticket",
-}
+PLUGIN_SOURCE_PARENT_REL = Path("plugins/turbo-mode")
+PERSONAL_PLUGIN_PARENT_REL = Path("plugins")
+PERSONAL_MARKETPLACE_PLUGIN_PREFIX = "./.codex/plugins"
 EXCLUDED_DIR_NAMES = frozenset(
     {
         ".mypy_cache",
@@ -78,11 +69,8 @@ def build_sync_plan(
         else (Path.home() / ".agents").resolve(strict=False)
     )
     items: list[SyncPlanItem] = []
-    for plugin, source_rel in PLUGIN_SOURCE_RELS.items():
-        source_root = resolved_repo_root / source_rel
-        target_root = resolved_codex_home / PERSONAL_PLUGIN_TARGET_RELS[plugin]
-        if not source_root.is_dir():
-            fail("build personal plugin sync plan", "missing source root", source_root)
+    for plugin, source_root in discover_plugin_source_roots(resolved_repo_root):
+        target_root = resolved_codex_home / PERSONAL_PLUGIN_PARENT_REL / plugin
         items.append(
             SyncPlanItem(
                 plugin=plugin,
@@ -99,7 +87,63 @@ def build_sync_plan(
     )
 
 
-def build_personal_marketplace_payload() -> dict[str, Any]:
+def discover_plugin_source_roots(repo_root: Path) -> tuple[tuple[str, Path], ...]:
+    """Discover configured Turbo Mode plugin source roots from plugin manifests."""
+
+    source_parent = repo_root / PLUGIN_SOURCE_PARENT_REL
+    if not source_parent.is_dir():
+        fail("discover Turbo Mode plugin source roots", "missing source parent", source_parent)
+
+    discovered: list[tuple[str, Path]] = []
+    seen_names: dict[str, Path] = {}
+    for candidate in sorted(source_parent.iterdir(), key=lambda path: path.name):
+        if not candidate.is_dir():
+            continue
+        manifest_path = candidate / ".codex-plugin/plugin.json"
+        if not manifest_path.is_file():
+            continue
+        manifest = read_plugin_manifest(manifest_path)
+        plugin_name = manifest.get("name")
+        if not isinstance(plugin_name, str) or not plugin_name.strip():
+            fail("discover Turbo Mode plugin source roots", "missing plugin name", manifest_path)
+        plugin = plugin_name.strip()
+        validate_plugin_name(plugin, manifest_path)
+        if plugin in seen_names:
+            fail(
+                "discover Turbo Mode plugin source roots",
+                f"duplicate plugin name also found at {seen_names[plugin]}",
+                manifest_path,
+            )
+        seen_names[plugin] = manifest_path
+        discovered.append((plugin, candidate))
+
+    if not discovered:
+        fail("discover Turbo Mode plugin source roots", "no plugin manifests found", source_parent)
+    return tuple(sorted(discovered, key=lambda item: item[0]))
+
+
+def read_plugin_manifest(manifest_path: Path) -> dict[str, Any]:
+    """Read a plugin manifest from a configured plugin source root."""
+
+    try:
+        loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        fail("read plugin manifest", str(exc), manifest_path)
+    except json.JSONDecodeError as exc:
+        fail("read plugin manifest", str(exc), manifest_path)
+    if not isinstance(loaded, dict):
+        fail("read plugin manifest", "manifest must be a JSON object", manifest_path)
+    return loaded
+
+
+def validate_plugin_name(plugin: str, manifest_path: Path) -> None:
+    """Reject manifest names that cannot be used as personal plugin directories."""
+
+    if plugin in {".", ".."} or "/" in plugin or "\\" in plugin:
+        fail("discover Turbo Mode plugin source roots", "invalid plugin name", manifest_path)
+
+
+def build_personal_marketplace_payload(items: tuple[SyncPlanItem, ...]) -> dict[str, Any]:
     """Return the intended personal marketplace descriptor."""
 
     return {
@@ -112,7 +156,7 @@ def build_personal_marketplace_payload() -> dict[str, Any]:
                 "name": plugin,
                 "source": {
                     "source": "local",
-                    "path": PERSONAL_MARKETPLACE_RELATIVE_PATHS[plugin],
+                    "path": f"{PERSONAL_MARKETPLACE_PLUGIN_PREFIX}/{plugin}",
                 },
                 "policy": {
                     "installation": "AVAILABLE",
@@ -120,7 +164,7 @@ def build_personal_marketplace_payload() -> dict[str, Any]:
                 },
                 "category": "Productivity",
             }
-            for plugin in PLUGIN_SOURCE_RELS
+            for plugin in (item.plugin for item in items)
         ],
     }
 
@@ -192,10 +236,14 @@ def copy_plugin_tree(*, source_root: Path, target_root: Path) -> None:
             shutil.rmtree(backup_root)
 
 
-def write_personal_marketplace(*, marketplace_path: Path) -> None:
+def write_personal_marketplace(
+    *,
+    marketplace_path: Path,
+    items: tuple[SyncPlanItem, ...],
+) -> None:
     """Write the personal marketplace descriptor to an explicit destination."""
 
-    payload = build_personal_marketplace_payload()
+    payload = build_personal_marketplace_payload(items)
     marketplace_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = marketplace_path.with_name(f".{marketplace_path.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -251,7 +299,7 @@ def print_plan(plan: SyncPlan) -> None:
         print(f"- {item.plugin}: {item.source_root} -> {item.target_root}")
     print(f"personal marketplace path: {plan.marketplace_path}")
     print("personal marketplace JSON:")
-    print(json.dumps(build_personal_marketplace_payload(), indent=2))
+    print(json.dumps(build_personal_marketplace_payload(plan.items), indent=2))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -287,7 +335,10 @@ def main(argv: list[str] | None = None) -> int:
             print("sync completed:")
             print(json.dumps(summary, indent=2))
         if args.write_personal_marketplace:
-            write_personal_marketplace(marketplace_path=plan.marketplace_path)
+            write_personal_marketplace(
+                marketplace_path=plan.marketplace_path,
+                items=plan.items,
+            )
             print(f"personal marketplace written: {plan.marketplace_path}")
     except (SyncPersonalPluginsError, OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)

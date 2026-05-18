@@ -9,15 +9,13 @@ baseline.
 Current baseline:
 
 - Repo source is authoritative:
-  - `plugins/turbo-mode/handoff/1.7.0`
-  - `plugins/turbo-mode/ticket/1.4.0`
+  - Stable Turbo Mode plugin source roots live at `plugins/turbo-mode/<plugin-name>/`.
+  - Current roots include `plugins/turbo-mode/handoff/` and `plugins/turbo-mode/ticket/`.
 - Personal plugin copies live under:
-  - `~/.codex/plugins/handoff`
-  - `~/.codex/plugins/ticket`
+  - `~/.codex/plugins/<plugin-name>`
 - The personal marketplace file is `~/.agents/plugins/marketplace.json`.
 - Personal marketplace `source.path` values point at:
-  - `./.codex/plugins/handoff`
-  - `./.codex/plugins/ticket`
+  - `./.codex/plugins/<plugin-name>`
 - Inspect the planned copy operations and intended marketplace JSON with:
 
 ```bash
@@ -30,10 +28,10 @@ npm run turbo:plan-personal-plugins
 npm run turbo:sync-personal-plugins
 ```
 
-After syncing, restart Codex so the local plugin loader sees the copied plugin
-directories. Syncing files is not runtime proof: do not claim installed runtime
-behavior from repo source or copied files alone. Runtime proof remains a
-separate inventory/smoke activity.
+After syncing, restart Codex so it loads the synced personal plugin copies.
+Syncing files is not runtime proof: do not claim installed runtime behavior from
+repo source or copied files alone. Runtime proof remains a separate
+inventory/smoke activity.
 
 Do not use this document's app-server `plugin/install`, source/cache equality,
 guarded-refresh, retained-run certification, or Gate 5 machinery as routine

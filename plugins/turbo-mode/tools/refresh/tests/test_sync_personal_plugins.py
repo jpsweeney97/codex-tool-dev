@@ -7,7 +7,6 @@ from types import SimpleNamespace
 import pytest
 import sync_personal_plugins as sync_module
 from sync_personal_plugins import (
-    PERSONAL_MARKETPLACE_RELATIVE_PATHS,
     build_personal_marketplace_payload,
     build_sync_plan,
     main,
@@ -15,12 +14,12 @@ from sync_personal_plugins import (
 )
 
 
-def seed_plugin_source(repo_root: Path, plugin: str, version_dir: str) -> Path:
-    source_root = repo_root / "plugins/turbo-mode" / plugin / version_dir
+def seed_plugin_source(repo_root: Path, plugin: str, version: str) -> Path:
+    source_root = repo_root / "plugins/turbo-mode" / plugin
     source_root.mkdir(parents=True)
     (source_root / ".codex-plugin").mkdir()
     (source_root / ".codex-plugin/plugin.json").write_text(
-        json.dumps({"name": plugin, "version": version_dir}),
+        json.dumps({"name": plugin, "version": version}),
         encoding="utf-8",
     )
     (source_root / "README.md").write_text(f"{plugin} source\n", encoding="utf-8")
@@ -33,7 +32,20 @@ def seed_turbo_mode_sources(repo_root: Path) -> None:
 
 
 def test_personal_marketplace_payload_uses_home_relative_plugin_paths() -> None:
-    payload = build_personal_marketplace_payload()
+    items = (
+        sync_module.SyncPlanItem(
+            plugin="handoff",
+            source_root=Path("/repo/plugins/turbo-mode/handoff"),
+            target_root=Path("/home/.codex/plugins/handoff"),
+        ),
+        sync_module.SyncPlanItem(
+            plugin="ticket",
+            source_root=Path("/repo/plugins/turbo-mode/ticket"),
+            target_root=Path("/home/.codex/plugins/ticket"),
+        ),
+    )
+
+    payload = build_personal_marketplace_payload(items)
 
     assert payload["name"] == "turbo-mode"
     plugins = {plugin["name"]: plugin for plugin in payload["plugins"]}
@@ -44,10 +56,6 @@ def test_personal_marketplace_payload_uses_home_relative_plugin_paths() -> None:
     assert plugins["ticket"]["source"] == {
         "source": "local",
         "path": "./.codex/plugins/ticket",
-    }
-    assert PERSONAL_MARKETPLACE_RELATIVE_PATHS == {
-        "handoff": "./.codex/plugins/handoff",
-        "ticket": "./.codex/plugins/ticket",
     }
 
 
@@ -61,22 +69,46 @@ def test_sync_plan_reports_repo_sources_and_personal_targets(tmp_path: Path) -> 
     assert [(item.plugin, item.source_root, item.target_root) for item in plan.items] == [
         (
             "handoff",
-            repo_root / "plugins/turbo-mode/handoff/1.7.0",
+            repo_root / "plugins/turbo-mode/handoff",
             codex_home / "plugins/handoff",
         ),
         (
             "ticket",
-            repo_root / "plugins/turbo-mode/ticket/1.4.0",
+            repo_root / "plugins/turbo-mode/ticket",
             codex_home / "plugins/ticket",
         ),
     ]
+
+
+def test_sync_plan_discovers_new_configured_plugin_roots(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / "home/.codex"
+    seed_turbo_mode_sources(repo_root)
+    seed_plugin_source(repo_root, "review-helper", "0.1.0")
+    (repo_root / "plugins/turbo-mode/tools").mkdir(parents=True)
+
+    plan = build_sync_plan(repo_root=repo_root, codex_home=codex_home)
+    payload = build_personal_marketplace_payload(plan.items)
+
+    assert [item.plugin for item in plan.items] == [
+        "handoff",
+        "review-helper",
+        "ticket",
+    ]
+    assert {
+        plugin["name"]: plugin["source"]["path"] for plugin in payload["plugins"]
+    } == {
+        "handoff": "./.codex/plugins/handoff",
+        "review-helper": "./.codex/plugins/review-helper",
+        "ticket": "./.codex/plugins/ticket",
+    }
 
 
 def test_sync_copies_sources_and_excludes_generated_residue(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     codex_home = tmp_path / "home/.codex"
     seed_turbo_mode_sources(repo_root)
-    handoff = repo_root / "plugins/turbo-mode/handoff/1.7.0"
+    handoff = repo_root / "plugins/turbo-mode/handoff"
     (handoff / ".pytest_cache").mkdir()
     (handoff / ".pytest_cache/CACHEDIR.TAG").write_text("cache\n", encoding="utf-8")
     (handoff / "module").mkdir()
@@ -98,12 +130,12 @@ def test_sync_copies_sources_and_excludes_generated_residue(tmp_path: Path) -> N
     assert summary["copied"] == [
         {
             "plugin": "handoff",
-            "source": str(repo_root / "plugins/turbo-mode/handoff/1.7.0"),
+            "source": str(repo_root / "plugins/turbo-mode/handoff"),
             "target": str(codex_home / "plugins/handoff"),
         },
         {
             "plugin": "ticket",
-            "source": str(repo_root / "plugins/turbo-mode/ticket/1.4.0"),
+            "source": str(repo_root / "plugins/turbo-mode/ticket"),
             "target": str(codex_home / "plugins/ticket"),
         },
     ]
