@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from scripts.ticket_dedup import dedup_fingerprint as compute_dedup_fp
 from scripts.ticket_engine_core import engine_execute
 
@@ -38,7 +37,13 @@ class TestEnvelopeValidation:
             "approach": "Increase timeout to 30s.",
             "acceptance_criteria": ["Payloads >10MB succeed"],
             "verification": "pytest tests/test_auth.py -v",
-            "key_files": [{"file": "handler.py:45", "role": "Timeout logic", "look_for": "timeout constant"}],
+            "key_files": [
+                {
+                    "file": "handler.py:45",
+                    "role": "Timeout logic",
+                    "look_for": "timeout constant",
+                }
+            ],
             "key_file_paths": ["handler.py"],
             "suggested_priority": "high",
             "suggested_tags": ["auth", "api"],
@@ -170,7 +175,9 @@ class TestEnvelopeToFields:
         assert fields["approach"] == "Increase timeout."
         assert fields["acceptance_criteria"] == ["Large payloads succeed"]
         assert fields["verification"] == "pytest tests/ -v"
-        assert fields["key_files"] == [{"file": "handler.py", "role": "Timeout", "look_for": "constant"}]
+        assert fields["key_files"] == [
+            {"file": "handler.py", "role": "Timeout", "look_for": "constant"}
+        ]
         assert fields["key_file_paths"] == ["handler.py"]
 
     def test_envelope_never_carries_status(self) -> None:
@@ -238,6 +245,28 @@ class TestEnvelopeRead:
 
 class TestEnvelopeLifecycle:
     """Tests for move_to_processed()."""
+
+    def test_envelope_id_from_path_uses_filename(self, tmp_path: Path) -> None:
+        from scripts.ticket_envelope import envelope_id_from_path
+
+        envelope_path = (
+            tmp_path
+            / "docs"
+            / "tickets"
+            / ".envelopes"
+            / "2026-05-18T120000Z-demo.json"
+        )
+
+        assert envelope_id_from_path(envelope_path) == "2026-05-18T120000Z-demo.json"
+
+    def test_processed_path_for_envelope_uses_processed_subdirectory(self, tmp_path: Path) -> None:
+        from scripts.ticket_envelope import processed_path_for_envelope
+
+        envelope_path = tmp_path / "docs" / "tickets" / ".envelopes" / "demo.json"
+
+        assert processed_path_for_envelope(envelope_path) == (
+            envelope_path.parent / ".processed" / "demo.json"
+        )
 
     def test_move_creates_processed_dir(self, tmp_path: Path) -> None:
         from scripts.ticket_envelope import move_to_processed
@@ -334,8 +363,9 @@ class TestEnvelopeIngestion:
     def test_envelope_to_ticket_full_pipeline(self, tmp_tickets: Path) -> None:
         """Read envelope, map fields, create ticket, move to processed."""
         import re
+
         import yaml
-        from scripts.ticket_envelope import read_envelope, map_envelope_to_fields, move_to_processed
+        from scripts.ticket_envelope import map_envelope_to_fields, move_to_processed, read_envelope
 
         # Set up envelope
         envelopes_dir = tmp_tickets / ".envelopes"

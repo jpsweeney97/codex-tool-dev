@@ -208,7 +208,13 @@ def _dispatch_ingest(
     request_origin: str,
 ) -> EngineResponse:
     """Orchestrate envelope ingestion through the create pipeline."""
-    from scripts.ticket_envelope import map_envelope_to_fields, move_to_processed, read_envelope
+    from scripts.ticket_envelope import (
+        envelope_id_from_path,
+        map_envelope_to_fields,
+        move_to_processed,
+        processed_path_for_envelope,
+        read_envelope,
+    )
 
     envelope_path = Path(inp.envelope_path)
 
@@ -239,6 +245,31 @@ def _dispatch_ingest(
         )
     except (ValueError, OSError):
         pass  # Not inside .processed — expected case.
+
+    if resolved_envelope.parent != envelopes_boundary:
+        return EngineResponse(
+            state="policy_blocked",
+            message=(
+                f"envelope_path must be a direct child of containment boundary "
+                f"{str(envelopes_boundary)!r}. Got: {str(inp.envelope_path)!r:.100}"
+            ),
+            error_code="policy_blocked",
+        )
+
+    envelope_id = envelope_id_from_path(envelope_path)
+    processed_path = processed_path_for_envelope(envelope_path)
+    if processed_path.exists():
+        return EngineResponse(
+            state="ok",
+            message=f"duplicate/replay: envelope {envelope_id} already processed",
+            data={
+                "ingest_outcome": "duplicate_replay",
+                "envelope_id": envelope_id,
+                "processed_path": str(processed_path),
+                "incoming_envelope_path": str(envelope_path),
+                "ticket_created": False,
+            },
+        )
 
     # Step 1: Read and validate envelope.
     envelope, errors = read_envelope(envelope_path)
@@ -316,14 +347,40 @@ def _dispatch_ingest(
         move_to_processed(envelope_path)
     except OSError as exc:
         # Ticket was created but envelope move failed. Not fatal — report in data.
-        exec_resp = EngineResponse(
+        data = dict(exec_resp.data or {})
+        data.update(
+            {
+                "envelope_move_error": str(exc),
+                "ingest_outcome": "created_envelope_move_failed",
+                "envelope_id": envelope_id,
+                "processed_path": str(processed_path),
+                "incoming_envelope_path": str(envelope_path),
+                "ticket_created": True,
+            }
+        )
+        return EngineResponse(
             state=exec_resp.state,
             message=f"{exec_resp.message}; envelope move failed: {exc}",
             ticket_id=exec_resp.ticket_id,
-            data={**(exec_resp.data or {}), "envelope_move_error": str(exc)},
+            data=data,
         )
 
-    return exec_resp
+    data = dict(exec_resp.data or {})
+    data.update(
+        {
+            "ingest_outcome": "created",
+            "envelope_id": envelope_id,
+            "processed_path": str(processed_path_for_envelope(envelope_path)),
+            "incoming_envelope_path": str(envelope_path),
+            "ticket_created": True,
+        }
+    )
+    return EngineResponse(
+        state=exec_resp.state,
+        message=exec_resp.message,
+        ticket_id=exec_resp.ticket_id,
+        data=data,
+    )
 
 
 def _dispatch(
