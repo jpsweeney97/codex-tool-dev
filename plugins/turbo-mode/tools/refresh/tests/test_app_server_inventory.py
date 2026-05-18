@@ -262,6 +262,8 @@ def write_sha256_file(path: Path) -> Path:
 
 def source_plugin_root(*, repo_root: Path, plugin_name: str) -> Path:
     source_parent = repo_root / "plugins/turbo-mode" / plugin_name
+    if (source_parent / ".codex-plugin/plugin.json").is_file():
+        return source_parent
     roots = tuple(
         sorted(
             manifest.parent.parent
@@ -386,8 +388,8 @@ def blocker_inventory_counts(
 
 
 def transcript(refresh_paths: RefreshPaths) -> tuple[dict[str, object], ...]:
-    handoff_source = refresh_paths.repo_root / "plugins/turbo-mode/handoff/1.6.0"
-    ticket_source = refresh_paths.repo_root / "plugins/turbo-mode/ticket/1.4.0"
+    handoff_source = refresh_paths.repo_root / "plugins/turbo-mode/handoff"
+    ticket_source = refresh_paths.repo_root / "plugins/turbo-mode/ticket"
     handoff_cache = refresh_paths.codex_home / "plugins/cache/turbo-mode/handoff/1.6.0"
     ticket_cache = refresh_paths.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
     return (
@@ -512,7 +514,7 @@ def test_validate_readonly_inventory_contract_accepts_aligned_runtime(tmp_path: 
     )
 
     assert inventory.state == "aligned"
-    assert inventory.plugin_read_sources["handoff"].endswith("plugins/turbo-mode/handoff/1.6.0")
+    assert inventory.plugin_read_sources["handoff"].endswith("plugins/turbo-mode/handoff")
     assert inventory.ticket_hook["command"].endswith("ticket_engine_guard.py")
     assert inventory.handoff_hooks == ()
     assert inventory.transcript_sha256 == hashlib.sha256(
@@ -595,7 +597,7 @@ def test_validate_readonly_inventory_contract_rejects_plugin_read_path_in_wrong_
 ) -> None:
     refresh_paths = paths(tmp_path)
     raw = copy.deepcopy(list(transcript(refresh_paths)))
-    expected = str(refresh_paths.repo_root / "plugins/turbo-mode/handoff/1.6.0")
+    expected = str(refresh_paths.repo_root / "plugins/turbo-mode/handoff")
     raw[1]["body"]["result"] = {"note": expected}
 
     with pytest.raises(RefreshError, match="plugin/read missing source path"):
@@ -1814,7 +1816,7 @@ def test_seed_isolated_codex_home_rewrites_ticket_hook_manifest_to_isolated_root
     tmp_path: Path,
 ) -> None:
     repo_root = tmp_path / "repo"
-    handoff_source_root = repo_root / "plugins/turbo-mode/handoff/1.6.0"
+    handoff_source_root = repo_root / "plugins/turbo-mode/handoff"
     (handoff_source_root / ".codex-plugin").mkdir(parents=True)
     (handoff_source_root / ".codex-plugin/plugin.json").write_text(
         json.dumps({"name": "handoff", "version": "1.7.0"}) + "\n",
@@ -1831,7 +1833,7 @@ def test_seed_isolated_codex_home_rewrites_ticket_hook_manifest_to_isolated_root
         encoding="utf-8",
     )
 
-    ticket_source_root = repo_root / "plugins/turbo-mode/ticket/1.4.0"
+    ticket_source_root = repo_root / "plugins/turbo-mode/ticket"
     (ticket_source_root / ".codex-plugin").mkdir(parents=True)
     (ticket_source_root / ".codex-plugin/plugin.json").write_text(
         json.dumps({"name": "ticket", "version": "1.4.0"}) + "\n",

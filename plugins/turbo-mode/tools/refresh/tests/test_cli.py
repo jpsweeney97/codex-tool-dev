@@ -138,13 +138,14 @@ def write_plan05_seed_sources(repo_root: Path) -> None:
     )
     data = json.loads(fixture.read_text(encoding="utf-8"))
     for rel, record in data.items():
-        source = repo_root / f"plugins/turbo-mode/{rel}"
+        parts = Path(rel).parts
+        source = repo_root / "plugins/turbo-mode" / Path(parts[0], *parts[2:])
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text(record["source_text"], encoding="utf-8")
-    ticket = repo_root / "plugins/turbo-mode/ticket/1.4.0/README.md"
+    ticket = repo_root / "plugins/turbo-mode/ticket/README.md"
     ticket.parent.mkdir(parents=True, exist_ok=True)
     ticket.write_text("ticket source\n", encoding="utf-8")
-    ticket_hook = repo_root / "plugins/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+    ticket_hook = repo_root / "plugins/turbo-mode/ticket/hooks/hooks.json"
     ticket_hook.parent.mkdir(parents=True, exist_ok=True)
     ticket_hook.write_text(
         json.dumps(
@@ -170,7 +171,7 @@ def write_plan05_seed_sources(repo_root: Path) -> None:
         ),
         encoding="utf-8",
     )
-    ticket_guard = repo_root / "plugins/turbo-mode/ticket/1.4.0/hooks/ticket_engine_guard.py"
+    ticket_guard = repo_root / "plugins/turbo-mode/ticket/hooks/ticket_engine_guard.py"
     ticket_guard.write_text("#!/usr/bin/env python3\nprint('guard')\n", encoding="utf-8")
 
 
@@ -344,8 +345,7 @@ for line in sys.stdin:
         }
     elif method == "plugin/read":
         plugin = request["params"]["pluginName"]
-        version = "1.6.0" if plugin == "handoff" else "1.4.0"
-        result = {"source": {"path": f"{repo}/plugins/turbo-mode/{plugin}/{version}"}}
+        result = {"source": {"path": f"{repo}/plugins/turbo-mode/{plugin}"}}
     elif method == "plugin/list":
         result = {"plugins": ["handoff@turbo-mode", "ticket@turbo-mode"]}
     elif method == "skills/list":
@@ -2290,8 +2290,8 @@ def test_cli_record_summary_fails_before_candidate_when_relevant_dirty(
 @pytest.mark.parametrize(
     "dirty_path",
     [
-        "plugins/turbo-mode/handoff/1.6.0/README.md",
-        "plugins/turbo-mode/ticket/1.4.0/README.md",
+        "plugins/turbo-mode/handoff/README.md",
+        "plugins/turbo-mode/ticket/README.md",
     ],
 )
 def test_cli_record_summary_fails_when_plugin_source_surfaces_are_dirty(

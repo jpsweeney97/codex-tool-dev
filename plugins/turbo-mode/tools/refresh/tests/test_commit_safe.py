@@ -88,8 +88,8 @@ def test_commit_safe_plan06_constants_and_reason_allowlist() -> None:
     assert "handoff-state-helper-direct-python-doc-migration" in commit_safe.SAFE_REASON_CODES
     assert commit_safe.RELEVANT_DIRTY_PATHS == (
         ".agents/plugins/marketplace.json",
-        "plugins/turbo-mode/handoff/1.6.0",
-        "plugins/turbo-mode/ticket/1.4.0",
+        "plugins/turbo-mode/handoff",
+        "plugins/turbo-mode/ticket",
         "plugins/turbo-mode/tools/refresh",
         "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
         "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",
@@ -385,8 +385,8 @@ def init_repo(repo_root: Path) -> None:
         "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
         "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",
         "plugins/turbo-mode/tools/refresh_validate_redaction.py",
-        "plugins/turbo-mode/handoff/1.6.0/README.md",
-        "plugins/turbo-mode/ticket/1.4.0/README.md",
+        "plugins/turbo-mode/handoff/README.md",
+        "plugins/turbo-mode/ticket/README.md",
         "docs/readme.md",
     ):
         path = repo_root / rel
@@ -400,8 +400,8 @@ def init_repo(repo_root: Path) -> None:
     "dirty_path",
     [
         ".agents/plugins/marketplace.json",
-        "plugins/turbo-mode/handoff/1.6.0/README.md",
-        "plugins/turbo-mode/ticket/1.4.0/README.md",
+        "plugins/turbo-mode/handoff/README.md",
+        "plugins/turbo-mode/ticket/README.md",
         "plugins/turbo-mode/tools/refresh/existing.py",
         "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
         "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",

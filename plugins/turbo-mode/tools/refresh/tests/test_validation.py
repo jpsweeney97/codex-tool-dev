@@ -347,14 +347,14 @@ def init_refresh_repo(tmp_path: Path) -> tuple[Path, Path, RefreshPlanResult]:
                         "name": "handoff",
                         "source": {
                             "source": "local",
-                            "path": "./plugins/turbo-mode/handoff/1.6.0",
+                            "path": "./plugins/turbo-mode/handoff",
                         },
                     },
                     {
                         "name": "ticket",
                         "source": {
                             "source": "local",
-                            "path": "./plugins/turbo-mode/ticket/1.4.0",
+                            "path": "./plugins/turbo-mode/ticket",
                         },
                     },
                 ],
@@ -372,8 +372,8 @@ def init_refresh_repo(tmp_path: Path) -> tuple[Path, Path, RefreshPlanResult]:
         encoding="utf-8",
     )
     for base in (
-        repo_root / "plugins/turbo-mode/handoff/1.6.0",
-        repo_root / "plugins/turbo-mode/ticket/1.4.0",
+        repo_root / "plugins/turbo-mode/handoff",
+        repo_root / "plugins/turbo-mode/ticket",
         codex_home / "plugins/cache/turbo-mode/handoff/1.6.0",
         codex_home / "plugins/cache/turbo-mode/ticket/1.4.0",
     ):
@@ -469,8 +469,8 @@ def inventory_fixture(*, version: str, hook_command: str) -> AppServerInventoryC
         state="aligned",
         identity=identity,
         plugin_read_sources={
-            "handoff": "/repo/plugins/turbo-mode/handoff/1.6.0",
-            "ticket": "/repo/plugins/turbo-mode/ticket/1.4.0",
+            "handoff": "/repo/plugins/turbo-mode/handoff",
+            "ticket": "/repo/plugins/turbo-mode/ticket",
         },
         plugin_list=("handoff@turbo-mode", "ticket@turbo-mode"),
         skills=("handoff:save", "ticket:ticket"),
@@ -1119,8 +1119,8 @@ def test_metadata_validator_rejects_stale_existing_candidate_summary(tmp_path: P
 @pytest.mark.parametrize(
     "dirty_path",
     [
-        "plugins/turbo-mode/handoff/1.6.0/README.md",
-        "plugins/turbo-mode/ticket/1.4.0/README.md",
+        "plugins/turbo-mode/handoff/README.md",
+        "plugins/turbo-mode/ticket/README.md",
     ],
 )
 def test_metadata_validator_rejects_dirty_plugin_source_paths(

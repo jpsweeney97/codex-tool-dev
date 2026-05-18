@@ -585,7 +585,12 @@ def seed_isolated_rehearsal_home(
         record = seed_records.get(canonical_path)
         if not isinstance(record, dict):
             fail("seed isolated rehearsal home", "missing seed fixture record", canonical_path)
-        source_path = normalized_repo_root / "plugins/turbo-mode" / canonical_path
+        canonical_parts = Path(canonical_path).parts
+        source_path = (
+            normalized_repo_root
+            / "plugins/turbo-mode"
+            / Path(canonical_parts[0], *canonical_parts[2:])
+        )
         cache_path = normalized_codex_home / "plugins/cache/turbo-mode" / canonical_path
         source_text = source_path.read_text(encoding="utf-8")
         if hashlib.sha256(source_text.encode("utf-8")).hexdigest() != record.get("source_sha256"):

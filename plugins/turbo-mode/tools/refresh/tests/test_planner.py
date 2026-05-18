@@ -458,8 +458,8 @@ def aligned_inventory() -> AppServerInventoryCheck:
         state="aligned",
         identity=identity,
         plugin_read_sources={
-            "handoff": "/repo/plugins/turbo-mode/handoff/1.6.0",
-            "ticket": "/repo/plugins/turbo-mode/ticket/1.4.0",
+            "handoff": "/repo/plugins/turbo-mode/handoff",
+            "ticket": "/repo/plugins/turbo-mode/ticket",
         },
         plugin_list=("handoff@turbo-mode", "ticket@turbo-mode"),
         skills=("handoff:save", "ticket:ticket"),
