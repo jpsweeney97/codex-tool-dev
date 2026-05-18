@@ -14,7 +14,7 @@ from typing import Any
 sys.dont_write_bytecode = True
 
 PLUGIN_SOURCE_RELS: dict[str, Path] = {
-    "handoff": Path("plugins/turbo-mode/handoff/1.6.0"),
+    "handoff": Path("plugins/turbo-mode/handoff/1.7.0"),
     "ticket": Path("plugins/turbo-mode/ticket/1.4.0"),
 }
 PERSONAL_PLUGIN_TARGET_RELS: dict[str, Path] = {

@@ -14,7 +14,7 @@ tree, not as proof that the installed Codex runtime already matches source.
 
 Primary source surfaces:
 
-- `plugins/turbo-mode/handoff/1.6.0/` - Handoff plugin source.
+- `plugins/turbo-mode/handoff/1.7.0/` - Handoff plugin source.
 - `plugins/turbo-mode/ticket/1.4.0/` - Ticket plugin source.
 - `plugins/turbo-mode/tools/` - migration, refresh, proof, and cache-update
   tooling for Turbo Mode plugin development.
@@ -78,13 +78,13 @@ hypothetical environment.
 
 ## Plugin-Specific Rules
 
-### Handoff `1.6.0`
+### Handoff `1.7.0`
 
-- Source root: `plugins/turbo-mode/handoff/1.6.0/`.
+- Source root: `plugins/turbo-mode/handoff/1.7.0/`.
 - Public behavior is primarily defined by `README.md`, `skills/*/SKILL.md`,
   `scripts/*.py`, `references/`, and `.codex-plugin/plugin.json`.
 - `hooks/hooks.json` is intentionally empty for this release. Do not describe
-  Handoff `1.6.0` as shipping plugin-bundled command hooks unless both the
+  Handoff `1.7.0` as shipping plugin-bundled command hooks unless both the
   source manifest and installed runtime prove that changed.
 - Handoff storage currently targets project-local `.codex/handoffs/` paths.
   Older `docs/handoffs/` artifacts can still exist as historical or ignored
@@ -153,7 +153,7 @@ Common targets:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/tools/refresh/tests -q
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/handoff/1.6.0 pytest -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/handoff/1.7.0 pytest -q
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket/1.4.0 pytest -q
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check <changed-python-paths>
 git diff --check
@@ -166,7 +166,7 @@ inventory such as `plugin/read`, `plugin/list`, `skills/list`, and `hooks/list`.
 For Handoff import or script-entrypoint changes, add a direct smoke such as:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 python plugins/turbo-mode/handoff/1.6.0/scripts/installed_host_harness.py
+PYTHONDONTWRITEBYTECODE=1 python plugins/turbo-mode/handoff/1.7.0/scripts/installed_host_harness.py
 ```
 
 Adjust the exact selector to the file being changed. If a command creates

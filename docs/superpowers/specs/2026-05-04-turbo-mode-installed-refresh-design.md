@@ -9,7 +9,7 @@ baseline.
 Current baseline:
 
 - Repo source is authoritative:
-  - `plugins/turbo-mode/handoff/1.6.0`
+  - `plugins/turbo-mode/handoff/1.7.0`
   - `plugins/turbo-mode/ticket/1.4.0`
 - Personal plugin copies live under:
   - `~/.codex/plugins/handoff`

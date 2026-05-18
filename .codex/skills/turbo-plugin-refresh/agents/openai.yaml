@@ -1,0 +1,4 @@
+interface:
+  display_name: "Turbo Plugin Refresh"
+  short_description: "Plan and sync Turbo Mode plugins"
+  default_prompt: "Use $turbo-plugin-refresh to plan a Turbo Mode plugin sync."

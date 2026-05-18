@@ -28,7 +28,7 @@ def seed_plugin_source(repo_root: Path, plugin: str, version_dir: str) -> Path:
 
 
 def seed_turbo_mode_sources(repo_root: Path) -> None:
-    seed_plugin_source(repo_root, "handoff", "1.6.0")
+    seed_plugin_source(repo_root, "handoff", "1.7.0")
     seed_plugin_source(repo_root, "ticket", "1.4.0")
 
 
@@ -61,7 +61,7 @@ def test_sync_plan_reports_repo_sources_and_personal_targets(tmp_path: Path) -> 
     assert [(item.plugin, item.source_root, item.target_root) for item in plan.items] == [
         (
             "handoff",
-            repo_root / "plugins/turbo-mode/handoff/1.6.0",
+            repo_root / "plugins/turbo-mode/handoff/1.7.0",
             codex_home / "plugins/handoff",
         ),
         (
@@ -76,7 +76,7 @@ def test_sync_copies_sources_and_excludes_generated_residue(tmp_path: Path) -> N
     repo_root = tmp_path / "repo"
     codex_home = tmp_path / "home/.codex"
     seed_turbo_mode_sources(repo_root)
-    handoff = repo_root / "plugins/turbo-mode/handoff/1.6.0"
+    handoff = repo_root / "plugins/turbo-mode/handoff/1.7.0"
     (handoff / ".pytest_cache").mkdir()
     (handoff / ".pytest_cache/CACHEDIR.TAG").write_text("cache\n", encoding="utf-8")
     (handoff / "module").mkdir()
@@ -98,7 +98,7 @@ def test_sync_copies_sources_and_excludes_generated_residue(tmp_path: Path) -> N
     assert summary["copied"] == [
         {
             "plugin": "handoff",
-            "source": str(repo_root / "plugins/turbo-mode/handoff/1.6.0"),
+            "source": str(repo_root / "plugins/turbo-mode/handoff/1.7.0"),
             "target": str(codex_home / "plugins/handoff"),
         },
         {
@@ -183,7 +183,7 @@ def test_copy_preserves_backup_when_replacement_and_restore_fail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    source_root = seed_plugin_source(repo_root, "handoff", "1.6.0")
+    source_root = seed_plugin_source(repo_root, "handoff", "1.7.0")
     target_root = tmp_path / "home/.codex/plugins/handoff"
     target_root.mkdir(parents=True)
     (target_root / "old.txt").write_text("old target\n", encoding="utf-8")

@@ -8,7 +8,7 @@
       "name": "handoff",
       "source": {
         "source": "local",
-        "path": "./plugins/turbo-mode/handoff/1.6.0"
+        "path": "./plugins/turbo-mode/handoff/1.7.0"
       },
       "policy": {
         "installation": "AVAILABLE",
