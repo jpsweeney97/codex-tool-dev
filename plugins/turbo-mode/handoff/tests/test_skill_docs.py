@@ -29,6 +29,12 @@ def test_no_skill_doc_uses_relative_script_paths() -> None:
         assert "../../scripts/" not in text
 
 
+def test_skill_docs_do_not_request_tool_permissions_up_front() -> None:
+    for path in COMMAND_SKILLS + STATE_SKILLS:
+        text = path.read_text(encoding="utf-8")
+        assert "allowed-tools" not in text
+
+
 def test_command_skills_define_plugin_root_setup() -> None:
     for path in COMMAND_SKILLS:
         text = path.read_text(encoding="utf-8")

@@ -1,9 +1,6 @@
 ---
 name: triage
 description: Review open tickets and detect orphaned handoff items that need tracking. Use when user says "/triage", "what's in the backlog", "review deferred items", "any open tickets", or at session start for project orientation.
-allowed-tools:
-  - Bash
-  - Read
 ---
 
 # Triage

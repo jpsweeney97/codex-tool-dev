@@ -57,6 +57,7 @@ def test_readme_documents_current_summary_and_development_commands() -> None:
     assert "cd packages/plugins/handoff" not in text
     assert "uv run --package handoff-plugin pytest" not in text
     assert "354 tests across 10 test modules" not in text
+    assert "allowed-tools:" not in text
 
 
 def test_contributor_architecture_docs_exist_and_are_linked() -> None:

@@ -1,12 +1,6 @@
 ---
 name: defer
 description: Extract deferred work items from conversation and create tracking tickets. Use when user says "/defer", "defer these", "track these for later", "create tickets for remaining items", or at end of session when open items remain. Scans conversation for explicit deferrals, review findings, open questions, and TODO/FIXME mentions, then creates ticket files in docs/tickets/.
-allowed-tools:
-  - Bash
-  - Read
-  - Write
-  - Glob
-  - Grep
 ---
 
 # Defer

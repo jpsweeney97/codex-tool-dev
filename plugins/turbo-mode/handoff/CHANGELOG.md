@@ -6,6 +6,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- Removed `allowed-tools` from Handoff skill frontmatter so skill invocation does not request up-front tool permissions before the normal workflow runs.
+
 ## [1.7.0] - 2026-05-15
 
 ### Changed

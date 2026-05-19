@@ -1,7 +1,6 @@
 ---
 name: summary
 description: Session summary with project arc context. Use when a full /save is overkill but /quicksave would lose decisions, codebase knowledge, and session narrative. Captures session context at moderate depth (120-250 lines) and synthesizes the project arc across sessions to prevent drift.
-allowed-tools: Write, Read, Bash, Glob
 ---
 
 # Summary

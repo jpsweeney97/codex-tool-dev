@@ -236,10 +236,6 @@ Create `skills/<name>/SKILL.md` with YAML frontmatter:
 name: my-skill
 description: Brief description for trigger detection
 argument-hint: "[optional-argument]"
-allowed-tools:
-  - Bash
-  - Read
-  - Write
 ---
 ```
 

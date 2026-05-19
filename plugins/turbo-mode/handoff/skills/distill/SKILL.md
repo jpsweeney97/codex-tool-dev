@@ -1,10 +1,6 @@
 ---
 name: distill
 description: Extract durable knowledge from handoffs into learnings. Use when user says "/distill", "distill handoff", "extract knowledge", "graduate knowledge", or wants to turn handoff insights into reusable learnings. Reads handoff files, extracts candidates from Decisions/Learnings/Codebase Knowledge/Gotchas, checks for duplicates, and appends synthesized entries to docs/learnings/learnings.md.
-allowed-tools:
-  - Bash
-  - Read
-  - Edit
 ---
 
 # Distill
