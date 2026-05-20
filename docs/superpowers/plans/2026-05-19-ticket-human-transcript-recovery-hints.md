@@ -79,8 +79,8 @@ Before implementation, re-read these live files. This plan is not a substitute f
 - `plugins/turbo-mode/ticket/scripts/ticket_capture.py` - attach hints to capture prepare/execute recoverable failures.
 - `plugins/turbo-mode/ticket/scripts/ticket_update.py` - attach hints to update prepare/execute recoverable failures.
 - `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py` - attach hints for ingest and runner-level trust/setup or payload boundary failures.
-- `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py` - make common trust/setup and stale-plan messages safe when they bubble through wrappers.
-- `plugins/turbo-mode/ticket/scripts/ticket_doctor.py` - attach `cleanup_stale_preview` when stale temp payloads are reported.
+- `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py` - read-only reference for low-level engine messages that may remain technical in this slice.
+- `plugins/turbo-mode/ticket/scripts/ticket_doctor.py` - attach `cleanup_stale_preview` to the top-level diagnose response envelope when stale temp payloads are reported.
 - `plugins/turbo-mode/ticket/skills/ticket-capture/SKILL.md` - tell the skill to render `recovery_hint` first and translate failures into user recovery.
 - `plugins/turbo-mode/ticket/skills/ticket-update/SKILL.md` - same, with ticket-specific context.
 - `plugins/turbo-mode/ticket/skills/ticket-doctor/SKILL.md` - same, for stale cleanup reporting and confirmed cleanup.
@@ -664,7 +664,6 @@ Expected: tests pass.
 
 **Files:**
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py`
-- Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
 - Test: `plugins/turbo-mode/ticket/tests/test_ingest.py`
 
 - [ ] **Step 1: Add ingest trust/setup, context, success, parse/read, and policy hint tests**
@@ -1270,15 +1269,13 @@ except PayloadError as exc:
 
 Keep detailed path diagnostics available only in raw machine `data`, low-level debug logs, or tests if needed; do not include them in `message`, `data.recovery_hint`, or the skill-rendered transcript projection.
 
-- [ ] **Step 5: Make bubbling core trust messages safe**
+- [ ] **Step 5: Preserve direct engine trust/debug behavior**
 
-In `ticket_engine_core.py`, for trust/setup failures that can bubble through user-facing wrappers, replace messages that enumerate hook fields, `request_origin`, or `origin_mismatch` details with:
+Do not rewrite `ticket_engine_core.py` trust/setup messages in this slice. Direct `classify`, `plan`, `preflight`, `execute`, and debug paths may remain technical, and existing direct-engine tests such as `plugins/turbo-mode/ticket/tests/test_execute.py::TestEngineExecute::test_execute_with_empty_session_id_rejected` may continue to assert low-level trust detail like `session_id empty`.
 
-```python
-message="Ticket setup needs attention before this write can continue."
-```
+Wrapper-surfaced transcript safety must be handled in `ticket_capture.py`, `ticket_update.py`, and `ticket_engine_runner.py` by sanitizing the paired `message` before attaching `data.recovery_hint`. If implementation cannot satisfy the capture/update/ingest transcript-safety tests without changing `ticket_engine_core.py`, stop and revise this plan to include `plugins/turbo-mode/ticket/tests/test_execute.py` in the read-first list, file structure, focused tests, changed-path lint, and Commit 3 staging list before changing core behavior.
 
-Attach `trust_setup` through `attach_engine_recovery_hint()` when creating those responses. Do not remove low-level trust validation itself.
+Keep low-level trust validation itself unchanged.
 
 - [ ] **Step 6: Run ingest tests and verify they pass**
 
@@ -1303,9 +1300,57 @@ rg -n "stale|clean-stale|ticket-tmp|payload" plugins/turbo-mode/ticket/tests/tes
 
 Expected: identify the existing diagnose and cleanup tests before editing.
 
-- [ ] **Step 2: Add or extend stale diagnostic test**
+- [ ] **Step 2: Add top-level diagnose response hint test**
 
-When doctor reports stale temp payloads, assert:
+Add a CLI-facing diagnose test so the hint is pinned to the user-facing response envelope, not to the raw `ticket_doctor()` report:
+
+```python
+def test_ticket_doctor_diagnose_response_adds_cleanup_hint_for_stale_payloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    payload_dir = tmp_path / ".codex" / "ticket-tmp"
+    payload_dir.mkdir(parents=True)
+    payload = payload_dir / "old.json"
+    payload.write_text("{}", encoding="utf-8")
+    old_time = 1_700_000_000
+    os.utime(payload, (old_time, old_time))
+    monkeypatch.chdir(tmp_path)
+
+    plugin_root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(DOCTOR_SCRIPT),
+            "diagnose",
+            str(tickets_dir),
+            "--plugin-root",
+            str(plugin_root),
+            "--cache-root",
+            str(plugin_root),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    response = json.loads(completed.stdout)
+    assert response["state"] == "ok"
+    assert response["data"]["report"]["payloads"]["stale_count"] == 1
+    assert response["data"]["recovery_hint"] == {
+        "code": "cleanup_stale_preview",
+        "summary": "Old abandoned Ticket preview state can be cleaned up after review.",
+        "next_step": "Use ticket-doctor stale cleanup after reviewing the reported items.",
+    }
+```
+
+Keep the existing raw `ticket_doctor(...)` stale report test focused on report data. Do not add `recovery_hint` to `ticket_doctor()` report output or to `diagnose_payload()` directly.
+
+When the top-level diagnose response reports stale temp payloads, assert:
 
 ```python
 assert response["data"]["recovery_hint"] == {
@@ -1326,15 +1371,18 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 Expected: new hint assertion fails.
 
-- [ ] **Step 4: Attach cleanup hint in doctor diagnostics**
+- [ ] **Step 4: Attach cleanup hint to the top-level diagnose response**
 
-In `ticket_doctor.py`, import `attach_recovery_hint`. When diagnostic response data includes stale payload findings, attach:
+In `ticket_doctor.py`, import `attach_recovery_hint`. Leave `ticket_doctor()` and `diagnose_payload()` raw payload/report shapes unchanged. In the `diagnose` CLI branch, build the top-level response envelope first, then attach the hint only when the response envelope contains stale payload findings:
 
 ```python
-response = attach_recovery_hint(response, "cleanup_stale_preview")
+response = _response("ok", payload)
+if response["data"]["report"]["payloads"]["stale_count"] > 0:
+    response = attach_recovery_hint(response, "cleanup_stale_preview")
+print(json.dumps(response))
 ```
 
-Only attach this hint when stale temp payloads are actually present.
+Only attach this hint when stale temp payloads are actually present. The durable contract is `response["data"]["recovery_hint"]` on the top-level diagnose response envelope.
 
 - [ ] **Step 5: Run doctor tests and verify they pass**
 
@@ -1598,7 +1646,6 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   plugins/turbo-mode/ticket/scripts/ticket_capture.py \
   plugins/turbo-mode/ticket/scripts/ticket_update.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py \
-  plugins/turbo-mode/ticket/scripts/ticket_engine_core.py \
   plugins/turbo-mode/ticket/scripts/ticket_doctor.py \
   plugins/turbo-mode/ticket/tests/test_ux.py \
   plugins/turbo-mode/ticket/tests/test_capture.py \
@@ -1655,7 +1702,6 @@ git add \
   plugins/turbo-mode/ticket/scripts/ticket_capture.py \
   plugins/turbo-mode/ticket/scripts/ticket_update.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py \
-  plugins/turbo-mode/ticket/scripts/ticket_engine_core.py \
   plugins/turbo-mode/ticket/tests/test_capture.py \
   plugins/turbo-mode/ticket/tests/test_update_refinement.py \
   plugins/turbo-mode/ticket/tests/test_ingest.py
@@ -1709,6 +1755,8 @@ Expected: boundary commits are split as above unless the user explicitly asks fo
 - [ ] Handoff `defer` reporting does not expose Ticket ingest payload paths, processed envelope paths, incoming envelope paths, or envelope provenance.
 - [ ] Docs tests normalize whitespace or snippets contain the exact asserted phrases.
 - [ ] `origin_mismatch` remains the machine error code, but no user-facing message or transcript projection renders `origin_mismatch` or `request_origin` details.
+- [ ] Direct engine/debug trust messages in `ticket_engine_core.py` remain technical unless this plan is explicitly revised with `tests/test_execute.py` coverage.
+- [ ] `cleanup_stale_preview` is attached to the top-level `ticket_doctor.py diagnose` response envelope only; raw `ticket_doctor()` reports and `diagnose_payload()` payloads keep their existing shape.
 - [ ] Transcript-safety tests assert the exact forbidden vocabulary set, including path-bearing data keys such as `processed_path`, `incoming_envelope_path`, `ticket_path`, and `envelope_move_error`, not just one matching term.
 - [ ] Transcript-safety path tests cover known Mac, Linux CI, workspace-container, temp, var, and Windows absolute path shapes.
 - [ ] `HANDBOOK.md` and `ticket-contract.md` both document the recovery-hint schema, frozen codes, and ingest projection boundary.
