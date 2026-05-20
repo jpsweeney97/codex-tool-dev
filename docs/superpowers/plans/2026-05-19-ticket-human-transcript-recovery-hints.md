@@ -54,6 +54,7 @@ Before implementation, re-read these live files. This plan is not a substitute f
 - `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py`
 - `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
 - `plugins/turbo-mode/ticket/scripts/ticket_doctor.py`
+- `plugins/turbo-mode/ticket/scripts/ticket_paths.py`
 - `plugins/turbo-mode/ticket/scripts/ticket_payloads.py`
 - `plugins/turbo-mode/ticket/skills/ticket-capture/SKILL.md`
 - `plugins/turbo-mode/ticket/skills/ticket-update/SKILL.md`
@@ -89,7 +90,7 @@ Before implementation, re-read these live files. This plan is not a substitute f
 - `plugins/turbo-mode/ticket/tests/test_ux.py` - taxonomy schema, exact wording, and internal-leak tests.
 - `plugins/turbo-mode/ticket/tests/test_capture.py` - capture stale/retry/trust/policy hint coverage.
 - `plugins/turbo-mode/ticket/tests/test_update_refinement.py` - update stale/retry/trust/preflight hint coverage.
-- `plugins/turbo-mode/ticket/tests/test_ingest.py` - ingest trust/setup, policy/preflight, and partial-success transcript-safety coverage.
+- `plugins/turbo-mode/ticket/tests/test_ingest.py` - ingest trust/setup, pre-dispatch context, policy/preflight, normal success, and partial-success transcript-safety coverage.
 - `plugins/turbo-mode/ticket/tests/test_doctor.py` - stale cleanup hint coverage.
 - `plugins/turbo-mode/ticket/tests/test_docs_contract.py` - static docs/skill contract checks.
 - `plugins/turbo-mode/handoff/tests/test_skill_docs.py` - Handoff defer skill/reference transcript-boundary checks.
@@ -154,7 +155,7 @@ INTERNAL_RECOVERY_TERMS = (
 )
 
 INTERNAL_RECOVERY_PATH_PATTERNS = (
-    r"(?<![A-Za-z0-9_.-])/(?:Users|private|tmp|var)/",
+    r"(?<![A-Za-z0-9_.-])/(?:Users|home|workspace|workspaces|private|tmp|var)/",
     r"[A-Za-z]:\\",
 )
 
@@ -200,7 +201,7 @@ The exact helper names may change during implementation if the surrounding code 
 
 - If implementation needs to expose `hook_injected`, `hook_request_origin`, `request_origin`, `origin_mismatch`, `PAYLOAD_PATH`, `payload`, `payload path`, `payload_file`, `envelope_path`, canonical command repair, raw absolute temp/workspace paths, or `python3 -B` in a user-facing `message`, `recovery_hint`, or transcript projection, stop and redesign that path.
 - If a recovery hint code would contain hidden implementation mechanics such as `payload`, `envelope`, hook/provenance field names, command shape, or raw path vocabulary, stop and rename the code before it becomes a durable contract.
-- If `plugin hook setup` appears anywhere except the `trust_setup` next step or skill explanation of that next step, stop and remove it.
+- If transcript-facing runtime output or skill recovery prose uses `plugin hook setup` anywhere except the `trust_setup` next step or skill explanation of that next step, stop and remove it. Control-doc and operator-contract mentions may use the phrase only to document that boundary.
 - If a user-facing response carries `data.recovery_hint`, the paired `message` must also avoid payload path mechanics, envelope path mechanics, canonical command repair, raw temp/workspace paths, and hook/provenance field names.
 - If a response would get `data.recovery_hint` only by running `recovery_hint_code_for_response()` while preserving an unsafe `message`, stop. Sanitize the paired `message` first, then attach the hint.
 - If an ingest response gets `data.recovery_hint`, sanitize the paired `message` before attaching or printing the hint. Do not attach a hint to an ingest response whose message still quotes `envelope_path`, containment boundaries, or raw paths.
@@ -220,6 +221,8 @@ The exact helper names may change during implementation if the surrounding code 
 - Commit 3: capture/update/ingest response hints and focused behavior tests.
 - Commit 4: Ticket and Handoff skill/docs wording plus docs contract tests.
 - Commit 5: doctor stale cleanup hint tests and final verification, if not already covered by Commit 3 or 4.
+
+These boundaries are authoritative for implementation. Do not replace them with one all-files source commit unless the user explicitly asks for a squash or single-commit closeout.
 
 ---
 
@@ -343,16 +346,39 @@ def test_attach_recovery_hint_preserves_response_data() -> None:
     assert "recovery_hint" not in response["data"]
 
 
-def test_transcript_safety_terms_cover_known_ingest_payload_and_origin_leaks() -> None:
-    rendered = (
-        "envelope_path escapes containment boundary '/private/tmp/project/tickets/.envelopes'. "
-        "Payload path must be absolute. Got: '/Users/example/project/.codex/ticket-tmp/payload.json'. "
-        "Run python3 -B with hook_injected=True. "
-        "origin_mismatch: request_origin='unknown'."
+def test_transcript_safety_terms_match_expected_internal_leak_vocabulary() -> None:
+    expected_terms = (
+        "hook_injected",
+        "hook_request_origin",
+        "request_origin",
+        "origin_mismatch",
+        "verified hook provenance",
+        "payload",
+        "payload path",
+        "payload_file",
+        "envelope_path",
+        "PAYLOAD_PATH",
+        "canonical command",
+        "python3 -B",
     )
 
-    assert any(term.lower() in rendered.lower() for term in INTERNAL_RECOVERY_TERMS)
-    assert any(re.search(pattern, rendered) for pattern in INTERNAL_RECOVERY_PATH_PATTERNS)
+    assert tuple(INTERNAL_RECOVERY_TERMS) == expected_terms
+
+
+def test_transcript_safety_path_patterns_cover_known_host_shapes() -> None:
+    examples = (
+        "/Users/example/project/.codex/ticket-tmp/payload.json",
+        "/home/runner/work/project/payload.json",
+        "/workspace/project/docs/tickets/.envelopes/item.json",
+        "/workspaces/project/docs/tickets/.envelopes/item.json",
+        "/private/tmp/project/tickets/.envelopes/item.json",
+        "/tmp/project/payload.json",
+        "/var/folders/example/payload.json",
+        r"C:\Users\example\project\payload.json",
+    )
+
+    for rendered in examples:
+        assert any(re.search(pattern, rendered) for pattern in INTERNAL_RECOVERY_PATH_PATTERNS), rendered
 ```
 
 - [ ] **Step 2: Run tests and verify they fail**
@@ -382,6 +408,7 @@ Expected: `tests/test_ux.py` passes.
 **Files:**
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_capture.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_update.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py`
 - Test: `plugins/turbo-mode/ticket/tests/test_capture.py`
 - Test: `plugins/turbo-mode/ticket/tests/test_update_refinement.py`
 
@@ -435,30 +462,25 @@ _assert_hint(response, "trust_setup")
 assert response["message"] == "Ticket setup needs attention before this write can continue."
 ```
 
-Add capture coverage for a malformed provenance-shaped origin that passes the runner trust triple and fails in `dispatch_stage()` / core preflight. The response may preserve machine `error_code="origin_mismatch"` but the paired message must be sanitized before `trust_setup` is attached:
+Add capture helper coverage for malformed provenance-shaped origin responses. Do not try to reach this through a wrapper execute path: `hook_request_origin` is part of the execute fingerprint, so mutating it after prepare should produce `stale_plan` before core preflight. Instead, test the local sanitizer/helper directly:
 
 ```python
-def test_execute_with_invalid_origin_message_is_sanitized_before_hint(
-    tmp_tickets: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    project_root = tmp_tickets.parent.parent
-    monkeypatch.chdir(project_root)
-    payload_path = _payload_file(project_root, _payload(tmp_tickets))
-    prepare = run_capture("prepare", payload_path)
-    assert prepare["state"] == "ready_to_execute"
-    payload = json.loads(payload_path.read_text(encoding="utf-8"))
-    payload["hook_request_origin"] = "request_origin=/Users/example/project"
-    payload["request_origin"] = "request_origin=/Users/example/project"
-    _write_payload(payload_path, payload)
-
-    response = run_capture("execute", payload_path)
+def test_default_hint_sanitizes_origin_mismatch_message_before_attaching_hint() -> None:
+    response = ticket_capture._with_default_recovery_hint(
+        {
+            "state": "escalate",
+            "message": "Cannot determine caller identity: request_origin='/Users/example/project'",
+            "error_code": "origin_mismatch",
+        }
+    )
 
     assert response["state"] == "escalate"
     assert response["error_code"] == "origin_mismatch"
     _assert_hint(response, "trust_setup")
     assert response["message"] == "Ticket setup needs attention before this write can continue."
 ```
+
+Use the existing `import scripts.ticket_capture as ticket_capture`; add it near the other imports if the file no longer has it.
 
 - [ ] **Step 2: Add update tests for retry, stale, trust, and preflight hints**
 
@@ -476,40 +498,25 @@ _assert_hint(response, "retry_preview")
 
 For trust/setup, prepare first, remove `hook_injected` and `hook_request_origin`, then execute and assert `trust_setup`.
 
-Add update coverage for the same malformed provenance-shaped origin passing through core preflight:
+Add update helper coverage for the same malformed provenance-shaped origin response. Keep this as a helper test for the same reachability reason: wrapper execute fingerprint checks should stop mutated trust-origin payloads before dispatch.
 
 ```python
-def test_execute_with_invalid_origin_message_is_sanitized_before_hint(
-    tmp_tickets: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    project_root = tmp_tickets.parent.parent
-    monkeypatch.chdir(project_root)
-    _make_refinement_ticket(tmp_tickets)
-    payload_path = _payload_file(
-        project_root,
-        _payload(
-            tmp_tickets,
-            {
-                "ticket_id": "T-20260518-01",
-                "next_action": "Use safe recovery copy.",
-            },
-        ),
+def test_default_hint_sanitizes_origin_mismatch_message_before_attaching_hint() -> None:
+    response = ticket_update._with_default_recovery_hint(
+        {
+            "state": "escalate",
+            "message": "Cannot determine caller identity: request_origin='/Users/example/project'",
+            "error_code": "origin_mismatch",
+        }
     )
-    prepare = run_update("prepare", payload_path)
-    assert prepare["state"] == "ready_to_execute"
-    payload = json.loads(payload_path.read_text(encoding="utf-8"))
-    payload["hook_request_origin"] = "request_origin=/Users/example/project"
-    payload["request_origin"] = "request_origin=/Users/example/project"
-    _write_payload(payload_path, payload)
-
-    response = run_update("execute", payload_path)
 
     assert response["state"] == "escalate"
     assert response["error_code"] == "origin_mismatch"
     _assert_hint(response, "trust_setup")
     assert response["message"] == "Ticket setup needs attention before this write can continue."
 ```
+
+Add `import scripts.ticket_update as ticket_update` near the other imports if it does not already exist.
 
 For preflight, use an existing close-readiness/precondition failure path and assert either `preflight_failed` if the response state is `preflight_failed`, or do not force a hint if the state is `invalid_transition`. Do not reclassify `invalid_transition` as `preflight_failed`.
 
@@ -602,7 +609,33 @@ return attach_recovery_hint(
 )
 ```
 
-- [ ] **Step 5: Run capture/update tests and verify they pass**
+- [ ] **Step 5: Sanitize runner execute trust/setup failures before capture/update pass gate**
+
+Capture/update execute use `load_runner_context(None, "execute", payload_path)` before their wrapper fingerprint checks. Missing trust fields therefore surface from `ticket_engine_runner.py`, not from `recovery_hint_code_for_response()` in the wrappers. Patch the shared runner before expecting capture/update trust tests to pass.
+
+In `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py`, import:
+
+```python
+from scripts.ticket_ux import attach_engine_recovery_hint
+```
+
+For execute trust errors in `load_runner_context()`, keep `state="policy_blocked"` and `error_code="policy_blocked"`, but replace the message and attach `trust_setup`:
+
+```python
+if trust_errors:
+    response = EngineResponse(
+        state="policy_blocked",
+        message="Ticket setup needs attention before this write can continue.",
+        error_code="policy_blocked",
+    )
+    if subcommand == "execute":
+        return None, attach_engine_recovery_hint(response, "trust_setup")
+    return None, response
+```
+
+Do not attach `trust_setup` to ingest here yet. Task 3 adds ingest trust/setup assertions and extends this same branch for `subcommand == "ingest"` after the ingest tests are written.
+
+- [ ] **Step 6: Run capture/update tests and verify they pass**
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache \
@@ -614,14 +647,14 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 Expected: tests pass.
 
-### Task 3: Attach Hints To Ingest And Runner Trust Setup
+### Task 3: Attach Hints To Ingest And Remaining Runner Setup
 
 **Files:**
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
 - Test: `plugins/turbo-mode/ticket/tests/test_ingest.py`
 
-- [ ] **Step 1: Add ingest trust/setup, parse/read, and policy hint tests**
+- [ ] **Step 1: Add ingest trust/setup, context, success, parse/read, and policy hint tests**
 
 In `plugins/turbo-mode/ticket/tests/test_ingest.py`, add helpers that parse the JSON emitted by `run()` using `capsys` and assert the deterministic transcript projection is safe. The raw stdout JSON envelope is machine-readable; this test intentionally validates the fields skills are allowed to render, not every machine/debug key in `data`.
 
@@ -766,6 +799,80 @@ def test_ingest_missing_payload_file_returns_safe_retry_hint(
     _assert_ingest_transcript_projection_safe(response)
 ```
 
+Add pre-dispatch context-error tests for `load_runner_context()` failures that occur before `_dispatch_ingest()` can sanitize anything:
+
+```python
+@pytest.mark.parametrize("tickets_dir_value", [123, "../outside-tickets"])
+def test_ingest_tickets_dir_context_errors_return_safe_policy_hint(
+    self,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tickets_dir_value: object,
+) -> None:
+    _ensure_project_root(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    tickets_dir = tmp_path / "tickets"
+    envelopes_dir = tickets_dir / ".envelopes"
+    envelope_path = _write_envelope(_valid_envelope(), envelopes_dir)
+    payload_file = tmp_path / "payload.json"
+    payload_file.write_text(
+        json.dumps(
+            {
+                "envelope_path": str(envelope_path),
+                "tickets_dir": tickets_dir_value,
+                "session_id": "test-session",
+                "hook_injected": True,
+                "hook_request_origin": "user",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code, response = _run_and_read_response(capsys, "user", ["ingest", str(payload_file)])
+
+    assert exit_code == 1
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == "policy_blocked"
+    assert response["data"]["recovery_hint"]["code"] == "policy_blocked"
+    assert response["message"] == "Ticket ingest is blocked by Ticket policy."
+    _assert_ingest_transcript_projection_safe(response)
+
+
+def test_ingest_missing_project_root_returns_safe_policy_hint(
+    self,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    tickets_dir = tmp_path / "tickets"
+    envelopes_dir = tickets_dir / ".envelopes"
+    envelope_path = _write_envelope(_valid_envelope(), envelopes_dir)
+    payload_file = tmp_path / "payload.json"
+    payload_file.write_text(
+        json.dumps(
+            {
+                "envelope_path": str(envelope_path),
+                "tickets_dir": str(tickets_dir),
+                "session_id": "test-session",
+                "hook_injected": True,
+                "hook_request_origin": "user",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code, response = _run_and_read_response(capsys, "user", ["ingest", str(payload_file)])
+
+    assert exit_code == 1
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == "policy_blocked"
+    assert response["data"]["recovery_hint"]["code"] == "policy_blocked"
+    assert response["message"] == "Ticket ingest is blocked by Ticket policy."
+    _assert_ingest_transcript_projection_safe(response)
+```
+
 Add a malformed ingest request test for missing `envelope_path`:
 
 ```python
@@ -843,6 +950,55 @@ def test_ingest_invalid_envelope_returns_safe_preflight_hint(
     assert envelope_path.exists()
 ```
 
+Add or update normal created-ingest success coverage so the happy path cannot leak the ticket path through the allowed projection:
+
+```python
+def test_ingest_created_response_has_safe_transcript_projection(
+    self,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _ensure_project_root(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    tickets_dir = tmp_path / "tickets"
+    envelopes_dir = tickets_dir / ".envelopes"
+    envelope_path = _write_envelope(_valid_envelope(), envelopes_dir)
+    payload_file = tmp_path / "payload.json"
+    payload_file.write_text(
+        json.dumps(
+            {
+                "envelope_path": str(envelope_path),
+                "tickets_dir": str(tickets_dir),
+                "session_id": "test-session",
+                "hook_injected": True,
+                "hook_request_origin": "user",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code, response = _run_and_read_response(capsys, "user", ["ingest", str(payload_file)])
+
+    assert exit_code == 0
+    assert response["state"] == "ok_create"
+    assert response["message"] == "Ticket was created."
+    assert response["data"]["ingest_outcome"] == "created"
+    assert response["data"]["ticket_created"] is True
+    assert response["data"]["ticket_path"]
+    assert response["data"]["processed_path"]
+    assert response["data"]["incoming_envelope_path"] == str(envelope_path)
+    assert "recovery_hint" not in response["data"]
+    projection = _ingest_transcript_projection(response)
+    assert projection["message"] == "Ticket was created."
+    assert projection["ingest_outcome"] == "Ticket was created."
+    assert "ticket_path" not in projection
+    assert "processed_path" not in projection
+    assert "incoming_envelope_path" not in projection
+    _assert_ingest_transcript_projection_safe(response)
+    assert len(list(tickets_dir.glob("*.md"))) == 1
+```
+
 For existing containment and direct-child policy-blocked ingest tests, assert:
 
 ```python
@@ -897,11 +1053,11 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   uv run --directory plugins/turbo-mode/ticket pytest tests/test_ingest.py -q
 ```
 
-Expected: new recovery-hint, stdout-envelope, origin-code-preservation, and transcript-projection safety assertions fail.
+Expected: new recovery-hint, stdout-envelope, origin-code-preservation, pre-dispatch context-error, created-success-message, and transcript-projection safety assertions fail.
 
 - [ ] **Step 3: Attach runner-level hints**
 
-In `ticket_engine_runner.py`, import:
+In `ticket_engine_runner.py`, extend the Task 2 import:
 
 ```python
 from scripts.ticket_ux import attach_engine_recovery_hint, recovery_hint_code_for_response
@@ -920,30 +1076,21 @@ return None, attach_engine_recovery_hint(
 )
 ```
 
-For execute/ingest trust errors in `load_runner_context()`, keep `state="policy_blocked"` and `error_code="policy_blocked"`, but replace the message and attach `trust_setup`:
+For ingest trust errors in `load_runner_context()`, extend the Task 2 execute branch so both `execute` and `ingest` attach `trust_setup`. Keep `state="policy_blocked"` and `error_code="policy_blocked"`, but replace the message:
 
 ```python
-return None, attach_engine_recovery_hint(
-    EngineResponse(
-        state="policy_blocked",
-        message="Ticket setup needs attention before this write can continue.",
-        error_code="policy_blocked",
-    ),
-    "trust_setup",
+if trust_errors:
+    return None, attach_engine_recovery_hint(
+        EngineResponse(
+            state="policy_blocked",
+            message="Ticket setup needs attention before this write can continue.",
+            error_code="policy_blocked",
+        ),
+        "trust_setup",
 )
 ```
 
-For ingest parse/read errors, remove the stderr-only `{"error": ...}` bypass. Keep the bypass for non-ingest debug stages if needed, but for `subcommand == "ingest"` return a normal JSON response envelope on stdout:
-
-```python
-if error.error_code == "parse_error" and subcommand == "ingest":
-    error.message = "The saved preview state is no longer usable."
-    error = attach_engine_recovery_hint(error, "retry_preview")
-    print(error.to_json())
-    return _exit_code(error)
-```
-
-Before printing responses from `run()` for `subcommand == "ingest"`, sanitize messages and attach default hints to policy/preflight/stale responses. If the response is an `EngineResponse`, use a helper like this:
+Add one sanitizer helper before `run()` print sites. It must handle both pre-dispatch `load_runner_context()` errors and post-dispatch `_dispatch_ingest()` responses:
 
 ```python
 def _ingest_need_fields_recovery_code(resp: EngineResponse) -> str:
@@ -973,10 +1120,36 @@ def _sanitize_user_facing_ingest_response(resp: EngineResponse) -> EngineRespons
     elif hint_code == "retry_preview":
         resp.message = "The saved preview state is no longer usable."
     return attach_engine_recovery_hint(resp, hint_code)
+```
 
+In `run()`, remove the stderr-only `{"error": ...}` bypass for ingest parse/read errors. Keep the bypass for non-ingest debug stages if needed, but every `subcommand == "ingest"` error from `load_runner_context()` must be sanitized and printed as a normal stdout response envelope:
 
+```python
+context, error = load_runner_context(request_origin, subcommand, payload_path)
+if error is not None:
+    if subcommand == "ingest":
+        error = _sanitize_user_facing_ingest_response(error)
+        print(error.to_json())
+        return _exit_code(error)
+    if error.error_code == "parse_error" and error.message.startswith("Cannot read payload:"):
+        print(json.dumps({"error": error.message}), file=sys.stderr)
+        return 1
+    print(error.to_json())
+    return _exit_code(error)
+```
+
+After `dispatch_stage()`, keep the post-dispatch sanitization before the final `print(resp.to_json())`:
+
+```python
+resp = dispatch_stage(
+    subcommand,
+    context.payload,
+    context.tickets_dir,
+    context.request_origin,
+)
 if subcommand == "ingest":
     resp = _sanitize_user_facing_ingest_response(resp)
+print(resp.to_json())
 ```
 
 This split is intentional. `need_fields` from runner request shape, such as a missing `envelope_path` in the ingest request payload, means the saved preview state cannot be used and should get `retry_preview`. `need_fields` from `_dispatch_ingest()` after `read_envelope()` has populated `data.validation_errors` means the envelope contents failed checks and should get `preflight_failed`.
@@ -1018,7 +1191,18 @@ return EngineResponse(
 )
 ```
 
-Do not attach `data.recovery_hint` to this successful mutation response in this slice. The Handoff defer skill update below must render only the safe message, ticket ID, duplicate status, and user-safe partial-failure summary, not the path-bearing debug fields from raw stdout.
+For the normal created-ingest branch, keep `ingest_outcome="created"` and the existing machine/debug data fields, but do not preserve `exec_resp.message` because create currently includes the ticket path. Replace it with:
+
+```python
+return EngineResponse(
+    state=exec_resp.state,
+    message="Ticket was created.",
+    ticket_id=exec_resp.ticket_id,
+    data=data,
+)
+```
+
+Do not attach `data.recovery_hint` to successful mutation responses in this slice. The Handoff defer skill update below must render only the safe message, ticket ID, duplicate status, and user-safe success or partial-failure summary, not the path-bearing debug fields from raw stdout.
 
 In `_dispatch()`, sanitize `PayloadError` responses for `subcommand == "ingest"` before returning them. This covers missing or malformed `envelope_path` from `IngestInput.from_payload()`:
 
@@ -1390,26 +1574,45 @@ git diff -- plugins/turbo-mode/ticket plugins/turbo-mode/handoff docs/superpower
 ```
 
 Expected:
-- no installed-cache mutation;
-- no app-server runtime inventory;
-- no live hook smoke or runtime-readiness proof file;
+- source-local diff is limited to the planned Ticket/Handoff source, docs, and tests;
+- no source-side installed-cache paths, personal-plugin sync outputs, app-server runtime inventory artifacts, live hook smoke artifacts, or runtime-readiness proof files are added;
 - no new lock/queue/daemon;
 - no `audience` field in `recovery_hint`;
 - no user-facing recovery text or transcript projection that exposes `hook_injected`, `hook_request_origin`, `request_origin`, `origin_mismatch`, `PAYLOAD_PATH`, `payload`, `payload path`, `payload_file`, `envelope_path`, raw absolute temp/workspace paths, canonical command repair, or `python3 -B`.
 
-- [ ] **Step 6: Commit coherent result**
+- This diff review is source-local evidence only. It does not prove installed-cache or app-server runtime state. If runtime proof is later required, run it as a separate non-mutating inventory slice.
 
-If the user asks to commit, stage only the files changed for this plan and commit with:
+- [ ] **Step 6: Commit according to the active boundary**
+
+If the user asks to commit during implementation, use the five commit boundaries above. Before each commit, run `git status --short --branch`, review `git diff --stat`, and inspect the relevant diff. Stage only files in the active boundary.
+
+Commit 2 example:
 
 ```bash
 git add \
-  docs/superpowers/plans/2026-05-19-ticket-human-transcript-recovery-hints.md \
   plugins/turbo-mode/ticket/scripts/ticket_ux.py \
+  plugins/turbo-mode/ticket/tests/test_ux.py
+git commit -m "fix(ticket): add recovery hint taxonomy"
+```
+
+Commit 3 example:
+
+```bash
+git add \
   plugins/turbo-mode/ticket/scripts/ticket_capture.py \
   plugins/turbo-mode/ticket/scripts/ticket_update.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_core.py \
-  plugins/turbo-mode/ticket/scripts/ticket_doctor.py \
+  plugins/turbo-mode/ticket/tests/test_capture.py \
+  plugins/turbo-mode/ticket/tests/test_update_refinement.py \
+  plugins/turbo-mode/ticket/tests/test_ingest.py
+git commit -m "fix(ticket): add transcript-safe mutation recovery hints"
+```
+
+Commit 4 example:
+
+```bash
+git add \
   plugins/turbo-mode/ticket/skills/ticket-capture/SKILL.md \
   plugins/turbo-mode/ticket/skills/ticket-update/SKILL.md \
   plugins/turbo-mode/ticket/skills/ticket-doctor/SKILL.md \
@@ -1417,17 +1620,21 @@ git add \
   plugins/turbo-mode/handoff/references/skill-details.md \
   plugins/turbo-mode/ticket/HANDBOOK.md \
   plugins/turbo-mode/ticket/references/ticket-contract.md \
-  plugins/turbo-mode/ticket/tests/test_ux.py \
-  plugins/turbo-mode/ticket/tests/test_capture.py \
-  plugins/turbo-mode/ticket/tests/test_update_refinement.py \
-  plugins/turbo-mode/ticket/tests/test_ingest.py \
-  plugins/turbo-mode/ticket/tests/test_doctor.py \
   plugins/turbo-mode/ticket/tests/test_docs_contract.py \
   plugins/turbo-mode/handoff/tests/test_skill_docs.py
-git commit -m "fix(ticket): add transcript-safe recovery hints"
+git commit -m "docs(ticket): document transcript-safe recovery hints"
 ```
 
-Expected: one coherent source-local commit if commit approval is in scope.
+Commit 5 example:
+
+```bash
+git add \
+  plugins/turbo-mode/ticket/scripts/ticket_doctor.py \
+  plugins/turbo-mode/ticket/tests/test_doctor.py
+git commit -m "fix(ticket): add stale preview cleanup recovery hint"
+```
+
+Expected: boundary commits are split as above unless the user explicitly asks for a single commit or squash.
 
 ## Self-Review Checklist
 
@@ -1439,14 +1646,19 @@ Expected: one coherent source-local commit if commit approval is in scope.
 - [ ] Policy and preflight remain separate codes.
 - [ ] Ingest policy responses with hints use sanitized messages and do not quote `envelope_path`, containment boundaries, or raw paths.
 - [ ] Ingest parse/read failures return a normal stdout response envelope with `retry_preview`.
+- [ ] Ingest pre-dispatch context failures from `load_runner_context()` return sanitized stdout envelopes before printing.
 - [ ] Ingest request-shape `need_fields` uses `retry_preview`, while envelope-content `need_fields` with validation errors uses `preflight_failed`.
 - [ ] Raw ingest stdout is documented as a machine-readable JSON envelope, while Handoff and Ticket skills render only the allowlisted transcript projection.
+- [ ] Normal created-ingest success uses `message="Ticket was created."` and does not leak `ticket_path` through the allowlisted projection.
 - [ ] Ingest envelope-move partial success has a safe message and no `recovery_hint` in this slice.
 - [ ] Handoff `defer` reporting parses Ticket ingest JSON and renders only recovery summaries, next steps, safe messages, ticket IDs, duplicate candidate ticket IDs, and user-safe ingest outcome prose.
 - [ ] Handoff `defer` reporting does not expose Ticket ingest payload paths, processed envelope paths, incoming envelope paths, or envelope provenance.
 - [ ] Docs tests normalize whitespace or snippets contain the exact asserted phrases.
 - [ ] `origin_mismatch` remains the machine error code, but no user-facing message or transcript projection renders `origin_mismatch` or `request_origin` details.
-- [ ] Transcript-safety tests cover lower-case payload wording, `payload_file`, `envelope_path`, canonical command text, hook/provenance fields, `request_origin`, `origin_mismatch`, and raw absolute temp/workspace paths.
+- [ ] Transcript-safety tests assert the exact forbidden vocabulary set, not just one matching term.
+- [ ] Transcript-safety path tests cover known Mac, Linux CI, workspace-container, temp, var, and Windows absolute path shapes.
 - [ ] The plan does not require installed-runtime proof.
+- [ ] Source-local diff checks are worded as repo evidence only, not proof of external installed-cache or app-server runtime state.
 - [ ] The plan does not require cache mutation or personal plugin sync.
 - [ ] The plan does not introduce parallel serialization, locking, queueing, or runtime readiness.
+- [ ] Implementation commits follow the five frozen boundaries unless the user explicitly asks for a single commit or squash.
