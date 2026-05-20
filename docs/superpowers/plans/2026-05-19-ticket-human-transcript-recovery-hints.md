@@ -70,6 +70,7 @@ Before implementation, re-read these live files. This plan is not a substitute f
 - `plugins/turbo-mode/ticket/tests/test_doctor.py`
 - `plugins/turbo-mode/ticket/tests/test_docs_contract.py`
 - `plugins/turbo-mode/handoff/tests/test_skill_docs.py`
+- Available `writing-principles` skill before Task 5 skill/reference edits. Prefer repo-local `.codex/skills/writing-principles/SKILL.md`; if absent, use `/Users/jp/.agents/skills/writing-principles/SKILL.md`. If no applicable copy is available, stop before editing `SKILL.md` or instruction-style Markdown.
 
 ## File Structure
 
@@ -87,10 +88,10 @@ Before implementation, re-read these live files. This plan is not a substitute f
 - `plugins/turbo-mode/handoff/references/skill-details.md` - mirror the Handoff defer transcript boundary for Ticket ingest.
 - `plugins/turbo-mode/ticket/HANDBOOK.md` - operator-facing contract for `recovery_hint` without hiding lower-level debug docs.
 - `plugins/turbo-mode/ticket/references/ticket-contract.md` - response contract for transcript-safe hints on user-facing surfaces.
-- `plugins/turbo-mode/ticket/tests/test_ux.py` - taxonomy schema, exact wording, and internal-leak tests.
+- `plugins/turbo-mode/ticket/tests/test_ux.py` - taxonomy schema, exact wording, exact forbidden transcript vocabulary, and internal-leak tests.
 - `plugins/turbo-mode/ticket/tests/test_capture.py` - capture stale/retry/trust/policy hint coverage.
 - `plugins/turbo-mode/ticket/tests/test_update_refinement.py` - update stale/retry/trust/preflight hint coverage.
-- `plugins/turbo-mode/ticket/tests/test_ingest.py` - ingest trust/setup, pre-dispatch context, policy/preflight, normal success, and partial-success transcript-safety coverage.
+- `plugins/turbo-mode/ticket/tests/test_ingest.py` - ingest trust/setup, pre-dispatch context, policy/preflight, duplicate candidate, normal success, and partial-success transcript-safety coverage.
 - `plugins/turbo-mode/ticket/tests/test_doctor.py` - stale cleanup hint coverage.
 - `plugins/turbo-mode/ticket/tests/test_docs_contract.py` - static docs/skill contract checks.
 - `plugins/turbo-mode/handoff/tests/test_skill_docs.py` - Handoff defer skill/reference transcript-boundary checks.
@@ -149,6 +150,10 @@ INTERNAL_RECOVERY_TERMS = (
     "payload path",
     "payload_file",
     "envelope_path",
+    "processed_path",
+    "incoming_envelope_path",
+    "ticket_path",
+    "envelope_move_error",
     "PAYLOAD_PATH",
     "canonical command",
     "python3 -B",
@@ -199,7 +204,7 @@ The exact helper names may change during implementation if the surrounding code 
 
 ## Stop Conditions
 
-- If implementation needs to expose `hook_injected`, `hook_request_origin`, `request_origin`, `origin_mismatch`, `PAYLOAD_PATH`, `payload`, `payload path`, `payload_file`, `envelope_path`, canonical command repair, raw absolute temp/workspace paths, or `python3 -B` in a user-facing `message`, `recovery_hint`, or transcript projection, stop and redesign that path.
+- If implementation needs to expose `hook_injected`, `hook_request_origin`, `request_origin`, `origin_mismatch`, `PAYLOAD_PATH`, `payload`, `payload path`, `payload_file`, `envelope_path`, `processed_path`, `incoming_envelope_path`, `ticket_path`, `envelope_move_error`, canonical command repair, raw absolute temp/workspace paths, or `python3 -B` in a user-facing `message`, `recovery_hint`, or transcript projection, stop and redesign that path.
 - If a recovery hint code would contain hidden implementation mechanics such as `payload`, `envelope`, hook/provenance field names, command shape, or raw path vocabulary, stop and rename the code before it becomes a durable contract.
 - If transcript-facing runtime output or skill recovery prose uses `plugin hook setup` anywhere except the `trust_setup` next step or skill explanation of that next step, stop and remove it. Control-doc and operator-contract mentions may use the phrase only to document that boundary.
 - If a user-facing response carries `data.recovery_hint`, the paired `message` must also avoid payload path mechanics, envelope path mechanics, canonical command repair, raw temp/workspace paths, and hook/provenance field names.
@@ -237,21 +242,25 @@ These boundaries are authoritative for implementation. Do not replace them with 
 git status --short --branch
 ```
 
-Expected: branch is a non-`main` task branch, currently intended as `fix/ticket-human-transcript-ux`, and unrelated dirty work is preserved.
+Expected: branch is `fix/ticket-human-transcript-ux` and unrelated dirty work is preserved.
 
-- [ ] **Step 2: If on `main`, create the implementation branch**
+- [ ] **Step 2: Require the intended implementation branch**
 
 ```bash
 git branch --show-current
 ```
 
-Expected: output is not `main`. If the output is `main`, run:
+Expected: output is exactly `fix/ticket-human-transcript-ux`.
+
+If the output is `main`, run:
 
 ```bash
 git switch -c fix/ticket-human-transcript-ux
 ```
 
 Expected: branch switches to `fix/ticket-human-transcript-ux`.
+
+If the output is any other branch name or empty because `HEAD` is detached, stop and decide explicitly whether to switch to `fix/ticket-human-transcript-ux` or revise the branch target. Do not continue silently on a wrong non-`main` branch.
 
 - [ ] **Step 3: Run current focused baseline**
 
@@ -357,6 +366,10 @@ def test_transcript_safety_terms_match_expected_internal_leak_vocabulary() -> No
         "payload path",
         "payload_file",
         "envelope_path",
+        "processed_path",
+        "incoming_envelope_path",
+        "ticket_path",
+        "envelope_move_error",
         "PAYLOAD_PATH",
         "canonical command",
         "python3 -B",
@@ -999,6 +1012,36 @@ def test_ingest_created_response_has_safe_transcript_projection(
     assert len(list(tickets_dir.glob("*.md"))) == 1
 ```
 
+For the existing duplicate-candidate ingest test, keep the machine duplicate details but prove the allowlisted projection is safe:
+
+```python
+exit_code, response = _run_and_read_response(capsys, "user", ["ingest", str(second_payload_file)])
+
+assert exit_code == 1
+assert response["state"] == "duplicate_candidate"
+assert response["error_code"] == "duplicate_candidate"
+assert response.get("data", {}).get("ingest_outcome") != "duplicate_replay"
+assert response["data"]["duplicate_of"] == response["ticket_id"]
+assert response["data"]["dedup_fingerprint"]
+assert response["data"]["target_fingerprint"]
+assert response["data"]["action_plan"]["duplicate_candidate"] is True
+assert "recovery_hint" not in response["data"]
+
+projection = _ingest_transcript_projection(response)
+assert projection["message"].startswith("Potential duplicate")
+assert projection["ticket_id"] == response["ticket_id"]
+assert projection["duplicate_candidate_ticket_id"] == response["data"]["duplicate_of"]
+assert "dedup_fingerprint" not in projection
+assert "target_fingerprint" not in projection
+assert "action_plan" not in projection
+assert "processed_path" not in projection
+assert "incoming_envelope_path" not in projection
+assert "ticket_path" not in projection
+assert "envelope_move_error" not in projection
+_assert_ingest_transcript_projection_safe(response)
+assert second_envelope.exists()
+```
+
 For existing containment and direct-child policy-blocked ingest tests, assert:
 
 ```python
@@ -1053,7 +1096,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   uv run --directory plugins/turbo-mode/ticket pytest tests/test_ingest.py -q
 ```
 
-Expected: new recovery-hint, stdout-envelope, origin-code-preservation, pre-dispatch context-error, created-success-message, and transcript-projection safety assertions fail.
+Expected: new recovery-hint, stdout-envelope, origin-code-preservation, pre-dispatch context-error, duplicate-candidate projection, created-success-message, and transcript-projection safety assertions fail.
 
 - [ ] **Step 3: Attach runner-level hints**
 
@@ -1315,6 +1358,10 @@ Expected: tests pass.
 - Test: `plugins/turbo-mode/ticket/tests/test_docs_contract.py`
 - Test: `plugins/turbo-mode/handoff/tests/test_skill_docs.py`
 
+- [ ] **Step 0: Resolve instruction-doc writing principles**
+
+Before editing `SKILL.md` files or instruction-style references, read and apply the available `writing-principles` skill. Prefer the repo-local `.codex/skills/writing-principles/SKILL.md`; if it is absent in this checkout, use `/Users/jp/.agents/skills/writing-principles/SKILL.md`. If neither path exists or the skill cannot be read, stop and report that the repo instruction-doc quality gate cannot be satisfied.
+
 - [ ] **Step 1: Add failing Ticket docs contract tests**
 
 In `test_docs_contract.py`, assert the current-facing docs and skills describe `recovery_hint` as the preferred transcript surface:
@@ -1330,19 +1377,25 @@ def test_user_facing_ticket_skills_prefer_recovery_hint() -> None:
 
 def test_contract_documents_recovery_hint_schema_and_codes() -> None:
     contract = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
-    assert "`data.recovery_hint`" in contract
-    for code in [
-        "stale_plan",
-        "trust_setup",
-        "retry_preview",
-        "cleanup_stale_preview",
-        "policy_blocked",
-        "preflight_failed",
-    ]:
-        assert f"`{code}`" in contract
-    assert "safe to show directly to a human user" in contract
-    assert "Ingest stdout is a machine-readable JSON envelope" in contract
-    assert "allowlisted projection" in contract
+    handbook = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
+    docs = {
+        "ticket-contract.md": contract,
+        "HANDBOOK.md": handbook,
+    }
+    for name, text in docs.items():
+        assert "`data.recovery_hint`" in text, name
+        for code in [
+            "stale_plan",
+            "trust_setup",
+            "retry_preview",
+            "cleanup_stale_preview",
+            "policy_blocked",
+            "preflight_failed",
+        ]:
+            assert f"`{code}`" in text, name
+        assert "safe to show directly to a human user" in text, name
+        assert "Ingest stdout is a machine-readable JSON envelope" in text, name
+        assert "allowlisted projection" in text, name
 ```
 
 - [ ] **Step 2: Add failing Handoff defer transcript-boundary docs test**
@@ -1578,7 +1631,7 @@ Expected:
 - no source-side installed-cache paths, personal-plugin sync outputs, app-server runtime inventory artifacts, live hook smoke artifacts, or runtime-readiness proof files are added;
 - no new lock/queue/daemon;
 - no `audience` field in `recovery_hint`;
-- no user-facing recovery text or transcript projection that exposes `hook_injected`, `hook_request_origin`, `request_origin`, `origin_mismatch`, `PAYLOAD_PATH`, `payload`, `payload path`, `payload_file`, `envelope_path`, raw absolute temp/workspace paths, canonical command repair, or `python3 -B`.
+- no user-facing recovery text or transcript projection that exposes `hook_injected`, `hook_request_origin`, `request_origin`, `origin_mismatch`, `PAYLOAD_PATH`, `payload`, `payload path`, `payload_file`, `envelope_path`, `processed_path`, `incoming_envelope_path`, `ticket_path`, `envelope_move_error`, raw absolute temp/workspace paths, canonical command repair, or `python3 -B`.
 
 - This diff review is source-local evidence only. It does not prove installed-cache or app-server runtime state. If runtime proof is later required, run it as a separate non-mutating inventory slice.
 
@@ -1650,13 +1703,17 @@ Expected: boundary commits are split as above unless the user explicitly asks fo
 - [ ] Ingest request-shape `need_fields` uses `retry_preview`, while envelope-content `need_fields` with validation errors uses `preflight_failed`.
 - [ ] Raw ingest stdout is documented as a machine-readable JSON envelope, while Handoff and Ticket skills render only the allowlisted transcript projection.
 - [ ] Normal created-ingest success uses `message="Ticket was created."` and does not leak `ticket_path` through the allowlisted projection.
+- [ ] Duplicate-candidate ingest keeps machine duplicate/fingerprint data in raw JSON only and proves the allowlisted projection is safe.
 - [ ] Ingest envelope-move partial success has a safe message and no `recovery_hint` in this slice.
 - [ ] Handoff `defer` reporting parses Ticket ingest JSON and renders only recovery summaries, next steps, safe messages, ticket IDs, duplicate candidate ticket IDs, and user-safe ingest outcome prose.
 - [ ] Handoff `defer` reporting does not expose Ticket ingest payload paths, processed envelope paths, incoming envelope paths, or envelope provenance.
 - [ ] Docs tests normalize whitespace or snippets contain the exact asserted phrases.
 - [ ] `origin_mismatch` remains the machine error code, but no user-facing message or transcript projection renders `origin_mismatch` or `request_origin` details.
-- [ ] Transcript-safety tests assert the exact forbidden vocabulary set, not just one matching term.
+- [ ] Transcript-safety tests assert the exact forbidden vocabulary set, including path-bearing data keys such as `processed_path`, `incoming_envelope_path`, `ticket_path`, and `envelope_move_error`, not just one matching term.
 - [ ] Transcript-safety path tests cover known Mac, Linux CI, workspace-container, temp, var, and Windows absolute path shapes.
+- [ ] `HANDBOOK.md` and `ticket-contract.md` both document the recovery-hint schema, frozen codes, and ingest projection boundary.
+- [ ] Task 5 skill/reference edits read and apply the available `writing-principles` skill before modifying instruction docs.
+- [ ] Task 0 stops on detached `HEAD` or any non-`fix/ticket-human-transcript-ux` branch unless the branch target is explicitly revised.
 - [ ] The plan does not require installed-runtime proof.
 - [ ] Source-local diff checks are worded as repo evidence only, not proof of external installed-cache or app-server runtime state.
 - [ ] The plan does not require cache mutation or personal plugin sync.
