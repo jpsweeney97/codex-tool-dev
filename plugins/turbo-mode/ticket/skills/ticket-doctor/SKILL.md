@@ -39,6 +39,14 @@ it as live runtime proof.
 `diagnose` reports stale `.codex/ticket-tmp/` payloads older than 24 hours
 without mutating them.
 
+## Recovery Hints
+
+When a backend response includes `data.recovery_hint`, show the recovery summary and next step before any lower-level message. Do not expose payload paths, envelope paths, canonical command repair, raw temp/workspace paths, or hook/provenance fields in the transcript.
+
+- `cleanup_stale_preview`: say old abandoned Ticket preview state can be cleaned
+  up after review. Do not clean anything until the user explicitly approves the
+  confirmed cleanup command.
+
 ## Audit Repair
 
 Always dry-run audit repair first:

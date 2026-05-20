@@ -66,6 +66,25 @@ Ticket has exactly three supported high-level mutation surfaces: `capture`, `upd
 `ticket_workflow.py` is a compatibility/debug runner kept for tests and
 low-level recovery work, not a supported user-facing mutation surface.
 
+### Recovery Hints
+
+User-facing mutation and recovery surfaces may include `data.recovery_hint`.
+When present, it is safe to show directly to a human user. Valid codes are
+`stale_plan`, `trust_setup`, `retry_preview`, `cleanup_stale_preview`,
+`policy_blocked`, and `preflight_failed`.
+
+The schema is `{"code": "...", "summary": "...", "next_step": "..."}`. The
+whole object is transcript-safe. `plugin hook setup` is allowed only as
+setup-level recovery wording for `trust_setup`; hook/provenance field names and
+command repair instructions remain internal.
+
+Ingest stdout is a machine-readable JSON envelope. Skills and transcript-facing
+workflows must parse it and render only the allowlisted projection: recovery
+summary, recovery next step, safe message, ticket ID, duplicate candidate ticket
+ID, and user-safe ingest outcome prose. Raw `data` fields such as processed
+paths, incoming envelope paths, and envelope provenance are not transcript
+fields.
+
 ### Hook
 
 | Hook | Event | Purpose |

@@ -57,6 +57,49 @@ def test_ticket_doctor_reports_stale_ticket_tmp_payloads(
     assert report["payloads"]["stale"][0]["path"] == str(payload)
 
 
+def test_ticket_doctor_diagnose_response_adds_cleanup_hint_for_stale_payloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    payload_dir = tmp_path / ".codex" / "ticket-tmp"
+    payload_dir.mkdir(parents=True)
+    payload = payload_dir / "old.json"
+    payload.write_text("{}", encoding="utf-8")
+    old_time = 1_700_000_000
+    os.utime(payload, (old_time, old_time))
+    monkeypatch.chdir(tmp_path)
+
+    plugin_root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(DOCTOR_SCRIPT),
+            "diagnose",
+            str(tickets_dir),
+            "--plugin-root",
+            str(plugin_root),
+            "--cache-root",
+            str(plugin_root),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    response = json.loads(completed.stdout)
+    assert response["state"] == "ok"
+    assert response["data"]["report"]["payloads"]["stale_count"] == 1
+    assert response["data"]["recovery_hint"] == {
+        "code": "cleanup_stale_preview",
+        "summary": "Old abandoned Ticket preview state can be cleaned up after review.",
+        "next_step": "Use ticket-doctor stale cleanup after reviewing the reported items.",
+    }
+
+
 def test_ticket_doctor_clean_stale_payloads_requires_confirmation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -37,6 +37,7 @@ from scripts.ticket_stage_models import (
     PreflightInput,
 )
 from scripts.ticket_trust import collect_trust_triple_errors
+from scripts.ticket_ux import attach_engine_recovery_hint, recovery_hint_code_for_response
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,15 @@ def load_runner_context(
     payload["request_origin"] = effective_origin
     hook_origin = payload.get("hook_request_origin")
     if hook_origin is not None and hook_origin != effective_origin:
+        if subcommand == "ingest":
+            return None, attach_engine_recovery_hint(
+                EngineResponse(
+                    state="escalate",
+                    message="Ticket setup needs attention before this write can continue.",
+                    error_code="origin_mismatch",
+                ),
+                "trust_setup",
+            )
         return None, EngineResponse(
             state="escalate",
             message=f"origin_mismatch: entrypoint={effective_origin}, hook={hook_origin}",
@@ -91,6 +101,15 @@ def load_runner_context(
             payload.get("session_id", ""),
         )
         if trust_errors:
+            if subcommand in ("execute", "ingest"):
+                return None, attach_engine_recovery_hint(
+                    EngineResponse(
+                        state="policy_blocked",
+                        message="Ticket setup needs attention before this write can continue.",
+                        error_code="policy_blocked",
+                    ),
+                    "trust_setup",
+                )
             return None, EngineResponse(
                 state="policy_blocked",
                 message=f"Execute requires verified hook provenance: {', '.join(trust_errors)}",
@@ -167,6 +186,10 @@ def run(
 
     context, error = load_runner_context(request_origin, subcommand, payload_path)
     if error is not None:
+        if subcommand == "ingest":
+            error = _sanitize_user_facing_ingest_response(error)
+            print(error.to_json())
+            return _exit_code(error)
         if error.error_code == "parse_error" and error.message.startswith("Cannot read payload:"):
             print(json.dumps({"error": error.message}), file=sys.stderr)
             return 1
@@ -180,6 +203,8 @@ def run(
         context.tickets_dir,
         context.request_origin,
     )
+    if subcommand == "ingest":
+        resp = _sanitize_user_facing_ingest_response(resp)
     print(resp.to_json())
     return _exit_code(resp)
 
@@ -199,6 +224,35 @@ def _exit_code(resp: EngineResponse) -> int:
     if resp.error_code == "need_fields":
         return 2
     return 1
+
+
+def _ingest_need_fields_recovery_code(resp: EngineResponse) -> str:
+    data = resp.data if isinstance(resp.data, dict) else {}
+    validation_errors = data.get("validation_errors")
+    if isinstance(validation_errors, list) and validation_errors:
+        return "preflight_failed"
+    return "retry_preview"
+
+
+def _sanitize_user_facing_ingest_response(resp: EngineResponse) -> EngineResponse:
+    hint_code = (
+        _ingest_need_fields_recovery_code(resp)
+        if resp.error_code == "need_fields"
+        else recovery_hint_code_for_response(resp.to_dict())
+    )
+    if hint_code is None:
+        return resp
+    if hint_code == "trust_setup":
+        resp.message = "Ticket setup needs attention before this write can continue."
+    elif hint_code == "policy_blocked":
+        resp.message = "Ticket ingest is blocked by Ticket policy."
+    elif hint_code == "preflight_failed":
+        resp.message = "Ticket checks did not pass."
+    elif hint_code == "stale_plan":
+        resp.message = "The saved preview is no longer current."
+    elif hint_code == "retry_preview":
+        resp.message = "The saved preview state is no longer usable."
+    return attach_engine_recovery_hint(resp, hint_code)
 
 
 def _dispatch_ingest(
@@ -227,20 +281,14 @@ def _dispatch_ingest(
     except (ValueError, OSError):
         return EngineResponse(
             state="policy_blocked",
-            message=(
-                f"envelope_path escapes containment boundary "
-                f"{str(envelopes_boundary)!r}. Got: {str(inp.envelope_path)!r:.100}"
-            ),
+            message="Ticket ingest is blocked by Ticket policy.",
             error_code="policy_blocked",
         )
     try:
         resolved_envelope.relative_to(envelopes_boundary / ".processed")
         return EngineResponse(
             state="policy_blocked",
-            message=(
-                "envelope_path points to processed envelope "
-                f"(replay rejected). Got: {str(inp.envelope_path)!r:.100}"
-            ),
+            message="Ticket ingest is blocked by Ticket policy.",
             error_code="policy_blocked",
         )
     except (ValueError, OSError):
@@ -249,10 +297,7 @@ def _dispatch_ingest(
     if resolved_envelope.parent != envelopes_boundary:
         return EngineResponse(
             state="policy_blocked",
-            message=(
-                f"envelope_path must be a direct child of containment boundary "
-                f"{str(envelopes_boundary)!r}. Got: {str(inp.envelope_path)!r:.100}"
-            ),
+            message="Ticket ingest is blocked by Ticket policy.",
             error_code="policy_blocked",
         )
 
@@ -261,7 +306,7 @@ def _dispatch_ingest(
     if processed_path.exists():
         return EngineResponse(
             state="ok",
-            message=f"duplicate/replay: envelope {envelope_id} already processed",
+            message="That Ticket ingest request was already processed; no ticket was created.",
             data={
                 "ingest_outcome": "duplicate_replay",
                 "envelope_id": envelope_id,
@@ -360,7 +405,7 @@ def _dispatch_ingest(
         )
         return EngineResponse(
             state=exec_resp.state,
-            message=f"{exec_resp.message}; envelope move failed: {exc}",
+            message="Ticket was created, but Ticket could not finish ingest cleanup.",
             ticket_id=exec_resp.ticket_id,
             data=data,
         )
@@ -377,7 +422,7 @@ def _dispatch_ingest(
     )
     return EngineResponse(
         state=exec_resp.state,
-        message=exec_resp.message,
+        message="Ticket was created.",
         ticket_id=exec_resp.ticket_id,
         data=data,
     )
@@ -461,6 +506,16 @@ def _dispatch(
                 error_code="intent_mismatch",
             )
     except PayloadError as exc:
+        if subcommand == "ingest":
+            return EngineResponse(
+                state=exc.state,
+                message=(
+                    "The saved preview state is no longer usable."
+                    if exc.code in {"need_fields", "parse_error"}
+                    else "Ticket ingest is blocked by Ticket policy."
+                ),
+                error_code=exc.code,
+            )
         return EngineResponse(
             state=exc.state,
             message=f"{subcommand} payload validation failed: {exc}",

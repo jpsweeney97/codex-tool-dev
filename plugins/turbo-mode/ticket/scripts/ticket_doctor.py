@@ -15,6 +15,7 @@ from scripts.ticket_audit import repair_audit_logs  # noqa: E402
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir  # noqa: E402
 from scripts.ticket_payloads import TicketPayloadPathError, clean_stale_payloads  # noqa: E402
 from scripts.ticket_triage import DoctorInputError, ticket_doctor  # noqa: E402
+from scripts.ticket_ux import attach_recovery_hint  # noqa: E402
 
 
 def _response(state: str, data: dict[str, Any], message: str = "") -> dict[str, Any]:
@@ -191,7 +192,10 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 1
-        print(json.dumps(_response("ok", payload)))
+        response = _response("ok", payload)
+        if response["data"]["report"]["payloads"]["stale_count"] > 0:
+            response = attach_recovery_hint(response, "cleanup_stale_preview")
+        print(json.dumps(response))
         return 0
 
     if args.subcommand == "repair-audit":

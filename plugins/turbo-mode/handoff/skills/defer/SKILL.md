@@ -57,5 +57,13 @@ Resolve plugin root before running helpers. Set `PLUGIN_ROOT` to the plugin root
    python3 /absolute/ticket/root/scripts/ticket_engine_user.py ingest "$PROJECT_ROOT/.codex/ticket-tmp/payload-ingest-<timestamp>-<suffix>.json"
    ```
 
+## Ticket Ingest Transcript Boundary
+
+When Ticket ingest returns `data.recovery_hint`, show the recovery summary and next step before any lower-level message. Do not report Ticket ingest payload paths, processed envelope paths, incoming envelope paths, or envelope provenance in the human transcript.
+
+Parse Ticket ingest JSON stdout and render only recovery summaries, next steps, safe messages, ticket IDs, duplicate candidate ticket IDs, and user-safe ingest outcome prose.
+
+Report ticket IDs, duplicate candidates, and user-safe partial-failure summaries. For `created_envelope_move_failed`, say the ticket was created but ingest cleanup could not finish; suggest Ticket diagnostics before retrying cleanup. Never paste the raw Ticket ingest JSON into the human transcript.
+
 7. Stage created ticket files and processed envelopes by explicit path only. Never use `git add .`.
-8. Report ticket IDs, file paths, envelope provenance, and any skipped duplicate candidates.
+8. Report ticket IDs, duplicate candidates, user-safe ingest outcomes, and any skipped duplicate candidates.

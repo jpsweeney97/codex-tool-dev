@@ -21,6 +21,7 @@ from scripts.ticket_engine_runner import dispatch_stage, load_runner_context  # 
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir  # noqa: E402
 from scripts.ticket_payloads import TicketPayloadPathError, delete_consumed_payload  # noqa: E402
 from scripts.ticket_read import find_ticket_by_id, list_tickets  # noqa: E402
+from scripts.ticket_ux import attach_recovery_hint, recovery_hint_code_for_response  # noqa: E402
 from scripts.ticket_validate import (  # noqa: E402
     CAPTURE_INPUT_FIELDS,
     CONTROLLED_CAPTURE_TAGS,
@@ -115,6 +116,27 @@ def _engine_response_to_dict(response: Any) -> dict[str, Any]:
     if "data" not in data:
         data["data"] = {}
     return data
+
+
+_SAFE_MESSAGE_BY_RECOVERY_CODE = {
+    "stale_plan": "The saved preview is no longer current.",
+    "trust_setup": "Ticket setup needs attention before this write can continue.",
+    "retry_preview": "The saved preview state is no longer usable.",
+    "policy_blocked": "This write is blocked by Ticket policy.",
+    "preflight_failed": "Ticket checks did not pass.",
+}
+
+
+def _with_default_recovery_hint(response: dict[str, Any]) -> dict[str, Any]:
+    code = recovery_hint_code_for_response(response)
+    if code is None:
+        return response
+    safe_response = dict(response)
+    safe_response["message"] = _SAFE_MESSAGE_BY_RECOVERY_CODE.get(
+        code,
+        safe_response.get("message", ""),
+    )
+    return attach_recovery_hint(safe_response, code)
 
 
 def _write_payload_atomic(payload_path: Path, payload: dict[str, Any]) -> None:
@@ -535,7 +557,7 @@ def _suggested_next_capture(edit_text: str | None) -> str:
 def _prepare(payload_path: Path, edit_text: str | None) -> dict[str, Any]:
     payload, tickets_dir, request_origin, error = _load_capture_context("prepare", payload_path)
     if error is not None:
-        return error
+        return _with_default_recovery_hint(error)
     assert payload is not None and tickets_dir is not None and request_origin is not None
 
     fields, field_error = _capture_fields(payload, edit_text=edit_text)
@@ -558,14 +580,14 @@ def _prepare(payload_path: Path, edit_text: str | None) -> dict[str, Any]:
         dispatch_stage("classify", current, tickets_dir, request_origin)
     )
     if classify_response.get("state") != "ok":
-        return classify_response
+        return _with_default_recovery_hint(classify_response)
     current.update(classify_response.get("data", {}))
 
     plan_response = _engine_response_to_dict(
         dispatch_stage("plan", current, tickets_dir, request_origin)
     )
     if plan_response.get("state") not in {"ok", "duplicate_candidate"}:
-        return plan_response
+        return _with_default_recovery_hint(plan_response)
     current.update(plan_response.get("data", {}))
     duplicate = _duplicate_info(payload, fields, plan_response, tickets_dir)
     if current.get("duplicate_of"):
@@ -575,7 +597,7 @@ def _prepare(payload_path: Path, edit_text: str | None) -> dict[str, Any]:
         dispatch_stage("preflight", current, tickets_dir, request_origin)
     )
     if preflight_response.get("state") != "ok":
-        return preflight_response
+        return _with_default_recovery_hint(preflight_response)
     current.update(preflight_response.get("data", {}))
 
     preview = _preview(fields, duplicate)
@@ -613,7 +635,7 @@ def _prepare(payload_path: Path, edit_text: str | None) -> dict[str, Any]:
 def _execute(payload_path: Path) -> dict[str, Any]:
     payload, tickets_dir, request_origin, error = _load_capture_context("execute", payload_path)
     if error is not None:
-        return error
+        return _with_default_recovery_hint(error)
     assert payload is not None and tickets_dir is not None and request_origin is not None
 
     prepare_artifact = payload.get("capture_prepare")
@@ -621,61 +643,87 @@ def _execute(payload_path: Path) -> dict[str, Any]:
         not isinstance(prepare_artifact, dict)
         or prepare_artifact.get("state") != "ready_to_execute"
     ):
-        return _response(
-            "preflight_failed",
-            "Capture execute requires a successful prepare preview",
-            error_code="stale_plan",
+        return attach_recovery_hint(
+            _response(
+                "preflight_failed",
+                "The saved preview state is no longer usable.",
+                error_code="stale_plan",
+            ),
+            "retry_preview",
         )
     fields = payload.get("fields")
     if not isinstance(fields, dict):
-        return _response(
-            "preflight_failed",
-            "Capture execute requires prepared fields",
-            error_code="stale_plan",
+        return attach_recovery_hint(
+            _response(
+                "preflight_failed",
+                "The saved preview state is no longer usable.",
+                error_code="stale_plan",
+            ),
+            "retry_preview",
         )
     preview = prepare_artifact.get("preview")
     if not isinstance(preview, dict):
-        return _response(
-            "preflight_failed",
-            "Capture execute requires prepared preview data",
-            error_code="stale_plan",
+        return attach_recovery_hint(
+            _response(
+                "preflight_failed",
+                "The saved preview state is no longer usable.",
+                error_code="stale_plan",
+            ),
+            "retry_preview",
         )
     if prepare_artifact.get("fingerprint") != _prepare_fingerprint(fields):
-        return _response(
-            "preflight_failed",
-            "Capture preview is stale; rerun prepare",
-            error_code="stale_plan",
+        return attach_recovery_hint(
+            _response(
+                "preflight_failed",
+                "The saved preview is no longer current.",
+                error_code="stale_plan",
+            ),
+            "stale_plan",
         )
     capture = payload.get("capture")
     if (
         not isinstance(capture, dict)
         or prepare_artifact.get("capture_fingerprint") != _json_fingerprint(capture)
     ):
-        return _response(
-            "preflight_failed",
-            "Capture input changed since prepare; rerun prepare",
-            error_code="stale_plan",
+        return attach_recovery_hint(
+            _response(
+                "preflight_failed",
+                "The saved preview is no longer current.",
+                error_code="stale_plan",
+            ),
+            "stale_plan",
         )
     if prepare_artifact.get("preview_fingerprint") != _json_fingerprint(preview):
-        return _response(
-            "preflight_failed",
-            "Capture preview is stale; rerun prepare",
-            error_code="stale_plan",
+        return attach_recovery_hint(
+            _response(
+                "preflight_failed",
+                "The saved preview is no longer current.",
+                error_code="stale_plan",
+            ),
+            "stale_plan",
         )
     if prepare_artifact.get("execute_fingerprint") != _execute_fingerprint(payload):
-        return _response(
-            "preflight_failed",
-            "Capture execute payload changed since prepare; rerun prepare",
-            error_code="stale_plan",
+        return attach_recovery_hint(
+            _response(
+                "preflight_failed",
+                "The saved preview is no longer current.",
+                error_code="stale_plan",
+            ),
+            "stale_plan",
         )
     payload["fields"] = dict(fields)
 
     project_root = discover_project_root(tickets_dir)
     if project_root is None:
-        return _response(
-            "policy_blocked",
-            "Cannot determine project root for payload cleanup: no .codex/ or .git/ marker found",
-            error_code="policy_blocked",
+        return _with_default_recovery_hint(
+            _response(
+                "policy_blocked",
+                (
+                    "Cannot determine project root for payload cleanup: "
+                    "no .codex/ or .git/ marker found"
+                ),
+                error_code="policy_blocked",
+            )
         )
 
     response = _engine_response_to_dict(
@@ -689,7 +737,7 @@ def _execute(payload_path: Path) -> dict[str, Any]:
             )
         except (OSError, TicketPayloadPathError) as exc:
             response.setdefault("data", {})["payload_cleanup_error"] = str(exc)
-    return response
+    return _with_default_recovery_hint(response)
 
 
 def run_capture(

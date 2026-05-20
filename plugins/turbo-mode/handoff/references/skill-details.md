@@ -46,7 +46,7 @@ Candidate fields: `summary`, `problem`, `source_text`, `proposed_approach`, `acc
 
 High-confidence signals include explicit deferral language, review findings marked as deferred or design debt, TODO/FIXME references discussed in the conversation, and unresolved items from consultations. Medium-confidence signals include conditional actions and open questions that imply future work. Low-confidence observations without action go in Possible Misses only.
 
-Present candidates in a table and full detail blocks before asking for confirmation. Accept `all`, explicit numbers, edits, or `none`. On ingest, report ticket IDs, paths, processed envelopes, duplicates, and any partial failures.
+Present candidates in a table and full detail blocks before asking for confirmation. Accept `all`, explicit numbers, edits, or `none`. On ingest: Parse Ticket ingest JSON stdout and render only recovery summaries, next steps, safe messages, ticket IDs, duplicate candidate ticket IDs, and user-safe ingest outcome prose. Do not report Ticket ingest payload paths, processed envelope paths, incoming envelope paths, or envelope provenance in the human transcript.
 
 Failure handling: stop on `defer.py` error; ingest successful envelopes on partial success; treat Ticket resolver ambiguity as a release blocker; report duplicate candidates as already tracked.
 

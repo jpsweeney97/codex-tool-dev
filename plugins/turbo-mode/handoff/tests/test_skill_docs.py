@@ -121,3 +121,31 @@ def test_defer_skill_uses_plugin_siblings_plain_field() -> None:
     assert "/tmp/ingest_payload.json" not in text
     assert "../../../../ticket/" not in text
     assert "ticket/1.4.0/scripts" not in text
+
+
+def test_defer_skill_hides_ticket_ingest_transcript_internals() -> None:
+    skill = (PLUGIN_ROOT / "skills" / "defer" / "SKILL.md").read_text(encoding="utf-8")
+    details = (PLUGIN_ROOT / "references" / "skill-details.md").read_text(encoding="utf-8")
+    normalized_skill = " ".join(skill.split())
+    normalized_details = " ".join(details.split())
+    hidden_mechanics_sentence = (
+        "Do not report Ticket ingest payload paths, processed envelope paths, "
+        "incoming envelope paths, or envelope provenance in the human transcript."
+    )
+    render_only_sentence = (
+        "Parse Ticket ingest JSON stdout and render only recovery summaries, "
+        "next steps, safe messages, ticket IDs, duplicate candidate ticket IDs, "
+        "and user-safe ingest outcome prose."
+    )
+
+    assert (
+        "When Ticket ingest returns `data.recovery_hint`, show the recovery summary and next step"
+        in normalized_skill
+    )
+    assert render_only_sentence in normalized_skill
+    assert render_only_sentence in normalized_details
+    assert hidden_mechanics_sentence in normalized_skill
+    assert hidden_mechanics_sentence in normalized_details
+    assert "duplicate candidate ticket IDs" in normalized_details
+    assert "Report ticket IDs, file paths, envelope provenance" not in normalized_skill
+    assert "report ticket IDs, paths, processed envelopes" not in normalized_details

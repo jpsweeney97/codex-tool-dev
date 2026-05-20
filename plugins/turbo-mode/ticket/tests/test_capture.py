@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import pytest
 import scripts.ticket_capture as ticket_capture
 from scripts.ticket_capture import run_capture
 from scripts.ticket_parse import parse_ticket
+from scripts.ticket_ux import INTERNAL_RECOVERY_PATH_PATTERNS, INTERNAL_RECOVERY_TERMS
 
 from tests.support.builders import make_ticket
 
@@ -57,6 +59,17 @@ def _write_payload(path: Path, payload: dict) -> None:
 
 def _now_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _assert_hint(response: dict, code: str) -> None:
+    hint = response["data"]["recovery_hint"]
+    assert hint["code"] == code
+    assert set(hint) == {"code", "summary", "next_step"}
+    rendered = " ".join(hint.values()) + " " + response["message"]
+    for term in INTERNAL_RECOVERY_TERMS:
+        assert term.lower() not in rendered.lower()
+    for pattern in INTERNAL_RECOVERY_PATH_PATTERNS:
+        assert re.search(pattern, rendered) is None
 
 
 def test_prepare_returns_compact_preview_fields_and_does_not_write_ticket(
@@ -325,7 +338,8 @@ def test_prepare_rejects_relative_payload_path(
 
     assert response["state"] == "policy_blocked"
     assert response["error_code"] == "policy_blocked"
-    assert "must be absolute" in response["message"]
+    assert response["message"] == "This write is blocked by Ticket policy."
+    _assert_hint(response, "policy_blocked")
 
 
 def test_prepare_rejects_payload_path_outside_workspace(
@@ -342,7 +356,8 @@ def test_prepare_rejects_payload_path_outside_workspace(
 
     assert response["state"] == "policy_blocked"
     assert response["error_code"] == "policy_blocked"
-    assert "outside workspace root" in response["message"]
+    assert response["message"] == "This write is blocked by Ticket policy."
+    _assert_hint(response, "policy_blocked")
 
 
 def test_prepare_rejects_payload_path_with_whitespace(
@@ -359,7 +374,8 @@ def test_prepare_rejects_payload_path_with_whitespace(
 
     assert response["state"] == "policy_blocked"
     assert response["error_code"] == "policy_blocked"
-    assert "must not contain whitespace" in response["message"]
+    assert response["message"] == "This write is blocked by Ticket policy."
+    _assert_hint(response, "policy_blocked")
 
 
 def test_prepare_surfaces_duplicate_detection_with_create_anyway_for_weak_duplicate(
@@ -540,7 +556,23 @@ def test_failed_capture_execute_preserves_ticket_tmp_payload(
     execute = run_capture("execute", payload_path)
 
     assert execute["state"] in {"preflight_failed", "policy_blocked", "escalate"}
+    _assert_hint(execute, "trust_setup")
     assert payload_path.exists()
+
+
+def test_execute_without_prepare_returns_retry_preview_hint(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    payload_path = _payload_file(project_root, _payload(tmp_tickets))
+
+    response = run_capture("execute", payload_path)
+
+    assert response["state"] == "preflight_failed"
+    assert response["error_code"] == "stale_plan"
+    _assert_hint(response, "retry_preview")
 
 
 def test_successful_capture_execute_does_not_delete_symlink_payload_target(
@@ -652,6 +684,7 @@ def test_execute_rejects_prepared_payload_with_missing_preview(
     assert prepare["state"] == "ready_to_execute"
     assert execute["state"] == "preflight_failed"
     assert execute["error_code"] == "stale_plan"
+    _assert_hint(execute, "retry_preview")
     assert list(tmp_tickets.glob("*.md")) == []
 
 
@@ -674,6 +707,7 @@ def test_execute_rejects_when_capture_changes_after_prepare_until_rerun(
     assert prepare["state"] == "ready_to_execute"
     assert stale_execute["state"] == "preflight_failed"
     assert stale_execute["error_code"] == "stale_plan"
+    _assert_hint(stale_execute, "stale_plan")
     assert rerun_prepare["state"] == "ready_to_execute"
     assert execute["state"] == "ok_create"
     assert len(list(tmp_tickets.glob("*.md"))) == 1
@@ -696,7 +730,44 @@ def test_execute_rejects_when_session_id_changes_after_prepare(
     assert prepare["state"] == "ready_to_execute"
     assert execute["state"] == "preflight_failed"
     assert execute["error_code"] == "stale_plan"
+    _assert_hint(execute, "stale_plan")
     assert list(tmp_tickets.glob("*.md")) == []
+
+
+def test_execute_missing_trust_fields_returns_setup_hint(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    payload_path = _payload_file(project_root, _payload(tmp_tickets))
+
+    prepare = run_capture("prepare", payload_path)
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    payload.pop("hook_injected", None)
+    payload.pop("hook_request_origin", None)
+    _write_payload(payload_path, payload)
+    response = run_capture("execute", payload_path)
+
+    assert prepare["state"] == "ready_to_execute"
+    assert response["state"] == "policy_blocked"
+    _assert_hint(response, "trust_setup")
+    assert response["message"] == "Ticket setup needs attention before this write can continue."
+
+
+def test_default_hint_sanitizes_origin_mismatch_message_before_attaching_hint() -> None:
+    response = ticket_capture._with_default_recovery_hint(
+        {
+            "state": "escalate",
+            "message": "Cannot determine caller identity: request_origin='/Users/example/project'",
+            "error_code": "origin_mismatch",
+        }
+    )
+
+    assert response["state"] == "escalate"
+    assert response["error_code"] == "origin_mismatch"
+    _assert_hint(response, "trust_setup")
+    assert response["message"] == "Ticket setup needs attention before this write can continue."
 
 
 def test_execute_does_not_persist_edit_history(

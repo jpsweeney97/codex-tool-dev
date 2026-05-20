@@ -88,6 +88,32 @@ Exit codes: 0 (success), 1 (engine error), 2 (validation failure)
 
 Ticket has exactly three supported high-level mutation surfaces: `capture`, `update`, and `ingest`. `capture` and `update` use their preview-first prepare/execute wrappers. `ingest` uses the guarded engine entrypoints to consume a DeferredWorkEnvelope from `docs/tickets/.envelopes/<filename>.json`. Direct engine `classify`/`plan`/`preflight`/`execute` and `ticket_workflow.py prepare`/`execute` remain low-level compatibility, debug, and agent-internal paths. They are not normal user-facing mutation interfaces and must not be documented as the preferred way to create or mutate tickets.
 
+### Recovery Hints
+
+User-facing mutation and recovery surfaces may include `data.recovery_hint`.
+When present, it is safe to show directly to a human user. The schema is:
+
+```json
+{"code": "stale_plan", "summary": "One user-safe sentence.", "next_step": "One concrete recovery action."}
+```
+
+Valid codes are `stale_plan`, `trust_setup`, `retry_preview`,
+`cleanup_stale_preview`, `policy_blocked`, and `preflight_failed`.
+Low-level direct engine/debug surfaces may remain technical unless their output
+bubbles into a user-facing wrapper.
+
+The whole object is transcript-safe. Do not add recovery hint codes that contain
+hidden implementation mechanics. `plugin hook setup` is allowed as setup-level
+recovery wording for `trust_setup`; hook/provenance field names and command
+repair instructions remain internal.
+
+Ingest stdout is a machine-readable JSON envelope. Skills and transcript-facing
+workflows must parse it and render only the allowlisted projection: recovery
+summary, recovery next step, safe message, ticket ID, duplicate candidate ticket
+ID, and user-safe ingest outcome prose. Raw `data` fields such as processed
+paths, incoming envelope paths, and envelope provenance are not transcript
+fields.
+
 ### Subcommands
 
 | Subcommand | Input | Output `data` |
