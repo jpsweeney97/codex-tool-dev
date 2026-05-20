@@ -97,11 +97,12 @@ Fresh 0.132.0 schema evidence captured on 2026-05-20:
 | Source checkout | Running activation from the source checkout may report diagnostics, but it must not write `.codex/ticket-runtime-proof.json`. Activation derives the running plugin root from `Path(__file__).resolve().parents[1]`; no CLI argument may impersonate the running root. Activation succeeds only when the derived running plugin root equals the installed cache root proven by app-server `hooks/list` and corroborated by installed-cache `skills/list` paths. |
 | Agent policy selectors | The hook-observed origin and payload fields are not policy selectors. `direct_execute` uses the hardcoded `ticket_engine_agent.py` entrypoint. Wrapper surfaces require hardcoded agent wrapper entrypoints that pass `request_origin="agent"` internally; the existing user wrappers remain `request_origin="user"`. |
 | Wrapper hook membrane | New agent wrapper entrypoints must be explicitly allowlisted by `ticket_engine_guard.py` and covered by `tests/test_hook.py`. An unrecognized `ticket_*.py` script remains denied by the hook. |
+| Wrapper prepare/execute fingerprint | Capture/update post-proof smokes must not prepare wrapper payloads through a different trust path than execute. `capture_execute` and `update_execute` must run both `prepare` and `execute` through app-server, the installed hook, and the same hardcoded agent wrapper entrypoint in the same app-server thread/session. Activation must record and verify that the wrapper execute-fingerprint trust inputs are stable from the prepared payload to the execute payload: non-empty `session_id`, `hook_injected is True`, `hook_request_origin == "user"` on current Codex, contained `tickets_dir`, payload path, and saved `execute_fingerprint`. A `stale_plan` before the readiness gate is an activation failure unless the implementation intentionally changes the wrapper fingerprint contract and adds tests for the new behavior. |
 | Gate scope | `engine_execute()` readiness gating applies only to `request_origin == "agent"` execute surfaces that can mutate tickets under `auto_audit`: `direct_execute`, `capture_execute`, and `update_execute`. `capture_execute` and `update_execute` are in scope only after the dedicated agent wrapper entrypoints select `request_origin="agent"` without trusting hook-origin metadata or caller payload. The gate does not apply to ingest because ingest is an internal dispatch path, not an external `execute_surface` value; it already requires the guarded engine entrypoints and remains governed by the existing trust triple plus ingest policy. The internal `activation_smoke` bootstrap path is excluded only for the dedicated activation-smoke entrypoint and only for the contained smoke tickets directory. |
 | Gate order | The readiness gate runs after the existing hook trust triple and structural execute prerequisites, and before ticket mutation/audit writes. Existing lower-level policy failures should not be hidden by a readiness error when the request is already untrusted or malformed. |
-| Gate verification | The gate must treat proof JSON as untrusted input and recompute bound identity at gate time: current plugin manifest SHA256, hook manifest SHA256, guard script SHA256, guard command/script SHA256, installed code identity for every installed Ticket `scripts/*.py` file plus separate hook/manifests, Codex executable identity, plugin/read source metadata, installed-root hook/skill evidence, inventory transcript hash, aggregate app-server transcript hash after all appends, raw JSON-RPC transcript semantics, normalized event rows recomputed from raw transcripts, raw evidence containment/existence, smoke command identity backed by `commandExecution`, hook completion backed by `hook/completed`, smoke payload before/after hashes, engine stdout hash/result semantics, smoke ticket/audit artifacts, nonce, age, and closeout-level `post_activation_gated_smokes` for the current `execute_surface`. A well-shaped handwritten JSON file must fail without matching raw evidence, raw evidence semantics, current hashes, and the current surface's post-proof smoke. |
-| Post-proof gated smokes | Activation is not complete when the bootstrap candidate verifies. After the candidate proof is written to `.codex/ticket-runtime-proof.candidate.json`, the installed activation command must run live app-server smokes through the actual gated surfaces with `runtime_readiness_required=True`: `ticket_engine_agent.py execute` for `direct_execute`, `ticket_capture_agent.py execute` for `capture_execute`, and `ticket_update_agent.py execute` for `update_execute`. These smokes may use the candidate only through a verifier mode that is limited to the candidate nonce, exact surface, payload path, and contained post-smoke tickets dir. The candidate must never authorize normal target-project `docs/tickets` mutation. The final activated proof must not be written until every surface listed in `gated_execute_surfaces` has passing post-proof smoke evidence, and normal `engine_execute()` must reject an activated proof if the requested surface lacks that closeout evidence. Activation fails if any gated surface is missing, blocked, stale, not hook-mediated, or not mechanically executable from its wrapper contract. If implementation intentionally narrows activation to direct execute only, the proof and docs must narrow `gated_execute_surfaces` to `["direct_execute"]`; do not keep capture/update in scope without proving them. |
-| Runtime freshness | The gate proof is valid only for the current project root, Ticket plugin id/version, installed cache root derived from hook identity, plugin/read source metadata, plugin manifest SHA256, installed code identity hashes, guard script SHA256, hook manifest SHA256, Codex executable identity, inventory transcript hash, aggregate app-server transcript hash, raw evidence hashes and semantics, exact smoke command/cwd backed by schema-shaped `commandExecution`, hook completion backed by schema-shaped `hook/completed`, payload before/after hashes, parsed engine result, smoke ticket/audit artifacts, nonce, current-surface post-proof smoke evidence, and a bounded age. Activation closeout additionally requires post-proof gated smoke evidence for every surface listed in `gated_execute_surfaces`. Use a default max age of 24 hours. |
+| Gate verification | The gate must treat proof JSON as untrusted input and recompute bound identity at gate time: current plugin manifest SHA256, hook manifest SHA256, guard script SHA256, guard command/script SHA256, installed code identity for every installed Ticket `scripts/*.py` file plus separate hook/manifests, Codex executable identity, plugin/read source metadata, installed-root hook/skill evidence, inventory transcript hash, aggregate app-server transcript hash after all appends, raw JSON-RPC transcript semantics, normalized event rows recomputed from raw transcripts, raw evidence containment/existence, smoke command identity backed by `commandExecution`, hook completion backed by `hook/completed`, smoke payload hashes or wrapper payload snapshots/deletion status, wrapper trust-fingerprint stability for capture/update, engine stdout hash/result semantics, smoke ticket/audit artifacts, nonce, age, and closeout-level `post_activation_gated_smokes` for the current `execute_surface`. A well-shaped handwritten JSON file must fail without matching raw evidence, raw evidence semantics, current hashes, and the current surface's post-proof smoke. |
+| Post-proof gated smokes | Activation is not complete when the bootstrap candidate verifies. After the candidate proof is written to `.codex/ticket-runtime-proof.candidate.json`, the installed activation command must run live app-server smokes through the actual gated surfaces with `runtime_readiness_required=True`: `ticket_engine_agent.py execute` for `direct_execute`, hook-mediated `ticket_capture_agent.py prepare` then `ticket_capture_agent.py execute` for `capture_execute`, and hook-mediated `ticket_update_agent.py prepare` then `ticket_update_agent.py execute` for `update_execute`. These smokes may use the candidate only through a verifier mode that is limited to the candidate nonce, exact surface, payload path, and contained post-smoke tickets dir. The candidate must never authorize normal target-project `docs/tickets` mutation. The final activated proof must not be written until every surface listed in `gated_execute_surfaces` has passing post-proof smoke evidence, and normal `engine_execute()` must reject an activated proof if the requested surface lacks that closeout evidence. Activation fails if any gated surface is missing, blocked, stale, not hook-mediated, or not mechanically executable from its wrapper contract. If implementation intentionally narrows activation to direct execute only, the proof and docs must narrow `gated_execute_surfaces` to `["direct_execute"]`; do not keep capture/update in scope without proving them. |
+| Runtime freshness | The gate proof is valid only for the current project root, Ticket plugin id/version, installed cache root derived from hook identity, plugin/read source metadata, plugin manifest SHA256, installed code identity hashes, guard script SHA256, hook manifest SHA256, Codex executable identity, inventory transcript hash, aggregate app-server transcript hash, raw evidence hashes and semantics, exact smoke command/cwd backed by schema-shaped `commandExecution`, hook completion backed by schema-shaped `hook/completed`, payload hashes or wrapper payload snapshots/deletion status, capture/update trust-fingerprint stability, parsed engine result, smoke ticket/audit artifacts, nonce, current-surface post-proof smoke evidence, and a bounded age. Activation closeout additionally requires post-proof gated smoke evidence for every surface listed in `gated_execute_surfaces`. Use a default max age of 24 hours. |
 | Cache mutation | This plan does not install, refresh, rewrite, or sync the installed plugin cache. Activation must fail when the executing plugin root is the source checkout, when installed-cache identity does not match the live `hooks/list` / `skills/list` evidence, or when installed code hashes differ from the proof. Do not claim broad source-vs-cache digest equality unless the implementation adds an explicit source manifest digest comparison; otherwise report source/cache drift as a diagnostic only. |
 | Source closeout | Source implementation closeout can prove that source code and tests are ready. It cannot by itself produce installed activation. Installed activation is a separate explicit post-refresh operation against the installed cache copy. |
 | Test seams | Source tests may inject an executing plugin root, verifier function, or activation collaborator through direct in-process helper calls only. Production code must default to `Path(__file__).resolve().parents[1]` and must not expose `--plugin-root`, `--cache-root`, payload fields, or environment variables that can impersonate installed-cache execution or supply non-live readiness evidence. |
@@ -161,8 +162,8 @@ Before implementation, re-read these live files. This plan and historical memory
 - `plugins/turbo-mode/ticket/scripts/ticket_stage_models.py` - add `ExecuteInput.execute_surface` with strict accepted values.
 - `plugins/turbo-mode/ticket/scripts/ticket_capture.py` - set `execute_surface="capture_execute"` before dispatching execute.
 - `plugins/turbo-mode/ticket/scripts/ticket_update.py` - set `execute_surface="update_execute"` before dispatching execute.
-- `plugins/turbo-mode/ticket/scripts/ticket_capture_agent.py` - new hardcoded agent wrapper entrypoint for capture execute policy selection.
-- `plugins/turbo-mode/ticket/scripts/ticket_update_agent.py` - new hardcoded agent wrapper entrypoint for update execute policy selection.
+- `plugins/turbo-mode/ticket/scripts/ticket_capture_agent.py` - new hardcoded agent wrapper entrypoint for capture prepare/execute policy selection.
+- `plugins/turbo-mode/ticket/scripts/ticket_update_agent.py` - new hardcoded agent wrapper entrypoint for update prepare/execute policy selection.
 - `plugins/turbo-mode/ticket/hooks/ticket_engine_guard.py` - align allow/deny output with the Codex app-server hook contract and allow the activation-smoke entrypoint plus canonical agent wrapper entrypoints through the same command/payload membrane as the user wrappers.
 - `plugins/turbo-mode/ticket/references/ticket-contract.md` - document activation proof, proof classes, gate scope, and diagnostics-only evidence.
 - `plugins/turbo-mode/ticket/skills/ticket-doctor/SKILL.md` - add explicit activation workflow, including the fact that activation runs live Codex and writes `.codex/ticket-runtime-proof.json` only on success.
@@ -340,23 +341,63 @@ payload path, and contained post-smoke tickets dir.
       },
       "capture_execute": {
         "runner": "app_server_turn",
+        "prepare_command": "python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/scripts/ticket_capture_agent.py prepare /absolute/project/root/.codex/ticket-runtime-smoke/<run_nonce>/post-capture-payload.json",
         "command": "python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/scripts/ticket_capture_agent.py execute /absolute/project/root/.codex/ticket-runtime-smoke/<run_nonce>/post-capture-payload.json",
         "execute_surface": "capture_execute",
         "runtime_readiness_required": true,
         "engine_state": "ok_create",
         "raw_events_sha256": "<sha256>",
         "engine_stdout_sha256": "<sha256>",
+        "wrapper_trust_fingerprint_inputs": {
+          "prepared": {
+            "session_id": "<non-empty-codex-session-id>",
+            "hook_injected": true,
+            "hook_request_origin": "user",
+            "tickets_dir": ".codex/ticket-runtime-smoke/<run_nonce>/post-capture/docs/tickets",
+            "payload_path": ".codex/ticket-runtime-smoke/<run_nonce>/post-capture-payload.json",
+            "saved_execute_fingerprint": "<sha256>"
+          },
+          "execute_time": {
+            "session_id": "<same-non-empty-codex-session-id>",
+            "hook_injected": true,
+            "hook_request_origin": "user",
+            "tickets_dir": ".codex/ticket-runtime-smoke/<run_nonce>/post-capture/docs/tickets",
+            "payload_path": ".codex/ticket-runtime-smoke/<run_nonce>/post-capture-payload.json",
+            "recomputed_execute_fingerprint": "<same-sha256>"
+          },
+          "stable_between_prepare_and_execute": true
+        },
         "ticket_path": ".codex/ticket-runtime-smoke/<run_nonce>/post-capture/docs/tickets/2026-05-20-example.md",
         "ticket_sha256": "<sha256>"
       },
       "update_execute": {
         "runner": "app_server_turn",
+        "prepare_command": "python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/scripts/ticket_update_agent.py prepare /absolute/project/root/.codex/ticket-runtime-smoke/<run_nonce>/post-update-payload.json",
         "command": "python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/scripts/ticket_update_agent.py execute /absolute/project/root/.codex/ticket-runtime-smoke/<run_nonce>/post-update-payload.json",
         "execute_surface": "update_execute",
         "runtime_readiness_required": true,
         "engine_state": "ok_update",
         "raw_events_sha256": "<sha256>",
         "engine_stdout_sha256": "<sha256>",
+        "wrapper_trust_fingerprint_inputs": {
+          "prepared": {
+            "session_id": "<non-empty-codex-session-id>",
+            "hook_injected": true,
+            "hook_request_origin": "user",
+            "tickets_dir": ".codex/ticket-runtime-smoke/<run_nonce>/post-update/docs/tickets",
+            "payload_path": ".codex/ticket-runtime-smoke/<run_nonce>/post-update-payload.json",
+            "saved_execute_fingerprint": "<sha256>"
+          },
+          "execute_time": {
+            "session_id": "<same-non-empty-codex-session-id>",
+            "hook_injected": true,
+            "hook_request_origin": "user",
+            "tickets_dir": ".codex/ticket-runtime-smoke/<run_nonce>/post-update/docs/tickets",
+            "payload_path": ".codex/ticket-runtime-smoke/<run_nonce>/post-update-payload.json",
+            "recomputed_execute_fingerprint": "<same-sha256>"
+          },
+          "stable_between_prepare_and_execute": true
+        },
         "ticket_path": ".codex/ticket-runtime-smoke/<run_nonce>/post-update/docs/tickets/2026-05-20-example.md",
         "ticket_sha256": "<sha256>"
       }
@@ -379,6 +420,11 @@ payload path, and contained post-smoke tickets dir.
     "smoke_autonomy_config": ".codex/ticket.local.md",
     "payload_before": "raw/payload-before.json",
     "payload_after": "raw/payload-after.json",
+    "wrapper_payload_before_prepare": "raw/<surface>-payload-before-prepare.json",
+    "wrapper_payload_after_prepare": "raw/<surface>-payload-after-prepare.json",
+    "wrapper_payload_before_execute": "raw/<surface>-payload-before-execute.json",
+    "wrapper_payload_after_execute": "raw/<surface>-payload-after-execute.json",
+    "wrapper_payload_deleted_after_execute": true,
     "agentcontrol_payload_after": "raw/agentcontrol-payload-after.json",
     "engine_stdout": "raw/engine-stdout.json",
     "engine_stderr": "raw/engine-stderr.txt"
@@ -1120,6 +1166,13 @@ hashed:
   gated but whose `post_activation_gated_smokes.surface_results` lacks that
   surface fails both activation closeout and normal `engine_execute()` for that
   surface.
+- a proof whose `capture_execute` or `update_execute` post-smoke evidence lacks
+  a successful hook-mediated `prepare` command, or whose wrapper
+  `session_id` / `hook_injected` / `hook_request_origin` trust inputs differ
+  between prepare and execute, fails activation closeout.
+- a capture/update post-smoke whose wrapper returns `stale_plan` before the
+  readiness gate is classified as a wrapper trust-fingerprint setup failure, not
+  as passing or failing runtime readiness proof.
 - a bootstrap-only proof whose hook membrane smoke passes but whose actual
   post-proof `ticket_engine_agent.py execute` smoke is missing or failed is not
   an activation success and is rejected by the normal execute gate.
@@ -2955,9 +3008,9 @@ assert resp.error_code == "runtime_readiness_required"
 
 - [ ] **Step 2: Add failing surface propagation tests**
 
-In `tests/test_capture.py`, assert successful user `capture execute` calls dispatch with `execute_surface == "capture_execute"`, `request_origin == "user"`, and `runtime_readiness_payload_path == payload_path` by monkeypatching `dispatch_stage`. Add a separate test for the hardcoded agent capture wrapper path that dispatches with `execute_surface == "capture_execute"` and `request_origin == "agent"` without reading that origin from payload or hook metadata.
+In `tests/test_capture.py`, assert successful user `capture execute` calls dispatch with `execute_surface == "capture_execute"`, `request_origin == "user"`, and `runtime_readiness_payload_path == payload_path` by monkeypatching `dispatch_stage`. Add separate tests for the hardcoded agent capture wrapper path that `prepare` and `execute` both run with `request_origin == "agent"` without reading that origin from payload or hook metadata, and that execute preserves the prepared payload's saved execute fingerprint when the hook-injected trust fields are unchanged.
 
-In `tests/test_update_refinement.py`, assert successful user `update execute` calls dispatch with `execute_surface == "update_execute"`, `request_origin == "user"`, and `runtime_readiness_payload_path == payload_path`. Add a separate test for the hardcoded agent update wrapper path that dispatches with `execute_surface == "update_execute"` and `request_origin == "agent"` without reading that origin from payload or hook metadata.
+In `tests/test_update_refinement.py`, assert successful user `update execute` calls dispatch with `execute_surface == "update_execute"`, `request_origin == "user"`, and `runtime_readiness_payload_path == payload_path`. Add separate tests for the hardcoded agent update wrapper path that `prepare` and `execute` both run with `request_origin == "agent"` without reading that origin from payload or hook metadata, and that execute preserves the prepared payload's saved execute fingerprint when the hook-injected trust fields are unchanged.
 
 In `tests/test_engine_runner.py`, assert `RunnerContext.payload_path` is the resolved script-read path and `run(... execute ...)` passes it into `dispatch_stage()` only for execute.
 
@@ -2965,8 +3018,8 @@ In `tests/test_ingest.py`, assert `_dispatch_ingest()` calls `engine_execute()` 
 
 In `tests/test_hook.py`, add hook membrane tests that:
 
-- allow canonical `python3 -B <PLUGIN_ROOT>/scripts/ticket_capture_agent.py execute <PAYLOAD>` and inject the same trust fields as `ticket_capture.py`.
-- allow canonical `python3 -B <PLUGIN_ROOT>/scripts/ticket_update_agent.py execute <PAYLOAD>` and inject the same trust fields as `ticket_update.py`.
+- allow canonical `python3 -B <PLUGIN_ROOT>/scripts/ticket_capture_agent.py prepare <PAYLOAD>` and `python3 -B <PLUGIN_ROOT>/scripts/ticket_capture_agent.py execute <PAYLOAD>`, injecting the same trust fields as `ticket_capture.py` for both subcommands.
+- allow canonical `python3 -B <PLUGIN_ROOT>/scripts/ticket_update_agent.py prepare <PAYLOAD>` and `python3 -B <PLUGIN_ROOT>/scripts/ticket_update_agent.py execute <PAYLOAD>`, injecting the same trust fields as `ticket_update.py` for both subcommands.
 - deny noncanonical agent wrapper command shapes such as `python3 -BB ...`.
 - keep unknown `ticket_*.py` scripts denied by Branch 3.
 
@@ -3076,9 +3129,11 @@ selector for `request_origin`.
 Refactor `ticket_capture.py` so its internal run function accepts a hardcoded
 `request_origin` argument from the entrypoint, defaulting to `"user"` for the
 existing script. Do not add a caller-supplied CLI flag or payload field for
-agent selection. On execute, call `load_runner_context(request_origin,
-"execute", payload_path)` so the script identity, not hook metadata or payload
-content, selects the policy origin.
+agent selection. Prepare and execute must both load wrapper context with the
+entrypoint-selected `request_origin` so the script identity, not hook metadata
+or payload content, selects the policy origin. Execute still passes the payload
+path through the internal `runtime_readiness_payload_path` channel after the
+wrapper prepare/fingerprint checks pass.
 
 In `ticket_capture.py`, after all prepare/fingerprint checks pass and immediately before dispatching execute:
 
@@ -3099,11 +3154,14 @@ response = _engine_response_to_dict(
 
 Add `ticket_capture_agent.py` as a tiny entrypoint that imports the refactored
 capture runner and calls it with `request_origin="agent"`. This file is the
-only supported agent policy selector for capture wrapper execute.
+only supported agent policy selector for capture wrapper `prepare` and
+`execute`.
 
 Refactor `ticket_update.py` the same way: the existing script defaults to
-`request_origin="user"`, no CLI or payload value can select agent mode, and
-execute calls `load_runner_context(request_origin, "execute", payload_path)`.
+`request_origin="user"`, no CLI or payload value can select agent mode, prepare
+and execute both use the entrypoint-selected `request_origin`, and execute
+passes the payload path through `runtime_readiness_payload_path` only after the
+wrapper prepare/fingerprint checks pass.
 
 In `ticket_update.py`, after all prepare/fingerprint checks pass and immediately before dispatching execute:
 
@@ -3124,9 +3182,9 @@ response = _engine_response_to_dict(
 
 Add `ticket_update_agent.py` as a tiny entrypoint that imports the refactored
 update runner and calls it with `request_origin="agent"`. This file is the only
-supported agent policy selector for update wrapper execute.
+supported agent policy selector for update wrapper `prepare` and `execute`.
 
-This makes wrapper surfaces internal to the wrapper execute step. A stale or malicious `execute_surface` already present in the payload cannot change the saved preview fingerprint or select a bypass, and a caller cannot obtain `request_origin="agent"` for wrapper execute without using the hardcoded agent wrapper entrypoint.
+This makes wrapper surfaces internal to the wrapper execute step. A stale or malicious `execute_surface` already present in the payload cannot change the saved preview fingerprint or select a bypass, and a caller cannot obtain `request_origin="agent"` for wrapper prepare or execute without using the hardcoded agent wrapper entrypoint.
 
 - [ ] **Step 6: Update hook wrapper allowlist**
 
@@ -3139,7 +3197,10 @@ accept exactly these scripts:
 Keep the same command shape restrictions that exist today: `python3`, optional
 single `-B`, exact installed plugin-root script path, subcommand, payload path
 without whitespace, and no broad `ticket_*.py` wildcard. Unknown Ticket scripts
-must still be denied by Branch 3.
+must still be denied by Branch 3. The agent wrapper allowlist must cover both
+`prepare` and `execute`; otherwise capture/update post-proof setup cannot
+produce a prepared payload whose saved execute fingerprint survives the later
+hook-mediated execute command.
 
 - [ ] **Step 7: Add the engine gate**
 
@@ -3280,8 +3341,10 @@ written and before final proof promotion, and must prove the exact surfaces list
 `ACTIVATING_EXECUTE_SURFACES`:
 
 - `direct_execute`: canonical `ticket_engine_agent.py execute <PAYLOAD>`.
-- `capture_execute`: canonical `ticket_capture_agent.py execute <PAYLOAD>`.
-- `update_execute`: canonical `ticket_update_agent.py execute <PAYLOAD>`.
+- `capture_execute`: canonical `ticket_capture_agent.py prepare <PAYLOAD>`
+  setup followed by canonical `ticket_capture_agent.py execute <PAYLOAD>`.
+- `update_execute`: canonical `ticket_update_agent.py prepare <PAYLOAD>` setup
+  followed by canonical `ticket_update_agent.py execute <PAYLOAD>`.
 
 Payload construction is part of the proof, not an implementation detail:
 
@@ -3298,30 +3361,48 @@ Payload construction is part of the proof, not an implementation detail:
   caller-supplied `execute_surface` override other than the explicit
   `"direct_execute"` value parsed by the stage model.
 - `capture_execute` payload setup first writes a normal capture payload with
-  `capture` fields sufficient for `ticket_capture_agent.py prepare`. Run the
-  installed capture agent wrapper's `prepare` command from the contained smoke
-  project root to populate `fields`, `capture_prepare`, preview, classify/plan/
-  preflight data, and all prepare fingerprints. That prepare step is fixture
-  setup and is not counted as the gated proof. After prepare succeeds, copy the
-  prepared payload bytes to the per-surface `raw/payload-before.json`; then the
-  app-server turn runs exactly `ticket_capture_agent.py execute <PAYLOAD>` and
-  the normal wrapper injects `execute_surface="capture_execute"` before
-  `dispatch_stage()`.
+  `capture` fields sufficient for `ticket_capture_agent.py prepare`. Run
+  prepare through a live app-server turn, not a local subprocess, using the same
+  contained cwd, workspace roots, sandbox policy, installed hook, and hardcoded
+  `ticket_capture_agent.py` entrypoint that execute will use. The exact command
+  is `ticket_capture_agent.py prepare <PAYLOAD>`, and it must populate
+  `fields`, `capture_prepare`, preview, classify/plan/preflight data, and all
+  prepare fingerprints. That prepare turn is fixture setup and is not counted as
+  the gated proof, but it is proof evidence. After prepare succeeds, copy the
+  prepared payload bytes to `raw/capture-payload-after-prepare.json` and
+  `raw/capture-payload-before-execute.json`. The app-server execute turn must
+  run in the same app-server thread/session and execute exactly
+  `ticket_capture_agent.py execute <PAYLOAD>`. Activation must verify that the
+  execute-turn hook injection leaves `session_id`, `hook_injected`, and
+  `hook_request_origin` identical to the prepared payload values before the
+  wrapper reaches its saved `execute_fingerprint` check, then the wrapper injects
+  `execute_surface="capture_execute"` before `dispatch_stage()`.
 - `update_execute` payload setup must seed exactly one mutable ticket under the
   contained post-update `docs/tickets/` before prepare. Compute the live
   `target_fingerprint` from that seeded ticket, write an update payload with
   `ticket_id`, `update` fields, the shared nonce, and the contained
-  `tickets_dir`, then run `ticket_update_agent.py prepare` from the contained
-  smoke project root to populate `fields`, `update_prepare`, preview,
+  `tickets_dir`, then run `ticket_update_agent.py prepare <PAYLOAD>` through a
+  live app-server turn using the same contained cwd, workspace roots, sandbox
+  policy, installed hook, and hardcoded agent wrapper entrypoint that execute
+  will use. Prepare must populate `fields`, `update_prepare`, preview,
   classify/plan/preflight data, and all prepare fingerprints. After prepare
-  succeeds, copy the prepared payload bytes to `raw/payload-before.json`; then
-  the app-server turn runs exactly `ticket_update_agent.py execute <PAYLOAD>`
-  and the normal wrapper injects `execute_surface="update_execute"` before
-  `dispatch_stage()`.
+  succeeds, copy the prepared payload bytes to
+  `raw/update-payload-after-prepare.json` and
+  `raw/update-payload-before-execute.json`. The app-server execute turn must run
+  in the same app-server thread/session and execute exactly
+  `ticket_update_agent.py execute <PAYLOAD>`. Activation must verify that the
+  execute-turn hook injection leaves `session_id`, `hook_injected`, and
+  `hook_request_origin` identical to the prepared payload values before the
+  wrapper reaches its saved `execute_fingerprint` check, then the wrapper
+  injects `execute_surface="update_execute"` before `dispatch_stage()`.
 - If capture or update prepare returns `stale_plan`, `need_fields`, `not_found`,
   policy failure, or any state other than `ready_to_execute`, activation fails
   before final proof promotion. Do not patch around wrapper prepare gates or
   weaken the wrapper fingerprint checks to make post-proof smokes pass.
+- If capture or update execute returns `stale_plan` before reaching the runtime
+  readiness gate, activation fails with a wrapper trust-fingerprint mismatch
+  diagnostic that records the prepared trust inputs and execute-time trust
+  inputs. Do not treat that as proof of readiness failure.
 
 Each post-proof smoke must:
 
@@ -3342,15 +3423,24 @@ Each post-proof smoke must:
 - create no target-project `docs/tickets` files and no target-project
   `.codex/ticket.local.md`.
 - record schema-shaped raw `commandExecution`, same-turn installed
-  `hook/completed`, payload before/after hashes, parsed engine stdout, ticket
-  file hash, and audit hash in `raw/post-activation-gated-events.jsonl` and
-  per-surface raw files.
-- fail activation if the app-server turn has zero, duplicate, extra, or wrong
+  `hook/completed`, parsed engine stdout, ticket file hash, audit hash, and
+  per-surface payload snapshots in `raw/post-activation-gated-events.jsonl` and
+  per-surface raw files. For direct execute, record payload before/after hashes.
+  For capture/update, record payload before prepare, payload after prepare,
+  payload before execute, wrapper stdout cleanup status, and payload after
+  execute only if the wrapper does not delete the consumed payload.
+- for capture/update, record and verify a
+  `wrapper_trust_fingerprint_inputs` object containing the prepared
+  `session_id`, `hook_injected`, `hook_request_origin`, contained `tickets_dir`,
+  payload path, saved `execute_fingerprint`, execute-time trust fields, and a
+  boolean `stable_between_prepare_and_execute` that must be true.
+- fail activation if the app-server turn or turns have zero, duplicate, extra, or wrong
   commands; missing hook completion; unsupported hook-output warnings; non-
   expected engine state (`ok_create` for `direct_execute` and `capture_execute`,
   `ok_update` for `update_execute`); stale proof rejection; stale wrapper
-  prepare/fingerprint state; or mutation outside the contained post-smoke tickets
-  dir.
+  prepare/fingerprint state, including changed wrapper trust fingerprint inputs
+  between prepare and execute; or mutation outside the contained post-smoke
+  tickets dir.
 
 If any post-proof gated smoke fails, `activate_runtime_readiness()` must write a
 final `.codex/ticket-runtime-proof.json` failure marker with
@@ -3507,7 +3597,10 @@ In `tests/test_docs_contract.py`, add assertions that:
   be used only for contained post-smoke validation.
 - `ticket-contract.md` says capture/update post-proof smokes must use prepared
   wrapper payloads with valid `capture_prepare` / `update_prepare` fingerprints
-  and an update target seeded under the contained smoke project.
+  and an update target seeded under the contained smoke project. Prepare and
+  execute must both be app-server/hook mediated through the same hardcoded agent
+  wrapper path, and the docs must require stable wrapper trust-fingerprint inputs
+  across that boundary.
 - `ticket-contract.md` says wrapper `request_origin=agent` can only come from hardcoded agent wrapper entrypoints, not hook metadata, CLI flags, or payload fields.
 - `ticket-doctor/SKILL.md` documents `activate-runtime` separately from `diagnose`.
 - `ticket-doctor/SKILL.md` says activation may leave an activated `.codex/ticket-runtime-proof.json` only after live inventory, live bootstrap smokes, and post-proof gated surface smokes pass.
@@ -3533,7 +3626,7 @@ Add a section named `## Activation-Capable Runtime Readiness` containing these e
 - Activation proof class: installed runtime.
 - Required evidence: live app-server inventory, live Codex-mediated hook membrane smoke, AgentControl child hook traversal smoke, and post-proof gated smokes for every listed gated execute surface.
 - Rejected evidence: source checkout diagnostics, fixture transcripts, direct hook-script subprocesses, cache file presence, marketplace JSON, and handwritten proof JSON.
-- Bound identities: project root, Ticket plugin id/version, plugin/read source metadata and digest, installed cache root derived from `hooks/list`, installed-cache `ticket:*` skill paths, plugin manifest path/hash, `hook_manifest_path`, `hook_manifest_sha256`, `guard_command`, `guard_script_path`, `guard_script_sha256`, Codex executable identity, marketplace path, cwd, pinned app-server approval/sandbox policy, app-server inventory hash, raw evidence hashes and semantics, exact smoke command/cwd from `commandExecution`, same-turn installed `hook/completed`, smoke disposable-project `auto_audit` config, smoke payload before/after hashes, parsed `raw/engine-stdout.json`, raw engine `ticket_path`, contained smoke ticket file/hash, contained smoke audit JSONL/hash, nonce, smoke session id, AgentControl child thread/turn ids, current-surface post-proof smoke evidence, and proof age.
+- Bound identities: project root, Ticket plugin id/version, plugin/read source metadata and digest, installed cache root derived from `hooks/list`, installed-cache `ticket:*` skill paths, plugin manifest path/hash, `hook_manifest_path`, `hook_manifest_sha256`, `guard_command`, `guard_script_path`, `guard_script_sha256`, Codex executable identity, marketplace path, cwd, pinned app-server approval/sandbox policy, app-server inventory hash, raw evidence hashes and semantics, exact smoke command/cwd from `commandExecution`, same-turn installed `hook/completed`, smoke disposable-project `auto_audit` config, smoke payload hashes or wrapper payload snapshots/deletion status, capture/update trust-fingerprint stability, parsed `raw/engine-stdout.json`, raw engine `ticket_path`, contained smoke ticket file/hash, contained smoke audit JSONL/hash, nonce, smoke session id, AgentControl child thread/turn ids, current-surface post-proof smoke evidence, and proof age.
 - Bound installed code: every installed Ticket `scripts/*.py` file discovered in
   the installed cache, including helper modules such as `ticket_paths.py`,
   `ticket_trust.py`, `ticket_payloads.py`, `ticket_read.py`, `ticket_parse.py`,
@@ -3552,8 +3645,11 @@ Add a section named `## Activation-Capable Runtime Readiness` containing these e
   with the normal readiness gate enabled. These smokes may use the candidate
   only for exact contained post-smoke payloads and tickets dirs. Missing or
   failed post-proof smoke invalidates activation. Capture/update smokes use
-  prepared wrapper payloads with valid prepare fingerprints; update smokes seed
-  their target ticket under the contained smoke project.
+  prepared wrapper payloads with valid prepare fingerprints; their prepare and
+  execute commands both run through the same app-server/hook-mediated agent
+  wrapper path, and activation records stable `session_id`, `hook_injected`, and
+  `hook_request_origin` evidence across the saved execute fingerprint boundary.
+  Update smokes seed their target ticket under the contained smoke project.
 
 - [ ] **Step 5: Patch `ticket-doctor/SKILL.md`**
 
@@ -3585,6 +3681,11 @@ normal readiness gate enabled. The bootstrap candidate lives at
 candidate, and only exact contained post-smoke payloads may use it. If any
 listed gated surface fails or is skipped, activation must write a rejected final
 failure marker and report the failure.
+Capture/update post-proof smokes prepare their wrapper payloads through the same
+app-server/hook-mediated agent wrapper path used for execute. Activation must
+fail if the prepared payload's execute-fingerprint trust inputs differ at
+execute time or if the wrapper returns `stale_plan` before reaching the runtime
+readiness gate.
 
 ```bash
 python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_JSON>
