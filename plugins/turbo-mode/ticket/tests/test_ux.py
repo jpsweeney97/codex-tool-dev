@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
-
 from scripts.ticket_parse import parse_ticket
-from scripts.ticket_ux import close_readiness, humanize_state, ticket_identity
+from scripts.ticket_ux import (
+    INTERNAL_RECOVERY_PATH_PATTERNS,
+    INTERNAL_RECOVERY_TERMS,
+    RECOVERY_HINTS,
+    attach_recovery_hint,
+    close_readiness,
+    humanize_state,
+    recovery_hint,
+    ticket_identity,
+)
+
 from tests.support.builders import make_gen1_ticket, make_ticket
 
 
@@ -125,7 +135,11 @@ def test_close_readiness_reports_open_blocker(tmp_tickets: Path) -> None:
     assert result["blocking_ids"] == ["T-20260503-12"]
     assert result["missing_blockers"] == []
     assert result["unresolved_blockers"] == ["T-20260503-12"]
-    assert result["allowed_actions"] == ["resolve blockers", "close as wontfix", "keep current status"]
+    assert result["allowed_actions"] == [
+        "resolve blockers",
+        "close as wontfix",
+        "keep current status",
+    ]
 
 
 def test_close_readiness_reports_missing_blocker_reference(tmp_tickets: Path) -> None:
@@ -148,7 +162,9 @@ def test_close_readiness_reports_missing_blocker_reference(tmp_tickets: Path) ->
     assert result["unresolved_blockers"] == []
 
 
-def test_close_readiness_error_code_matches_close_policy_for_terminal_ticket(tmp_tickets: Path) -> None:
+def test_close_readiness_error_code_matches_close_policy_for_terminal_ticket(
+    tmp_tickets: Path,
+) -> None:
     from scripts.ticket_engine_core import _execute_close
 
     path = make_ticket(tmp_tickets, "terminal-parity.md", id="T-20260503-15", status="done")
@@ -168,12 +184,22 @@ def test_close_readiness_error_code_matches_close_policy_for_terminal_ticket(tmp
     assert readiness["ready"] is False
 
 
-def test_close_readiness_error_code_matches_close_policy_for_missing_acceptance_criteria(tmp_tickets: Path) -> None:
+def test_close_readiness_error_code_matches_close_policy_for_missing_acceptance_criteria(
+    tmp_tickets: Path,
+) -> None:
     from scripts.ticket_engine_core import _execute_close
 
-    path = make_ticket(tmp_tickets, "missing-ac-parity.md", id="T-20260503-16", status="in_progress")
+    path = make_ticket(
+        tmp_tickets,
+        "missing-ac-parity.md",
+        id="T-20260503-16",
+        status="in_progress",
+    )
     text = path.read_text(encoding="utf-8")
-    path.write_text(text.replace("## Acceptance Criteria\n- [ ] Issue resolved\n\n", ""), encoding="utf-8")
+    path.write_text(
+        text.replace("## Acceptance Criteria\n- [ ] Issue resolved\n\n", ""),
+        encoding="utf-8",
+    )
     ticket = parse_ticket(path)
     assert ticket is not None
 
@@ -190,7 +216,9 @@ def test_close_readiness_error_code_matches_close_policy_for_missing_acceptance_
     assert readiness["ready"] is False
 
 
-def test_close_readiness_error_code_matches_close_policy_for_blocked_ticket(tmp_tickets: Path) -> None:
+def test_close_readiness_error_code_matches_close_policy_for_blocked_ticket(
+    tmp_tickets: Path,
+) -> None:
     from scripts.ticket_engine_core import _execute_close
 
     make_ticket(tmp_tickets, "blocker-parity.md", id="T-20260503-17", status="open")
@@ -217,7 +245,9 @@ def test_close_readiness_error_code_matches_close_policy_for_blocked_ticket(tmp_
     assert readiness["ready"] is False
 
 
-def test_close_readiness_error_code_matches_close_policy_for_legacy_ticket(tmp_tickets: Path) -> None:
+def test_close_readiness_error_code_matches_close_policy_for_legacy_ticket(
+    tmp_tickets: Path,
+) -> None:
     from scripts.ticket_engine_core import _execute_close
 
     path = make_gen1_ticket(tmp_tickets, "legacy-parity.md")
@@ -237,10 +267,17 @@ def test_close_readiness_error_code_matches_close_policy_for_legacy_ticket(tmp_t
     assert readiness["ready"] is False
 
 
-def test_close_readiness_error_code_matches_close_policy_for_invalid_resolution(tmp_tickets: Path) -> None:
+def test_close_readiness_error_code_matches_close_policy_for_invalid_resolution(
+    tmp_tickets: Path,
+) -> None:
     from scripts.ticket_engine_core import _execute_close
 
-    path = make_ticket(tmp_tickets, "invalid-resolution-parity.md", id="T-20260503-19", status="in_progress")
+    path = make_ticket(
+        tmp_tickets,
+        "invalid-resolution-parity.md",
+        id="T-20260503-19",
+        status="in_progress",
+    )
     ticket = parse_ticket(path)
     assert ticket is not None
 
@@ -275,3 +312,92 @@ def test_close_readiness_ready_matches_close_policy_for_successful_close(tmp_tic
 
     assert readiness["ready"] is True
     assert close_response.state == "ok_close"
+
+
+def test_recovery_hint_contract_is_transcript_safe() -> None:
+    expected_codes = {
+        "stale_plan",
+        "trust_setup",
+        "retry_preview",
+        "cleanup_stale_preview",
+        "policy_blocked",
+        "preflight_failed",
+    }
+
+    assert set(RECOVERY_HINTS) == expected_codes
+    assert recovery_hint("trust_setup") == {
+        "code": "trust_setup",
+        "summary": "Ticket setup needs attention before this write can continue.",
+        "next_step": (
+            "Stop without writing. Run ticket-doctor diagnostics or verify the plugin "
+            "hook setup before retrying."
+        ),
+    }
+    for code in expected_codes:
+        hint = recovery_hint(code)
+        assert set(hint) == {"code", "summary", "next_step"}
+        rendered = " ".join(hint.values())
+        for term in INTERNAL_RECOVERY_TERMS:
+            assert term.lower() not in rendered.lower()
+        for pattern in INTERNAL_RECOVERY_PATH_PATTERNS:
+            assert re.search(pattern, rendered) is None
+
+
+def test_attach_recovery_hint_preserves_response_data() -> None:
+    response = {
+        "state": "preflight_failed",
+        "message": "Ticket checks did not pass.",
+        "error_code": "preflight_failed",
+        "data": {"checks_failed": ["missing_acceptance_criteria"]},
+    }
+
+    updated = attach_recovery_hint(response, "preflight_failed")
+
+    assert updated["data"]["checks_failed"] == ["missing_acceptance_criteria"]
+    assert updated["data"]["recovery_hint"] == {
+        "code": "preflight_failed",
+        "summary": "Ticket checks did not pass.",
+        "next_step": "Review the preview or check details, update the request, then rerun preview.",
+    }
+    assert "recovery_hint" not in response["data"]
+
+
+def test_transcript_safety_terms_match_expected_internal_leak_vocabulary() -> None:
+    expected_terms = (
+        "hook_injected",
+        "hook_request_origin",
+        "request_origin",
+        "origin_mismatch",
+        "verified hook provenance",
+        "payload",
+        "payload path",
+        "payload_file",
+        "envelope_path",
+        "processed_path",
+        "incoming_envelope_path",
+        "ticket_path",
+        "envelope_move_error",
+        "PAYLOAD_PATH",
+        "canonical command",
+        "python3 -B",
+    )
+
+    assert tuple(INTERNAL_RECOVERY_TERMS) == expected_terms
+
+
+def test_transcript_safety_path_patterns_cover_known_host_shapes() -> None:
+    examples = (
+        "/Users/example/project/.codex/ticket-tmp/payload.json",
+        "/home/runner/work/project/payload.json",
+        "/workspace/project/docs/tickets/.envelopes/item.json",
+        "/workspaces/project/docs/tickets/.envelopes/item.json",
+        "/private/tmp/project/tickets/.envelopes/item.json",
+        "/tmp/project/payload.json",
+        "/var/folders/example/payload.json",
+        r"C:\Users\example\project\payload.json",
+    )
+
+    for rendered in examples:
+        assert any(
+            re.search(pattern, rendered) for pattern in INTERNAL_RECOVERY_PATH_PATTERNS
+        ), rendered

@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
 from scripts.ticket_engine_runner import run
+from scripts.ticket_ux import INTERNAL_RECOVERY_PATH_PATTERNS, INTERNAL_RECOVERY_TERMS
 
 
 def _valid_envelope() -> dict:
@@ -30,6 +32,57 @@ def _write_envelope(envelope: dict, envelopes_dir: Path) -> Path:
     path = envelopes_dir / "2026-03-10T120000Z-fix-timeout.json"
     path.write_text(json.dumps(envelope), encoding="utf-8")
     return path
+
+
+def _run_and_read_response(
+    capsys: pytest.CaptureFixture[str],
+    request_origin: str,
+    argv: list[str],
+) -> tuple[int, dict]:
+    exit_code = run(request_origin, argv=argv, prog="test")
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert isinstance(response, dict)
+    return exit_code, response
+
+
+_INGEST_TRANSCRIPT_OUTCOME_MESSAGES = {
+    "created": "Ticket was created.",
+    "duplicate_replay": "That Ticket ingest request was already processed; no ticket was created.",
+    "created_envelope_move_failed": (
+        "Ticket was created, but Ticket could not finish ingest cleanup."
+    ),
+}
+
+
+def _ingest_transcript_projection(response: dict) -> dict[str, object]:
+    data = response.get("data") or {}
+    hint = data.get("recovery_hint") if isinstance(data, dict) else None
+    projection: dict[str, object] = {
+        "message": response.get("message"),
+    }
+    if hint is not None:
+        projection["recovery_hint"] = hint
+    ticket_id = response.get("ticket_id")
+    if isinstance(ticket_id, str) and ticket_id:
+        projection["ticket_id"] = ticket_id
+    if isinstance(data, dict):
+        duplicate_of = data.get("duplicate_of")
+        if isinstance(duplicate_of, str) and duplicate_of:
+            projection["duplicate_candidate_ticket_id"] = duplicate_of
+        outcome = data.get("ingest_outcome")
+        if isinstance(outcome, str) and outcome in _INGEST_TRANSCRIPT_OUTCOME_MESSAGES:
+            projection["ingest_outcome"] = _INGEST_TRANSCRIPT_OUTCOME_MESSAGES[outcome]
+    return projection
+
+
+def _assert_ingest_transcript_projection_safe(response: dict) -> None:
+    rendered = json.dumps(_ingest_transcript_projection(response), sort_keys=True)
+    for term in INTERNAL_RECOVERY_TERMS:
+        assert term.lower() not in rendered.lower()
+    for pattern in INTERNAL_RECOVERY_PATH_PATTERNS:
+        assert re.search(pattern, rendered) is None
 
 
 class TestIngestSubcommand:
@@ -140,6 +193,300 @@ class TestIngestSubcommand:
 
         assert exit_code == 2  # need_fields maps to exit code 2
 
+    def test_ingest_missing_trust_fields_returns_safe_setup_hint(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        _ensure_project_root(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        tickets_dir = tmp_path / "tickets"
+        envelopes_dir = tickets_dir / ".envelopes"
+        envelope_path = _write_envelope(_valid_envelope(), envelopes_dir)
+        payload_file = tmp_path / "payload.json"
+        payload_file.write_text(
+            json.dumps({"envelope_path": str(envelope_path), "tickets_dir": str(tickets_dir)}),
+            encoding="utf-8",
+        )
+
+        exit_code, response = _run_and_read_response(
+            capsys,
+            "user",
+            ["ingest", str(payload_file)],
+        )
+
+        assert exit_code == 1
+        assert response["state"] == "policy_blocked"
+        assert response["data"]["recovery_hint"]["code"] == "trust_setup"
+        assert response["message"] == "Ticket setup needs attention before this write can continue."
+        _assert_ingest_transcript_projection_safe(response)
+
+    def test_ingest_origin_mismatch_preserves_error_code_with_setup_hint(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        _ensure_project_root(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        tickets_dir = tmp_path / "tickets"
+        envelopes_dir = tickets_dir / ".envelopes"
+        envelope_path = _write_envelope(_valid_envelope(), envelopes_dir)
+        payload_file = tmp_path / "payload.json"
+        payload_file.write_text(
+            json.dumps(
+                {
+                    "envelope_path": str(envelope_path),
+                    "tickets_dir": str(tickets_dir),
+                    "session_id": "test-session",
+                    "hook_injected": True,
+                    "hook_request_origin": "agent",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        exit_code, response = _run_and_read_response(
+            capsys,
+            "user",
+            ["ingest", str(payload_file)],
+        )
+
+        assert exit_code == 1
+        assert response["state"] == "escalate"
+        assert response["error_code"] == "origin_mismatch"
+        assert response["data"]["recovery_hint"]["code"] == "trust_setup"
+        assert response["message"] == "Ticket setup needs attention before this write can continue."
+        _assert_ingest_transcript_projection_safe(response)
+
+    def test_ingest_missing_payload_file_returns_safe_retry_hint(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        _ensure_project_root(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        payload_file = tmp_path / "missing-payload.json"
+
+        exit_code, response = _run_and_read_response(
+            capsys,
+            "user",
+            ["ingest", str(payload_file)],
+        )
+
+        assert exit_code == 1
+        assert response["state"] == "escalate"
+        assert response["error_code"] == "parse_error"
+        assert response["data"]["recovery_hint"]["code"] == "retry_preview"
+        assert response["message"] == "The saved preview state is no longer usable."
+        _assert_ingest_transcript_projection_safe(response)
+
+    @pytest.mark.parametrize("tickets_dir_value", [123, "../outside-tickets"])
+    def test_ingest_tickets_dir_context_errors_return_safe_policy_hint(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tickets_dir_value: object,
+    ) -> None:
+        _ensure_project_root(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        tickets_dir = tmp_path / "tickets"
+        envelopes_dir = tickets_dir / ".envelopes"
+        envelope_path = _write_envelope(_valid_envelope(), envelopes_dir)
+        payload_file = tmp_path / "payload.json"
+        payload_file.write_text(
+            json.dumps(
+                {
+                    "envelope_path": str(envelope_path),
+                    "tickets_dir": tickets_dir_value,
+                    "session_id": "test-session",
+                    "hook_injected": True,
+                    "hook_request_origin": "user",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        exit_code, response = _run_and_read_response(
+            capsys,
+            "user",
+            ["ingest", str(payload_file)],
+        )
+
+        assert exit_code == 1
+        assert response["state"] == "policy_blocked"
+        assert response["error_code"] == "policy_blocked"
+        assert response["data"]["recovery_hint"]["code"] == "policy_blocked"
+        assert response["message"] == "Ticket ingest is blocked by Ticket policy."
+        _assert_ingest_transcript_projection_safe(response)
+
+    def test_ingest_missing_project_root_returns_safe_policy_hint(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        tickets_dir = tmp_path / "tickets"
+        envelopes_dir = tickets_dir / ".envelopes"
+        envelope_path = _write_envelope(_valid_envelope(), envelopes_dir)
+        payload_file = tmp_path / "payload.json"
+        payload_file.write_text(
+            json.dumps(
+                {
+                    "envelope_path": str(envelope_path),
+                    "tickets_dir": str(tickets_dir),
+                    "session_id": "test-session",
+                    "hook_injected": True,
+                    "hook_request_origin": "user",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        exit_code, response = _run_and_read_response(
+            capsys,
+            "user",
+            ["ingest", str(payload_file)],
+        )
+
+        assert exit_code == 1
+        assert response["state"] == "policy_blocked"
+        assert response["error_code"] == "policy_blocked"
+        assert response["data"]["recovery_hint"]["code"] == "policy_blocked"
+        assert response["message"] == "Ticket ingest is blocked by Ticket policy."
+        _assert_ingest_transcript_projection_safe(response)
+
+    def test_ingest_missing_envelope_path_returns_safe_retry_hint(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        _ensure_project_root(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        tickets_dir = tmp_path / "tickets"
+        tickets_dir.mkdir()
+        payload_file = tmp_path / "payload.json"
+        payload_file.write_text(
+            json.dumps(
+                {
+                    "tickets_dir": str(tickets_dir),
+                    "session_id": "test-session",
+                    "hook_injected": True,
+                    "hook_request_origin": "user",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        exit_code, response = _run_and_read_response(
+            capsys,
+            "user",
+            ["ingest", str(payload_file)],
+        )
+
+        assert exit_code == 2
+        assert response["state"] == "need_fields"
+        assert response["error_code"] == "need_fields"
+        assert response["data"]["recovery_hint"]["code"] == "retry_preview"
+        assert response["message"] == "The saved preview state is no longer usable."
+        _assert_ingest_transcript_projection_safe(response)
+
+    def test_ingest_invalid_envelope_returns_safe_preflight_hint(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        _ensure_project_root(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        tickets_dir = tmp_path / "tickets"
+        tickets_dir.mkdir()
+        envelopes_dir = tickets_dir / ".envelopes"
+        bad_envelope = {"envelope_version": "1.0"}
+        envelope_path = _write_envelope(bad_envelope, envelopes_dir)
+        payload_file = tmp_path / "payload.json"
+        payload_file.write_text(
+            json.dumps(
+                {
+                    "envelope_path": str(envelope_path),
+                    "tickets_dir": str(tickets_dir),
+                    "session_id": "test-session",
+                    "hook_injected": True,
+                    "hook_request_origin": "user",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        exit_code, response = _run_and_read_response(
+            capsys,
+            "user",
+            ["ingest", str(payload_file)],
+        )
+
+        assert exit_code == 2
+        assert response["state"] == "need_fields"
+        assert response["error_code"] == "need_fields"
+        assert response["data"]["recovery_hint"]["code"] == "preflight_failed"
+        assert response["message"] == "Ticket checks did not pass."
+        assert response["data"]["validation_errors"]
+        _assert_ingest_transcript_projection_safe(response)
+        assert envelope_path.exists()
+
+    def test_ingest_created_response_has_safe_transcript_projection(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        _ensure_project_root(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        tickets_dir = tmp_path / "tickets"
+        envelopes_dir = tickets_dir / ".envelopes"
+        envelope_path = _write_envelope(_valid_envelope(), envelopes_dir)
+        payload_file = tmp_path / "payload.json"
+        payload_file.write_text(
+            json.dumps(
+                {
+                    "envelope_path": str(envelope_path),
+                    "tickets_dir": str(tickets_dir),
+                    "session_id": "test-session",
+                    "hook_injected": True,
+                    "hook_request_origin": "user",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        exit_code, response = _run_and_read_response(
+            capsys,
+            "user",
+            ["ingest", str(payload_file)],
+        )
+
+        assert exit_code == 0
+        assert response["state"] == "ok_create"
+        assert response["message"] == "Ticket was created."
+        assert response["data"]["ingest_outcome"] == "created"
+        assert response["data"]["ticket_created"] is True
+        assert response["data"]["ticket_path"]
+        assert response["data"]["processed_path"]
+        assert response["data"]["incoming_envelope_path"] == str(envelope_path)
+        assert "recovery_hint" not in response["data"]
+        projection = _ingest_transcript_projection(response)
+        assert projection["message"] == "Ticket was created."
+        assert projection["ingest_outcome"] == "Ticket was created."
+        assert "ticket_path" not in projection
+        assert "processed_path" not in projection
+        assert "incoming_envelope_path" not in projection
+        _assert_ingest_transcript_projection_safe(response)
+        assert len(list(tickets_dir.glob("*.md"))) == 1
+
     def test_dedup_detected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Ingest detects duplicate and returns duplicate_candidate state."""
         _ensure_project_root(tmp_path)
@@ -178,7 +525,12 @@ class TestIngestSubcommand:
         exit_code2 = run("user", argv=["ingest", str(payload_file2)], prog="test")
         assert exit_code2 == 1  # Duplicate detected, not created
 
-    def test_path_traversal_blocked(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_path_traversal_blocked(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
         """Ingest with envelope_path outside tickets_dir/.envelopes is blocked."""
         _ensure_project_root(tmp_path)
         monkeypatch.chdir(tmp_path)
@@ -201,19 +553,19 @@ class TestIngestSubcommand:
         payload_file = tmp_path / "payload.json"
         payload_file.write_text(json.dumps(payload))
 
-        exit_code = run(
-            "user",
-            argv=["ingest", str(payload_file)],
-            prog="test",
-        )
+        exit_code, response = _run_and_read_response(capsys, "user", ["ingest", str(payload_file)])
 
         assert exit_code == 1  # policy_blocked
+        assert response["data"]["recovery_hint"]["code"] == "policy_blocked"
+        assert response["message"] == "Ticket ingest is blocked by Ticket policy."
+        _assert_ingest_transcript_projection_safe(response)
         assert not list(tickets_dir.glob("*.md"))
 
     def test_processed_replay_blocked(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Ingest with envelope_path in .processed is blocked (replay prevention)."""
         _ensure_project_root(tmp_path)
@@ -238,13 +590,12 @@ class TestIngestSubcommand:
         payload_file = tmp_path / "payload.json"
         payload_file.write_text(json.dumps(payload))
 
-        exit_code = run(
-            "user",
-            argv=["ingest", str(payload_file)],
-            prog="test",
-        )
+        exit_code, response = _run_and_read_response(capsys, "user", ["ingest", str(payload_file)])
 
         assert exit_code == 1  # policy_blocked
+        assert response["data"]["recovery_hint"]["code"] == "policy_blocked"
+        assert response["message"] == "Ticket ingest is blocked by Ticket policy."
+        _assert_ingest_transcript_projection_safe(response)
 
     def test_processed_filename_replay_reports_duplicate_without_creating_ticket(
         self,
@@ -284,10 +635,24 @@ class TestIngestSubcommand:
         assert exit_code == 0
         assert response["state"] == "ok"
         assert response["data"]["ingest_outcome"] == "duplicate_replay"
+        assert "recovery_hint" not in response["data"]
+        assert (
+            response["message"]
+            == "That Ticket ingest request was already processed; no ticket was created."
+        )
+        assert "envelope_path" not in response["message"]
         assert response["data"]["envelope_id"] == envelope_path.name
         assert response["data"]["processed_path"] == str(processed_path)
         assert response["data"]["incoming_envelope_path"] == str(envelope_path)
         assert response["data"]["ticket_created"] is False
+        projection = _ingest_transcript_projection(response)
+        assert (
+            projection["ingest_outcome"]
+            == "That Ticket ingest request was already processed; no ticket was created."
+        )
+        assert "processed_path" not in projection
+        assert "incoming_envelope_path" not in projection
+        _assert_ingest_transcript_projection_safe(response)
         assert envelope_path.exists()
         assert processed_path.exists()
         assert not list(tickets_dir.glob("*.md"))
@@ -329,7 +694,9 @@ class TestIngestSubcommand:
 
         assert exit_code == 1
         assert response["state"] == "policy_blocked"
-        assert "direct child" in response["message"]
+        assert response["data"]["recovery_hint"]["code"] == "policy_blocked"
+        assert response["message"] == "Ticket ingest is blocked by Ticket policy."
+        _assert_ingest_transcript_projection_safe(response)
         assert nested_envelope_path.exists()
         assert root_processed_path.exists()
         assert not list(tickets_dir.glob("*.md"))
@@ -368,9 +735,11 @@ class TestIngestSubcommand:
 
         assert exit_code == 0
         assert response["state"] == "ok_create"
+        assert response["message"] == "Ticket was created."
         assert response["data"]["ingest_outcome"] == "created"
         assert response["data"]["envelope_id"] == envelope_path.name
         assert response["data"]["ticket_created"] is True
+        _assert_ingest_transcript_projection_safe(response)
         assert not envelope_path.exists()
         assert processed_path.exists()
         assert (processed_dir / envelope_path.name).exists()
@@ -421,7 +790,25 @@ class TestIngestSubcommand:
 
         assert exit_code == 1
         assert response["state"] == "duplicate_candidate"
+        assert response["error_code"] == "duplicate_candidate"
         assert response.get("data", {}).get("ingest_outcome") != "duplicate_replay"
+        assert response["data"]["duplicate_of"] == response["ticket_id"]
+        assert response["data"]["dedup_fingerprint"]
+        assert response["data"]["target_fingerprint"]
+        assert response["data"]["action_plan"]["duplicate_candidate"] is True
+        assert "recovery_hint" not in response["data"]
+        projection = _ingest_transcript_projection(response)
+        assert str(projection["message"]).startswith("Potential duplicate")
+        assert projection["ticket_id"] == response["ticket_id"]
+        assert projection["duplicate_candidate_ticket_id"] == response["data"]["duplicate_of"]
+        assert "dedup_fingerprint" not in projection
+        assert "target_fingerprint" not in projection
+        assert "action_plan" not in projection
+        assert "processed_path" not in projection
+        assert "incoming_envelope_path" not in projection
+        assert "ticket_path" not in projection
+        assert "envelope_move_error" not in projection
+        _assert_ingest_transcript_projection_safe(response)
         assert second_envelope.exists()
 
     def test_created_envelope_move_failed_reports_created_outcome(
@@ -467,6 +854,19 @@ class TestIngestSubcommand:
         assert response["data"]["processed_path"] == str(processed_path)
         assert response["data"]["incoming_envelope_path"] == str(envelope_path)
         assert response["data"]["envelope_move_error"].startswith("simulated move failure")
+        assert "recovery_hint" not in response["data"]
+        assert (
+            response["message"]
+            == "Ticket was created, but Ticket could not finish ingest cleanup."
+        )
+        projection = _ingest_transcript_projection(response)
+        assert (
+            projection["ingest_outcome"]
+            == "Ticket was created, but Ticket could not finish ingest cleanup."
+        )
+        assert "processed_path" not in projection
+        assert "incoming_envelope_path" not in projection
+        _assert_ingest_transcript_projection_safe(response)
         assert envelope_path.exists()
         assert len(list(tickets_dir.glob("*.md"))) == 1
 

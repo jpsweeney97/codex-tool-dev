@@ -149,3 +149,22 @@ python3 -B <PLUGIN_ROOT>/scripts/ticket_update.py execute <PAYLOAD_PATH>
 
 If the user edits the proposed change, update the same payload and rerun
 `prepare` for the same `PAYLOAD_PATH`.
+
+## Recovery Hints
+
+When a backend response includes `data.recovery_hint`, show the recovery summary and next step before any lower-level message. Do not expose payload paths, envelope paths, canonical command repair, raw temp/workspace paths, or hook/provenance fields in the transcript.
+
+- `stale_plan`: say the preview is no longer current; rerun prepare and ask for
+  confirmation again. Include the ticket ID when available: "Ticket <id>
+  changed since preview; rerun the preview against the current ticket, then
+  confirm again."
+- `retry_preview`: say the saved preview state is no longer usable; rerun
+  prepare and ask for confirmation again.
+- `trust_setup`: stop without writing; say Ticket setup needs attention and
+  suggest ticket-doctor diagnostics or plugin hook setup verification. The
+  phrase "plugin hook setup" is allowed setup-level language; do not include
+  hook/provenance field names or command-shape repair.
+- `policy_blocked`: stop without writing; say the write is blocked by Ticket
+  policy and the request or policy must change before retrying.
+- `preflight_failed`: stop without writing; ask the user to review the check
+  details, adjust the request, and rerun the preview.

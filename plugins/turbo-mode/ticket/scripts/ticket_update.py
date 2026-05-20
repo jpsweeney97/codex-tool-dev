@@ -19,6 +19,7 @@ from scripts.ticket_engine_runner import dispatch_stage, load_runner_context  # 
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir  # noqa: E402
 from scripts.ticket_payloads import TicketPayloadPathError, delete_consumed_payload  # noqa: E402
 from scripts.ticket_read import find_ticket_by_id  # noqa: E402
+from scripts.ticket_ux import attach_recovery_hint, recovery_hint_code_for_response  # noqa: E402
 
 _ALLOWED_UPDATE_FIELDS = frozenset(
     {
@@ -82,6 +83,27 @@ def _engine_response_to_dict(response: Any) -> dict[str, Any]:
     if "data" not in data:
         data["data"] = {}
     return data
+
+
+_SAFE_MESSAGE_BY_RECOVERY_CODE = {
+    "stale_plan": "The saved preview is no longer current.",
+    "trust_setup": "Ticket setup needs attention before this write can continue.",
+    "retry_preview": "The saved preview state is no longer usable.",
+    "policy_blocked": "This write is blocked by Ticket policy.",
+    "preflight_failed": "Ticket checks did not pass.",
+}
+
+
+def _with_default_recovery_hint(response: dict[str, Any]) -> dict[str, Any]:
+    code = recovery_hint_code_for_response(response)
+    if code is None:
+        return response
+    safe_response = dict(response)
+    safe_response["message"] = _SAFE_MESSAGE_BY_RECOVERY_CODE.get(
+        code,
+        safe_response.get("message", ""),
+    )
+    return attach_recovery_hint(safe_response, code)
 
 
 def _write_payload_atomic(payload_path: Path, payload: dict[str, Any]) -> None:
@@ -364,7 +386,7 @@ def _validate_lifecycle_payload(update: dict[str, Any]) -> dict[str, Any] | None
 def _prepare(payload_path: Path) -> dict[str, Any]:
     payload, tickets_dir, request_origin, error = _load_update_context("prepare", payload_path)
     if error is not None:
-        return error
+        return _with_default_recovery_hint(error)
     assert payload is not None and tickets_dir is not None and request_origin is not None
 
     update, update_error = _validate_update_payload(payload.get("update"))
@@ -401,14 +423,14 @@ def _prepare(payload_path: Path) -> dict[str, Any]:
 
     policy_error = _evaluate_workflow_policy(action, ticket_id, fields, tickets_dir)
     if policy_error is not None:
-        return _engine_response_to_dict(policy_error)
+        return _with_default_recovery_hint(_engine_response_to_dict(policy_error))
 
     for stage in ("classify", "plan", "preflight"):
         response = _engine_response_to_dict(
             dispatch_stage(stage, current, tickets_dir, request_origin)
         )
         if response.get("state") != "ok":
-            return response
+            return _with_default_recovery_hint(response)
         current.update(response.get("data", {}))
 
     preview = _preview(ticket, action, fields, clear_refinement=clear_refinement, ready=True)
@@ -437,7 +459,7 @@ def _prepare(payload_path: Path) -> dict[str, Any]:
 def _execute(payload_path: Path) -> dict[str, Any]:
     payload, tickets_dir, request_origin, error = _load_update_context("execute", payload_path)
     if error is not None:
-        return error
+        return _with_default_recovery_hint(error)
     assert payload is not None and tickets_dir is not None and request_origin is not None
 
     prepare_artifact = payload.get("update_prepare")
@@ -445,10 +467,13 @@ def _execute(payload_path: Path) -> dict[str, Any]:
         not isinstance(prepare_artifact, dict)
         or prepare_artifact.get("state") != "ready_to_execute"
     ):
-        return _response(
-            "preflight_failed",
-            "Update execute requires a successful prepare preview",
-            error_code="stale_plan",
+        return attach_recovery_hint(
+            _response(
+                "preflight_failed",
+                "The saved preview state is no longer usable.",
+                error_code="stale_plan",
+            ),
+            "retry_preview",
         )
     fields = payload.get("fields")
     update = payload.get("update")
@@ -458,42 +483,62 @@ def _execute(payload_path: Path) -> dict[str, Any]:
         or not isinstance(update, dict)
         or not isinstance(preview, dict)
     ):
-        return _response(
-            "preflight_failed",
-            "Update execute requires prepared fields, update, and preview data",
-            error_code="stale_plan",
+        return attach_recovery_hint(
+            _response(
+                "preflight_failed",
+                "The saved preview state is no longer usable.",
+                error_code="stale_plan",
+            ),
+            "retry_preview",
         )
     if prepare_artifact.get("fields_fingerprint") != _json_fingerprint(fields):
-        return _response(
-            "preflight_failed",
-            "Update preview is stale; rerun prepare",
-            error_code="stale_plan",
+        return attach_recovery_hint(
+            _response(
+                "preflight_failed",
+                "The saved preview is no longer current.",
+                error_code="stale_plan",
+            ),
+            "stale_plan",
         )
     if prepare_artifact.get("update_fingerprint") != _json_fingerprint(update):
-        return _response(
-            "preflight_failed",
-            "Update input changed since prepare; rerun prepare",
-            error_code="stale_plan",
+        return attach_recovery_hint(
+            _response(
+                "preflight_failed",
+                "The saved preview is no longer current.",
+                error_code="stale_plan",
+            ),
+            "stale_plan",
         )
     if prepare_artifact.get("preview_fingerprint") != _json_fingerprint(preview):
-        return _response(
-            "preflight_failed",
-            "Update preview is stale; rerun prepare",
-            error_code="stale_plan",
+        return attach_recovery_hint(
+            _response(
+                "preflight_failed",
+                "The saved preview is no longer current.",
+                error_code="stale_plan",
+            ),
+            "stale_plan",
         )
     if prepare_artifact.get("execute_fingerprint") != _execute_fingerprint(payload):
-        return _response(
-            "preflight_failed",
-            "Update execute payload changed since prepare; rerun prepare",
-            error_code="stale_plan",
+        return attach_recovery_hint(
+            _response(
+                "preflight_failed",
+                "The saved preview is no longer current.",
+                error_code="stale_plan",
+            ),
+            "stale_plan",
         )
 
     project_root = discover_project_root(tickets_dir)
     if project_root is None:
-        return _response(
-            "policy_blocked",
-            "Cannot determine project root for payload cleanup: no .codex/ or .git/ marker found",
-            error_code="policy_blocked",
+        return _with_default_recovery_hint(
+            _response(
+                "policy_blocked",
+                (
+                    "Cannot determine project root for payload cleanup: "
+                    "no .codex/ or .git/ marker found"
+                ),
+                error_code="policy_blocked",
+            )
         )
 
     response = _engine_response_to_dict(
@@ -509,7 +554,7 @@ def _execute(payload_path: Path) -> dict[str, Any]:
             )
         except (OSError, TicketPayloadPathError) as exc:
             response.setdefault("data", {})["payload_cleanup_error"] = str(exc)
-    return response
+    return _with_default_recovery_hint(response)
 
 
 def run_update(subcommand: str, payload_path: Path) -> dict[str, Any]:

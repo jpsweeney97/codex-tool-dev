@@ -366,6 +366,40 @@ def test_ticket_capture_skill_preserves_hook_guard_boundary() -> None:
     assert "the guard or use noncanonical commands" in text
 
 
+def test_user_facing_ticket_skills_prefer_recovery_hint() -> None:
+    for path in [CAPTURE_SKILL, UPDATE_SKILL, DOCTOR_SKILL]:
+        text = _normalize_whitespace(_read_text(path))
+        assert "`data.recovery_hint`" in text
+        assert "show the recovery summary and next step" in text
+        assert (
+            "Do not expose payload paths, envelope paths, canonical command repair, "
+            "raw temp/workspace paths, or hook/provenance fields"
+        ) in text
+
+
+def test_contract_documents_recovery_hint_schema_and_codes() -> None:
+    contract = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
+    handbook = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
+    docs = {
+        "ticket-contract.md": contract,
+        "HANDBOOK.md": handbook,
+    }
+    for name, text in docs.items():
+        assert "`data.recovery_hint`" in text, name
+        for code in [
+            "stale_plan",
+            "trust_setup",
+            "retry_preview",
+            "cleanup_stale_preview",
+            "policy_blocked",
+            "preflight_failed",
+        ]:
+            assert f"`{code}`" in text, name
+        assert "safe to show directly to a human user" in text, name
+        assert "Ingest stdout is a machine-readable JSON envelope" in text, name
+        assert "allowlisted projection" in text, name
+
+
 def test_ticket_capture_skill_owns_creation_without_broad_ticket_skill() -> None:
     text = _read_text(CAPTURE_SKILL)
     assert "ticket_capture.py prepare" in text

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
+import scripts.ticket_update as ticket_update
 from scripts.ticket_parse import extract_fenced_yaml, parse_ticket, parse_yaml_block
 from scripts.ticket_render import render_ticket
 from scripts.ticket_update import run_update
+from scripts.ticket_ux import INTERNAL_RECOVERY_PATH_PATTERNS, INTERNAL_RECOVERY_TERMS
 
 
 def _payload_file(project_root: Path, payload: dict) -> Path:
@@ -35,6 +38,17 @@ def _read_payload(path: Path) -> dict:
 
 def _write_payload(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _assert_hint(response: dict, code: str) -> None:
+    hint = response["data"]["recovery_hint"]
+    assert hint["code"] == code
+    assert set(hint) == {"code", "summary", "next_step"}
+    rendered = " ".join(hint.values()) + " " + response["message"]
+    for term in INTERNAL_RECOVERY_TERMS:
+        assert term.lower() not in rendered.lower()
+    for pattern in INTERNAL_RECOVERY_PATH_PATTERNS:
+        assert re.search(pattern, rendered) is None
 
 
 def _frontmatter(path: Path) -> dict:
@@ -190,6 +204,7 @@ def test_failed_update_execute_preserves_ticket_tmp_payload(
     execute = run_update("execute", payload_path)
 
     assert execute["state"] in {"preflight_failed", "policy_blocked", "escalate"}
+    _assert_hint(execute, "trust_setup")
     assert payload_path.exists()
 
 
@@ -370,6 +385,7 @@ def test_execute_without_prepare_returns_stale_plan(
 
     assert response["state"] == "preflight_failed"
     assert response["error_code"] == "stale_plan"
+    _assert_hint(response, "retry_preview")
 
 
 def test_execute_rejects_mutated_update_as_stale_plan(
@@ -393,6 +409,7 @@ def test_execute_rejects_mutated_update_as_stale_plan(
 
     assert response["state"] == "preflight_failed"
     assert response["error_code"] == "stale_plan"
+    _assert_hint(response, "stale_plan")
 
 
 def test_execute_rejects_mutated_fields_as_stale_plan(
@@ -416,6 +433,7 @@ def test_execute_rejects_mutated_fields_as_stale_plan(
 
     assert response["state"] == "preflight_failed"
     assert response["error_code"] == "stale_plan"
+    _assert_hint(response, "stale_plan")
 
 
 def test_execute_rejects_mutated_action_and_classify_intent_as_stale_plan(
@@ -445,6 +463,7 @@ def test_execute_rejects_mutated_action_and_classify_intent_as_stale_plan(
 
     assert response["state"] == "preflight_failed"
     assert response["error_code"] == "stale_plan"
+    _assert_hint(response, "stale_plan")
 
 
 def test_execute_rejects_mutated_preview_as_stale_plan(
@@ -468,6 +487,44 @@ def test_execute_rejects_mutated_preview_as_stale_plan(
 
     assert response["state"] == "preflight_failed"
     assert response["error_code"] == "stale_plan"
+    _assert_hint(response, "stale_plan")
+
+
+def test_execute_missing_trust_fields_returns_setup_hint(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    _make_refinement_ticket(tmp_tickets)
+    payload_path = _payload_file(project_root, _payload(tmp_tickets, {"priority": "high"}))
+
+    prepare = run_update("prepare", payload_path)
+    payload = _read_payload(payload_path)
+    payload.pop("hook_injected", None)
+    payload.pop("hook_request_origin", None)
+    _write_payload(payload_path, payload)
+    response = run_update("execute", payload_path)
+
+    assert prepare["state"] == "ready_to_execute"
+    assert response["state"] == "policy_blocked"
+    _assert_hint(response, "trust_setup")
+    assert response["message"] == "Ticket setup needs attention before this write can continue."
+
+
+def test_default_hint_sanitizes_origin_mismatch_message_before_attaching_hint() -> None:
+    response = ticket_update._with_default_recovery_hint(
+        {
+            "state": "escalate",
+            "message": "Cannot determine caller identity: request_origin='/Users/example/project'",
+            "error_code": "origin_mismatch",
+        }
+    )
+
+    assert response["state"] == "escalate"
+    assert response["error_code"] == "origin_mismatch"
+    _assert_hint(response, "trust_setup")
+    assert response["message"] == "Ticket setup needs attention before this write can continue."
 
 
 def test_reopen_terminal_ticket_uses_engine_reopen_path(
