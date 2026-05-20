@@ -98,15 +98,18 @@ Fresh 0.132.0 schema evidence captured on 2026-05-20:
 | Nonce binding | One fresh `run_nonce` must appear in inventory evidence, smoke payload data, smoke result, and final proof. Mismatched or missing nonce fails activation. |
 | Source checkout | Running activation from the source checkout may report diagnostics, but it must not write `.codex/ticket-runtime-proof.json`. Activation derives the running plugin root from `Path(__file__).resolve().parents[1]`; no CLI argument may impersonate the running root. Activation succeeds only when the derived running plugin root equals the installed cache root proven by app-server `hooks/list` and corroborated by installed-cache `skills/list` paths. |
 | Agent policy selectors | The hook-observed origin and payload fields are not policy selectors. `direct_execute` uses the hardcoded `ticket_engine_agent.py` entrypoint. Wrapper surfaces require hardcoded agent wrapper entrypoints that pass `request_origin="agent"` internally; the existing user wrappers remain `request_origin="user"`. |
+| Workflow/debug runner boundary | `ticket_workflow.py` is a compatibility/debug runner, not an activation-certified agent entrypoint. Activation cannot rely on hook-origin fallback for this path. Before the gate can be claimed, `ticket_workflow.py execute` must either be brought under the same hardcoded selector model or be demoted so it cannot perform `auto_audit` mutation as an agent-internal bypass. This plan chooses demotion: workflow prepare/recover may remain debug compatibility paths, but workflow execute must fail closed for `auto_audit` mutation and docs must state that consumers still invoking workflow/debug paths are outside the activated boundary. |
 | Wrapper hook membrane | New agent wrapper entrypoints must be explicitly allowlisted by `ticket_engine_guard.py` and covered by `tests/test_hook.py`. An unrecognized `ticket_*.py` script remains denied by the hook. |
 | Wrapper prepare/execute fingerprint | Capture/update post-proof smokes must not prepare wrapper payloads through a different trust path than execute. `capture_execute` and `update_execute` must run both `prepare` and `execute` through app-server, the installed hook, and the same hardcoded agent wrapper entrypoint in the same app-server thread/session. Before relying on those post-smokes, run a narrow live preflight against the installed hook that executes two hook-mediated turns in one app-server thread and proves `session_id`, `hook_injected`, and `hook_request_origin` are stable from prepare to execute. The 2026-05-20 preflight proved same-thread `session_id` stability under diagnostic `dangerFullAccess` against a disposable project root, while `workspaceWrite` failed before command execution; implementation must still prove the pinned workspace-write policy or stop with a policy diagnostic. Activation must record and verify that the wrapper execute-fingerprint trust inputs are stable from the prepared payload to the execute payload: non-empty `session_id`, `hook_injected is True`, `hook_request_origin == "user"` on current Codex, contained `tickets_dir`, payload path, and saved `execute_fingerprint`. A `stale_plan` before the readiness gate is an activation failure unless the implementation intentionally changes the wrapper fingerprint contract and adds tests for the new behavior. |
-| Gate scope | `engine_execute()` readiness gating applies only to `request_origin == "agent"` execute surfaces that can mutate tickets under `auto_audit`: `direct_execute`, `capture_execute`, and `update_execute`. `capture_execute` and `update_execute` are in scope only after the dedicated agent wrapper entrypoints select `request_origin="agent"` without trusting hook-origin metadata or caller payload. The gate does not apply to ingest because ingest is an internal dispatch path, not an external `execute_surface` value; it already requires the guarded engine entrypoints and remains governed by the existing trust triple plus ingest policy. The internal `activation_smoke` bootstrap path is excluded only for the dedicated activation-smoke entrypoint and only for the contained smoke tickets directory. |
+| Gate scope | `engine_execute()` readiness gating applies only to `request_origin == "agent"` execute surfaces that can mutate tickets under `auto_audit`: `direct_execute`, `capture_execute`, and `update_execute`. `capture_execute` and `update_execute` are in scope only after the dedicated agent wrapper entrypoints select `request_origin="agent"` without trusting hook-origin metadata or caller payload. The gate does not apply to ingest because ingest is an internal dispatch path, not an external `execute_surface` value; it already requires the guarded engine entrypoints and remains governed by the existing trust triple plus ingest policy. `ticket_workflow.py execute` is not a certified execute surface and must not be able to mutate `auto_audit` tickets as `request_origin="user"` merely because current Codex hook metadata says `hook_request_origin="user"`. The internal `activation_smoke` bootstrap path is excluded only for the dedicated activation-smoke entrypoint and only for the contained smoke tickets directory. |
 | Gate order | The readiness gate runs after the existing hook trust triple and structural execute prerequisites, and before ticket mutation/audit writes. Existing lower-level policy failures should not be hidden by a readiness error when the request is already untrusted or malformed. |
 | Gate verification | The gate must treat proof JSON as untrusted input and recompute bound identity at gate time: current plugin manifest SHA256, hook manifest SHA256, guard script SHA256, guard command/script SHA256, installed code identity for every installed Ticket `scripts/*.py` file plus separate hook/manifests, Codex executable identity, plugin/read source metadata, installed-root hook/skill evidence, inventory transcript hash, aggregate app-server transcript hash after all appends, raw JSON-RPC transcript semantics, normalized event rows recomputed from raw transcripts, raw evidence containment/existence, smoke command identity backed by `commandExecution`, hook completion backed by `hook/completed`, smoke payload hashes or wrapper payload snapshots/deletion status, wrapper trust-fingerprint stability for capture/update, engine stdout hash/result semantics, smoke ticket/audit artifacts, nonce, age, and closeout-level `post_activation_gated_smokes` for the current `execute_surface`. The exported proof verifier must fail closed on unknown surfaces; ingest and other non-gated internal paths must bypass the verifier before calling it, not by relying on a silent return. A well-shaped handwritten JSON file must fail without matching raw evidence, raw evidence semantics, current hashes, and the current surface's post-proof smoke. |
 | Post-proof gated smokes | Activation is not complete when the bootstrap candidate verifies. After the candidate proof is written to `.codex/ticket-runtime-proof.candidate.json`, the installed activation command must run live app-server smokes through the actual gated surfaces with `runtime_readiness_required=True`: `ticket_engine_agent.py execute` for `direct_execute`, hook-mediated `ticket_capture_agent.py prepare` then `ticket_capture_agent.py execute` for `capture_execute`, and hook-mediated `ticket_update_agent.py prepare` then `ticket_update_agent.py execute` for `update_execute`. These smokes must use a candidate-only verifier mode that ignores any existing final proof and accepts only the fresh candidate nonce, expected surface, normalized current command identity (`python3` with optional single `-B`), exact payload path, contained post-smoke tickets dir, and proof target project root. A stale activated `.codex/ticket-runtime-proof.json` must not authorize activation closeout smokes for a new candidate. The candidate must never authorize normal target-project `docs/tickets` mutation. The final activated proof must not be written until every surface listed in `gated_execute_surfaces` has passing post-proof smoke evidence, and normal `engine_execute()` must reject an activated proof if the requested surface lacks that closeout evidence. Activation fails if any gated surface is missing, blocked, stale, not hook-mediated, or not mechanically executable from its wrapper contract. If implementation intentionally narrows activation to direct execute only, the proof and docs must narrow `gated_execute_surfaces` to `["direct_execute"]`; do not keep capture/update in scope without proving them. |
 | Runtime freshness | The gate proof is valid only for the current project root, Ticket plugin id/version, installed cache root derived from hook identity, plugin/read source metadata, plugin manifest SHA256, installed code identity hashes, guard script SHA256, hook manifest SHA256, Codex executable identity, inventory transcript hash, aggregate app-server transcript hash, raw evidence hashes and semantics, exact smoke command/cwd backed by schema-shaped `commandExecution`, hook completion backed by schema-shaped `hook/completed`, payload hashes or wrapper payload snapshots/deletion status, capture/update trust-fingerprint stability, parsed engine result, smoke ticket/audit artifacts, nonce, current-surface post-proof smoke evidence, and a bounded age. Activation closeout additionally requires post-proof gated smoke evidence for every surface listed in `gated_execute_surfaces`. Use a default max age of 24 hours. |
 | Cache mutation | This plan does not install, refresh, rewrite, or sync the installed plugin cache. Activation must fail when the executing plugin root is the source checkout, when installed-cache identity does not match the live `hooks/list` / `skills/list` evidence, or when installed code hashes differ from the proof. Do not claim broad source-vs-cache digest equality unless the implementation adds an explicit source manifest digest comparison; otherwise report source/cache drift as a diagnostic only. |
+| Example cache paths | Any literal `/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/...` path in examples or fixtures is illustrative for the current machine only. Production code and proof verification must derive the installed cache root from live `hooks/list` plus guard command/skill corroboration, then compare against `Path(__file__).resolve().parents[1]`; do not bake the 1.4.0 path into implementation logic. |
 | Source closeout | Source implementation closeout can prove that source code and tests are ready. It cannot by itself produce installed activation. Installed activation is a separate explicit post-refresh operation against the installed cache copy. |
+| Caller migration | Installed activation proof certifies only callers that invoke the supported hardcoded entrypoints: `ticket_engine_agent.py`, `ticket_capture_agent.py`, and `ticket_update_agent.py` for agent-origin `auto_audit` mutation, plus the existing user-facing wrappers for non-agent flows. This repo does not own all consuming-project agent definitions, so closeout must state that consumers still invoking `ticket_workflow.py`, user wrappers for agent work, or other debug/compatibility paths are not covered by the activated boundary until they migrate. |
 | Test seams | Source tests may inject an executing plugin root, verifier function, or activation collaborator through direct in-process helper calls only. Production code must default to `Path(__file__).resolve().parents[1]` and must not expose `--plugin-root`, `--cache-root`, payload fields, or environment variables that can impersonate installed-cache execution or supply non-live readiness evidence. The live hook and activation app-server child environment must not trust ambient `CODEX_PLUGIN_ROOT`; remove that override from production lookup or scope it behind an explicit pytest-only helper, unset it for activation child processes, and add regression tests proving a malicious inherited value cannot make source checkout execution look installed. |
 | Parallel agents | This plan does not serialize parallel autonomous ticket creation. T-20260518-01 remains the separate multi-writer follow-up. |
 
@@ -120,6 +123,7 @@ Fresh 0.132.0 schema evidence captured on 2026-05-20:
 - Do not require `hook_request_origin == "agent"` for activation on current Codex. Treat `hook_request_origin` as hook-observed provenance metadata unless the Codex hook contract gains a host-owned agent identity signal.
 - Do not use AgentControl child smoke as a caller-identity proof. It is only a traversal proof for the installed hook membrane.
 - Do not let ordinary `ticket_engine_agent.py`, capture, update, or payload-controlled fields select the activation bootstrap bypass.
+- Do not claim activation readiness for consumers that still invoke `ticket_workflow.py`, user wrappers, or other debug/compatibility paths for agent-origin `auto_audit` mutation.
 - Do not let `ticket_doctor.py diagnose --runtime-probe-output` write or promote the activation proof.
 - Do not add a production `ticket_doctor.py` environment-variable fixture path for `activate-runtime`; non-live fixtures must stay in pytest-only helper code outside the installed command path.
 - Do not rely on ambient `CODEX_PLUGIN_ROOT` for production hook, doctor, or activation root discovery.
@@ -464,6 +468,11 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   tests/test_update_refinement.py \
   tests/test_ingest.py \
   tests/test_hook.py \
+  tests/test_hook_integration.py \
+  tests/test_workflow.py \
+  tests/test_workflow_cli.py \
+  tests/test_workflow_execute.py \
+  tests/test_workflow_recovery.py \
   tests/test_docs_contract.py \
   tests/test_ux.py \
   -q
@@ -487,6 +496,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   plugins/turbo-mode/ticket/scripts/ticket_engine_core.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py \
   plugins/turbo-mode/ticket/scripts/ticket_stage_models.py \
+  plugins/turbo-mode/ticket/scripts/ticket_workflow.py \
   plugins/turbo-mode/ticket/scripts/ticket_capture.py \
   plugins/turbo-mode/ticket/scripts/ticket_capture_agent.py \
   plugins/turbo-mode/ticket/scripts/ticket_update.py \
@@ -500,6 +510,11 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   plugins/turbo-mode/ticket/tests/test_update_refinement.py \
   plugins/turbo-mode/ticket/tests/test_ingest.py \
   plugins/turbo-mode/ticket/tests/test_hook.py \
+  plugins/turbo-mode/ticket/tests/test_hook_integration.py \
+  plugins/turbo-mode/ticket/tests/test_workflow.py \
+  plugins/turbo-mode/ticket/tests/test_workflow_cli.py \
+  plugins/turbo-mode/ticket/tests/test_workflow_execute.py \
+  plugins/turbo-mode/ticket/tests/test_workflow_recovery.py \
   plugins/turbo-mode/ticket/tests/test_docs_contract.py \
   plugins/turbo-mode/ticket/tests/test_ux.py
 ```
@@ -544,6 +559,15 @@ Expected live success shape after installed refresh: JSON response with `state: 
 - If the first live activation smoke hits `runtime_readiness_required` because it used a normal gated execute path instead of the dedicated activation-smoke bootstrap entrypoint, stop before writing proof.
 - If the activation-smoke bootstrap can mutate outside the contained smoke tickets dir or can be selected by ordinary payload fields, stop before writing proof.
 - If the proof does not bind installed code hashes for the activation entrypoint and gated execute path modules, stop before treating it as fresh.
+- If `ticket_workflow.py execute` can still mutate `auto_audit` tickets after
+  hook injection by resolving effective origin from `hook_request_origin`, stop
+  before claiming the activation boundary. Workflow/debug execute must be
+  demoted or brought under a hardcoded selector before readiness gating is
+  credible.
+- If closeout cannot identify which consuming-project caller definitions have
+  migrated to `ticket_engine_agent.py`, `ticket_capture_agent.py`, and
+  `ticket_update_agent.py`, report activation as plugin-surface proof only. Do
+  not claim real consumer migration.
 - If AgentControl child smoke does not traverse the installed hook membrane, stop before claiming agent-workflow readiness. Do not reinterpret that as a caller-identity failure.
 - If a future Codex release starts emitting a documented host-owned agent identity in `PreToolUse`, stop and update this plan's hook-origin semantics before using that field.
 - If the current CLI app-server schema lacks the required thread/turn/hook/plugin/skill or AgentControl notification surfaces, stop and update the command contract before implementation.
@@ -2467,6 +2491,7 @@ Expected: commit contains only runtime-readiness module and tests.
 **Files:**
 - Modify: `plugins/turbo-mode/ticket/hooks/ticket_engine_guard.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_hook.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_hook_integration.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_runtime_readiness.py`
 
 - [ ] **Step 1: Add failing hook output tests**
@@ -2484,6 +2509,11 @@ explicit before any live activation smoke is considered valid:
 - the runtime readiness app-server parser rejects any matching Ticket hook run
   whose `run.entries` contain an unsupported-hook-output warning, including the
   observed `permissionDecision: allow` warning.
+- `tests/test_hook_integration.py` no longer asserts
+  `hookSpecificOutput.permissionDecision == "allow"` for successful allowed
+  commands. Update every allow-path integration assertion at the same time as
+  `test_hook.py`; this slice is non-mergeable if narrow hook tests pass while
+  integration tests still require the unsupported allow decision.
 
 - [ ] **Step 2: Implement the hook output contract**
 
@@ -2501,7 +2531,7 @@ checking the current Codex hook contract. The source contract must be:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache \
-  uv run --directory plugins/turbo-mode/ticket pytest tests/test_hook.py tests/test_runtime_readiness.py -q
+  uv run --directory plugins/turbo-mode/ticket pytest tests/test_hook.py tests/test_hook_integration.py tests/test_runtime_readiness.py -q
 ```
 
 Expected: PASS for source tests. Installed activation still requires an explicit
@@ -2511,7 +2541,7 @@ hook output fix.
 - [ ] **Step 4: Commit hook output contract preflight**
 
 ```bash
-git add plugins/turbo-mode/ticket/hooks/ticket_engine_guard.py plugins/turbo-mode/ticket/tests/test_hook.py plugins/turbo-mode/ticket/tests/test_runtime_readiness.py
+git add plugins/turbo-mode/ticket/hooks/ticket_engine_guard.py plugins/turbo-mode/ticket/tests/test_hook.py plugins/turbo-mode/ticket/tests/test_hook_integration.py plugins/turbo-mode/ticket/tests/test_runtime_readiness.py
 git commit -m "fix(ticket): align hook output with Codex app-server contract"
 ```
 
@@ -2859,6 +2889,15 @@ Do not run any other shell commands. Do not edit files except through that comma
 After the command finishes, answer with exactly: done
 ```
 
+- Treat this prompt-driven app-server turn as a model/tool-availability
+  certification harness, not a deterministic local subprocess. If the turn
+  times out, declines to run Bash, runs an extra command, edits files outside
+  the canonical command, or fails to produce a single expected
+  `commandExecution`, record a failure class such as `model_command_timeout`,
+  `model_command_not_observed`, `model_extra_command`, or
+  `model_tool_unavailable`. These are activation failures, but report them
+  separately from proof-boundary failures such as stale proof, missing hook
+  traversal, or mutation outside the smoke tickets dir.
 - Capture the complete app-server transcript as `raw/app-server-transcript.jsonl`,
   after first writing the inventory-only transcript to
   `raw/app-server-inventory-transcript.jsonl`. Both files must use raw
@@ -2890,7 +2929,10 @@ After the command finishes, answer with exactly: done
   `agentcontrol_child_hook_timeout`, `agentcontrol_child_completion_timeout`,
   `agentcontrol_extra_spawn`, or `agentcontrol_extra_command`. Do not perform an
   automatic retry inside the same activation run; operators may rerun
-  `activate-runtime`, producing a new nonce and diagnostics.
+  `activate-runtime`, producing a new nonce and diagnostics. Report
+  `agentcontrol_tool_unavailable` and timeout classes as harness/tool
+  availability failures rather than evidence that the Ticket readiness boundary
+  accepted or rejected mutation incorrectly.
 - The AgentControl payload must use a distinct contained
   `activation_result_path` such as `raw/agentcontrol-engine-stdout.json` so it
   cannot overwrite the primary `raw/engine-stdout.json` success artifact.
@@ -3344,6 +3386,7 @@ without post-proof gated smokes.
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_stage_models.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_workflow.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_capture.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_update.py`
 - Add: `plugins/turbo-mode/ticket/scripts/ticket_capture_agent.py`
@@ -3355,6 +3398,11 @@ without post-proof gated smokes.
 - Modify: `plugins/turbo-mode/ticket/tests/test_update_refinement.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_ingest.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_hook.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_hook_integration.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_workflow.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_workflow_cli.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_workflow_execute.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_workflow_recovery.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_runtime_readiness.py`
 
 - [ ] **Step 1: Add failing engine gate tests**
@@ -3388,6 +3436,17 @@ In `tests/test_execute.py`, add:
 - external execute payload with `execute_surface="activation_smoke"` is rejected
   at the stage-model boundary with `parse_error`.
 - `_dispatch_ingest()` reaches `engine_execute()` with `runtime_readiness_required=False` through an internal argument, not through payload-controlled `execute_surface`.
+- `ticket_workflow.py execute` with hook-injected trust fields,
+  `hook_request_origin="user"`, non-empty `session_id`, and an `auto_audit`
+  autonomy config fails closed before mutation. This proves the compatibility
+  workflow cannot be used as an agent-internal bypass around the readiness gate.
+- `ticket_workflow.py execute` cannot select `request_origin="agent"` through
+  payload fields, hook metadata, CLI arguments, or `load_runner_context(None,
+  ...)` fallback. The workflow runner must not infer policy origin from
+  `hook_request_origin`.
+- workflow `prepare` and authorized `recover` tests remain explicit
+  compatibility/debug coverage and must not be described as activation-certified
+  agent mutation paths.
 
 Expected failing assertion pattern:
 
@@ -3424,12 +3483,38 @@ In `tests/test_engine_runner.py`, assert `RunnerContext.payload_path` is the res
 
 In `tests/test_ingest.py`, assert `_dispatch_ingest()` calls `engine_execute()` with `runtime_readiness_required=False`, no `runtime_readiness_payload_path`, and never accepts `execute_surface` from the ingest envelope payload.
 
+In `tests/test_workflow_execute.py`, add a test that stages a prepared workflow
+payload under a temp project with `.codex/ticket.local.md` set to
+`autonomy_mode: auto_audit`, `hook_injected=true`,
+`hook_request_origin="user"`, and a non-empty `session_id`, then calls
+`run_workflow("execute", payload_path)`. Expected result:
+`state == "policy_blocked"`, `error_code == "runtime_readiness_required"` or
+`"policy_blocked"`, no ticket file is created, and no audit row is written.
+Use the final implementation's chosen error code consistently in docs and UX
+mapping.
+
+In `tests/test_workflow.py` and `tests/test_workflow_cli.py`, assert no workflow
+CLI shape or payload field can select `request_origin="agent"`. If
+`run_workflow(..., request_origin=...)` remains as an internal test seam, tests
+must prove the CLI path never exposes it and production `run_workflow()` uses a
+hardcoded non-agent origin for prepare/execute. In
+`tests/test_workflow_recovery.py`, keep recovery authority tests green but add
+a docs/comment assertion that recovery is not an activation-certified agent
+mutation surface.
+
 In `tests/test_hook.py`, add hook membrane tests that:
 
 - allow canonical `python3 -B <PLUGIN_ROOT>/scripts/ticket_capture_agent.py prepare <PAYLOAD>` and `python3 -B <PLUGIN_ROOT>/scripts/ticket_capture_agent.py execute <PAYLOAD>`, injecting the same trust fields as `ticket_capture.py` for both subcommands.
 - allow canonical `python3 -B <PLUGIN_ROOT>/scripts/ticket_update_agent.py prepare <PAYLOAD>` and `python3 -B <PLUGIN_ROOT>/scripts/ticket_update_agent.py execute <PAYLOAD>`, injecting the same trust fields as `ticket_update.py` for both subcommands.
+- keep `ticket_workflow.py prepare` and authorized `recover` behavior covered as
+  compatibility/debug paths, but do not treat `ticket_workflow.py execute` as an
+  activation-certified agent entrypoint.
 - deny noncanonical agent wrapper command shapes such as `python3 -BB ...`.
 - keep unknown `ticket_*.py` scripts denied by Branch 3.
+
+In `tests/test_hook_integration.py`, update allow-path expectations to the new
+supported hook output shape from Task 2.5 and add integration coverage that
+workflow commands no longer depend on `permissionDecision="allow"`.
 
 - [ ] **Step 3: Run tests and verify they fail**
 
@@ -3442,6 +3527,11 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   tests/test_update_refinement.py \
   tests/test_ingest.py \
   tests/test_hook.py \
+  tests/test_hook_integration.py \
+  tests/test_workflow.py \
+  tests/test_workflow_cli.py \
+  tests/test_workflow_execute.py \
+  tests/test_workflow_recovery.py \
   -q
 ```
 
@@ -3552,7 +3642,41 @@ observed runtime metadata. Current Codex injects `"user"` even when the
 entrypoint is `ticket_engine_agent.py`; the entrypoint remains the policy
 selector for `request_origin`.
 
-- [ ] **Step 5: Set wrapper execute surfaces and agent wrapper selectors**
+- [ ] **Step 5: Demote `ticket_workflow.py` from agent activation boundary**
+
+Patch `ticket_workflow.py` before wiring capture/update agent wrappers. The
+workflow runner is compatibility/debug code and must not infer policy origin
+from hook metadata:
+
+```python
+context, error = load_runner_context("user", subcommand, payload_path)
+```
+
+Do not call `load_runner_context(None, ...)` from `ticket_workflow.py` for
+`prepare` or `execute`. Do not expose a CLI flag, payload field, or environment
+variable that lets workflow callers select `request_origin="agent"`.
+
+For `execute`, block `auto_audit` mutation before `dispatch_stage()`:
+
+```python
+if subcommand == "execute":
+    from scripts.ticket_engine_core import read_autonomy_config
+
+    config = read_autonomy_config(context.tickets_dir)
+    if config.mode == "auto_audit":
+        return _response(
+            "policy_blocked",
+            "ticket_workflow.py execute is a compatibility/debug path and is not activation-certified for auto_audit mutation; use ticket_engine_agent.py, ticket_capture_agent.py, or ticket_update_agent.py",
+            error_code="runtime_readiness_required",
+        )
+```
+
+If this breaks a legitimate internal test, update the test to use the supported
+engine/capture/update entrypoint for mutation or keep it in a non-`auto_audit`
+mode. Do not weaken the check by allowing workflow execute to load activation
+proof as `request_origin="user"`.
+
+- [ ] **Step 6: Set wrapper execute surfaces and agent wrapper selectors**
 
 Refactor `ticket_capture.py` so its internal run function accepts a hardcoded
 `request_origin` argument from the entrypoint, defaulting to `"user"` for the
@@ -3622,7 +3746,7 @@ supported agent policy selector for update wrapper `prepare` and `execute`.
 
 This makes wrapper surfaces internal to the wrapper execute step. A stale or malicious `execute_surface` already present in the payload cannot change the saved preview fingerprint or select a bypass, and a caller cannot obtain `request_origin="agent"` for wrapper prepare or execute without using the hardcoded agent wrapper entrypoint.
 
-- [ ] **Step 6: Update hook wrapper allowlist**
+- [ ] **Step 7: Update hook wrapper allowlist**
 
 In `hooks/ticket_engine_guard.py`, update the canonical wrapper parsers so they
 accept exactly these scripts:
@@ -3638,7 +3762,7 @@ must still be denied by Branch 3. The agent wrapper allowlist must cover both
 produce a prepared payload whose saved execute fingerprint survives the later
 hook-mediated execute command.
 
-- [ ] **Step 7: Add the engine gate**
+- [ ] **Step 8: Add the engine gate**
 
 In `ticket_engine_core.py`, use the `execute_surface` and
 `runtime_readiness_required` parameters introduced for the activation-smoke
@@ -3800,7 +3924,7 @@ executing plugin root to `Path(__file__).resolve().parents[1]`.
 
 If this helper causes import cycles, move it into `ticket_runtime_readiness.py` and keep `ticket_engine_core.py` with a minimal import inside the helper.
 
-- [ ] **Step 8: Add post-proof gated surface smokes**
+- [ ] **Step 9: Add post-proof gated surface smokes**
 
 In `ticket_runtime_readiness.py`, implement
 `run_post_activation_gated_smokes()` and
@@ -4007,7 +4131,7 @@ Add tests proving:
   builder must narrow `gated_execute_surfaces` to `["direct_execute"]` before
   writing proof; keeping capture/update while skipping their smokes fails.
 
-- [ ] **Step 9: Run focused gate tests**
+- [ ] **Step 10: Run focused gate tests**
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache \
@@ -4019,12 +4143,17 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   tests/test_update_refinement.py \
   tests/test_ingest.py \
   tests/test_hook.py \
+  tests/test_hook_integration.py \
+  tests/test_workflow.py \
+  tests/test_workflow_cli.py \
+  tests/test_workflow_execute.py \
+  tests/test_workflow_recovery.py \
   -q
 ```
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit engine gate**
+- [ ] **Step 11: Commit engine gate**
 
 ```bash
 git add \
@@ -4032,6 +4161,7 @@ git add \
   plugins/turbo-mode/ticket/scripts/ticket_engine_core.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py \
   plugins/turbo-mode/ticket/scripts/ticket_stage_models.py \
+  plugins/turbo-mode/ticket/scripts/ticket_workflow.py \
   plugins/turbo-mode/ticket/scripts/ticket_capture.py \
   plugins/turbo-mode/ticket/scripts/ticket_capture_agent.py \
   plugins/turbo-mode/ticket/scripts/ticket_update.py \
@@ -4043,6 +4173,11 @@ git add \
   plugins/turbo-mode/ticket/tests/test_update_refinement.py \
   plugins/turbo-mode/ticket/tests/test_ingest.py \
   plugins/turbo-mode/ticket/tests/test_hook.py \
+  plugins/turbo-mode/ticket/tests/test_hook_integration.py \
+  plugins/turbo-mode/ticket/tests/test_workflow.py \
+  plugins/turbo-mode/ticket/tests/test_workflow_cli.py \
+  plugins/turbo-mode/ticket/tests/test_workflow_execute.py \
+  plugins/turbo-mode/ticket/tests/test_workflow_recovery.py \
   plugins/turbo-mode/ticket/tests/test_runtime_readiness.py
 git commit -m "feat(ticket): gate agent execute on runtime readiness"
 ```
@@ -4054,6 +4189,7 @@ Expected: commit contains only execute-surface and gate changes.
 ### Task 6: Docs And Skill Contract
 
 **Files:**
+- Modify: `plugins/turbo-mode/ticket/README.md`
 - Modify: `plugins/turbo-mode/ticket/references/ticket-contract.md`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_ux.py`
 - Modify: `plugins/turbo-mode/ticket/skills/ticket-doctor/SKILL.md`
@@ -4115,6 +4251,11 @@ In `tests/test_docs_contract.py`, add assertions that:
   wrapper path, and the docs must require stable wrapper trust-fingerprint inputs
   across that boundary.
 - `ticket-contract.md` says wrapper `request_origin=agent` can only come from hardcoded agent wrapper entrypoints, not hook metadata, CLI flags, or payload fields.
+- `README.md` says installed activation proof certifies only consumers using
+  `ticket_engine_agent.py`, `ticket_capture_agent.py`, and
+  `ticket_update_agent.py` for agent-origin `auto_audit` mutation. Consumers
+  still invoking `ticket_workflow.py`, user wrappers, or other debug paths are
+  outside the activated boundary until migrated.
 - `ticket-doctor/SKILL.md` documents `activate-runtime` separately from `diagnose`.
 - `ticket-doctor/SKILL.md` says activation may leave an activated `.codex/ticket-runtime-proof.json` only after live inventory, live bootstrap smokes, and post-proof gated surface smokes pass.
 - `ticket-doctor/SKILL.md` says ordinary `diagnose` remains source/cache/storage evidence and not live activation proof, and does not claim broad source-vs-cache equality unless a source manifest digest comparison is implemented.
@@ -4147,6 +4288,12 @@ First revise the existing `## 5. Autonomy Model` section in place:
   instead chooses `policy_blocked`, update every plan snippet that currently
   asserts `runtime_readiness_required`.
 
+Then patch `README.md` in the script surface section so `ticket_workflow.py` is
+described as compatibility/debug only, never a supported or certified
+agent-origin mutation surface. The README must state the caller-migration gate
+in the same terms as activation closeout: activation certifies only hardcoded
+agent entrypoints, and consuming projects own their agent-definition migration.
+
 Then add a section named `## Activation-Capable Runtime Readiness` containing these exact points:
 
 - Activation proof path: `<PROJECT_ROOT>/.codex/ticket-runtime-proof.json`.
@@ -4168,6 +4315,11 @@ Then add a section named `## Activation-Capable Runtime Readiness` containing th
   entrypoints.
 - Gate behavior: the engine reloads proof JSON as untrusted input and recomputes the identities above, including closeout-level post-proof smoke evidence for the current `execute_surface`, before accepting it.
 - Gated surfaces: `request_origin=agent` `auto_audit` `direct_execute`, `capture_execute`, and `update_execute`. Wrapper agent origins are selected only by dedicated hardcoded agent wrapper entrypoints, not hook metadata or caller payload.
+- Caller migration gate: activation proof is valid only for consumers that have
+  migrated agent-origin mutation calls to `ticket_engine_agent.py`,
+  `ticket_capture_agent.py`, and `ticket_update_agent.py`. The plugin source
+  can provide and test those entrypoints, but it cannot prove consuming-project
+  agent definitions have adopted them.
 - Excluded path: `ingest` reaches execute only through the internal ingest dispatcher; external execute payloads cannot select `execute_surface="ingest"`.
 - Activation bootstrap: first activation uses the dedicated
   `ticket_engine_activation_smoke.py` entrypoint and internal
@@ -4229,6 +4381,11 @@ app-server/hook-mediated agent wrapper path used for execute. Activation must
 fail if the prepared payload's execute-fingerprint trust inputs differ at
 execute time or if the wrapper returns `stale_plan` before reaching the runtime
 readiness gate.
+Activation certifies only consumers that invoke the supported hardcoded agent
+entrypoints: `ticket_engine_agent.py`, `ticket_capture_agent.py`, and
+`ticket_update_agent.py`. Consumers still invoking `ticket_workflow.py`, user
+wrappers, or debug paths for agent-origin mutation are outside the activated
+boundary until migrated.
 
 ```bash
 python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_JSON>
@@ -4236,6 +4393,10 @@ python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKETS_DIR>
 
 Report the result as installed-runtime activation proof. If activation fails,
 report the failure reason and do not suggest editing the proof file by hand.
+If activation fails because the prompt-driven app-server harness did not run the
+exact command, could not use AgentControl, timed out, or ran extra commands,
+report that as a harness/tool-availability failure distinct from a Ticket
+readiness-boundary failure.
 Do not treat `diagnose`, source/cache equality, runtime probe fixture output,
 direct hook-script subprocess output, synthetic hook rows, or uncorrelated
 app-server output as activation proof. On current Codex,
@@ -4262,6 +4423,7 @@ Expected: PASS.
 
 ```bash
 git add \
+  plugins/turbo-mode/ticket/README.md \
   plugins/turbo-mode/ticket/references/ticket-contract.md \
   plugins/turbo-mode/ticket/scripts/ticket_ux.py \
   plugins/turbo-mode/ticket/skills/ticket-doctor/SKILL.md \
@@ -4323,6 +4485,11 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   tests/test_update_refinement.py \
   tests/test_ingest.py \
   tests/test_hook.py \
+  tests/test_hook_integration.py \
+  tests/test_workflow.py \
+  tests/test_workflow_cli.py \
+  tests/test_workflow_execute.py \
+  tests/test_workflow_recovery.py \
   tests/test_docs_contract.py \
   tests/test_ux.py \
   -q
@@ -4350,6 +4517,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   plugins/turbo-mode/ticket/scripts/ticket_engine_core.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py \
   plugins/turbo-mode/ticket/scripts/ticket_stage_models.py \
+  plugins/turbo-mode/ticket/scripts/ticket_workflow.py \
   plugins/turbo-mode/ticket/scripts/ticket_capture.py \
   plugins/turbo-mode/ticket/scripts/ticket_capture_agent.py \
   plugins/turbo-mode/ticket/scripts/ticket_update.py \
@@ -4363,6 +4531,11 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   plugins/turbo-mode/ticket/tests/test_update_refinement.py \
   plugins/turbo-mode/ticket/tests/test_ingest.py \
   plugins/turbo-mode/ticket/tests/test_hook.py \
+  plugins/turbo-mode/ticket/tests/test_hook_integration.py \
+  plugins/turbo-mode/ticket/tests/test_workflow.py \
+  plugins/turbo-mode/ticket/tests/test_workflow_cli.py \
+  plugins/turbo-mode/ticket/tests/test_workflow_execute.py \
+  plugins/turbo-mode/ticket/tests/test_workflow_recovery.py \
   plugins/turbo-mode/ticket/tests/test_docs_contract.py \
   plugins/turbo-mode/ticket/tests/test_ux.py
 ```
@@ -4399,6 +4572,14 @@ passing `post_activation_gated_smokes` for every surface listed in
 surface only after verifying that surface's closeout proof. A proof that exists
 but has `status="activation_failed"`, lacks post-proof gated smokes, prompts for
 approval, or proves only the bootstrap entrypoint is not an activation success.
+The closeout report must include the caller-migration caveat: installed
+activation certifies the hardcoded agent entrypoints only, and consuming-project
+agent definitions that still call `ticket_workflow.py`, user wrappers, or debug
+paths remain outside the activated boundary.
+If the app-server model-driven harness fails to run the exact command, cannot
+use AgentControl, times out, or runs extra commands, report that as a
+model/tool-availability activation failure rather than as evidence that the
+Ticket readiness boundary accepted a bad proof.
 If the proof JSON exists but its indexed raw transcripts, payload snapshots,
 engine output, smoke ticket, or audit artifacts have been cleaned, report
 `activation evidence missing` and rerun activation instead of trusting the JSON.
@@ -4448,11 +4629,13 @@ git add \
   plugins/turbo-mode/ticket/scripts/ticket_engine_core.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py \
   plugins/turbo-mode/ticket/scripts/ticket_stage_models.py \
+  plugins/turbo-mode/ticket/scripts/ticket_workflow.py \
   plugins/turbo-mode/ticket/scripts/ticket_capture.py \
   plugins/turbo-mode/ticket/scripts/ticket_capture_agent.py \
   plugins/turbo-mode/ticket/scripts/ticket_update.py \
   plugins/turbo-mode/ticket/scripts/ticket_update_agent.py \
   plugins/turbo-mode/ticket/hooks/ticket_engine_guard.py \
+  plugins/turbo-mode/ticket/README.md \
   plugins/turbo-mode/ticket/references/ticket-contract.md \
   plugins/turbo-mode/ticket/skills/ticket-doctor/SKILL.md \
   plugins/turbo-mode/ticket/tests/test_runtime_readiness.py \
@@ -4463,6 +4646,11 @@ git add \
   plugins/turbo-mode/ticket/tests/test_update_refinement.py \
   plugins/turbo-mode/ticket/tests/test_ingest.py \
   plugins/turbo-mode/ticket/tests/test_hook.py \
+  plugins/turbo-mode/ticket/tests/test_hook_integration.py \
+  plugins/turbo-mode/ticket/tests/test_workflow.py \
+  plugins/turbo-mode/ticket/tests/test_workflow_cli.py \
+  plugins/turbo-mode/ticket/tests/test_workflow_execute.py \
+  plugins/turbo-mode/ticket/tests/test_workflow_recovery.py \
   plugins/turbo-mode/ticket/tests/test_docs_contract.py \
   plugins/turbo-mode/ticket/tests/test_ux.py
 git commit -m "feat(ticket): activate runtime readiness gate"
