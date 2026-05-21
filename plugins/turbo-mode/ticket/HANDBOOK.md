@@ -50,7 +50,7 @@ Low-confidence captures are allowed when a next action exists; they should carry
 Canonical Bash launcher for these scripts:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/tickets
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/tickets
 ```
 
 ### Supported Mutation Surfaces
@@ -373,8 +373,8 @@ Called by skills to execute the 4-stage mutation pipeline. `ticket_engine_user.p
 
 **Inputs**
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_engine_user.py <subcommand> <payload_json_path>
-python3 -B <PLUGIN_ROOT>/scripts/ticket_engine_agent.py <subcommand> <payload_json_path>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_engine_user.py <subcommand> <payload_json_path>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_engine_agent.py <subcommand> <payload_json_path>
 ```
 
 Valid subcommands: `classify`, `plan`, `preflight`, `execute`, `ingest`.
@@ -407,9 +407,9 @@ List or query tickets without triggering the mutation pipeline. Safe to run at a
 
 **Inputs**
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_read.py list <tickets_dir> [--status open|blocked|in_progress] [--priority high|critical] [--tag <tag>]
-python3 -B <PLUGIN_ROOT>/scripts/ticket_read.py query <tickets_dir> <id_prefix>
-python3 -B <PLUGIN_ROOT>/scripts/ticket_read.py check <tickets_dir> <ticket_id> [--resolution done|wontfix]
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <tickets_dir> [--status open|blocked|in_progress] [--priority high|critical] [--tag <tag>]
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py query <tickets_dir> <id_prefix>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py check <tickets_dir> <ticket_id> [--resolution done|wontfix]
 ```
 
 **Failure modes**
@@ -427,8 +427,8 @@ Lower-level health check backend; called by `ticket_review.py`. Produces dashboa
 
 **Inputs**
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_triage.py dashboard <tickets_dir>
-python3 -B <PLUGIN_ROOT>/scripts/ticket_triage.py audit <tickets_dir> [--days <N>]
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_triage.py dashboard <tickets_dir>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_triage.py audit <tickets_dir> [--days <N>]
 ```
 
 **Failure modes**
@@ -447,7 +447,7 @@ Direct use is for debugging. User-facing repair should go through
 
 **Inputs**
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_audit.py repair <tickets_dir> [--dry-run]
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_audit.py repair <tickets_dir> [--dry-run]
 ```
 
 **Behavior:** Reads all `.audit/YYYY-MM-DD/*.jsonl` files, validates each line as parseable JSON. In repair mode: rewrites files with corrupt lines replaced, backs up originals with ISO8601 timestamp suffix.
@@ -465,7 +465,7 @@ python3 -B <PLUGIN_ROOT>/scripts/ticket_audit.py repair <tickets_dir> [--dry-run
 Registered as `PreToolUse` hook in `settings.json`. Runs automatically before any Bash tool call. Not invoked directly.
 
 **What it enforces**
-- Allowlists only canonical plugin endpoint paths using `python3 -B <ABS_PLUGIN_ROOT>/scripts/...`
+- Allowlists only canonical plugin endpoint paths using `uv run python -B <ABS_PLUGIN_ROOT>/scripts/...`
 - Rejects shell metacharacters: `|`, `;`, `` ` ``, `$`, `&`, `(`, `)`, `<`, `>`, newlines
 - Validates that payload file paths resolve inside `event.cwd`
 - Injects `session_id`, `hook_injected`, `hook_request_origin` into the payload atomically
@@ -545,8 +545,8 @@ At preflight, the engine takes a fingerprint snapshot of any existing ticket bei
 | `session_cap_exceeded` | Agent created ≥ `max_creates_per_session` tickets this session | Check `max_creates_per_session` in `.codex/ticket.local.md` | Raise cap or start a new session |
 | `audit_write_failed` blocks agent mutation | Disk full, permission error, or `.audit/` not writable | Check disk space and permissions on `docs/tickets/.audit/` | Fix underlying issue; mutation will proceed once audit write succeeds |
 | `stale_plan` on update | Concurrent write between preflight and execute | Inspect ticket file mtime | Re-run update after verifying current state |
-| Corrupt audit JSONL lines | Interrupted write (crash during mutation) | Run `python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir>` | After explicit approval, run `python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir> --confirm-repair` |
-| Stale `.codex/ticket-tmp/` payloads | Interrupted or abandoned prepare/execute flow | Run `python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <tickets_dir> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>` | After explicit approval, run `python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads` |
+| Corrupt audit JSONL lines | Interrupted write (crash during mutation) | Run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir>` | After explicit approval, run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir> --confirm-repair` |
+| Stale `.codex/ticket-tmp/` payloads | Interrupted or abandoned prepare/execute flow | Run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <tickets_dir> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>` | After explicit approval, run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads` |
 | Stale tickets not surfaced by triage | Missing `updated` field in old ticket YAML | Inspect ticket frontmatter | Triage falls back to file mtime; results are approximate for legacy tickets |
 | `path_outside_cwd` from hook | Project root not at Codex launch directory | Check hook's `event.cwd` vs actual tickets path | Launch Codex from the project root containing `.git/` or `.codex/` |
 
@@ -608,14 +608,14 @@ grep -r "ticket_engine_guard" ~/.codex/settings.json
 
 ```bash
 # From a project with docs/tickets/
-python3 -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/tickets
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/tickets
 # Should return JSON list (empty [] is valid if no tickets exist)
 ```
 
 ### 5. Triage Smoke Test
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_triage.py dashboard <PROJECT_ROOT>/docs/tickets
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_triage.py dashboard <PROJECT_ROOT>/docs/tickets
 # Should return JSON with counts (all zeros valid for empty directory)
 ```
 
@@ -642,7 +642,7 @@ cat > <PROJECT_ROOT>/.codex/ticket-tmp/capture-smoke.json << 'EOF'
 }
 EOF
 
-python3 -B <PLUGIN_ROOT>/scripts/ticket_capture.py prepare <PROJECT_ROOT>/.codex/ticket-tmp/capture-smoke.json
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_capture.py prepare <PROJECT_ROOT>/.codex/ticket-tmp/capture-smoke.json
 # Expected: {"state": "ready_to_execute", ...}; do not run execute unless you intend to create the ticket.
 ```
 
@@ -653,7 +653,7 @@ python3 -B <PLUGIN_ROOT>/scripts/ticket_capture.py prepare <PROJECT_ROOT>/.codex
 ls docs/tickets/.audit/
 # Should show YYYY-MM-DD/ directory with at least one .jsonl file
 
-python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <PROJECT_ROOT>/docs/tickets
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <PROJECT_ROOT>/docs/tickets
 # Should complete with no errors
 ```
 

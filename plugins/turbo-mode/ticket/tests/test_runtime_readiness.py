@@ -310,6 +310,120 @@ def test_activate_runtime_propagates_post_activation_smoke_failure(
     assert not (project_root / ".codex" / "ticket-runtime-proof.json").exists()
 
 
+def test_run_activation_smoke_uses_uv_run_python_launcher(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    installed_root = tmp_path / "installed"
+    tickets_dir.mkdir(parents=True)
+    expected_command = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_activation_smoke.py "
+        f"execute {run_dir / 'payload.json'}"
+    )
+
+    def _fake_turn(**kwargs):
+        assert f"Command: {expected_command}" in kwargs["prompt_text"]
+        return [
+            {
+                "direction": "recv",
+                "body": {"method": "hook/completed", "params": {"run": {"entries": []}}},
+            },
+            {
+                "direction": "recv",
+                "body": {
+                    "params": {
+                        "item": {
+                            "type": "commandExecution",
+                            "id": "cmd-1",
+                            "command": expected_command,
+                        }
+                    }
+                },
+            },
+        ]
+
+    monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
+
+    result = ticket_runtime_readiness.run_activation_smoke(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        run_dir=run_dir,
+        installed_ticket_root=installed_root,
+    )
+
+    assert result["hook_membrane_proof"]["command"] == expected_command
+
+
+def test_run_post_activation_direct_execute_smoke_uses_uv_run_python_launcher(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    installed_root = tmp_path / "installed"
+    proof_path = run_dir / "activated-ticket-runtime-proof.json"
+    tickets_dir.mkdir(parents=True)
+    proof_path.parent.mkdir(parents=True, exist_ok=True)
+    proof_path.write_text("{}", encoding="utf-8")
+    ticket_path = run_dir / "post-direct" / "docs" / "tickets" / "2026-05-20-example.md"
+    ticket_path.parent.mkdir(parents=True, exist_ok=True)
+    ticket_path.write_text("# T-20260520-01: Runtime activation smoke\n", encoding="utf-8")
+    expected_command = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_agent.py "
+        f"execute {run_dir / 'post-direct' / 'post-direct-payload.json'}"
+    )
+
+    def _fake_turn(**kwargs):
+        assert f"Command: {expected_command}" in kwargs["prompt_text"]
+        return [
+            {
+                "direction": "recv",
+                "body": {
+                    "params": {
+                        "item": {
+                            "type": "commandExecution",
+                            "id": "cmd-1",
+                            "command": expected_command,
+                        }
+                    }
+                },
+            },
+            {
+                "direction": "recv",
+                "body": {
+                    "method": "item/commandExecution/outputDelta",
+                    "params": {
+                        "delta": json.dumps(
+                            {
+                                "state": "ok_create",
+                                "data": {"ticket_path": str(ticket_path)},
+                            }
+                        )
+                    },
+                },
+            },
+        ]
+
+    monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
+
+    result = ticket_runtime_readiness.run_post_activation_direct_execute_smoke(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        run_dir=run_dir,
+        installed_ticket_root=installed_root,
+        proof_path=proof_path,
+    )
+
+    actual_command = result["post_activation_gated_smokes"]["surface_results"]["direct_execute"][
+        "command"
+    ]
+    assert actual_command == expected_command
+
+
 def _fake_inventory_result(tmp_path: Path, *, run_dir: Path) -> dict[str, object]:
     installed_root = tmp_path / "installed-ticket"
     hooks_dir = installed_root / "hooks"
@@ -389,7 +503,7 @@ def _fake_smoke_result(tmp_path: Path, *, project_root: Path) -> dict[str, objec
     engine_stderr.write_text("", encoding="utf-8")
     post_events.write_text('{"method":"turn/completed"}\n', encoding="utf-8")
     activation_command = (
-        "python3 -B installed/scripts/ticket_engine_activation_smoke.py "
+        "uv run python -B installed/scripts/ticket_engine_activation_smoke.py "
         "execute payload.json"
     )
     return {
@@ -441,7 +555,7 @@ def _fake_post_activation_smoke_result(*, run_dir: Path) -> dict[str, object]:
                 "direct_execute": {
                     "runner": "app_server_turn",
                     "command": (
-                        "python3 -B installed/scripts/ticket_engine_agent.py "
+                        "uv run python -B installed/scripts/ticket_engine_agent.py "
                         "execute payload.json"
                     ),
                     "execute_surface": "direct_execute",
@@ -502,7 +616,7 @@ def build_valid_runtime_readiness_fixture(
     shutil.copy2(MODULE_SOURCE, copied_module_path)
     module = load_module(copied_module_path)
     activation_command = (
-        "python3 -B installed/scripts/ticket_engine_activation_smoke.py "
+        "uv run python -B installed/scripts/ticket_engine_activation_smoke.py "
         "execute payload.json"
     )
 

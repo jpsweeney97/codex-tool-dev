@@ -29,19 +29,19 @@ and stop.
 List tickets:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_read.py list <TICKETS_DIR> [--status open|blocked|in_progress] [--priority critical|high|medium|low] [--tag <tag>]
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <TICKETS_DIR> [--status open|blocked|in_progress] [--priority critical|high|medium|low] [--tag <tag>]
 ```
 
 Search or open by ticket ID prefix:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_read.py query <TICKETS_DIR> <search_term>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py query <TICKETS_DIR> <search_term>
 ```
 
 Check close readiness:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_read.py check <TICKETS_DIR> <ticket_id> [--resolution done|wontfix]
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py check <TICKETS_DIR> <ticket_id> [--resolution done|wontfix]
 ```
 
 ## Output Rules

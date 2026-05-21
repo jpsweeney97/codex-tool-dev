@@ -30,7 +30,7 @@ not invent an installed cache path.
 For static plugin and storage diagnostics, run:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <TICKETS_DIR> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <TICKETS_DIR> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>
 ```
 
 Report the diagnostic result as source/cache/storage evidence. Do not describe
@@ -48,7 +48,7 @@ direct-execute lane.
 Run:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>
 ```
 
 Report direct-execute-only scope. Do not describe activation as caller-identity
@@ -75,14 +75,14 @@ When a backend response includes `data.recovery_hint`, show the recovery summary
 Always dry-run audit repair first:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <TICKETS_DIR>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <TICKETS_DIR>
 ```
 
 Show the dry-run result and ask before any mutation. If the user explicitly
 approves repair, run:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <TICKETS_DIR> --confirm-repair
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <TICKETS_DIR> --confirm-repair
 ```
 
 Stop on parse, path, permission, or backup errors. Report the failing command
@@ -95,13 +95,13 @@ report and ask before any cleanup mutation. If the user explicitly approves
 stale payload cleanup, run:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads
 ```
 
 The unconfirmed command is:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR>
 ```
 
 Short form: `ticket_doctor.py clean-stale-payloads <TICKETS_DIR>`.

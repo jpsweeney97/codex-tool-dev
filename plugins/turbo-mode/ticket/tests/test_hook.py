@@ -1390,6 +1390,20 @@ class TestCandidateDetection:
         result = run_hook(make_hook_input(cmd, cwd=str(tmp_path)))
         assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "allow"
 
+    def test_uv_run_python_with_dash_b_allowed(self, tmp_path: Path) -> None:
+        plugin_root = str(Path(__file__).parent.parent)
+        payload = make_payload_file(tmp_path)
+        cmd = f"uv run python -B {plugin_root}/scripts/ticket_engine_user.py classify {payload}"
+        result = run_hook(make_hook_input(cmd, cwd=str(tmp_path)))
+        assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "allow"
+
+    def test_uv_run_python_capture_prepare_allowed(self, tmp_path: Path) -> None:
+        plugin_root = str(Path(__file__).parent.parent)
+        payload = make_payload_file(tmp_path)
+        cmd = f"uv run python -B {plugin_root}/scripts/ticket_capture.py prepare {payload}"
+        result = run_hook(make_hook_input(cmd, cwd=str(tmp_path)))
+        assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "allow"
+
     @pytest.mark.parametrize("python_prefix", ["-BB", "-B -u", "-u -B"])
     def test_noncanonical_dash_b_flag_combinations_denied(
         self, tmp_path: Path, python_prefix: str

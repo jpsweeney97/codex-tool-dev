@@ -412,6 +412,7 @@ def test_transcript_safety_terms_match_expected_internal_leak_vocabulary() -> No
         "PAYLOAD_PATH",
         "canonical command",
         "python3 -B",
+        "uv run python -B",
     )
 
     assert tuple(INTERNAL_RECOVERY_TERMS) == expected_terms

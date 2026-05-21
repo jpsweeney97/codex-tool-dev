@@ -282,11 +282,11 @@ def test_ticket_capture_skill_requires_explicit_confirmation_before_writing() ->
 def test_ticket_capture_skill_uses_canonical_prepare_and_execute_commands() -> None:
     text = _read_text(CAPTURE_SKILL)
     assert (
-        "python3 -B <PLUGIN_ROOT>/scripts/ticket_capture.py prepare <PAYLOAD_PATH>"
+        "uv run python -B <PLUGIN_ROOT>/scripts/ticket_capture.py prepare <PAYLOAD_PATH>"
         in text
     )
     assert (
-        "python3 -B <PLUGIN_ROOT>/scripts/ticket_capture.py execute <PAYLOAD_PATH>"
+        "uv run python -B <PLUGIN_ROOT>/scripts/ticket_capture.py execute <PAYLOAD_PATH>"
         in text
     )
 
@@ -633,7 +633,7 @@ def test_current_facing_docs_include_dash_b_launcher_examples() -> None:
     for path in CURRENT_FACING_DOCS:
         text = _read_text(path)
         if "scripts/" in text:
-            assert "python3 -B <PLUGIN_ROOT>/scripts/" in text, str(path)
+            assert "uv run python -B <PLUGIN_ROOT>/scripts/" in text, str(path)
 
 
 def test_current_facing_docs_do_not_keep_no_flag_plugin_launchers() -> None:

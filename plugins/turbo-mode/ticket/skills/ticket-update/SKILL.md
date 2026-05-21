@@ -132,7 +132,7 @@ preview/execute cycles so no requested field is silently dropped.
 Write the requested scoped change to `PAYLOAD_PATH`, then run:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_update.py prepare <PAYLOAD_PATH>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_update.py prepare <PAYLOAD_PATH>
 ```
 
 Show the returned preview and wait for explicit user confirmation before any
@@ -144,7 +144,7 @@ the user that execution will remove the refinement metadata and tag.
 If the user confirms, run:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_update.py execute <PAYLOAD_PATH>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_update.py execute <PAYLOAD_PATH>
 ```
 
 If the user edits the proposed change, update the same payload and rerun

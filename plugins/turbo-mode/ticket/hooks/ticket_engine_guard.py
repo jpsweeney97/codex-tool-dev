@@ -155,6 +155,24 @@ def _expand_env_split_string(tokens: list[str]) -> list[str]:
     return expanded
 
 
+def _canonical_launcher_script_index(tokens: list[str]) -> int | None:
+    """Return the script token index for exact canonical launcher forms."""
+    if not tokens:
+        return None
+    if tokens[0] == "python3":
+        script_idx = 1
+    elif len(tokens) >= 3 and tokens[:3] == ["uv", "run", "python"]:
+        script_idx = 3
+    else:
+        return None
+
+    if script_idx < len(tokens) and tokens[script_idx] == "-B":
+        script_idx += 1
+    if script_idx >= len(tokens):
+        return None
+    return script_idx
+
+
 def _is_ticket_candidate(command: str) -> bool:
     """Detect if command is a Python invocation targeting a ticket script.
 
@@ -225,12 +243,17 @@ def _is_ticket_candidate(command: str) -> bool:
     # Check if current token is a Python launcher.
     launcher = tokens[i]
     launcher_basename = launcher.rsplit("/", 1)[-1] if "/" in launcher else launcher
-    if not _PYTHON_LAUNCHER_RE.match(launcher_basename):
-        return False
+    if launcher == "uv":
+        if tokens[i : i + 3] != ["uv", "run", "python"]:
+            return False
+        script_idx = i + 3
+    else:
+        if not _PYTHON_LAUNCHER_RE.match(launcher_basename):
+            return False
+        script_idx = i + 1
 
     # Skip Python flags until the first non-option token, accounting for options
     # that consume a following argument (for example "-m pdb" or "-X dev").
-    script_idx = i + 1
     while script_idx < len(tokens):
         token = tokens[script_idx]
         if token in _PYTHON_OPTIONS_WITH_VALUE:
@@ -276,12 +299,9 @@ def _parse_workflow_invocation(
         return None
     if len(tokens) < 3:
         return None
-    if tokens[0] != "python3":
+    script_idx = _canonical_launcher_script_index(tokens)
+    if script_idx is None:
         return None
-
-    script_idx = 1
-    if tokens[script_idx] == "-B":
-        script_idx += 1
 
     expected_script = str(Path(plugin_root) / "scripts" / "ticket_workflow.py")
     if script_idx >= len(tokens) or tokens[script_idx] != expected_script:
@@ -307,12 +327,9 @@ def _parse_capture_invocation(
         return None
     if len(tokens) < 3:
         return None
-    if tokens[0] != "python3":
+    script_idx = _canonical_launcher_script_index(tokens)
+    if script_idx is None:
         return None
-
-    script_idx = 1
-    if tokens[script_idx] == "-B":
-        script_idx += 1
 
     expected_script = str(Path(plugin_root) / "scripts" / "ticket_capture.py")
     if script_idx >= len(tokens) or tokens[script_idx] != expected_script:
@@ -338,12 +355,9 @@ def _parse_update_invocation(
         return None
     if len(tokens) < 3:
         return None
-    if tokens[0] != "python3":
+    script_idx = _canonical_launcher_script_index(tokens)
+    if script_idx is None:
         return None
-
-    script_idx = 1
-    if tokens[script_idx] == "-B":
-        script_idx += 1
 
     expected_script = str(Path(plugin_root) / "scripts" / "ticket_update.py")
     if script_idx >= len(tokens) or tokens[script_idx] != expected_script:
@@ -357,6 +371,86 @@ def _parse_update_invocation(
         return None
     extra_args = tokens[script_idx + 3 :]
     return subcommand, payload_path, extra_args
+
+
+def _parse_engine_invocation(
+    command_clean: str,
+    plugin_root: str,
+) -> tuple[str, str, str, list[str]] | None:
+    """Parse only canonical engine entrypoint invocations."""
+    try:
+        tokens = shlex.split(command_clean)
+    except ValueError:
+        return None
+    script_idx = _canonical_launcher_script_index(tokens)
+    if script_idx is None or len(tokens) < script_idx + 3:
+        return None
+    script_path = tokens[script_idx]
+    script_name = Path(script_path).name
+    if script_name not in {
+        "ticket_engine_user.py",
+        "ticket_engine_agent.py",
+        "ticket_engine_activation_smoke.py",
+    }:
+        return None
+    expected_script = str(Path(plugin_root) / "scripts" / script_name)
+    if script_path != expected_script:
+        return None
+    entrypoint_type = script_name.removeprefix("ticket_engine_").removesuffix(".py")
+    return entrypoint_type, tokens[script_idx + 1], tokens[script_idx + 2], tokens[script_idx + 3 :]
+
+
+def _parse_readonly_invocation(
+    command_clean: str,
+    plugin_root: str,
+) -> tuple[str, str] | None:
+    """Parse only canonical read-only ticket script invocations."""
+    try:
+        tokens = shlex.split(command_clean)
+    except ValueError:
+        return None
+    script_idx = _canonical_launcher_script_index(tokens)
+    if script_idx is None or len(tokens) < script_idx + 3:
+        return None
+    script_path = tokens[script_idx]
+    script_name = Path(script_path).name
+    allowed = {
+        "ticket_read.py": "read",
+        "ticket_triage.py": "triage",
+        "ticket_review.py": "review",
+    }
+    if script_name not in allowed:
+        return None
+    expected_script = str(Path(plugin_root) / "scripts" / script_name)
+    if script_path != expected_script:
+        return None
+    return allowed[script_name], tokens[script_idx + 1]
+
+
+def _parse_audit_invocation(
+    command_clean: str,
+    plugin_root: str,
+) -> tuple[str, str] | None:
+    """Parse only canonical maintenance invocations."""
+    try:
+        tokens = shlex.split(command_clean)
+    except ValueError:
+        return None
+    script_idx = _canonical_launcher_script_index(tokens)
+    if script_idx is None or len(tokens) < script_idx + 3:
+        return None
+    script_path = tokens[script_idx]
+    script_name = Path(script_path).name
+    allowed = {
+        "ticket_audit.py": "audit",
+        "ticket_doctor.py": "doctor",
+    }
+    if script_name not in allowed:
+        return None
+    expected_script = str(Path(plugin_root) / "scripts" / script_name)
+    if script_path != expected_script:
+        return None
+    return allowed[script_name], tokens[script_idx + 1]
 
 
 def _validate_doctor_readonly_invocation(command_clean: str, plugin_root: str) -> str | None:
@@ -559,14 +653,18 @@ def main() -> None:
         )
         return
 
-    # Branch 1: Engine exact allowlist → validate subcommand/payload + inject.
-    engine_pattern = _build_allowlist_pattern(plugin_root)
-    engine_match = engine_pattern.match(command_clean)
+    if command_clean != command_for_detection:
+        print(
+            json.dumps(
+                _make_deny(f"Command invokes unrecognized ticket script. Got: {command!r:.100}")
+            )
+        )
+        return
 
-    if engine_match:
-        entrypoint_type = engine_match.group(1)  # "user", "agent", or "activation_smoke"
-        subcommand = engine_match.group(2)
-        payload_path = engine_match.group(3)
+    # Branch 1: Engine exact allowlist → validate subcommand/payload + inject.
+    engine_invocation = _parse_engine_invocation(command_clean, plugin_root)
+    if engine_invocation is not None:
+        entrypoint_type, subcommand, payload_path, extra_args = engine_invocation
 
         # Validate subcommand.
         valid_subcommands = (
@@ -585,7 +683,7 @@ def main() -> None:
             return
 
         # Check for extra arguments (payload_path should not contain whitespace).
-        if re.search(r"\s", payload_path):
+        if re.search(r"\s", payload_path) or extra_args:
             print(
                 json.dumps(_make_deny(f"Extra arguments after payload path. Got: {command!r:.100}"))
             )
@@ -792,11 +890,9 @@ def main() -> None:
 
     # Branch 2: Read-only scripts (ticket_read.py, ticket_triage.py, ticket_review.py)
     # → allow, no injection.
-    readonly_pattern = _build_readonly_pattern(plugin_root)
-    readonly_match = readonly_pattern.match(command_clean)
-    if readonly_match:
-        script_name = readonly_match.group(1)  # "read" or "triage"
-        subcommand = readonly_match.group(2)
+    readonly_invocation = _parse_readonly_invocation(command_clean, plugin_root)
+    if readonly_invocation is not None:
+        script_name, subcommand = readonly_invocation
         if script_name == "triage" and subcommand == "doctor":
             doctor_error = _validate_doctor_readonly_invocation(command_clean, plugin_root)
             if doctor_error is not None:
@@ -807,9 +903,8 @@ def main() -> None:
 
     # Branch 2b: Maintenance scripts (ticket_audit.py, ticket_doctor.py)
     # → allow for users, deny for agents.
-    audit_pattern = _build_audit_pattern(plugin_root)
-    audit_match = audit_pattern.match(command_clean)
-    if audit_match:
+    audit_invocation = _parse_audit_invocation(command_clean, plugin_root)
+    if audit_invocation is not None:
         origin, origin_error = _resolve_origin(event, is_ticket_candidate=True)
         if origin_error is not None:
             print(json.dumps(_make_deny(origin_error)))
@@ -824,8 +919,7 @@ def main() -> None:
                 )
             )
             return
-        script_name = audit_match.group(1)
-        subcommand = audit_match.group(2)
+        script_name, subcommand = audit_invocation
         print(json.dumps(_make_allow(f"Ticket {script_name}/{subcommand} validated (user-only)")))
         return
 

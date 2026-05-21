@@ -104,6 +104,7 @@ INTERNAL_RECOVERY_TERMS = (
     "PAYLOAD_PATH",
     "canonical command",
     "python3 -B",
+    "uv run python -B",
 )
 
 INTERNAL_RECOVERY_PATH_PATTERNS = (

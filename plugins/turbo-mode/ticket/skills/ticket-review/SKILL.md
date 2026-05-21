@@ -30,13 +30,13 @@ and stop.
 Run dashboard:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_review.py review <TICKETS_DIR>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_review.py review <TICKETS_DIR>
 ```
 
 Run audit summary:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_review.py audit <TICKETS_DIR>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_review.py audit <TICKETS_DIR>
 ```
 
 ## Output Rules

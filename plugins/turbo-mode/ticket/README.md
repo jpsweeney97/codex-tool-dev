@@ -91,12 +91,12 @@ Security: blocks shell metacharacters (`|;&`$><\n\r`), enforces path containment
 
 ### Scripts
 
-Source code lives in `scripts/`, not a standard Python package directory. Skills resolve the plugin root from their own installed location and invoke scripts through the canonical Bash launcher `python3 -B <PLUGIN_ROOT>/scripts/<script>.py`.
+Source code lives in `scripts/`, not a standard Python package directory. Skills resolve the plugin root from their own installed location and invoke scripts through the canonical Bash launcher `uv run python -B <PLUGIN_ROOT>/scripts/<script>.py`.
 
 Canonical Bash launcher for plugin scripts:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/tickets
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/tickets
 ```
 
 **Engine entrypoints (mutation pipeline):**
@@ -409,7 +409,7 @@ CHANGELOG.md      # Version history
 HANDBOOK.md       # Operator handbook
 ```
 
-Source lives in `scripts/` rather than a standard Python package directory. Modules use `sys.path.insert` for imports and the documented Bash contract is `python3 -B <PLUGIN_ROOT>/scripts/<script>.py ...`.
+Source lives in `scripts/` rather than a standard Python package directory. Modules use `sys.path.insert` for imports and the documented Bash contract is `uv run python -B <PLUGIN_ROOT>/scripts/<script>.py ...`.
 
 ### Dependencies
 

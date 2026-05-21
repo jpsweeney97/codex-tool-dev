@@ -5,6 +5,7 @@ import json
 import os
 import queue
 import secrets
+import shlex
 import shutil
 import subprocess
 import threading
@@ -41,6 +42,11 @@ class RuntimeActivationError(RuntimeError):
 
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _ticket_python_command(script_path: Path, *args: Path | str) -> str:
+    parts = ["uv", "run", "python", "-B", str(script_path), *(str(arg) for arg in args)]
+    return shlex.join(parts)
 
 
 def verify_installed_ticket_runtime_readiness_for_execute(
@@ -515,9 +521,10 @@ def run_activation_smoke(
     payload_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     payload_before_path = raw_dir / "payload-before.json"
     payload_before_path.write_text(payload_path.read_text(encoding="utf-8"), encoding="utf-8")
-    command = (
-        f"python3 -B {installed_ticket_root}/scripts/ticket_engine_activation_smoke.py "
-        f"execute {payload_path}"
+    command = _ticket_python_command(
+        installed_ticket_root / "scripts" / "ticket_engine_activation_smoke.py",
+        "execute",
+        payload_path,
     )
     prompt = (
         "Run exactly one Bash command and nothing else.\n"
@@ -640,9 +647,10 @@ def run_post_activation_direct_execute_smoke(
         "autonomy_config": autonomy_config.to_dict(),
     }
     _write_json(payload_path, payload)
-    command = (
-        f"python3 -B {installed_ticket_root}/scripts/ticket_engine_agent.py "
-        f"execute {payload_path}"
+    command = _ticket_python_command(
+        installed_ticket_root / "scripts" / "ticket_engine_agent.py",
+        "execute",
+        payload_path,
     )
     prompt = (
         "Run exactly one Bash command and nothing else.\n"
