@@ -58,7 +58,7 @@ class TranscriptSummary:
 
 def build_probe_command(*, installed_ticket_root: Path, payload_path: Path) -> str:
     return (
-        f"python3 -B {installed_ticket_root}/scripts/ticket_engine_agent.py "
+        f"uv run python -B {installed_ticket_root}/scripts/ticket_engine_agent.py "
         f"execute {payload_path}"
     )
 
@@ -67,7 +67,8 @@ def build_probe_prompt(command: str) -> str:
     return (
         "Run exactly one Bash command and nothing else.\n"
         f"Command: {command}\n"
-        "Do not inspect files, do not explain, do not ask for approval, and do not run any other command."
+        "Do not inspect files, do not explain, do not ask for approval, "
+        "and do not run any other command."
     )
 
 
@@ -282,9 +283,8 @@ def run_driver(
         cwd=str(layout.project_root),
         env=os.environ.copy(),
     )
-    assert proc.stdin is not None
-    assert proc.stdout is not None
-    assert proc.stderr is not None
+    if proc.stdin is None or proc.stdout is None or proc.stderr is None:
+        fail("start app-server", "stdio pipe unavailable", active_executable)
 
     output: queue.Queue[str | None] = queue.Queue()
     stderr_lines: list[str] = []
@@ -310,7 +310,17 @@ def run_driver(
         _send_and_record(
             proc=proc,
             output=output,
-            request={"id": INITIALIZE_REQUEST_ID, "method": "initialize", "params": {"clientInfo": {"name": "ticket-runtime-turn-driver", "version": "0"}, "capabilities": {"experimentalApi": True}}},
+            request={
+                "id": INITIALIZE_REQUEST_ID,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": {
+                        "name": "ticket-runtime-turn-driver",
+                        "version": "0",
+                    },
+                    "capabilities": {"experimentalApi": True},
+                },
+            },
             transcript=transcript,
         )
         _send_and_record(
@@ -338,6 +348,8 @@ def run_driver(
             transcript=transcript,
         )
         active_turn_id = _turn_id_from_response(turn_response)
+        if active_turn_id is None:
+            fail("parse turn/start response", "turn id missing", turn_response)
         _drain_until_turn_completed(
             output=output,
             transcript=transcript,
@@ -366,7 +378,9 @@ def run_driver(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Drive one contained app-server turn for Ticket runtime preflight")
+    parser = argparse.ArgumentParser(
+        description="Drive one contained app-server turn for Ticket runtime preflight"
+    )
     parser.add_argument("--project-root", type=Path, required=True)
     parser.add_argument("--contained-root", type=Path, required=True)
     parser.add_argument("--installed-ticket-root", type=Path, required=True)
@@ -412,7 +426,7 @@ def main(argv: list[str] | None = None) -> int:
 def _assert_under_root(*, candidate: Path, allowed_root: Path, operation: str) -> None:
     try:
         candidate.relative_to(allowed_root)
-    except ValueError as exc:
+    except ValueError:
         fail(operation, f"path escapes {allowed_root}", str(candidate))
 
 
@@ -424,7 +438,8 @@ def _send_and_record(
     transcript: list[dict[str, Any]],
     expect_response: bool = True,
 ) -> dict[str, Any] | None:
-    assert proc.stdin is not None
+    if proc.stdin is None:
+        fail("send app-server request", "stdin unavailable", request)
     proc.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
     proc.stdin.flush()
     transcript.append({"direction": "send", "body": request})
@@ -435,7 +450,11 @@ def _send_and_record(
         fail("send app-server request", "request id missing", request)
     deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
-        response = _read_next_message(output=output, transcript=transcript, timeout=deadline - time.monotonic())
+        response = _read_next_message(
+            output=output,
+            transcript=transcript,
+            timeout=deadline - time.monotonic(),
+        )
         if response is None:
             continue
         if response.get("id") != request_id:
@@ -450,11 +469,17 @@ def _drain_until_turn_completed(
     *,
     output: queue.Queue[str | None],
     transcript: list[dict[str, Any]],
-    turn_id: str | None,
+    turn_id: str,
 ) -> None:
+    if not turn_id:
+        fail("drain turn transcript", "turn id missing", turn_id)
     deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
-        response = _read_next_message(output=output, transcript=transcript, timeout=deadline - time.monotonic())
+        response = _read_next_message(
+            output=output,
+            transcript=transcript,
+            timeout=deadline - time.monotonic(),
+        )
         if response is None:
             continue
         if response.get("method") != "turn/completed":
@@ -466,7 +491,7 @@ def _drain_until_turn_completed(
         if not isinstance(turn, dict):
             continue
         observed_turn_id = turn.get("id")
-        if turn_id is None or observed_turn_id == turn_id:
+        if observed_turn_id == turn_id:
             return
     fail("drain turn transcript", "timed out waiting for turn/completed", turn_id)
 
@@ -488,9 +513,9 @@ def _read_next_message(
         return None
     try:
         response = json.loads(raw_line)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
         transcript.append({"direction": "recv-raw", "body": raw_line.rstrip("\n")})
-        return {}
+        fail("read app-server response", f"malformed JSON response: {exc}", raw_line.rstrip("\n"))
     transcript.append({"direction": "recv", "body": response})
     return response
 

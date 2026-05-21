@@ -638,9 +638,26 @@ def test_current_facing_docs_include_dash_b_launcher_examples() -> None:
             assert "uv run python -B <PLUGIN_ROOT>/scripts/" in text, str(path)
 
 
+def test_launcher_docs_mark_python3_as_legacy_compatibility() -> None:
+    for path in (
+        PLUGIN_ROOT / "README.md",
+        PLUGIN_ROOT / "HANDBOOK.md",
+        PLUGIN_ROOT / "references" / "ticket-contract.md",
+    ):
+        normalized = _normalize_whitespace(_read_text(path))
+        assert "uv run python -B" in normalized, str(path)
+        assert "legacy compatibility" in normalized, str(path)
+
+
 def test_current_facing_docs_do_not_keep_no_flag_plugin_launchers() -> None:
     for path in CURRENT_FACING_DOCS:
         assert not NO_FLAG_LAUNCHER_RE.search(_read_text(path)), str(path)
+
+
+def test_handbook_shell_metacharacter_list_matches_guard_regex() -> None:
+    text = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
+    assert "Rejects shell metacharacters: `|`, `;`, `` ` ``, `$`, `&`, `<`, `>`, newlines" in text
+    assert "`(`, `)`" not in text
 
 
 def test_handbook_does_not_advertise_stale_test_count_or_version_footer() -> None:

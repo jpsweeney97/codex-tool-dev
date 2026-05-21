@@ -26,6 +26,23 @@ class RuntimeReadinessVerification:
     error_code: str | None
     message: str
 
+    def __post_init__(self) -> None:
+        if not self.message:
+            raise ValueError(
+                "RuntimeReadinessVerification validation failed: message is required. "
+                f"Got: {self!r:.100}"
+            )
+        if self.passed and self.error_code is not None:
+            raise ValueError(
+                "RuntimeReadinessVerification validation failed: passed result must not "
+                f"include error_code. Got: {self!r:.100}"
+            )
+        if not self.passed and not self.error_code:
+            raise ValueError(
+                "RuntimeReadinessVerification validation failed: failed result requires "
+                f"error_code. Got: {self!r:.100}"
+            )
+
 
 @dataclass(frozen=True)
 class RuntimeActivationBuildResult:
@@ -76,6 +93,8 @@ def verify_installed_ticket_runtime_readiness_for_execute(
         proof = json.loads(active_proof_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return _reject("proof_invalid", f"Cannot read runtime proof: {exc}")
+    if not isinstance(proof, dict):
+        return _reject("proof_invalid", "Runtime proof must be a JSON object")
 
     if proof.get("schema_version") != "installed_ticket_runtime_readiness-v1":
         return _reject("proof_invalid", "Unexpected runtime proof schema_version")
@@ -93,6 +112,23 @@ def verify_installed_ticket_runtime_readiness_for_execute(
     if expires_at <= datetime.now(UTC):
         return _reject("stale_proof", "Runtime proof expired")
 
+    try:
+        return _verify_runtime_readiness_proof_fields(
+            proof=proof,
+            evidence_project_root=evidence_project_root,
+        )
+    except KeyError as exc:
+        return _reject(
+            "proof_invalid",
+            f"Missing or invalid runtime proof field: {_key_error_field(exc)}",
+        )
+
+
+def _verify_runtime_readiness_proof_fields(
+    *,
+    proof: dict[str, Any],
+    evidence_project_root: Path,
+) -> RuntimeReadinessVerification:
     if proof.get("run_nonce") != _get_nested_str(proof, "hook_membrane_proof", "nonce"):
         return _reject("nonce_mismatch", "Runtime proof nonce mismatch")
 
@@ -200,12 +236,23 @@ def verify_installed_ticket_runtime_readiness_for_execute(
     )
 
 
+def _key_error_field(exc: KeyError) -> str:
+    return str(exc.args[0]) if exc.args else str(exc)
+
+
 def _reject(error_code: str, message: str) -> RuntimeReadinessVerification:
     return RuntimeReadinessVerification(passed=False, error_code=error_code, message=message)
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _unlink_if_exists(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
 
 
 def _parse_utc_timestamp(raw: object) -> datetime | None:
@@ -384,6 +431,7 @@ def activate_runtime(
             executable=executable,
         )
     except RuntimeActivationError as exc:
+        _unlink_if_exists(temp_proof_path)
         return RuntimeActivationBuildResult(
             proof=None,
             error_code=exc.error_code,
@@ -398,6 +446,7 @@ def activate_runtime(
         proof_path=temp_proof_path,
     )
     if not verification.passed:
+        _unlink_if_exists(temp_proof_path)
         return RuntimeActivationBuildResult(
             proof=None,
             error_code=verification.error_code,
@@ -470,11 +519,12 @@ def collect_installed_runtime_inventory(
             "deterministic_driver_unavailable",
             f"Installed Ticket plugin manifest missing at {plugin_manifest_path}",
         )
+    executable_sha256, hash_unavailable_reason = _resolve_executable_sha256_with_reason(executable)
     runtime_identity = {
         "codex_version": _capture_codex_version(executable),
         "executable_path": _resolve_codex_executable(executable),
-        "executable_sha256": _resolve_executable_sha256(executable),
-        "executable_hash_unavailable_reason": None,
+        "executable_sha256": executable_sha256,
+        "executable_hash_unavailable_reason": hash_unavailable_reason,
         "accepted_response_schema_version": "ticket-app-server-readiness-v1",
         "parser_version": "installed-ticket-runtime-readiness-v1",
     }
@@ -771,11 +821,16 @@ def _resolve_codex_executable(executable: str | None) -> str:
 
 
 def _resolve_executable_sha256(executable: str | None) -> str | None:
+    digest, _reason = _resolve_executable_sha256_with_reason(executable)
+    return digest
+
+
+def _resolve_executable_sha256_with_reason(executable: str | None) -> tuple[str | None, str | None]:
     path = Path(_resolve_codex_executable(executable))
     try:
-        return sha256_file(path)
-    except OSError:
-        return None
+        return sha256_file(path), None
+    except OSError as exc:
+        return None, f"{type(exc).__name__}: {exc}"
 
 
 def _capture_codex_version(executable: str | None) -> str:
@@ -812,9 +867,11 @@ def _app_server_roundtrip(
         cwd=str(cwd),
         env=os.environ.copy(),
     )
-    assert proc.stdin is not None
-    assert proc.stdout is not None
-    assert proc.stderr is not None
+    if proc.stdin is None or proc.stdout is None or proc.stderr is None:
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            "app-server stdio pipe unavailable",
+        )
     output: queue.Queue[str | None] = queue.Queue()
     stderr_lines: list[str] = []
     transcript: list[dict[str, Any]] = []
@@ -877,9 +934,11 @@ def _run_app_server_turn(
         cwd=str(project_root),
         env=os.environ.copy(),
     )
-    assert proc.stdin is not None
-    assert proc.stdout is not None
-    assert proc.stderr is not None
+    if proc.stdin is None or proc.stdout is None or proc.stderr is None:
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            "app-server stdio pipe unavailable",
+        )
     output: queue.Queue[str | None] = queue.Queue()
     stderr_lines: list[str] = []
     transcript: list[dict[str, Any]] = []
@@ -954,7 +1013,11 @@ def _run_app_server_turn(
         )
         turn_response = _wait_for_response(output=output, transcript=transcript, expected_id=2)
         turn_id = str(_response_result_by_body(turn_response).get("turn", {}).get("id", ""))
-        _drain_until_turn_completed(output=output, transcript=transcript, turn_id=turn_id or None)
+        if not turn_id:
+            raise RuntimeActivationError(
+                "deterministic_driver_unavailable", "turn/start missing turn id"
+            )
+        _drain_until_turn_completed(output=output, transcript=transcript, turn_id=turn_id)
     finally:
         proc.terminate()
         try:
@@ -976,7 +1039,11 @@ def _send_request(
     request: dict[str, Any],
     transcript: list[dict[str, Any]],
 ) -> None:
-    assert proc.stdin is not None
+    if proc.stdin is None:
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            "app-server stdin pipe unavailable",
+        )
     proc.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
     proc.stdin.flush()
     transcript.append({"direction": "send", "body": request})
@@ -1013,8 +1080,12 @@ def _drain_until_turn_completed(
     *,
     output: queue.Queue[str | None],
     transcript: list[dict[str, Any]],
-    turn_id: str | None,
+    turn_id: str,
 ) -> None:
+    if not turn_id:
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable", "turn/start missing turn id"
+        )
     deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         message = _read_message(
@@ -1030,7 +1101,7 @@ def _drain_until_turn_completed(
         turn = params.get("turn", {})
         if not isinstance(turn, dict):
             continue
-        if turn_id is None or turn.get("id") == turn_id:
+        if turn.get("id") == turn_id:
             return
     raise RuntimeActivationError(
         "deterministic_driver_unavailable",
@@ -1052,9 +1123,12 @@ def _read_message(
         return None
     try:
         message = json.loads(raw)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
         transcript.append({"direction": "recv-raw", "body": raw.rstrip("\n")})
-        return {}
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            f"Malformed app-server JSON response: {exc}",
+        ) from exc
     transcript.append({"direction": "recv", "body": message})
     return message
 

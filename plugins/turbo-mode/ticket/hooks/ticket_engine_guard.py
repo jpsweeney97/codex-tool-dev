@@ -3,12 +3,19 @@
 
 Decision branches:
 - Branch 1: exact engine allowlist -> validate subcommand/payload + inject trust fields.
-- Branch 2: exact read-only allowlist (`ticket_read.py`, `ticket_triage.py`,
-  `ticket_review.py`) -> allow.
-- Branch 2b: exact audit/doctor allowlist (`ticket_audit.py`,
-  `ticket_doctor.py`) -> allow for users, deny for agents.
-- Branch 3: any other Python invocation targeting `ticket_*.py` -> deny.
-- Branch 4: non-ticket Bash commands -> pass through silently (empty JSON).
+- Branch 2: exact workflow allowlist (`ticket_workflow.py`) -> validate
+  subcommand/payload/recovery args + inject trust fields.
+- Branch 3: exact capture allowlist (`ticket_capture.py`) -> validate
+  subcommand/payload/edit args + inject trust fields.
+- Branch 4: exact update allowlist (`ticket_update.py`) -> validate
+  subcommand/payload + inject trust fields.
+- Branch 5: exact read-only allowlist (`ticket_read.py`, `ticket_triage.py`,
+  `ticket_review.py`) -> allow. `ticket_triage.py doctor` also validates
+  explicit roots.
+- Branch 6: exact maintenance allowlist (`ticket_audit.py`, `ticket_doctor.py`)
+  -> allow for users, deny for agents.
+- Branch 7: unknown Python invocation targeting `ticket_*.py` -> deny.
+- Branch 8: non-ticket Bash commands -> pass through silently (empty JSON).
 
 Payload injection (atomic):
 - Injects session_id, hook_injected, hook_request_origin into the payload file.
@@ -58,30 +65,6 @@ SHELL_METACHAR_RE = re.compile(r"[|;&`$><\n\r]")
 def _plugin_root() -> str:
     """Return plugin root directory, with an optional test/development override."""
     return os.environ.get("CODEX_PLUGIN_ROOT", str(Path(__file__).parent.parent))
-
-
-def _build_allowlist_pattern(plugin_root: str) -> re.Pattern[str]:
-    """Build the allowlist regex anchored to the plugin root."""
-    escaped = re.escape(plugin_root)
-    return re.compile(
-        rf"^python3(?:\s+-B)?\s+{escaped}/scripts/ticket_engine_(user|agent|activation_smoke)\.py\s+(\w+)\s+(.+)$"
-    )
-
-
-def _build_readonly_pattern(plugin_root: str) -> re.Pattern[str]:
-    """Build pattern for read-only ticket scripts (no payload injection)."""
-    escaped = re.escape(plugin_root)
-    return re.compile(
-        rf"^python3(?:\s+-B)?\s+{escaped}/scripts/ticket_(read|triage|review)\.py\s+(\w+)\s+(.+)$"
-    )
-
-
-def _build_audit_pattern(plugin_root: str) -> re.Pattern[str]:
-    """Build pattern for user-only maintenance scripts (no payload injection)."""
-    escaped = re.escape(plugin_root)
-    return re.compile(
-        rf"^python3(?:\s+-B)?\s+{escaped}/scripts/ticket_(audit|doctor)\.py\s+([\w-]+)\s+(.+)$"
-    )
 
 
 # Known ticket script basenames for candidate detection.
@@ -488,12 +471,8 @@ def _validate_doctor_readonly_invocation(command_clean: str, plugin_root: str) -
 
     if values.get("--plugin-root") != plugin_root:
         return "ticket_triage.py doctor --plugin-root must equal the running plugin root"
-    expected_cache = "/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0"
-    if values.get("--cache-root") not in {plugin_root, expected_cache}:
-        return (
-            "ticket_triage.py doctor --cache-root must equal the running plugin root "
-            "or expected Ticket cache root"
-        )
+    if values.get("--cache-root") != plugin_root:
+        return "ticket_triage.py doctor --cache-root must equal the running plugin root"
     probe = values.get("--runtime-probe-output")
     if probe is not None:
         probe_path = Path(probe)

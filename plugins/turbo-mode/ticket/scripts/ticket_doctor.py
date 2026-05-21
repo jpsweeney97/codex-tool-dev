@@ -27,7 +27,10 @@ def _response(
     *,
     error_code: str | None = None,
 ) -> dict[str, Any]:
-    return {"state": state, "message": message, "data": data, "error_code": error_code}
+    response = {"state": state, "message": message, "data": data}
+    if error_code is not None:
+        response["error_code"] = error_code
+    return response
 
 
 def _resolve_tickets_dir(raw_tickets_dir: Path) -> tuple[Path | None, dict[str, Any] | None]:
@@ -179,8 +182,8 @@ def activate_runtime_payload(
         )
         try:
             response = attach_recovery_hint(response, result.error_code)
-        except ValueError:
-            pass
+        except ValueError as exc:
+            response["data"]["recovery_hint_error"] = str(exc)
         return response, 1
     return _response("ok", {"mode": "activate-runtime", "proof": result.proof}, result.message), 0
 

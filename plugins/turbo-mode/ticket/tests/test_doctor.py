@@ -150,7 +150,7 @@ def test_activate_runtime_returns_ok_with_activated_proof(
 
     assert exit_code == 0
     assert response["state"] == "ok"
-    assert response["error_code"] is None
+    assert "error_code" not in response
     assert response["data"]["mode"] == "activate-runtime"
     assert response["data"]["proof"]["status"] == "activated"
 
@@ -276,6 +276,49 @@ def test_activate_runtime_propagates_hook_contract_blocked(
     assert exit_code == 1
     assert response["state"] == "policy_blocked"
     assert response["error_code"] == "hook_contract_blocked"
+
+
+def test_activate_runtime_surfaces_unknown_recovery_hint_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    marketplace_path = tmp_path / ".agents" / "plugins" / "marketplace.json"
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    blocked_result = ticket_runtime_readiness.RuntimeActivationBuildResult(
+        proof=None,
+        error_code="new_unregistered_code",
+        message="unregistered runtime failure",
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "activate_runtime",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
+
+    def _unknown_hint(_response: dict[str, object], code: str) -> dict[str, object]:
+        raise ValueError(f"Unknown recovery hint code: {code}")
+
+    monkeypatch.setattr(ticket_doctor_script, "attach_recovery_hint", _unknown_hint)
+
+    response, exit_code = ticket_doctor_script.activate_runtime_payload(
+        project_root=tmp_path,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert exit_code == 1
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == "new_unregistered_code"
+    assert response["data"]["recovery_hint_error"] == (
+        "Unknown recovery hint code: new_unregistered_code"
+    )
 
 
 def test_ticket_doctor_clean_stale_payloads_requires_confirmation(

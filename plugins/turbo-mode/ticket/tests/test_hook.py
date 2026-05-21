@@ -7,6 +7,7 @@ using sys.executable as the Python interpreter.
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -690,6 +691,29 @@ def test_hook_allows_ticket_triage_doctor_with_uv_run_python_launcher(tmp_path: 
     assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
+def test_hook_denies_ticket_triage_doctor_personal_cache_root(tmp_path: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    personal_cache_root = "/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0"
+    event = make_hook_input(
+        (
+            f"uv run python -B {plugin_root}/scripts/ticket_triage.py doctor {tickets_dir} "
+            f"--plugin-root {plugin_root} --cache-root {personal_cache_root}"
+        ),
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(plugin_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "--cache-root must equal the running plugin root" in result["hookSpecificOutput"][
+        "permissionDecisionReason"
+    ]
+
+
 @pytest.mark.parametrize(
     "doctor_args",
     [
@@ -928,6 +952,56 @@ def test_blocks_newline_injection(tmp_path: Path) -> None:
     output = run_hook(inp, plugin_root=plugin_root)
     assert _decision(output) == "deny"
     assert "metacharacters" in _reason(output).lower()
+
+
+@pytest.mark.parametrize("failing_call", ["mkstemp", "fsync", "replace"])
+def test_payload_atomic_write_failures_deny_without_mutating_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failing_call: str,
+) -> None:
+    module = load_guard_module()
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "scripts").mkdir(parents=True)
+    payload = make_payload_file(tmp_path, {"action": "plan"})
+    original_payload = payload.read_text(encoding="utf-8")
+
+    if failing_call == "mkstemp":
+
+        def _raise_mkstemp(*_args, **_kwargs):
+            raise OSError("mkstemp boom")
+
+        monkeypatch.setattr(module.tempfile, "mkstemp", _raise_mkstemp)
+    elif failing_call == "fsync":
+
+        def _raise_fsync(_fd: int) -> None:
+            raise OSError("fsync boom")
+
+        monkeypatch.setattr(module.os, "fsync", _raise_fsync)
+    else:
+
+        def _raise_replace(_src: str, _dst: str) -> None:
+            raise OSError("replace boom")
+
+        monkeypatch.setattr(module.os, "replace", _raise_replace)
+
+    event = make_hook_input(
+        f"python3 -B {plugin_root}/scripts/ticket_engine_user.py plan {payload}",
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+    monkeypatch.setenv("CODEX_PLUGIN_ROOT", str(plugin_root))
+    monkeypatch.setattr(module.sys, "stdin", io.StringIO(json.dumps(event)))
+
+    module.main()
+    raw = json.loads(capsys.readouterr().out)
+    output = _normalize_hook_output(raw)
+
+    assert _decision(output) == "deny"
+    assert "Payload injection failed: Payload write failed" in _reason(output)
+    assert payload.read_text(encoding="utf-8") == original_payload
 
 
 class TestPayloadPathBoundaries:

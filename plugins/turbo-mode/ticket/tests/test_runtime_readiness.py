@@ -2,13 +2,29 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import queue
 import shutil
 import sys
 from pathlib import Path
 
+import pytest
 import scripts.ticket_runtime_readiness as ticket_runtime_readiness
 
 MODULE_SOURCE = Path(__file__).resolve().parents[1] / "scripts" / "ticket_runtime_readiness.py"
+PAYLOAD_BEFORE_SHA256 = "ff8157c5a6e1429eed9c45aa18698f21ee69127ba844bd2b26d77824b0e77324"
+
+
+def _write_proof(proof_path: Path, proof: dict[str, object]) -> None:
+    proof_path.write_text(json.dumps(proof, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _set_nested(mapping: dict[str, object], path: tuple[str, ...], value: object) -> None:
+    target = mapping
+    for key in path[:-1]:
+        child = target[key]
+        assert isinstance(child, dict)
+        target = child
+    target[path[-1]] = value
 
 
 def test_missing_runtime_proof_rejects(tmp_path: Path) -> None:
@@ -21,6 +37,29 @@ def test_missing_runtime_proof_rejects(tmp_path: Path) -> None:
 
     assert result.passed is False
     assert result.error_code == "proof_missing"
+
+
+@pytest.mark.parametrize(
+    "verification",
+    [
+        ticket_runtime_readiness.RuntimeReadinessVerification,
+    ],
+)
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"passed": True, "error_code": "stale_proof", "message": "bad"},
+        {"passed": False, "error_code": None, "message": "bad"},
+        {"passed": False, "error_code": "", "message": "bad"},
+        {"passed": False, "error_code": "proof_invalid", "message": ""},
+    ],
+)
+def test_runtime_readiness_verification_enforces_state_invariants(
+    verification: type[ticket_runtime_readiness.RuntimeReadinessVerification],
+    kwargs: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="RuntimeReadinessVerification validation failed"):
+        verification(**kwargs)
 
 
 def test_source_checkout_execution_cannot_satisfy_installed_runtime_proof(tmp_path: Path) -> None:
@@ -45,6 +84,18 @@ def test_valid_installed_runtime_proof_passes_when_executing_root_matches(tmp_pa
 
     assert result.passed is True
     assert result.error_code is None
+
+
+def test_fixture_payload_hash_uses_fixed_sha256_literal(tmp_path: Path) -> None:
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    run_dir = project_root / proof["raw_evidence"]["run_dir"]
+    payload_before = run_dir / proof["raw_evidence"]["payload_before"]
+
+    assert module.sha256_file(payload_before) == PAYLOAD_BEFORE_SHA256
+    assert proof["hook_membrane_proof"]["payload_sha256"] == PAYLOAD_BEFORE_SHA256
 
 
 def test_explicit_proof_path_uses_proof_project_root_for_raw_evidence(tmp_path: Path) -> None:
@@ -92,22 +143,131 @@ def test_stale_proof_rejects(tmp_path: Path) -> None:
     assert result.error_code == "stale_proof"
 
 
-def test_hash_mismatches_reject(tmp_path: Path) -> None:
-    project_root, installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+@pytest.mark.parametrize(
+    ("mutator", "message"),
+    [
+        (lambda proof: proof.update({"schema_version": "unexpected"}), "schema_version"),
+        (lambda proof: proof.update({"status": "activation_in_progress"}), "not activated"),
+        (lambda proof: proof.update({"expires_at": "not-a-timestamp"}), "expires_at"),
+        (
+            lambda proof: proof["activation_scope"].pop("gated_execute_surfaces"),
+            "activation_scope.gated_execute_surfaces",
+        ),
+        (lambda proof: proof["raw_evidence"].pop("engine_stdout"), "raw_evidence"),
+    ],
+)
+def test_proof_invalid_variants_reject(
+    tmp_path: Path,
+    mutator,
+    message: str,
+) -> None:
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
         tmp_path
     )
     proof = json.loads(proof_path.read_text(encoding="utf-8"))
-
-    (installed_root / ".codex-plugin" / "plugin.json").write_text(
-        '{"name":"ticket","version":"1.4.0","drift":true}\n',
-        encoding="utf-8",
-    )
-    proof_path.write_text(json.dumps(proof, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    mutator(proof)
+    _write_proof(proof_path, proof)
 
     result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
 
     assert result.passed is False
-    assert result.error_code == "plugin_manifest_hash_mismatch"
+    assert result.error_code == "proof_invalid"
+    assert message in result.message
+
+
+def test_malformed_proof_json_rejects_as_proof_invalid(tmp_path: Path) -> None:
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    proof_path.write_text("{not-json\n", encoding="utf-8")
+
+    result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+
+    assert result.passed is False
+    assert result.error_code == "proof_invalid"
+
+
+@pytest.mark.parametrize(
+    ("proof_path_field", "expected_code"),
+    [
+        (("ticket_plugin", "plugin_manifest_path"), "plugin_manifest_path_mismatch"),
+        (("inventory", "hook", "hook_manifest_path"), "hook_manifest_path_mismatch"),
+        (("inventory", "hook", "guard_script_path"), "guard_script_path_mismatch"),
+    ],
+)
+def test_path_mismatches_reject(
+    tmp_path: Path,
+    proof_path_field: tuple[str, ...],
+    expected_code: str,
+) -> None:
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    _set_nested(proof, proof_path_field, str(tmp_path / "wrong-path"))
+    _write_proof(proof_path, proof)
+
+    result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+
+    assert result.passed is False
+    assert result.error_code == expected_code
+
+
+@pytest.mark.parametrize(
+    ("target", "expected_code"),
+    [
+        ("plugin_manifest", "plugin_manifest_hash_mismatch"),
+        ("hook_manifest", "hook_manifest_hash_mismatch"),
+        ("guard_script", "guard_script_hash_mismatch"),
+        ("inventory_transcript", "inventory_transcript_hash_mismatch"),
+        ("hook_events", "hook_transcript_hash_mismatch"),
+        ("post_events", "post_activation_transcript_hash_mismatch"),
+        ("payload_before", "payload_hash_mismatch"),
+        ("engine_stdout", "engine_stdout_hash_mismatch"),
+    ],
+)
+def test_hash_mismatches_reject(
+    tmp_path: Path,
+    target: str,
+    expected_code: str,
+) -> None:
+    project_root, installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    run_dir = project_root / proof["raw_evidence"]["run_dir"]
+
+    target_paths = {
+        "plugin_manifest": installed_root / ".codex-plugin" / "plugin.json",
+        "hook_manifest": Path(proof["inventory"]["hook"]["hook_manifest_path"]),
+        "guard_script": Path(proof["inventory"]["hook"]["guard_script_path"]),
+        "inventory_transcript": run_dir / proof["raw_evidence"]["app_server_inventory_transcript"],
+        "hook_events": run_dir / proof["raw_evidence"]["hook_membrane_events"],
+        "post_events": run_dir / proof["raw_evidence"]["post_activation_events"],
+        "payload_before": run_dir / proof["raw_evidence"]["payload_before"],
+        "engine_stdout": run_dir / proof["raw_evidence"]["engine_stdout"],
+    }
+    target_paths[target].write_text("changed\n", encoding="utf-8")
+    _write_proof(proof_path, proof)
+
+    result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+
+    assert result.passed is False
+    assert result.error_code == expected_code
+
+
+def test_nonce_mismatch_rejects(tmp_path: Path) -> None:
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    proof["hook_membrane_proof"]["nonce"] = "different-nonce"
+    _write_proof(proof_path, proof)
+
+    result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+
+    assert result.passed is False
+    assert result.error_code == "nonce_mismatch"
 
 
 def test_invalid_scope_rejects(tmp_path: Path) -> None:
@@ -140,19 +300,18 @@ def test_forbidden_surface_fields_reject(tmp_path: Path) -> None:
     assert result.error_code == "invalid_scope"
 
 
-def test_nonce_and_payload_hash_mismatches_reject(tmp_path: Path) -> None:
+def test_payload_hash_mismatch_rejects(tmp_path: Path) -> None:
     project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
         tmp_path
     )
     proof = json.loads(proof_path.read_text(encoding="utf-8"))
-    proof["hook_membrane_proof"]["nonce"] = "different-nonce"
     proof["hook_membrane_proof"]["payload_sha256"] = "different-payload"
-    proof_path.write_text(json.dumps(proof, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_proof(proof_path, proof)
 
     result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
 
     assert result.passed is False
-    assert result.error_code in {"nonce_mismatch", "payload_hash_mismatch"}
+    assert result.error_code == "payload_hash_mismatch"
 
 
 def test_build_activation_candidate_returns_candidate_without_writing_final_proof(
@@ -324,6 +483,68 @@ def test_activate_runtime_propagates_post_activation_smoke_failure(
     assert result.proof is None
     assert result.error_code == "runtime_readiness_required"
     assert not (project_root / ".codex" / "ticket-runtime-proof.json").exists()
+    assert not (
+        project_root
+        / ".codex"
+        / "ticket-runtime-smoke"
+        / "run-1"
+        / "activated-ticket-runtime-proof.json"
+    ).exists()
+
+
+def test_activate_runtime_removes_temp_proof_after_verification_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    marketplace_path = project_root / ".agents" / "plugins" / "marketplace.json"
+    (project_root / ".git").mkdir(parents=True)
+    tickets_dir.mkdir(parents=True)
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "collect_installed_runtime_inventory",
+        lambda **kwargs: _fake_inventory_result(tmp_path, run_dir=kwargs["run_dir"]),
+    )
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "run_activation_smoke",
+        lambda **_kwargs: _fake_smoke_result(tmp_path, project_root=project_root),
+    )
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "run_post_activation_direct_execute_smoke",
+        lambda **kwargs: _fake_post_activation_smoke_result(run_dir=kwargs["run_dir"]),
+    )
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "verify_installed_ticket_runtime_readiness_for_execute",
+        lambda **_kwargs: ticket_runtime_readiness.RuntimeReadinessVerification(
+            passed=False,
+            error_code="payload_hash_mismatch",
+            message="Payload hash mismatch",
+        ),
+    )
+
+    result = ticket_runtime_readiness.activate_runtime(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert result.proof is None
+    assert result.error_code == "payload_hash_mismatch"
+    assert not (project_root / ".codex" / "ticket-runtime-proof.json").exists()
+    assert not (
+        project_root
+        / ".codex"
+        / "ticket-runtime-smoke"
+        / "run-1"
+        / "activated-ticket-runtime-proof.json"
+    ).exists()
 
 
 def test_run_activation_smoke_uses_uv_run_python_launcher(
@@ -573,6 +794,94 @@ def test_run_post_activation_direct_execute_smoke_accepts_aggregated_output(
     assert result["post_activation_gated_smokes"]["surface_results"]["direct_execute"][
         "ticket_path"
     ] == str(ticket_path)
+
+
+def test_read_message_rejects_malformed_app_server_json() -> None:
+    output: queue.Queue[str | None] = queue.Queue()
+    transcript: list[dict[str, object]] = []
+    output.put("not-json\n")
+
+    with pytest.raises(
+        ticket_runtime_readiness.RuntimeActivationError,
+        match="Malformed app-server JSON response",
+    ):
+        ticket_runtime_readiness._read_message(
+            output=output,
+            transcript=transcript,
+            timeout=1.0,
+        )
+
+    assert transcript == [{"direction": "recv-raw", "body": "not-json"}]
+
+
+def test_wait_for_response_rejects_app_server_error_response() -> None:
+    output: queue.Queue[str | None] = queue.Queue()
+    transcript: list[dict[str, object]] = []
+    output.put('{"id":4,"error":{"message":"bad request"}}\n')
+
+    with pytest.raises(
+        ticket_runtime_readiness.RuntimeActivationError,
+        match="app-server returned error for request 4",
+    ):
+        ticket_runtime_readiness._wait_for_response(
+            output=output,
+            transcript=transcript,
+            expected_id=4,
+        )
+
+
+def test_wait_for_response_rejects_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    output: queue.Queue[str | None] = queue.Queue()
+    transcript: list[dict[str, object]] = []
+    monkeypatch.setattr(ticket_runtime_readiness, "REQUEST_TIMEOUT_SECONDS", 0.001)
+
+    with pytest.raises(
+        ticket_runtime_readiness.RuntimeActivationError,
+        match="Timed out waiting for app-server response 9",
+    ):
+        ticket_runtime_readiness._wait_for_response(
+            output=output,
+            transcript=transcript,
+            expected_id=9,
+        )
+
+
+def test_drain_until_turn_completed_requires_turn_id() -> None:
+    output: queue.Queue[str | None] = queue.Queue()
+    transcript: list[dict[str, object]] = []
+
+    with pytest.raises(
+        ticket_runtime_readiness.RuntimeActivationError,
+        match="turn/start missing turn id",
+    ):
+        ticket_runtime_readiness._drain_until_turn_completed(
+            output=output,
+            transcript=transcript,
+            turn_id="",
+        )
+
+
+def test_resolve_executable_sha256_records_oserror_reason(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / "codex"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "_resolve_codex_executable",
+        lambda _executable: str(executable),
+    )
+
+    def _permission_error(_path: Path) -> str:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(ticket_runtime_readiness, "sha256_file", _permission_error)
+
+    digest, reason = ticket_runtime_readiness._resolve_executable_sha256_with_reason(None)
+
+    assert digest is None
+    assert reason == "PermissionError: denied"
 
 
 def _fake_inventory_result(tmp_path: Path, *, run_dir: Path) -> dict[str, object]:

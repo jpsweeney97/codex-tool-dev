@@ -388,10 +388,12 @@ Valid subcommands: `classify`, `plan`, `preflight`, `execute`, `ingest`.
   "state": "<machine_state>",
   "ticket_id": "<string|null>",
   "message": "human-readable result",
-  "error_code": "<string|null>",
-  "data": { ... }
+  "data": { ... },
+  "error_code": "<string on failure only>"
 }
 ```
+
+Success responses omit `error_code`; error responses include it at the top level.
 
 **Failure modes**
 | Symptom | Cause | Recovery |
@@ -469,7 +471,8 @@ Registered as `PreToolUse` hook in `settings.json`. Runs automatically before an
 
 **What it enforces**
 - Allowlists only canonical plugin endpoint paths using `uv run python -B <ABS_PLUGIN_ROOT>/scripts/...`
-- Rejects shell metacharacters: `|`, `;`, `` ` ``, `$`, `&`, `(`, `)`, `<`, `>`, newlines
+- `python3` launchers may still be accepted as legacy compatibility, but `uv run python -B` is the documented public launcher form
+- Rejects shell metacharacters: `|`, `;`, `` ` ``, `$`, `&`, `<`, `>`, newlines
 - Validates that payload file paths resolve inside `event.cwd`
 - Injects `session_id`, `hook_injected`, `hook_request_origin` into the payload atomically
 

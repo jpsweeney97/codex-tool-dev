@@ -78,6 +78,10 @@ Captured Request → Problem → Next Action → Context → Prior Investigation
 
 ## 4. Engine Interface
 
+Canonical script launcher: `uv run python -B <PLUGIN_ROOT>/scripts/<script>.py ...`.
+Hook acceptance of `python3` launchers is legacy compatibility only, not the
+public contract.
+
 Common response envelope: `{state: string, ticket_id: string|null, message: string, data: object}`
 
 Exit codes: 0 (success), 1 (engine error), 2 (validation failure)

@@ -91,7 +91,7 @@ Security: blocks shell metacharacters (`|;&`$><\n\r`), enforces path containment
 
 ### Scripts
 
-Source code lives in `scripts/`, not a standard Python package directory. Skills resolve the plugin root from their own installed location and invoke scripts through the canonical Bash launcher `uv run python -B <PLUGIN_ROOT>/scripts/<script>.py`.
+Source code lives in `scripts/`, not a standard Python package directory. Skills resolve the plugin root from their own installed location and invoke scripts through the canonical Bash launcher `uv run python -B <PLUGIN_ROOT>/scripts/<script>.py`. The hook may still accept `python3` launchers as legacy compatibility, but `uv run python -B` is the documented public contract.
 
 Canonical Bash launcher for plugin scripts:
 
@@ -131,8 +131,10 @@ Both delegate to `ticket_engine_runner.py`, which dispatches to `ticket_engine_c
 **Response envelope (all engine commands):**
 
 ```json
-{"state": "<machine_state>", "ticket_id": "<string|null>", "message": "<string>", "error_code": "<string|null>", "data": {}}
+{"state": "<machine_state>", "ticket_id": "<string|null>", "message": "<string>", "data": {}, "error_code": "<string on failure only>"}
 ```
+
+Success responses omit `error_code`; error responses include it at the top level.
 
 Exit codes: `0` (success), `1` (engine error), `2` (validation failure / need_fields).
 
@@ -413,7 +415,7 @@ CHANGELOG.md      # Version history
 HANDBOOK.md       # Operator handbook
 ```
 
-Source lives in `scripts/` rather than a standard Python package directory. Modules use `sys.path.insert` for imports and the documented Bash contract is `uv run python -B <PLUGIN_ROOT>/scripts/<script>.py ...`.
+Source lives in `scripts/` rather than a standard Python package directory. Modules use `sys.path.insert` for imports and the documented Bash contract is `uv run python -B <PLUGIN_ROOT>/scripts/<script>.py ...`. Any remaining `python3` hook acceptance is legacy compatibility, not the public launcher form.
 
 ### Dependencies
 

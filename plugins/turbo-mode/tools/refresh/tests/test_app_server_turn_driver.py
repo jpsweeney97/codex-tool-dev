@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 import refresh.app_server_turn_driver as driver_module
-
 from refresh.app_server_turn_driver import (
     analyze_transcript,
     build_probe_command,
@@ -16,6 +15,24 @@ from refresh.app_server_turn_driver import (
     prepare_preflight_layout,
     write_transcript_jsonl,
 )
+from refresh.models import RefreshError
+
+
+class _StringWriter:
+    def __init__(self) -> None:
+        self.chunks: list[str] = []
+
+    def write(self, chunk: str) -> int:
+        self.chunks.append(chunk)
+        return len(chunk)
+
+    def flush(self) -> None:
+        return None
+
+
+class _Proc:
+    def __init__(self, *, stdin: _StringWriter | None) -> None:
+        self.stdin = stdin
 
 
 def test_build_probe_command_targets_installed_ticket_engine_agent(tmp_path: Path) -> None:
@@ -28,7 +45,7 @@ def test_build_probe_command_targets_installed_ticket_engine_agent(tmp_path: Pat
     )
 
     assert command == (
-        f"python3 -B {installed_ticket_root}/scripts/ticket_engine_agent.py "
+        f"uv run python -B {installed_ticket_root}/scripts/ticket_engine_agent.py "
         f"execute {payload_path}"
     )
 
@@ -48,8 +65,8 @@ def test_build_turn_start_request_pins_workspace_write_and_exact_prompt(
     contained_root: Path,
 ) -> None:
     command = (
-        "python3 -B /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/"
-        "scripts/ticket_engine_agent.py execute /tmp/payload.json"
+        "uv run python -B /tmp/installed-ticket/scripts/ticket_engine_agent.py "
+        "execute /tmp/payload.json"
     )
     request = build_turn_start_request(
         thread_id="thread-123",
@@ -75,7 +92,12 @@ def test_prepare_preflight_layout_writes_payload_and_contained_ticket_root(
     project_root = tmp_path / "repo"
     contained_root = project_root / ".codex/ticket-runtime-smoke-preflight/contained"
     installed_ticket_root = tmp_path / "installed-ticket"
-    out_path = project_root / ".codex/ticket-runtime-smoke-preflight/app-server-driver-preflight.jsonl"
+    out_path = (
+        project_root
+        / ".codex"
+        / "ticket-runtime-smoke-preflight"
+        / "app-server-driver-preflight.jsonl"
+    )
 
     layout = prepare_preflight_layout(
         project_root=project_root,
@@ -91,10 +113,12 @@ def test_prepare_preflight_layout_writes_payload_and_contained_ticket_root(
         "tickets_dir": str(layout.tickets_dir),
     }
     assert layout.probe_command == (
-        f"python3 -B {installed_ticket_root}/scripts/ticket_engine_agent.py "
+        f"uv run python -B {installed_ticket_root}/scripts/ticket_engine_agent.py "
         f"execute {layout.payload_path}"
     )
-    assert str(layout.payload_path).startswith(str(project_root / ".codex/ticket-runtime-smoke-preflight"))
+    assert str(layout.payload_path).startswith(
+        str(project_root / ".codex/ticket-runtime-smoke-preflight")
+    )
 
 
 def test_write_transcript_jsonl_uses_send_recv_rows(tmp_path: Path) -> None:
@@ -110,6 +134,72 @@ def test_write_transcript_jsonl_uses_send_recv_rows(tmp_path: Path) -> None:
         '{"body":{"id":0,"method":"initialize"},"direction":"send"}',
         '{"body":{"id":0,"result":{"ok":true}},"direction":"recv"}',
     ]
+
+
+def test_write_transcript_jsonl_preserves_stderr_rows(tmp_path: Path) -> None:
+    out_path = tmp_path / "transcript.jsonl"
+    transcript = [
+        {"direction": "stderr", "body": "driver diagnostic"},
+    ]
+
+    write_transcript_jsonl(out_path, transcript)
+
+    assert out_path.read_text(encoding="utf-8").splitlines() == [
+        '{"body":"driver diagnostic","direction":"stderr"}',
+    ]
+
+
+def test_read_next_message_rejects_malformed_json() -> None:
+    output: queue.Queue[str | None] = queue.Queue()
+    transcript: list[dict[str, object]] = []
+    output.put("not-json\n")
+
+    with pytest.raises(RefreshError, match="malformed JSON response"):
+        driver_module._read_next_message(output=output, transcript=transcript, timeout=1.0)
+
+    assert transcript == [{"direction": "recv-raw", "body": "not-json"}]
+
+
+def test_send_and_record_rejects_app_server_error_response(tmp_path: Path) -> None:
+    output: queue.Queue[str | None] = queue.Queue()
+    output.put('{"id":7,"error":{"message":"blocked"}}\n')
+    transcript: list[dict[str, object]] = []
+    proc = _Proc(stdin=_StringWriter())
+
+    with pytest.raises(RefreshError, match="response returned error"):
+        driver_module._send_and_record(
+            proc=proc,
+            output=output,
+            request={"id": 7, "method": "plugin/read"},
+            transcript=transcript,
+        )
+
+
+def test_send_and_record_rejects_response_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    output: queue.Queue[str | None] = queue.Queue()
+    transcript: list[dict[str, object]] = []
+    proc = _Proc(stdin=_StringWriter())
+    monkeypatch.setattr(driver_module, "REQUEST_TIMEOUT_SECONDS", 0.001)
+
+    with pytest.raises(RefreshError, match="timed out waiting for response"):
+        driver_module._send_and_record(
+            proc=proc,
+            output=output,
+            request={"id": 8, "method": "plugin/read"},
+            transcript=transcript,
+        )
+
+
+def test_drain_until_turn_completed_requires_exact_turn_id() -> None:
+    output: queue.Queue[str | None] = queue.Queue()
+    transcript: list[dict[str, object]] = []
+
+    with pytest.raises(RefreshError, match="turn id missing"):
+        driver_module._drain_until_turn_completed(
+            output=output,
+            transcript=transcript,
+            turn_id="",
+        )
 
 
 def test_analyze_transcript_reports_gate_b_success_shape(
@@ -148,7 +238,9 @@ def test_analyze_transcript_reports_gate_b_success_shape(
                     "run": {
                         "eventName": "preToolUse",
                         "status": "completed",
-                        "sourcePath": str(installed_ticket_root / "hooks" / "ticket_engine_guard.py"),
+                        "sourcePath": str(
+                            installed_ticket_root / "hooks" / "ticket_engine_guard.py"
+                        ),
                         "entries": [],
                     },
                 },
@@ -263,7 +355,10 @@ def test_analyze_transcript_accepts_live_item_started_and_failed_hook_shape(
                         "entries": [
                             {
                                 "kind": "error",
-                                "text": "PreToolUse hook returned unsupported permissionDecision:allow",
+                                "text": (
+                                    "PreToolUse hook returned unsupported "
+                                    "permissionDecision:allow"
+                                ),
                             }
                         ],
                     },
