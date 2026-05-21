@@ -162,7 +162,9 @@ class TestAllowlist:
         (Path(plugin_root) / "scripts").mkdir(parents=True)
 
         inp = make_hook_input(
-            f"python3 -B {plugin_root}/scripts/ticket_engine_activation_smoke.py execute {payload_file}",
+            "python3 -B "
+            f"{plugin_root}/scripts/ticket_engine_activation_smoke.py "
+            f"execute {payload_file}",
             plugin_root=plugin_root,
         )
         output = run_hook(inp, plugin_root=plugin_root)

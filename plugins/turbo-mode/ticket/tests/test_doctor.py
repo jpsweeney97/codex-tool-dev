@@ -34,6 +34,7 @@ def test_ticket_doctor_reports_project_and_plugin_paths(tmp_tickets: Path) -> No
     assert report["plugin"]["cache_root"] == str(plugin_root)
     assert report["plugin"]["source_cache_equal"] is True
     assert report["runtime"]["live_hook_probe"] == "not_run"
+    assert report["runtime_proof"]["status"] == "missing"
 
 
 def test_ticket_doctor_reports_stale_ticket_tmp_payloads(
@@ -102,7 +103,7 @@ def test_ticket_doctor_diagnose_response_adds_cleanup_hint_for_stale_payloads(
     }
 
 
-def test_activate_runtime_returns_engine_gate_required_with_candidate_proof(
+def test_activate_runtime_returns_ok_with_activated_proof(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -116,15 +117,29 @@ def test_activate_runtime_returns_engine_gate_required_with_candidate_proof(
 
     monkeypatch.setattr(
         ticket_doctor_script,
-        "build_activation_candidate",
+        "activate_runtime",
         lambda **_kwargs: ticket_runtime_readiness.RuntimeActivationBuildResult(
             proof={
-                "status": "activation_in_progress",
+                "status": "activated",
                 "activation_scope": {"gated_execute_surfaces": ["direct_execute"]},
             },
             error_code=None,
-            message="candidate proof built",
+            message="final proof activated",
         ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "build_activation_candidate",
+        lambda **_kwargs: ticket_runtime_readiness.RuntimeActivationBuildResult(
+            proof={
+                "status": "activated",
+                "activation_scope": {"gated_execute_surfaces": ["direct_execute"]},
+            },
+            error_code=None,
+            message="final proof activated",
+        ),
+        raising=False,
     )
 
     response, exit_code = ticket_doctor_script.activate_runtime_payload(
@@ -133,12 +148,11 @@ def test_activate_runtime_returns_engine_gate_required_with_candidate_proof(
         marketplace_path=marketplace_path,
     )
 
-    assert exit_code == 1
-    assert response["state"] == "policy_blocked"
-    assert response["error_code"] == "engine_gate_required"
+    assert exit_code == 0
+    assert response["state"] == "ok"
+    assert response["error_code"] is None
     assert response["data"]["mode"] == "activate-runtime"
-    assert response["data"]["proof"]["status"] == "activation_in_progress"
-    assert not (tmp_path / ".codex" / "ticket-runtime-proof.json").exists()
+    assert response["data"]["proof"]["status"] == "activated"
 
 
 def test_activate_runtime_propagates_host_policy_blocked(
@@ -153,14 +167,22 @@ def test_activate_runtime_propagates_host_policy_blocked(
     marketplace_path.write_text("{}", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
+    blocked_result = ticket_runtime_readiness.RuntimeActivationBuildResult(
+        proof=None,
+        error_code="host_policy_blocked",
+        message="contained workspaceWrite turn failed",
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "activate_runtime",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
     monkeypatch.setattr(
         ticket_doctor_script,
         "build_activation_candidate",
-        lambda **_kwargs: ticket_runtime_readiness.RuntimeActivationBuildResult(
-            proof=None,
-            error_code="host_policy_blocked",
-            message="contained workspaceWrite turn failed",
-        ),
+        lambda **_kwargs: blocked_result,
+        raising=False,
     )
 
     response, exit_code = ticket_doctor_script.activate_runtime_payload(
@@ -186,14 +208,22 @@ def test_activate_runtime_propagates_deterministic_driver_unavailable(
     marketplace_path.write_text("{}", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
+    blocked_result = ticket_runtime_readiness.RuntimeActivationBuildResult(
+        proof=None,
+        error_code="deterministic_driver_unavailable",
+        message="app-server transcript did not capture the command turn",
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "activate_runtime",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
     monkeypatch.setattr(
         ticket_doctor_script,
         "build_activation_candidate",
-        lambda **_kwargs: ticket_runtime_readiness.RuntimeActivationBuildResult(
-            proof=None,
-            error_code="deterministic_driver_unavailable",
-            message="app-server transcript did not capture the command turn",
-        ),
+        lambda **_kwargs: blocked_result,
+        raising=False,
     )
 
     response, exit_code = ticket_doctor_script.activate_runtime_payload(
@@ -219,14 +249,22 @@ def test_activate_runtime_propagates_hook_contract_blocked(
     marketplace_path.write_text("{}", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
+    blocked_result = ticket_runtime_readiness.RuntimeActivationBuildResult(
+        proof=None,
+        error_code="hook_contract_blocked",
+        message="installed hook still emits unsupported output",
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "activate_runtime",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
     monkeypatch.setattr(
         ticket_doctor_script,
         "build_activation_candidate",
-        lambda **_kwargs: ticket_runtime_readiness.RuntimeActivationBuildResult(
-            proof=None,
-            error_code="hook_contract_blocked",
-            message="installed hook still emits unsupported output",
-        ),
+        lambda **_kwargs: blocked_result,
+        raising=False,
     )
 
     response, exit_code = ticket_doctor_script.activate_runtime_payload(

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 REQUEST_TIMEOUT_SECONDS = 30.0
+RUNTIME_PROOF_PATH_ENV = "TICKET_RUNTIME_PROOF_PATH"
 
 
 @dataclass(frozen=True)
@@ -181,6 +182,10 @@ def _reject(error_code: str, message: str) -> RuntimeReadinessVerification:
     return RuntimeReadinessVerification(passed=False, error_code=error_code, message=message)
 
 
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def _parse_utc_timestamp(raw: object) -> datetime | None:
     if not isinstance(raw, str) or not raw:
         return None
@@ -268,6 +273,7 @@ def build_activation_candidate(
         "created_at": active_now.isoformat().replace("+00:00", "Z"),
         "expires_at": (active_now + timedelta(hours=24)).isoformat().replace("+00:00", "Z"),
         "run_nonce": run_nonce,
+        "project_root": str(resolved_project_root),
         "ticket_plugin": {
             **inventory_result["ticket_plugin"],
             "installed_cache_root": inventory_result["inventory"]["installed_runtime_root"],
@@ -316,6 +322,73 @@ def build_activation_candidate(
         proof=proof,
         error_code=None,
         message="Candidate activation proof built",
+    )
+
+
+def activate_runtime(
+    *,
+    project_root: Path,
+    tickets_dir: Path,
+    marketplace_path: Path,
+    executable: str | None = None,
+    now: datetime | None = None,
+) -> RuntimeActivationBuildResult:
+    candidate = build_activation_candidate(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+        executable=executable,
+        now=now,
+    )
+    if candidate.error_code is not None or candidate.proof is None:
+        return candidate
+
+    resolved_project_root = project_root.resolve(strict=False)
+    proof = json.loads(json.dumps(candidate.proof))
+    proof["status"] = "activated"
+    run_dir = resolved_project_root / _get_nested_str(proof, "raw_evidence", "run_dir")
+    temp_proof_path = run_dir / "activated-ticket-runtime-proof.json"
+    _write_json(temp_proof_path, proof)
+
+    try:
+        post_smoke = run_post_activation_direct_execute_smoke(
+            project_root=resolved_project_root,
+            tickets_dir=tickets_dir.resolve(strict=False),
+            run_dir=run_dir,
+            installed_ticket_root=Path(
+                _get_nested_str(proof, "ticket_plugin", "installed_cache_root")
+            ).resolve(strict=False),
+            proof_path=temp_proof_path,
+            executable=executable,
+        )
+    except RuntimeActivationError as exc:
+        return RuntimeActivationBuildResult(
+            proof=None,
+            error_code=exc.error_code,
+            message=exc.message,
+        )
+
+    proof["post_activation_gated_smokes"] = post_smoke["post_activation_gated_smokes"]
+    _write_json(temp_proof_path, proof)
+
+    verification = verify_installed_ticket_runtime_readiness_for_execute(
+        project_root=resolved_project_root,
+        proof_path=temp_proof_path,
+    )
+    if not verification.passed:
+        return RuntimeActivationBuildResult(
+            proof=None,
+            error_code=verification.error_code,
+            message=verification.message,
+        )
+
+    final_proof_path = resolved_project_root / ".codex" / "ticket-runtime-proof.json"
+    final_proof_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json(final_proof_path, proof)
+    return RuntimeActivationBuildResult(
+        proof=proof,
+        error_code=None,
+        message="Installed Ticket runtime proof activated",
     )
 
 
@@ -529,6 +602,139 @@ def run_activation_smoke(
             "engine_stdout": str(engine_stdout_path.relative_to(run_dir)),
             "engine_stderr": str(engine_stderr_path.relative_to(run_dir)),
         },
+    }
+
+
+def run_post_activation_direct_execute_smoke(
+    *,
+    project_root: Path,
+    tickets_dir: Path,
+    run_dir: Path,
+    installed_ticket_root: Path,
+    proof_path: Path,
+    executable: str | None = None,
+) -> dict[str, Any]:
+    from scripts.ticket_dedup import dedup_fingerprint as compute_dedup_fingerprint
+    from scripts.ticket_engine_core import read_autonomy_config
+
+    raw_dir = run_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    post_root = run_dir / "post-direct"
+    post_tickets_dir = post_root / "docs" / "tickets"
+    post_tickets_dir.mkdir(parents=True, exist_ok=True)
+    payload_path = post_root / "post-direct-payload.json"
+    problem = "Runtime activation direct execute smoke."
+    autonomy_config = read_autonomy_config(tickets_dir)
+    payload = {
+        "action": "create",
+        "fields": {
+            "title": "Runtime activation smoke",
+            "problem": problem,
+            "priority": "medium",
+        },
+        "session_id": f"{run_dir.name}-post-direct",
+        "classify_intent": "create",
+        "classify_confidence": 0.95,
+        "dedup_fingerprint": compute_dedup_fingerprint(problem, []),
+        "tickets_dir": str(post_tickets_dir),
+        "autonomy_config": autonomy_config.to_dict(),
+    }
+    _write_json(payload_path, payload)
+    command = (
+        f"python3 -B {installed_ticket_root}/scripts/ticket_engine_agent.py "
+        f"execute {payload_path}"
+    )
+    prompt = (
+        "Run exactly one Bash command and nothing else.\n"
+        f"Command: {command}\n"
+        "Do not inspect files, do not explain, do not ask for approval, "
+        "and do not run any other command."
+    )
+
+    prior_override = os.environ.get(RUNTIME_PROOF_PATH_ENV)
+    os.environ[RUNTIME_PROOF_PATH_ENV] = str(proof_path)
+    try:
+        transcript = _run_app_server_turn(
+            project_root=project_root,
+            contained_root=run_dir,
+            prompt_text=prompt,
+            executable=executable,
+        )
+    finally:
+        if prior_override is None:
+            os.environ.pop(RUNTIME_PROOF_PATH_ENV, None)
+        else:
+            os.environ[RUNTIME_PROOF_PATH_ENV] = prior_override
+
+    post_events_path = raw_dir / "post-activation-gated-events.jsonl"
+    _write_transcript_jsonl(post_events_path, transcript)
+
+    command_items = _command_execution_items(transcript)
+    if len(command_items) != 1:
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            f"Expected exactly one command execution item, saw {len(command_items)}",
+        )
+    command_item = command_items[0]
+    if command not in str(command_item.get("command", "")):
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            "Direct execute smoke did not traverse the expected command execution path",
+        )
+
+    engine_stdout_text = "".join(_command_output_deltas(transcript))
+    if not engine_stdout_text.strip():
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            "Direct execute smoke did not emit engine output",
+        )
+    try:
+        engine_response = json.loads(engine_stdout_text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            f"Direct execute smoke returned invalid engine output: {exc}",
+        ) from exc
+    if engine_response.get("state") != "ok_create":
+        raise RuntimeActivationError(
+            "runtime_readiness_required",
+            "Direct execute smoke did not reach an activated runtime-ready create result",
+        )
+
+    ticket_path_raw = (
+        engine_response.get("data", {}).get("ticket_path")
+        if isinstance(engine_response.get("data"), dict)
+        else None
+    )
+    if not isinstance(ticket_path_raw, str) or not ticket_path_raw:
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            "Direct execute smoke did not report a created ticket path",
+        )
+    ticket_path = Path(ticket_path_raw)
+    if not ticket_path.is_file():
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            f"Direct execute smoke ticket missing at {ticket_path}",
+        )
+
+    return {
+        "post_activation_gated_smokes": {
+            "status": "passed",
+            "required_surfaces": ["direct_execute"],
+            "surface_results": {
+                "direct_execute": {
+                    "runner": "app_server_turn",
+                    "command": command,
+                    "execute_surface": "direct_execute",
+                    "runtime_readiness_required": True,
+                    "engine_state": "ok_create",
+                    "raw_events_sha256": sha256_file(post_events_path),
+                    "ticket_path": str(ticket_path),
+                    "ticket_sha256": sha256_file(ticket_path),
+                }
+            },
+        }
     }
 
 

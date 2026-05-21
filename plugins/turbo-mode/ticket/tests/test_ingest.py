@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from scripts.ticket_engine_runner import run
+from scripts.ticket_runtime_readiness import RUNTIME_PROOF_PATH_ENV
 from scripts.ticket_ux import INTERNAL_RECOVERY_PATH_PATTERNS, INTERNAL_RECOVERY_TERMS
 
 
@@ -121,6 +122,39 @@ class TestIngestSubcommand:
         # Ticket created
         ticket_files = list(tickets_dir.glob("*.md"))
         assert len(ticket_files) == 1
+
+    def test_ingest_ignores_runtime_proof_override_env(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _ensure_project_root(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv(RUNTIME_PROOF_PATH_ENV, str(tmp_path / "missing-runtime-proof.json"))
+
+        tickets_dir = tmp_path / "tickets"
+        tickets_dir.mkdir()
+        envelopes_dir = tickets_dir / ".envelopes"
+        envelope_path = _write_envelope(_valid_envelope(), envelopes_dir)
+
+        payload = {
+            "envelope_path": str(envelope_path),
+            "tickets_dir": str(tickets_dir),
+            "session_id": "test-session",
+            "hook_injected": True,
+            "hook_request_origin": "user",
+        }
+
+        payload_file = tmp_path / "payload.json"
+        payload_file.write_text(json.dumps(payload))
+
+        exit_code = run(
+            "user",
+            argv=["ingest", str(payload_file)],
+            prog="test",
+        )
+
+        assert exit_code == 0
 
     def test_invalid_envelope_returns_error(
         self,

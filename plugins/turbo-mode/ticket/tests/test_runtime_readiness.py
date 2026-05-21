@@ -211,6 +211,105 @@ def test_build_activation_candidate_propagates_hook_contract_blocker(
     assert result.error_code == "hook_contract_blocked"
 
 
+def test_activate_runtime_writes_final_proof_after_direct_execute_smoke(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    marketplace_path = project_root / ".agents" / "plugins" / "marketplace.json"
+    (project_root / ".git").mkdir(parents=True)
+    tickets_dir.mkdir(parents=True)
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "collect_installed_runtime_inventory",
+        lambda **kwargs: _fake_inventory_result(tmp_path, run_dir=kwargs["run_dir"]),
+    )
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "run_activation_smoke",
+        lambda **_kwargs: _fake_smoke_result(tmp_path, project_root=project_root),
+    )
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "run_post_activation_direct_execute_smoke",
+        lambda **kwargs: _fake_post_activation_smoke_result(run_dir=kwargs["run_dir"]),
+    )
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "verify_installed_ticket_runtime_readiness_for_execute",
+        lambda **_kwargs: ticket_runtime_readiness.RuntimeReadinessVerification(
+            passed=True,
+            error_code=None,
+            message="verified",
+        ),
+    )
+
+    result = ticket_runtime_readiness.activate_runtime(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    proof_path = project_root / ".codex" / "ticket-runtime-proof.json"
+    assert result.error_code is None
+    assert result.proof is not None
+    assert result.proof["status"] == "activated"
+    assert result.proof["post_activation_gated_smokes"]["status"] == "passed"
+    assert proof_path.exists()
+    written = json.loads(proof_path.read_text(encoding="utf-8"))
+    assert written["status"] == "activated"
+
+
+def test_activate_runtime_propagates_post_activation_smoke_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    marketplace_path = project_root / ".agents" / "plugins" / "marketplace.json"
+    (project_root / ".git").mkdir(parents=True)
+    tickets_dir.mkdir(parents=True)
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "collect_installed_runtime_inventory",
+        lambda **kwargs: _fake_inventory_result(tmp_path, run_dir=kwargs["run_dir"]),
+    )
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "run_activation_smoke",
+        lambda **_kwargs: _fake_smoke_result(tmp_path, project_root=project_root),
+    )
+
+    def _blocked_post_smoke(**_kwargs):
+        raise ticket_runtime_readiness.RuntimeActivationError(
+            "runtime_readiness_required",
+            "Direct execute smoke did not reach an activated runtime-ready create result",
+        )
+
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "run_post_activation_direct_execute_smoke",
+        _blocked_post_smoke,
+    )
+
+    result = ticket_runtime_readiness.activate_runtime(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert result.proof is None
+    assert result.error_code == "runtime_readiness_required"
+    assert not (project_root / ".codex" / "ticket-runtime-proof.json").exists()
+
+
 def _fake_inventory_result(tmp_path: Path, *, run_dir: Path) -> dict[str, object]:
     installed_root = tmp_path / "installed-ticket"
     hooks_dir = installed_root / "hooks"
@@ -323,6 +422,37 @@ def _fake_smoke_result(tmp_path: Path, *, project_root: Path) -> dict[str, objec
             "engine_stdout": str(engine_stdout.relative_to(run_dir)),
             "engine_stderr": str(engine_stderr.relative_to(run_dir)),
         },
+    }
+
+
+def _fake_post_activation_smoke_result(*, run_dir: Path) -> dict[str, object]:
+    raw_dir = run_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    post_events = raw_dir / "post-activation-gated-events.jsonl"
+    post_events.write_text('{"method":"turn/completed"}\n', encoding="utf-8")
+    ticket_path = run_dir / "post-direct" / "docs" / "tickets" / "2026-05-20-example.md"
+    ticket_path.parent.mkdir(parents=True, exist_ok=True)
+    ticket_path.write_text("# T-20260520-01: Runtime activation smoke\n", encoding="utf-8")
+    return {
+        "post_activation_gated_smokes": {
+            "status": "passed",
+            "required_surfaces": ["direct_execute"],
+            "surface_results": {
+                "direct_execute": {
+                    "runner": "app_server_turn",
+                    "command": (
+                        "python3 -B installed/scripts/ticket_engine_agent.py "
+                        "execute payload.json"
+                    ),
+                    "execute_surface": "direct_execute",
+                    "runtime_readiness_required": True,
+                    "engine_state": "ok_create",
+                    "raw_events_sha256": ticket_runtime_readiness.sha256_file(post_events),
+                    "ticket_path": str(ticket_path),
+                    "ticket_sha256": ticket_runtime_readiness.sha256_file(ticket_path),
+                }
+            },
+        }
     }
 
 

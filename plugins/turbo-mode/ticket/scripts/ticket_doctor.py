@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from scripts.ticket_audit import repair_audit_logs  # noqa: E402
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir  # noqa: E402
 from scripts.ticket_payloads import TicketPayloadPathError, clean_stale_payloads  # noqa: E402
-from scripts.ticket_runtime_readiness import build_activation_candidate  # noqa: E402
+from scripts.ticket_runtime_readiness import activate_runtime  # noqa: E402
 from scripts.ticket_triage import DoctorInputError, ticket_doctor  # noqa: E402
 from scripts.ticket_ux import attach_recovery_hint  # noqa: E402
 
@@ -165,24 +165,24 @@ def activate_runtime_payload(
     tickets_dir: Path,
     marketplace_path: Path,
 ) -> tuple[dict[str, Any], int]:
-    result = build_activation_candidate(
+    result = activate_runtime(
         project_root=project_root,
         tickets_dir=tickets_dir,
         marketplace_path=marketplace_path,
     )
     if result.error_code is not None:
-        return _response(
+        response = _response(
             "policy_blocked",
             {"mode": "activate-runtime", "proof": result.proof},
             result.message,
             error_code=result.error_code,
-        ), 1
-    return _response(
-        "policy_blocked",
-        {"mode": "activate-runtime", "proof": result.proof},
-        "Direct execute engine gate is not active yet; final activation remains blocked.",
-        error_code="engine_gate_required",
-    ), 1
+        )
+        try:
+            response = attach_recovery_hint(response, result.error_code)
+        except ValueError:
+            pass
+        return response, 1
+    return _response("ok", {"mode": "activate-runtime", "proof": result.proof}, result.message), 0
 
 
 def main(argv: list[str] | None = None) -> int:

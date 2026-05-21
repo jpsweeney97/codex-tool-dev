@@ -13,8 +13,7 @@ sys.dont_write_bytecode = True
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.ticket_engine_runner import run
-
+from scripts.ticket_engine_runner import run  # noqa: E402
 
 if __name__ == "__main__":
     raise SystemExit(run("user", prog="ticket_engine_activation_smoke.py"))

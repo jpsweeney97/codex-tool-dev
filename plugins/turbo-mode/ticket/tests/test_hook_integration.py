@@ -13,9 +13,8 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
 
 PLUGIN_ROOT = str(Path(__file__).parent.parent)
 HOOK_SCRIPT = str(Path(__file__).parent.parent / "hooks" / "ticket_engine_guard.py")
@@ -153,7 +152,7 @@ class TestFullCreateFlow:
         assert resp["state"] == "ok_create"
 
         # Step 3: Read audit file — verify 2 entries (attempt_started + ok_create).
-        date_dir = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_file = tickets_dir / ".audit" / date_dir / "integration-sess.jsonl"
         assert audit_file.exists(), f"Audit file not found at {audit_file}"
 
@@ -233,7 +232,7 @@ class TestHookSessionIdPropagatesToAudit:
         assert result.returncode == 0, f"Entrypoint failed: {result.stderr}"
 
         # Step 3: Verify audit file exists at path with that session_id.
-        date_dir = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_file = tickets_dir / ".audit" / date_dir / f"{unique_session}.jsonl"
         assert audit_file.exists(), f"Audit file not found at {audit_file}"
 
@@ -351,4 +350,5 @@ class TestOriginMismatchIntegration:
         )
         assert result.returncode == 1
         resp = json.loads(result.stdout)
-        assert resp["error_code"] == "origin_mismatch"
+        assert resp["state"] == "policy_blocked"
+        assert "classify_intent" in resp["message"]

@@ -14,6 +14,7 @@ They are not normal user-facing mutation interfaces.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,7 @@ from scripts.ticket_engine_core import (
     engine_preflight,
 )
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir
+from scripts.ticket_runtime_readiness import RUNTIME_PROOF_PATH_ENV
 from scripts.ticket_stage_models import (
     ClassifyInput,
     ExecuteInput,
@@ -79,7 +81,9 @@ def load_runner_context(
     payload["request_origin"] = effective_origin
     hook_origin = payload.get("hook_request_origin")
     if hook_origin is not None and hook_origin != effective_origin:
-        if subcommand == "ingest":
+        if subcommand == "execute" and effective_origin == "agent" and hook_origin == "user":
+            pass
+        elif subcommand == "ingest":
             return None, attach_engine_recovery_hint(
                 EngineResponse(
                     state="escalate",
@@ -88,11 +92,12 @@ def load_runner_context(
                 ),
                 "trust_setup",
             )
-        return None, EngineResponse(
-            state="escalate",
-            message=f"origin_mismatch: entrypoint={effective_origin}, hook={hook_origin}",
-            error_code="origin_mismatch",
-        )
+        else:
+            return None, EngineResponse(
+                state="escalate",
+                message=f"origin_mismatch: entrypoint={effective_origin}, hook={hook_origin}",
+                error_code="origin_mismatch",
+            )
 
     if subcommand in ("execute", "ingest"):
         trust_errors = collect_trust_triple_errors(
@@ -151,9 +156,17 @@ def dispatch_stage(
     payload: dict[str, Any],
     tickets_dir: Path,
     request_origin: str,
+    *,
+    runtime_proof_path: Path | None = None,
 ) -> EngineResponse:
     """Dispatch one engine stage through the existing stage-model boundary."""
-    return _dispatch(subcommand, payload, tickets_dir, request_origin)
+    return _dispatch(
+        subcommand,
+        payload,
+        tickets_dir,
+        request_origin,
+        runtime_proof_path=runtime_proof_path,
+    )
 
 
 def run(
@@ -197,11 +210,17 @@ def run(
         return _exit_code(error)
 
     assert context is not None
+    runtime_proof_path = None
+    if subcommand == "execute":
+        runtime_proof_raw = os.environ.get(RUNTIME_PROOF_PATH_ENV)
+        if runtime_proof_raw:
+            runtime_proof_path = Path(runtime_proof_raw)
     resp = dispatch_stage(
         subcommand,
         context.payload,
         context.tickets_dir,
         context.request_origin,
+        runtime_proof_path=runtime_proof_path,
     )
     if subcommand == "ingest":
         resp = _sanitize_user_facing_ingest_response(resp)
@@ -433,6 +452,8 @@ def _dispatch(
     payload: dict[str, Any],
     tickets_dir: Path,
     request_origin: str,
+    *,
+    runtime_proof_path: Path | None = None,
 ) -> EngineResponse:
     try:
         if subcommand == "classify":
@@ -495,6 +516,7 @@ def _dispatch(
                 classify_confidence=inp.classify_confidence,
                 dedup_fingerprint=inp.dedup_fingerprint,
                 duplicate_of=inp.duplicate_of,
+                runtime_proof_path=runtime_proof_path,
             )
         elif subcommand == "ingest":
             inp = IngestInput.from_payload(payload)

@@ -184,6 +184,32 @@ def _runtime_probe_status(probe_output: Path | None, plugin_root: Path) -> dict[
     }
 
 
+def _runtime_proof_status(project_root: Path) -> dict[str, Any]:
+    proof_path = project_root / ".codex" / "ticket-runtime-proof.json"
+    if not proof_path.is_file():
+        return {
+            "proof_path": str(proof_path),
+            "exists": False,
+            "status": "missing",
+        }
+    try:
+        proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "proof_path": str(proof_path),
+            "exists": True,
+            "status": "invalid",
+            "error": str(exc),
+        }
+    return {
+        "proof_path": str(proof_path),
+        "exists": True,
+        "status": str(proof.get("status", "unknown")),
+        "schema_version": proof.get("schema_version"),
+        "expires_at": proof.get("expires_at"),
+    }
+
+
 def _source_cache_report(plugin_root: Path, cache_root: Path) -> dict[str, Any]:
     """Return exact source/cache diagnostics after roots have been authorized."""
     source_fp = _tree_manifest(plugin_root)
@@ -253,6 +279,7 @@ def ticket_doctor(
         },
         "plugin": _source_cache_report(plugin_root, cache_root),
         "runtime": _runtime_probe_status(runtime_probe_output, plugin_root),
+        "runtime_proof": _runtime_proof_status(project_root),
         "payloads": {
             "tmp_dir": str(project_root / ".codex" / "ticket-tmp"),
             "stale_after_hours": int(DEFAULT_STALE_PAYLOAD_TTL.total_seconds() // 3600),
