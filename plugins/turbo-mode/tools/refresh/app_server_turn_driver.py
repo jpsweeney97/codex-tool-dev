@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +45,6 @@ class PreflightLayout:
 
 @dataclass(frozen=True)
 class TranscriptSummary:
-    passed: bool
     request_methods: tuple[str, ...]
     approval_request_methods: tuple[str, ...]
     command_execution_count: int
@@ -54,6 +53,10 @@ class TranscriptSummary:
     probe_command_seen: bool
     thread_start_ephemeral: bool
     failure_reasons: tuple[str, ...]
+
+    @property
+    def passed(self) -> bool:
+        return not self.failure_reasons
 
 
 def build_probe_command(*, installed_ticket_root: Path, payload_path: Path) -> str:
@@ -255,7 +258,6 @@ def analyze_transcript(
         failure_reasons.append("probe_command_missing")
 
     return TranscriptSummary(
-        passed=not failure_reasons,
         request_methods=request_methods_tuple,
         approval_request_methods=approval_request_methods_tuple,
         command_execution_count=command_execution_count,
@@ -288,18 +290,24 @@ def run_driver(
 
     output: queue.Queue[str | None] = queue.Queue()
     stderr_lines: list[str] = []
+    reader_errors: list[str] = []
     transcript: list[dict[str, Any]] = []
 
     def read_stdout() -> None:
         try:
             for line in proc.stdout:
                 output.put(line)
+        except Exception as exc:
+            reader_errors.append(f"stdout reader failed: {exc!r}")
         finally:
             output.put(None)
 
     def read_stderr() -> None:
-        for line in proc.stderr:
-            stderr_lines.append(line)
+        try:
+            for line in proc.stderr:
+                stderr_lines.append(line)
+        except Exception as exc:
+            reader_errors.append(f"stderr reader failed: {exc!r}")
 
     stdout_reader = threading.Thread(target=read_stdout, daemon=True)
     stderr_reader = threading.Thread(target=read_stderr, daemon=True)
@@ -322,6 +330,8 @@ def run_driver(
                 },
             },
             transcript=transcript,
+            stderr_lines=stderr_lines,
+            reader_errors=reader_errors,
         )
         _send_and_record(
             proc=proc,
@@ -329,12 +339,16 @@ def run_driver(
             request={"method": "initialized"},
             transcript=transcript,
             expect_response=False,
+            stderr_lines=stderr_lines,
+            reader_errors=reader_errors,
         )
         thread_response = _send_and_record(
             proc=proc,
             output=output,
             request=build_thread_start_request(contained_root=layout.contained_root),
             transcript=transcript,
+            stderr_lines=stderr_lines,
+            reader_errors=reader_errors,
         )
         thread_id = _thread_id_from_response(thread_response)
         turn_response = _send_and_record(
@@ -346,6 +360,8 @@ def run_driver(
                 prompt_text=layout.prompt_text,
             ),
             transcript=transcript,
+            stderr_lines=stderr_lines,
+            reader_errors=reader_errors,
         )
         active_turn_id = _turn_id_from_response(turn_response)
         if active_turn_id is None:
@@ -354,6 +370,9 @@ def run_driver(
             output=output,
             transcript=transcript,
             turn_id=active_turn_id,
+            proc=proc,
+            stderr_lines=stderr_lines,
+            reader_errors=reader_errors,
         )
     finally:
         proc.terminate()
@@ -412,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(
             {
                 "state": "ok" if summary.passed else "deterministic_driver_unavailable",
-                "summary": asdict(summary),
+                "summary": transcript_summary_to_dict(summary),
                 "out_path": str(layout.out_path),
                 "marketplace_path": str(args.marketplace_path),
                 "payload_path": str(layout.payload_path),
@@ -437,6 +456,8 @@ def _send_and_record(
     request: dict[str, Any],
     transcript: list[dict[str, Any]],
     expect_response: bool = True,
+    stderr_lines: list[str] | None = None,
+    reader_errors: list[str] | None = None,
 ) -> dict[str, Any] | None:
     if proc.stdin is None:
         fail("send app-server request", "stdin unavailable", request)
@@ -456,6 +477,11 @@ def _send_and_record(
             timeout=deadline - time.monotonic(),
         )
         if response is None:
+            _fail_if_app_server_unavailable(
+                proc=proc,
+                stderr_lines=stderr_lines,
+                reader_errors=reader_errors,
+            )
             continue
         if response.get("id") != request_id:
             continue
@@ -470,6 +496,9 @@ def _drain_until_turn_completed(
     output: queue.Queue[str | None],
     transcript: list[dict[str, Any]],
     turn_id: str,
+    proc: subprocess.Popen[str] | None = None,
+    stderr_lines: list[str] | None = None,
+    reader_errors: list[str] | None = None,
 ) -> None:
     if not turn_id:
         fail("drain turn transcript", "turn id missing", turn_id)
@@ -481,6 +510,11 @@ def _drain_until_turn_completed(
             timeout=deadline - time.monotonic(),
         )
         if response is None:
+            _fail_if_app_server_unavailable(
+                proc=proc,
+                stderr_lines=stderr_lines,
+                reader_errors=reader_errors,
+            )
             continue
         if response.get("method") != "turn/completed":
             continue
@@ -518,6 +552,40 @@ def _read_next_message(
         fail("read app-server response", f"malformed JSON response: {exc}", raw_line.rstrip("\n"))
     transcript.append({"direction": "recv", "body": response})
     return response
+
+
+def transcript_summary_to_dict(summary: TranscriptSummary) -> dict[str, Any]:
+    return {
+        "passed": summary.passed,
+        "request_methods": summary.request_methods,
+        "approval_request_methods": summary.approval_request_methods,
+        "command_execution_count": summary.command_execution_count,
+        "ticket_hook_completed_count": summary.ticket_hook_completed_count,
+        "turn_id": summary.turn_id,
+        "probe_command_seen": summary.probe_command_seen,
+        "thread_start_ephemeral": summary.thread_start_ephemeral,
+        "failure_reasons": summary.failure_reasons,
+    }
+
+
+def _fail_if_app_server_unavailable(
+    *,
+    proc: subprocess.Popen[str] | None,
+    stderr_lines: list[str] | None,
+    reader_errors: list[str] | None,
+) -> None:
+    if reader_errors:
+        fail("read app-server response", f"reader failed: {reader_errors[0]}", None)
+    if proc is None:
+        return
+    poll = getattr(proc, "poll", None)
+    if poll is None or poll() is None:
+        return
+    stderr = "".join(stderr_lines or ()).strip()
+    reason = f"app-server exited with code {proc.returncode}"
+    if stderr:
+        reason = f"{reason}: {stderr}"
+    fail("read app-server response", reason, None)
 
 
 def _thread_id_from_response(response: dict[str, Any] | None) -> str:

@@ -82,6 +82,9 @@ def load_runner_context(
     hook_origin = payload.get("hook_request_origin")
     if hook_origin is not None and hook_origin != effective_origin:
         if subcommand == "execute" and effective_origin == "agent" and hook_origin == "user":
+            # Direct agent execute may carry user hook provenance because the hook
+            # records command-origin metadata; the engine runtime gate makes the
+            # final direct_execute readiness decision.
             pass
         elif subcommand == "ingest":
             return None, attach_engine_recovery_hint(
@@ -499,6 +502,9 @@ def _dispatch(
                 if isinstance(inp.autonomy_config_data, dict)
                 else None
             )
+            runtime_execute_surface = "direct_execute" if request_origin == "agent" else None
+            if request_origin == "agent":
+                assert runtime_execute_surface == "direct_execute"
             return engine_execute(
                 action=inp.action,
                 ticket_id=inp.ticket_id,
@@ -516,9 +522,7 @@ def _dispatch(
                 classify_confidence=inp.classify_confidence,
                 dedup_fingerprint=inp.dedup_fingerprint,
                 duplicate_of=inp.duplicate_of,
-                runtime_execute_surface=(
-                    "direct_execute" if request_origin == "agent" else None
-                ),
+                runtime_execute_surface=runtime_execute_surface,
                 runtime_proof_path=runtime_proof_path,
             )
         elif subcommand == "ingest":

@@ -1773,6 +1773,50 @@ class TestExecuteTrustTripleEngine:
         assert resp.state == "policy_blocked"
         assert resp.error_code == "runtime_readiness_required"
 
+    def test_agent_direct_execute_project_root_oserror_returns_policy_blocked(
+        self,
+        tmp_tickets,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        write_autonomy_config(
+            tmp_tickets,
+            "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
+        )
+        problem = "Direct execute should fail closed on project-root errors."
+
+        def _raise_oserror(_tickets_dir: Path) -> Path:
+            raise OSError("symlink loop")
+
+        monkeypatch.setattr(
+            ticket_engine_core,
+            "read_autonomy_config",
+            lambda _tickets_dir: AutonomyConfig(mode="auto_audit", max_creates=5),
+        )
+        monkeypatch.setattr(ticket_engine_core, "discover_project_root", _raise_oserror)
+
+        resp = engine_execute(
+            action="create",
+            ticket_id=None,
+            fields={"title": "Runtime gate", "problem": problem, "priority": "medium"},
+            session_id="test-session",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
+            hook_request_origin="user",
+            classify_intent="create",
+            classify_confidence=0.95,
+            dedup_fingerprint=compute_dedup_fp(problem, []),
+            autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
+            runtime_execute_surface="direct_execute",
+        )
+
+        assert resp.state == "policy_blocked"
+        assert resp.error_code == "policy_blocked"
+        assert "Cannot determine project root" in resp.message
+        assert "symlink loop" in resp.message
+
     def test_agent_direct_execute_succeeds_when_runtime_proof_verifies(
         self,
         tmp_tickets,

@@ -7,12 +7,14 @@ from pathlib import Path
 import pytest
 import refresh.app_server_turn_driver as driver_module
 from refresh.app_server_turn_driver import (
+    TranscriptSummary,
     analyze_transcript,
     build_probe_command,
     build_probe_prompt,
     build_thread_start_request,
     build_turn_start_request,
     prepare_preflight_layout,
+    transcript_summary_to_dict,
     write_transcript_jsonl,
 )
 from refresh.models import RefreshError
@@ -440,6 +442,211 @@ def test_send_and_record_retries_after_empty_poll(monkeypatch: pytest.MonkeyPatc
     )
 
     assert response == {"id": 0, "result": {"ok": True}}
+
+
+def test_send_and_record_rejects_dead_app_server_with_stderr() -> None:
+    class DeadProc:
+        stdin = _StringWriter()
+        returncode = 2
+
+        def poll(self) -> int:
+            return self.returncode
+
+    output: queue.Queue[str | None] = queue.Queue()
+    output.put(None)
+    transcript: list[dict[str, object]] = []
+
+    with pytest.raises(RefreshError, match="app-server exited with code 2: fatal stderr"):
+        driver_module._send_and_record(
+            proc=DeadProc(),
+            output=output,
+            request={"id": 0, "method": "initialize"},
+            transcript=transcript,
+            stderr_lines=["fatal stderr"],
+            reader_errors=[],
+        )
+
+
+def test_send_and_record_rejects_reader_exception() -> None:
+    class LiveProc:
+        stdin = _StringWriter()
+
+        def poll(self) -> None:
+            return None
+
+    output: queue.Queue[str | None] = queue.Queue()
+    output.put(None)
+    transcript: list[dict[str, object]] = []
+
+    with pytest.raises(RefreshError, match="reader failed: stdout reader failed"):
+        driver_module._send_and_record(
+            proc=LiveProc(),
+            output=output,
+            request={"id": 0, "method": "initialize"},
+            transcript=transcript,
+            stderr_lines=[],
+            reader_errors=["stdout reader failed: RuntimeError('broken')"],
+        )
+
+
+def test_transcript_summary_passed_is_derived_from_failure_reasons() -> None:
+    summary = TranscriptSummary(
+        request_methods=(),
+        approval_request_methods=(),
+        command_execution_count=0,
+        ticket_hook_completed_count=0,
+        turn_id=None,
+        probe_command_seen=False,
+        thread_start_ephemeral=False,
+        failure_reasons=("approval_requested",),
+    )
+
+    assert summary.passed is False
+    assert transcript_summary_to_dict(summary)["passed"] is False
+
+
+@pytest.mark.parametrize(
+    ("mutator", "expected_reason"),
+    [
+        (
+            lambda transcript, _probe, _root: transcript[1]["body"].update(
+                {"method": "not-initialized"}
+            ),
+            "request_sequence_mismatch",
+        ),
+        (
+            lambda transcript, _probe, _root: transcript[2]["body"]["params"].update(
+                {"ephemeral": False}
+            ),
+            "thread_start_missing_ephemeral",
+        ),
+        (
+            lambda transcript, _probe, _root: transcript[6]["body"]["params"]["turn"]["items"].append(
+                {
+                    "id": "cmd-2",
+                    "type": "commandExecution",
+                    "status": "completed",
+                    "command": "echo extra",
+                }
+            ),
+            "command_execution_count_mismatch",
+        ),
+        (
+            lambda transcript, _probe, _root: transcript.pop(5),
+            "ticket_hook_count_mismatch",
+        ),
+        (
+            lambda transcript, _probe, _root: transcript[6]["body"]["params"]["turn"]["items"][0].update(
+                {"command": "echo different"}
+            ),
+            "probe_command_missing",
+        ),
+        (
+            lambda transcript, _probe, _root: transcript.append(
+                {
+                    "direction": "recv",
+                    "body": {
+                        "method": "item/commandExecution/requestApproval",
+                        "params": {"threadId": "thread-1"},
+                    },
+                }
+            ),
+            "approval_requested",
+        ),
+    ],
+)
+def test_analyze_transcript_reports_each_failure_reason(
+    tmp_path: Path,
+    contained_root: Path,
+    mutator,
+    expected_reason: str,
+) -> None:
+    installed_ticket_root = tmp_path / "installed-ticket"
+    payload_path = contained_root / "payload.json"
+    probe_command = build_probe_command(
+        installed_ticket_root=installed_ticket_root,
+        payload_path=payload_path,
+    )
+    transcript = _passing_transcript(
+        installed_ticket_root=installed_ticket_root,
+        contained_root=contained_root,
+        probe_command=probe_command,
+    )
+    mutator(transcript, probe_command, installed_ticket_root)
+
+    summary = analyze_transcript(
+        transcript,
+        probe_command=probe_command,
+        installed_ticket_root=installed_ticket_root,
+    )
+
+    assert expected_reason in summary.failure_reasons
+    assert summary.passed is False
+
+
+def _passing_transcript(
+    *,
+    installed_ticket_root: Path,
+    contained_root: Path,
+    probe_command: str,
+) -> list[dict[str, object]]:
+    return [
+        {"direction": "send", "body": {"id": 0, "method": "initialize"}},
+        {"direction": "send", "body": {"method": "initialized"}},
+        {
+            "direction": "send",
+            "body": {
+                "id": 1,
+                "method": "thread/start",
+                "params": {"ephemeral": True},
+            },
+        },
+        {"direction": "recv", "body": {"id": 1, "result": {"thread": {"id": "thread-1"}}}},
+        {
+            "direction": "send",
+            "body": {"id": 2, "method": "turn/start", "params": {"threadId": "thread-1"}},
+        },
+        {
+            "direction": "recv",
+            "body": {
+                "method": "hook/completed",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "run": {
+                        "eventName": "preToolUse",
+                        "status": "completed",
+                        "sourcePath": str(
+                            installed_ticket_root / "hooks" / "ticket_engine_guard.py"
+                        ),
+                        "entries": [],
+                    },
+                },
+            },
+        },
+        {
+            "direction": "recv",
+            "body": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "thread-1",
+                    "turn": {
+                        "id": "turn-1",
+                        "status": "completed",
+                        "items": [
+                            {
+                                "id": "cmd-1",
+                                "type": "commandExecution",
+                                "status": "completed",
+                                "command": probe_command,
+                                "cwd": str(contained_root),
+                            }
+                        ],
+                    },
+                },
+            },
+        },
+    ]
 
 
 @pytest.fixture

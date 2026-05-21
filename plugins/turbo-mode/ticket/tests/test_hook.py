@@ -87,6 +87,27 @@ def load_guard_module() -> ModuleType:
     return module
 
 
+def test_run_cli_fails_closed_on_internal_error(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    guard = load_guard_module()
+
+    def _raise_internal_error() -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(guard, "main", _raise_internal_error)
+
+    assert guard._run_cli() == 0
+
+    captured = capsys.readouterr()
+    raw = json.loads(captured.out)
+    assert raw["entries"][0]["kind"] == "stop"
+    assert "guard internal error" in raw["entries"][0]["text"]
+    assert "RuntimeError('boom')" in raw["entries"][0]["text"]
+    assert "ticket_engine_guard failed closed: RuntimeError: boom" in captured.err
+
+
 def _normalize_hook_output(raw: dict) -> dict:
     if "hookSpecificOutput" in raw:
         return raw
@@ -171,6 +192,44 @@ class TestAllowlist:
         output = run_hook(inp, plugin_root=plugin_root)
 
         assert _decision(output) == "allow"
+
+    @pytest.mark.parametrize("subcommand", ["classify", "plan", "preflight", "ingest"])
+    def test_denies_activation_smoke_non_execute_subcommands(
+        self,
+        tmp_path: Path,
+        subcommand: str,
+    ) -> None:
+        payload_file = make_payload_file(tmp_path)
+        plugin_root = str(tmp_path / "plugin")
+        (Path(plugin_root) / "scripts").mkdir(parents=True)
+
+        inp = make_hook_input(
+            "python3 -B "
+            f"{plugin_root}/scripts/ticket_engine_activation_smoke.py "
+            f"{subcommand} {payload_file}",
+            plugin_root=plugin_root,
+        )
+        output = run_hook(inp, plugin_root=plugin_root)
+
+        assert _decision(output) == "deny"
+        assert "Unknown subcommand" in _reason(output)
+        assert "execute" in _reason(output)
+
+    def test_denies_engine_payload_path_with_whitespace(self, tmp_path: Path) -> None:
+        plugin_root = str(tmp_path / "plugin")
+        (Path(plugin_root) / "scripts").mkdir(parents=True)
+        payload_file = tmp_path / "payload with space.json"
+        payload_file.write_text(json.dumps({"action": "classify"}), encoding="utf-8")
+
+        inp = make_hook_input(
+            f"python3 -B {plugin_root}/scripts/ticket_engine_user.py "
+            f"classify '{payload_file}'",
+            plugin_root=plugin_root,
+        )
+        output = run_hook(inp, plugin_root=plugin_root)
+
+        assert _decision(output) == "deny"
+        assert "Extra arguments after payload path" in _reason(output)
 
     def test_allows_user_entrypoint(self, tmp_path: Path) -> None:
         payload_file = make_payload_file(tmp_path)

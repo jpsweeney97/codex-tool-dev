@@ -37,6 +37,50 @@ def test_ticket_doctor_reports_project_and_plugin_paths(tmp_tickets: Path) -> No
     assert report["runtime_proof"]["status"] == "missing"
 
 
+def test_ticket_doctor_reports_invalid_runtime_proof_status(tmp_tickets: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    proof_path = tmp_tickets.parent.parent / ".codex" / "ticket-runtime-proof.json"
+    proof_path.parent.mkdir(parents=True)
+    proof_path.write_text("{not json", encoding="utf-8")
+
+    report = ticket_doctor(
+        tmp_tickets,
+        plugin_root=plugin_root,
+        cache_root=plugin_root,
+    )
+
+    assert report["runtime_proof"]["exists"] is True
+    assert report["runtime_proof"]["status"] == "invalid"
+    assert "Expecting property name" in report["runtime_proof"]["error"]
+
+
+def test_ticket_doctor_reports_activated_runtime_proof_status(tmp_tickets: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    proof_path = tmp_tickets.parent.parent / ".codex" / "ticket-runtime-proof.json"
+    proof_path.parent.mkdir(parents=True)
+    proof_path.write_text(
+        json.dumps(
+            {
+                "status": "activated",
+                "schema_version": "installed_ticket_runtime_readiness-v1",
+                "expires_at": "2026-05-21T23:59:59Z",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = ticket_doctor(
+        tmp_tickets,
+        plugin_root=plugin_root,
+        cache_root=plugin_root,
+    )
+
+    assert report["runtime_proof"]["exists"] is True
+    assert report["runtime_proof"]["status"] == "activated"
+    assert report["runtime_proof"]["schema_version"] == "installed_ticket_runtime_readiness-v1"
+
+
 def test_ticket_doctor_reports_stale_ticket_tmp_payloads(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -316,6 +360,9 @@ def test_activate_runtime_surfaces_unknown_recovery_hint_code(
     assert exit_code == 1
     assert response["state"] == "policy_blocked"
     assert response["error_code"] == "new_unregistered_code"
+    assert response["message"] == (
+        "unregistered runtime failure internal: recovery hint missing for new_unregistered_code"
+    )
     assert response["data"]["recovery_hint_error"] == (
         "Unknown recovery hint code: new_unregistered_code"
     )

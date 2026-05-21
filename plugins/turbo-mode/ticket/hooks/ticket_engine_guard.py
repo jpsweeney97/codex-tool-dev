@@ -906,14 +906,17 @@ def main() -> None:
     )
 
 
-if __name__ == "__main__":
+def _run_cli() -> int:
     try:
         main()
     except Exception as exc:
-        # Fail open on unhandled exceptions — exit 0 with empty JSON.
         print(
-            f"ticket_engine_guard failed open: {type(exc).__name__}: {exc}",
+            f"ticket_engine_guard failed closed: {type(exc).__name__}: {exc}",
             file=sys.stderr,
         )
-        print("{}")
-        sys.exit(0)
+        print(json.dumps(_make_deny(f"guard internal error: {exc!r:.100}")))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(_run_cli())

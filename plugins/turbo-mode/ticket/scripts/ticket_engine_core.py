@@ -1482,7 +1482,14 @@ def engine_execute(
                     error_code="policy_blocked",
                 )
         if runtime_execute_surface == "direct_execute":
-            project_root = discover_project_root(tickets_dir)
+            try:
+                project_root = discover_project_root(tickets_dir)
+            except OSError as exc:
+                return EngineResponse(
+                    state="policy_blocked",
+                    message=f"Cannot determine project root: {exc}. Got: {str(tickets_dir)!r:.100}",
+                    error_code="policy_blocked",
+                )
             if project_root is None:
                 return EngineResponse(
                     state="policy_blocked",

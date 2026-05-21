@@ -8,6 +8,7 @@ import secrets
 import shlex
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -50,9 +51,37 @@ class RuntimeActivationBuildResult:
     error_code: str | None
     message: str
 
+    def __post_init__(self) -> None:
+        if not self.message:
+            raise ValueError(
+                "RuntimeActivationBuildResult validation failed: message is required. "
+                f"Got: {self!r:.100}"
+            )
+        if self.error_code is not None and not self.error_code:
+            raise ValueError(
+                "RuntimeActivationBuildResult validation failed: error_code is required. "
+                f"Got: {self!r:.100}"
+            )
+        if self.error_code is None and self.proof is None:
+            raise ValueError(
+                "RuntimeActivationBuildResult validation failed: success result requires proof. "
+                f"Got: {self!r:.100}"
+            )
+        if self.error_code is not None and self.proof is not None:
+            raise ValueError(
+                "RuntimeActivationBuildResult validation failed: failure result must not "
+                "include proof. "
+                f"Got: {self!r:.100}"
+            )
+
 
 class RuntimeActivationError(RuntimeError):
     def __init__(self, error_code: str, message: str):
+        if not error_code:
+            raise ValueError(
+                "RuntimeActivationError validation failed: error_code is required. "
+                f"Got: {error_code!r:.100}"
+            )
         super().__init__(message)
         self.error_code = error_code
         self.message = message
@@ -138,6 +167,10 @@ def _verify_runtime_readiness_proof_fields(
     surface_results = _get_nested_dict(proof, "post_activation_gated_smokes", "surface_results")
     if any(key != "direct_execute" for key in surface_results):
         return _reject("invalid_scope", "Runtime proof contains unsupported execute surfaces")
+
+    executable_sha256 = _get_nested_str(proof, "runtime_identity", "executable_sha256")
+    if not executable_sha256:
+        return _reject("proof_invalid", "Runtime proof executable_sha256 is required")
 
     executing_root = Path(__file__).resolve().parents[1]
     installed_root = Path(_get_nested_str(proof, "ticket_plugin", "installed_cache_root")).resolve(
@@ -253,6 +286,11 @@ def _unlink_if_exists(path: Path) -> None:
         path.unlink()
     except FileNotFoundError:
         return
+    except OSError as exc:
+        print(
+            f"runtime activation cleanup failed: {exc}. Got: {str(path)!r:.100}",
+            file=sys.stderr,
+        )
 
 
 def _parse_utc_timestamp(raw: object) -> datetime | None:
@@ -417,50 +455,71 @@ def activate_runtime(
     proof["status"] = "activated"
     run_dir = resolved_project_root / _get_nested_str(proof, "raw_evidence", "run_dir")
     temp_proof_path = run_dir / "activated-ticket-runtime-proof.json"
-    _write_json(temp_proof_path, proof)
+    activation_succeeded = False
 
     try:
-        post_smoke = run_post_activation_direct_execute_smoke(
-            project_root=resolved_project_root,
-            tickets_dir=tickets_dir.resolve(strict=False),
-            run_dir=run_dir,
-            installed_ticket_root=Path(
-                _get_nested_str(proof, "ticket_plugin", "installed_cache_root")
-            ).resolve(strict=False),
-            proof_path=temp_proof_path,
-            executable=executable,
+        _write_json(temp_proof_path, proof)
+
+        try:
+            post_smoke = run_post_activation_direct_execute_smoke(
+                project_root=resolved_project_root,
+                tickets_dir=tickets_dir.resolve(strict=False),
+                run_dir=run_dir,
+                installed_ticket_root=Path(
+                    _get_nested_str(proof, "ticket_plugin", "installed_cache_root")
+                ).resolve(strict=False),
+                proof_path=temp_proof_path,
+                executable=executable,
+            )
+        except RuntimeActivationError as exc:
+            return RuntimeActivationBuildResult(
+                proof=None,
+                error_code=exc.error_code,
+                message=exc.message,
+            )
+
+        proof["post_activation_gated_smokes"] = post_smoke["post_activation_gated_smokes"]
+        _write_json(temp_proof_path, proof)
+
+        try:
+            verification = verify_installed_ticket_runtime_readiness_for_execute(
+                project_root=resolved_project_root,
+                proof_path=temp_proof_path,
+            )
+        except OSError as exc:
+            return RuntimeActivationBuildResult(
+                proof=None,
+                error_code="deterministic_driver_unavailable",
+                message=(
+                    f"runtime proof verification failed: {exc}. "
+                    f"Got: {str(temp_proof_path)!r:.100}"
+                ),
+            )
+        if not verification.passed:
+            return RuntimeActivationBuildResult(
+                proof=None,
+                error_code=verification.error_code,
+                message=verification.message,
+            )
+
+        final_proof_path = resolved_project_root / ".codex" / "ticket-runtime-proof.json"
+        final_proof_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_json(final_proof_path, proof)
+        activation_succeeded = True
+        return RuntimeActivationBuildResult(
+            proof=proof,
+            error_code=None,
+            message="Installed Ticket runtime proof activated",
         )
-    except RuntimeActivationError as exc:
-        _unlink_if_exists(temp_proof_path)
+    except OSError as exc:
         return RuntimeActivationBuildResult(
             proof=None,
-            error_code=exc.error_code,
-            message=exc.message,
+            error_code="deterministic_driver_unavailable",
+            message=f"runtime proof activation failed: {exc}. Got: {str(temp_proof_path)!r:.100}",
         )
-
-    proof["post_activation_gated_smokes"] = post_smoke["post_activation_gated_smokes"]
-    _write_json(temp_proof_path, proof)
-
-    verification = verify_installed_ticket_runtime_readiness_for_execute(
-        project_root=resolved_project_root,
-        proof_path=temp_proof_path,
-    )
-    if not verification.passed:
-        _unlink_if_exists(temp_proof_path)
-        return RuntimeActivationBuildResult(
-            proof=None,
-            error_code=verification.error_code,
-            message=verification.message,
-        )
-
-    final_proof_path = resolved_project_root / ".codex" / "ticket-runtime-proof.json"
-    final_proof_path.parent.mkdir(parents=True, exist_ok=True)
-    _write_json(final_proof_path, proof)
-    return RuntimeActivationBuildResult(
-        proof=proof,
-        error_code=None,
-        message="Installed Ticket runtime proof activated",
-    )
+    finally:
+        if not activation_succeeded:
+            _unlink_if_exists(temp_proof_path)
 
 
 def collect_installed_runtime_inventory(
@@ -835,13 +894,24 @@ def _resolve_executable_sha256_with_reason(executable: str | None) -> tuple[str 
 
 def _capture_codex_version(executable: str | None) -> str:
     active = _resolve_codex_executable(executable)
-    completed = subprocess.run(
-        [active, "--version"],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=10,
-    )
+    try:
+        completed = subprocess.run(
+            [active, "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            f"codex --version timed out after {exc.timeout}s",
+        ) from exc
+    except OSError as exc:
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            f"codex --version failed: {exc}. Got: {active!r:.100}",
+        ) from exc
     if completed.returncode != 0:
         raise RuntimeActivationError(
             "deterministic_driver_unavailable",
@@ -874,18 +944,24 @@ def _app_server_roundtrip(
         )
     output: queue.Queue[str | None] = queue.Queue()
     stderr_lines: list[str] = []
+    reader_errors: list[str] = []
     transcript: list[dict[str, Any]] = []
 
     def read_stdout() -> None:
         try:
             for line in proc.stdout:
                 output.put(line)
+        except Exception as exc:
+            reader_errors.append(f"stdout reader failed: {exc!r}")
         finally:
             output.put(None)
 
     def read_stderr() -> None:
-        for line in proc.stderr:
-            stderr_lines.append(line)
+        try:
+            for line in proc.stderr:
+                stderr_lines.append(line)
+        except Exception as exc:
+            reader_errors.append(f"stderr reader failed: {exc!r}")
 
     stdout_reader = threading.Thread(target=read_stdout, daemon=True)
     stderr_reader = threading.Thread(target=read_stderr, daemon=True)
@@ -900,6 +976,9 @@ def _app_server_roundtrip(
                 output=output,
                 transcript=transcript,
                 expected_id=int(request["id"]),
+                proc=proc,
+                stderr_lines=stderr_lines,
+                reader_errors=reader_errors,
             )
     finally:
         proc.terminate()
@@ -941,18 +1020,24 @@ def _run_app_server_turn(
         )
     output: queue.Queue[str | None] = queue.Queue()
     stderr_lines: list[str] = []
+    reader_errors: list[str] = []
     transcript: list[dict[str, Any]] = []
 
     def read_stdout() -> None:
         try:
             for line in proc.stdout:
                 output.put(line)
+        except Exception as exc:
+            reader_errors.append(f"stdout reader failed: {exc!r}")
         finally:
             output.put(None)
 
     def read_stderr() -> None:
-        for line in proc.stderr:
-            stderr_lines.append(line)
+        try:
+            for line in proc.stderr:
+                stderr_lines.append(line)
+        except Exception as exc:
+            reader_errors.append(f"stderr reader failed: {exc!r}")
 
     stdout_reader = threading.Thread(target=read_stdout, daemon=True)
     stderr_reader = threading.Thread(target=read_stderr, daemon=True)
@@ -971,7 +1056,14 @@ def _run_app_server_turn(
             },
             transcript=transcript,
         )
-        _wait_for_response(output=output, transcript=transcript, expected_id=0)
+        _wait_for_response(
+            output=output,
+            transcript=transcript,
+            expected_id=0,
+            proc=proc,
+            stderr_lines=stderr_lines,
+            reader_errors=reader_errors,
+        )
         _send_request(proc=proc, request={"method": "initialized"}, transcript=transcript)
         _send_request(
             proc=proc,
@@ -987,7 +1079,14 @@ def _run_app_server_turn(
             },
             transcript=transcript,
         )
-        thread_response = _wait_for_response(output=output, transcript=transcript, expected_id=1)
+        thread_response = _wait_for_response(
+            output=output,
+            transcript=transcript,
+            expected_id=1,
+            proc=proc,
+            stderr_lines=stderr_lines,
+            reader_errors=reader_errors,
+        )
         thread_id = str(_response_result_by_body(thread_response).get("thread", {}).get("id", ""))
         if not thread_id:
             raise RuntimeActivationError(
@@ -1011,13 +1110,27 @@ def _run_app_server_turn(
             },
             transcript=transcript,
         )
-        turn_response = _wait_for_response(output=output, transcript=transcript, expected_id=2)
+        turn_response = _wait_for_response(
+            output=output,
+            transcript=transcript,
+            expected_id=2,
+            proc=proc,
+            stderr_lines=stderr_lines,
+            reader_errors=reader_errors,
+        )
         turn_id = str(_response_result_by_body(turn_response).get("turn", {}).get("id", ""))
         if not turn_id:
             raise RuntimeActivationError(
                 "deterministic_driver_unavailable", "turn/start missing turn id"
             )
-        _drain_until_turn_completed(output=output, transcript=transcript, turn_id=turn_id)
+        _drain_until_turn_completed(
+            output=output,
+            transcript=transcript,
+            turn_id=turn_id,
+            proc=proc,
+            stderr_lines=stderr_lines,
+            reader_errors=reader_errors,
+        )
     finally:
         proc.terminate()
         try:
@@ -1054,6 +1167,9 @@ def _wait_for_response(
     output: queue.Queue[str | None],
     transcript: list[dict[str, Any]],
     expected_id: int,
+    proc: subprocess.Popen[str] | None = None,
+    stderr_lines: list[str] | None = None,
+    reader_errors: list[str] | None = None,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
@@ -1061,6 +1177,11 @@ def _wait_for_response(
             output=output, transcript=transcript, timeout=deadline - time.monotonic()
         )
         if message is None:
+            _raise_if_app_server_unavailable(
+                proc=proc,
+                stderr_lines=stderr_lines,
+                reader_errors=reader_errors,
+            )
             continue
         if message.get("id") != expected_id:
             continue
@@ -1081,6 +1202,9 @@ def _drain_until_turn_completed(
     output: queue.Queue[str | None],
     transcript: list[dict[str, Any]],
     turn_id: str,
+    proc: subprocess.Popen[str] | None = None,
+    stderr_lines: list[str] | None = None,
+    reader_errors: list[str] | None = None,
 ) -> None:
     if not turn_id:
         raise RuntimeActivationError(
@@ -1092,6 +1216,11 @@ def _drain_until_turn_completed(
             output=output, transcript=transcript, timeout=deadline - time.monotonic()
         )
         if message is None:
+            _raise_if_app_server_unavailable(
+                proc=proc,
+                stderr_lines=stderr_lines,
+                reader_errors=reader_errors,
+            )
             continue
         if message.get("method") != "turn/completed":
             continue
@@ -1131,6 +1260,29 @@ def _read_message(
         ) from exc
     transcript.append({"direction": "recv", "body": message})
     return message
+
+
+def _raise_if_app_server_unavailable(
+    *,
+    proc: subprocess.Popen[str] | None,
+    stderr_lines: list[str] | None,
+    reader_errors: list[str] | None,
+) -> None:
+    if reader_errors:
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            f"app-server reader failed: {reader_errors[0]}",
+        )
+    if proc is None:
+        return
+    poll = getattr(proc, "poll", None)
+    if poll is None or poll() is None:
+        return
+    stderr = "".join(stderr_lines or ()).strip()
+    message = f"app-server exited with code {proc.returncode}"
+    if stderr:
+        message = f"{message}: {stderr}"
+    raise RuntimeActivationError("deterministic_driver_unavailable", message)
 
 
 def _write_transcript_jsonl(path: Path, transcript: list[dict[str, Any]]) -> None:

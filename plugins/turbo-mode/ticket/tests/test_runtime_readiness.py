@@ -4,6 +4,7 @@ import importlib.util
 import json
 import queue
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -60,6 +61,27 @@ def test_runtime_readiness_verification_enforces_state_invariants(
 ) -> None:
     with pytest.raises(ValueError, match="RuntimeReadinessVerification validation failed"):
         verification(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"proof": None, "error_code": None, "message": "bad"},
+        {"proof": {}, "error_code": "deterministic_driver_unavailable", "message": "bad"},
+        {"proof": None, "error_code": "", "message": "bad"},
+        {"proof": {}, "error_code": None, "message": ""},
+    ],
+)
+def test_runtime_activation_build_result_enforces_state_invariants(
+    kwargs: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="RuntimeActivationBuildResult validation failed"):
+        ticket_runtime_readiness.RuntimeActivationBuildResult(**kwargs)
+
+
+def test_runtime_activation_error_requires_error_code() -> None:
+    with pytest.raises(ValueError, match="RuntimeActivationError validation failed"):
+        ticket_runtime_readiness.RuntimeActivationError("", "bad")
 
 
 def test_source_checkout_execution_cannot_satisfy_installed_runtime_proof(tmp_path: Path) -> None:
@@ -127,6 +149,21 @@ def test_deleted_raw_evidence_rejects(tmp_path: Path) -> None:
 
     assert result.passed is False
     assert result.error_code == "raw_evidence_missing"
+
+
+def test_missing_executable_sha256_rejects(tmp_path: Path) -> None:
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    proof["runtime_identity"]["executable_sha256"] = None
+    proof_path.write_text(json.dumps(proof, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+
+    assert result.passed is False
+    assert result.error_code == "proof_invalid"
+    assert "executable_sha256" in result.message
 
 
 def test_stale_proof_rejects(tmp_path: Path) -> None:
@@ -547,6 +584,133 @@ def test_activate_runtime_removes_temp_proof_after_verification_failure(
     ).exists()
 
 
+def test_activate_runtime_removes_temp_proof_after_verification_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    marketplace_path = project_root / ".agents" / "plugins" / "marketplace.json"
+    (project_root / ".git").mkdir(parents=True)
+    tickets_dir.mkdir(parents=True)
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "collect_installed_runtime_inventory",
+        lambda **kwargs: _fake_inventory_result(tmp_path, run_dir=kwargs["run_dir"]),
+    )
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "run_activation_smoke",
+        lambda **_kwargs: _fake_smoke_result(tmp_path, project_root=project_root),
+    )
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "run_post_activation_direct_execute_smoke",
+        lambda **kwargs: _fake_post_activation_smoke_result(run_dir=kwargs["run_dir"]),
+    )
+
+    def _raise_oserror(**_kwargs):
+        raise OSError("tampered proof path")
+
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "verify_installed_ticket_runtime_readiness_for_execute",
+        _raise_oserror,
+    )
+
+    result = ticket_runtime_readiness.activate_runtime(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert result.proof is None
+    assert result.error_code == "deterministic_driver_unavailable"
+    assert "tampered proof path" in result.message
+    assert not (project_root / ".codex" / "ticket-runtime-proof.json").exists()
+    assert not (
+        project_root
+        / ".codex"
+        / "ticket-runtime-smoke"
+        / "run-1"
+        / "activated-ticket-runtime-proof.json"
+    ).exists()
+
+
+def test_activate_runtime_removes_temp_proof_after_final_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    marketplace_path = project_root / ".agents" / "plugins" / "marketplace.json"
+    (project_root / ".git").mkdir(parents=True)
+    tickets_dir.mkdir(parents=True)
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "collect_installed_runtime_inventory",
+        lambda **kwargs: _fake_inventory_result(tmp_path, run_dir=kwargs["run_dir"]),
+    )
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "run_activation_smoke",
+        lambda **_kwargs: _fake_smoke_result(tmp_path, project_root=project_root),
+    )
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "run_post_activation_direct_execute_smoke",
+        lambda **kwargs: _fake_post_activation_smoke_result(run_dir=kwargs["run_dir"]),
+    )
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "verify_installed_ticket_runtime_readiness_for_execute",
+        lambda **_kwargs: ticket_runtime_readiness.RuntimeReadinessVerification(
+            passed=True,
+            error_code=None,
+            message="verified",
+        ),
+    )
+    real_write_json = ticket_runtime_readiness._write_json
+
+    def _write_json(path: Path, payload: dict[str, object]) -> None:
+        if path.name == "ticket-runtime-proof.json":
+            raise OSError("final proof denied")
+        real_write_json(path, payload)
+
+    monkeypatch.setattr(ticket_runtime_readiness, "_write_json", _write_json)
+
+    result = ticket_runtime_readiness.activate_runtime(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert result.proof is None
+    assert result.error_code == "deterministic_driver_unavailable"
+    assert "final proof denied" in result.message
+    assert not (project_root / ".codex" / "ticket-runtime-proof.json").exists()
+    assert not (
+        project_root
+        / ".codex"
+        / "ticket-runtime-smoke"
+        / "run-1"
+        / "activated-ticket-runtime-proof.json"
+    ).exists()
+    assert not (
+        project_root
+        / ".codex"
+        / "ticket-runtime-smoke"
+        / "run-1"
+        / "activated-ticket-runtime-proof.json"
+    ).exists()
+
+
 def test_run_activation_smoke_uses_uv_run_python_launcher(
     tmp_path: Path,
     monkeypatch,
@@ -846,6 +1010,48 @@ def test_wait_for_response_rejects_timeout(monkeypatch: pytest.MonkeyPatch) -> N
         )
 
 
+def test_wait_for_response_rejects_dead_app_server_with_stderr() -> None:
+    class DeadProc:
+        returncode = 2
+
+        def poll(self) -> int:
+            return self.returncode
+
+    output: queue.Queue[str | None] = queue.Queue()
+    transcript: list[dict[str, object]] = []
+    output.put(None)
+
+    with pytest.raises(
+        ticket_runtime_readiness.RuntimeActivationError,
+        match="app-server exited with code 2: fatal stderr",
+    ):
+        ticket_runtime_readiness._wait_for_response(
+            output=output,
+            transcript=transcript,
+            expected_id=9,
+            proc=DeadProc(),
+            stderr_lines=["fatal stderr"],
+            reader_errors=[],
+        )
+
+
+def test_wait_for_response_rejects_reader_exception() -> None:
+    output: queue.Queue[str | None] = queue.Queue()
+    transcript: list[dict[str, object]] = []
+    output.put(None)
+
+    with pytest.raises(
+        ticket_runtime_readiness.RuntimeActivationError,
+        match="app-server reader failed: stdout reader failed",
+    ):
+        ticket_runtime_readiness._wait_for_response(
+            output=output,
+            transcript=transcript,
+            expected_id=9,
+            reader_errors=["stdout reader failed: RuntimeError('broken pipe')"],
+        )
+
+
 def test_drain_until_turn_completed_requires_turn_id() -> None:
     output: queue.Queue[str | None] = queue.Queue()
     transcript: list[dict[str, object]] = []
@@ -882,6 +1088,82 @@ def test_resolve_executable_sha256_records_oserror_reason(
 
     assert digest is None
     assert reason == "PermissionError: denied"
+
+
+def test_unlink_if_exists_reports_cleanup_oserror(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "proof.json"
+    target.write_text("{}", encoding="utf-8")
+
+    def _raise_permission_error(_self: Path) -> None:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "unlink", _raise_permission_error)
+
+    ticket_runtime_readiness._unlink_if_exists(target)
+
+    assert "runtime activation cleanup failed: denied" in capsys.readouterr().err
+
+
+def test_capture_codex_version_translates_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ticket_runtime_readiness, "_resolve_codex_executable", lambda _exe: "codex")
+
+    def _timeout(*_args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=["codex", "--version"], timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(ticket_runtime_readiness.subprocess, "run", _timeout)
+
+    with pytest.raises(ticket_runtime_readiness.RuntimeActivationError) as exc_info:
+        ticket_runtime_readiness._capture_codex_version(None)
+
+    assert exc_info.value.error_code == "deterministic_driver_unavailable"
+    assert "timed out" in exc_info.value.message
+
+
+def test_capture_codex_version_translates_oserror(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ticket_runtime_readiness, "_resolve_codex_executable", lambda _exe: "codex")
+
+    def _raise_oserror(*_args, **_kwargs):
+        raise FileNotFoundError("missing executable")
+
+    monkeypatch.setattr(ticket_runtime_readiness.subprocess, "run", _raise_oserror)
+
+    with pytest.raises(ticket_runtime_readiness.RuntimeActivationError) as exc_info:
+        ticket_runtime_readiness._capture_codex_version(None)
+
+    assert exc_info.value.error_code == "deterministic_driver_unavailable"
+    assert "missing executable" in exc_info.value.message
+
+
+def test_build_activation_candidate_reports_missing_codex_cli(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    marketplace_path = project_root / ".agents" / "plugins" / "marketplace.json"
+    (project_root / ".git").mkdir(parents=True)
+    tickets_dir.mkdir(parents=True)
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(ticket_runtime_readiness.shutil, "which", lambda _name: None)
+
+    result = ticket_runtime_readiness.build_activation_candidate(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert result.proof is None
+    assert result.error_code == "deterministic_driver_unavailable"
+    assert result.message == "codex executable not found"
 
 
 def _fake_inventory_result(tmp_path: Path, *, run_dir: Path) -> dict[str, object]:
@@ -1098,8 +1380,8 @@ def build_valid_runtime_readiness_fixture(
         "runtime_identity": {
             "codex_version": "codex-cli 0.132.0",
             "executable_path": "/usr/local/bin/codex",
-            "executable_sha256": None,
-            "executable_hash_unavailable_reason": "not needed in tests",
+            "executable_sha256": "0" * 64,
+            "executable_hash_unavailable_reason": None,
             "accepted_response_schema_version": "ticket-app-server-readiness-v1",
             "parser_version": "installed-ticket-runtime-readiness-v1",
         },
