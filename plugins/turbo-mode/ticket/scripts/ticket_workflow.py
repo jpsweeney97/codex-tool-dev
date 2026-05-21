@@ -624,6 +624,18 @@ def run_recovery(
     value: str | None = None,
     status: str | None = None,
 ) -> dict[str, Any]:
+    """Apply an authorized workflow recovery mutation to a saved payload.
+
+    Args:
+        payload_path: Saved workflow payload to recover.
+        recovery_action: Recovery action name from the workflow authority block.
+        field: Optional field name for `set_field`.
+        value: Optional JSON-encoded value for `set_field`.
+        status: Optional status value for `set_status`.
+
+    Returns:
+        A workflow response dict describing the recovery outcome.
+    """
     try:
         payload = json.loads(payload_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
@@ -783,6 +795,20 @@ def run_workflow(
     value: str | None = None,
     status: str | None = None,
 ) -> dict[str, Any]:
+    """Run the legacy workflow wrapper for prepare, execute, or recover.
+
+    Args:
+        subcommand: Workflow subcommand to run.
+        payload_path: Saved workflow payload path.
+        request_origin: Optional caller identity override for engine context loading.
+        recovery_action: Optional recovery action when `subcommand == "recover"`.
+        field: Optional field name for `set_field` recovery.
+        value: Optional JSON-encoded value for `set_field` recovery.
+        status: Optional status value for `set_status` recovery.
+
+    Returns:
+        A workflow response dict representing the selected workflow operation.
+    """
     if subcommand == "recover":
         if recovery_action is None:
             return _response(

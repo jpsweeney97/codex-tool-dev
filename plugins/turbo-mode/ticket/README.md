@@ -120,7 +120,7 @@ Both delegate to `ticket_engine_runner.py`, which dispatches to `ticket_engine_c
 | `ticket_triage.py` | `dashboard <tickets_dir>` | Health dashboard |
 | `ticket_triage.py` | `audit <tickets_dir> [--days N]` | Audit trail summary (default 7 days) |
 | `ticket_review.py` | `review <tickets_dir>` / `audit <tickets_dir> [--days N]` | User-facing read-only backlog review wrapper |
-| `ticket_doctor.py` | `diagnose <tickets_dir> --plugin-root <plugin_root> --cache-root <cache_root>` | User-facing explicit diagnostics wrapper |
+| `ticket_doctor.py` | `diagnose <tickets_dir> --plugin-root <plugin_root> --cache-root <cache_root> [--runtime-probe-output <path>]` | User-facing explicit diagnostics wrapper |
 | `ticket_doctor.py` | `activate-runtime <tickets_dir> --marketplace-path <marketplace_path>` | User-facing direct_execute-only runtime activation wrapper |
 | `ticket_doctor.py` | `clean-stale-payloads <tickets_dir> [--confirm-clean-stale-payloads]` | User-facing confirmed cleanup for stale prepare payloads |
 | `ticket_doctor.py` | `repair-audit <tickets_dir> [--confirm-repair]` | User-facing dry-run-first audit repair wrapper |
@@ -186,6 +186,9 @@ Skills and hooks do not require shell environment setup. Skills derive the plugi
 - `PLUGIN_ROOT` identifies this plugin package.
 - `PROJECT_ROOT` identifies the active workspace root by walking up from the current working directory until `.codex`, `.git/`, or a `.git` file is found.
 - `TICKETS_DIR` is always `<PROJECT_ROOT>/docs/tickets`, never a path under `PLUGIN_ROOT`.
+- `TICKET_RUNTIME_PROOF_PATH` and `TICKET_RUNTIME_ACTIVATION_BOOTSTRAP=1` are
+  internal activation/test overrides used only by the explicit runtime
+  activation flow. They are not normal operator inputs.
 
 `hooks/hooks.json` in this source tree describes install-target metadata for the personal marketplace. It is not live runtime proof for the installed cache copy.
 
@@ -273,8 +276,10 @@ Produces a structured report: ticket counts by status/priority, stale tickets (>
 ### Doctor stale payloads
 
 `ticket_doctor.py diagnose` reports stale `.codex/ticket-tmp/` payloads older
-than 24 hours without mutating them. Cleanup is TTL-scoped and
-confirmation-gated: first run
+than 24 hours without mutating them. Pass
+`--runtime-probe-output <path>` only when you want a read-only runtime probe
+artifact written under a caller-chosen temp path for later inspection. Cleanup
+is TTL-scoped and confirmation-gated: first run
 `ticket_doctor.py clean-stale-payloads <TICKETS_DIR>` to see that cleanup
 requires confirmation, then run
 `ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads`

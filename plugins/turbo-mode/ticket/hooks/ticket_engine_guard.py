@@ -56,7 +56,8 @@ SHELL_METACHAR_RE = re.compile(r"[|;&`$><\n\r]")
 
 def _plugin_root() -> str:
     """Return plugin root directory, with an optional test/development override."""
-    return os.environ.get("CODEX_PLUGIN_ROOT", str(Path(__file__).parent.parent))
+    configured_root = os.environ.get("CODEX_PLUGIN_ROOT", str(Path(__file__).parent.parent))
+    return str(Path(configured_root).resolve(strict=False))
 
 
 # Known ticket script basenames for candidate detection.

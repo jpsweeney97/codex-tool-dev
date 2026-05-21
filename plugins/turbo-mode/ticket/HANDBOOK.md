@@ -177,6 +177,9 @@ parent of `hooks/`, and `PROJECT_ROOT` is discovered by walking up from the
 current working directory to the nearest `.codex`, `.git/`, or `.git` marker.
 During activation and test flows, `ticket_engine_runner.py execute` may honor
 `TICKET_RUNTIME_PROOF_PATH`; classify, plan, preflight, and ingest ignore it.
+`TICKET_RUNTIME_ACTIVATION_BOOTSTRAP=1` is an internal activation/test override
+used only while explicit runtime activation proves the post-activation lane.
+Neither variable is a normal operator input.
 
 ### Tickets Directory
 
@@ -383,6 +386,9 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKET
 
 **Stale payload cleanup:** `ticket_doctor.py diagnose` reports stale
 `.codex/ticket-tmp/` payloads older than 24 hours without mutating them.
+Pass `--runtime-probe-output <path>` only when you want the diagnose command to
+write a read-only runtime probe artifact under a caller-chosen temp path for
+later inspection.
 Cleanup is TTL-scoped to stale JSON payloads under
 `<PROJECT_ROOT>/.codex/ticket-tmp/` and is confirmation-gated with
 `--confirm-clean-stale-payloads`.

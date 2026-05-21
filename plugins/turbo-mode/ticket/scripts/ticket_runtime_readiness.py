@@ -1,3 +1,11 @@
+"""Installed Ticket runtime readiness verification and activation helpers.
+
+This module builds, verifies, and activates direct-execute-only runtime proof
+for the installed Ticket plugin. It intentionally keeps source-local proof
+separate from installed-runtime proof and fails closed when proof evidence is
+missing, stale, malformed, or tied to a different executing plugin tree.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -58,6 +66,8 @@ RuntimeActivationBuildErrorCode: TypeAlias = (
 
 @dataclass(frozen=True)
 class ReadinessSuccess:
+    """Successful installed-runtime verification result."""
+
     message: str
     passed: Literal[True] = True
     error_code: None = None
@@ -76,6 +86,8 @@ class ReadinessSuccess:
 
 @dataclass(frozen=True)
 class ReadinessFailure:
+    """Failed installed-runtime verification result."""
+
     error_code: RuntimeReadinessErrorCode
     message: str
     passed: Literal[False] = False
@@ -94,6 +106,8 @@ class ReadinessFailure:
 
 @dataclass(frozen=True)
 class ActivationSuccess:
+    """Successful runtime activation build or activation result."""
+
     proof: dict[str, Any]
     message: str
     error_code: None = None
@@ -112,6 +126,8 @@ class ActivationSuccess:
 
 @dataclass(frozen=True)
 class ActivationFailure:
+    """Failed runtime activation build or activation result."""
+
     error_code: RuntimeActivationBuildErrorCode
     message: str
     proof: None = None
@@ -182,6 +198,18 @@ def verify_installed_ticket_runtime_readiness_for_execute(
     proof_path: Path | None = None,
     allow_activation_bootstrap: bool = False,
 ) -> RuntimeReadinessVerification:
+    """Verify installed Ticket runtime readiness for direct execute.
+
+    Args:
+        project_root: Active project root that owns `.codex/ticket-runtime-proof.json`.
+        proof_path: Optional explicit proof path used by activation bootstrap or tests.
+        allow_activation_bootstrap: Whether a temporary activation-in-progress proof
+            may be accepted for the post-activation bootstrap handoff only.
+
+    Returns:
+        A discriminated success or failure result describing whether the installed
+        direct-execute runtime proof is valid for the current executing plugin tree.
+    """
     resolved_project_root = project_root.resolve(strict=False)
     active_proof_path = proof_path or (
         resolved_project_root / ".codex" / "ticket-runtime-proof.json"
@@ -249,6 +277,40 @@ def _verify_runtime_readiness_proof_fields(
     scope = _get_nested_list(proof, "activation_scope", "gated_execute_surfaces")
     if scope != ["direct_execute"]:
         return _reject("invalid_scope", "Runtime proof scope must be direct_execute only")
+
+    pre_smokes = _get_nested_dict(proof, "pre_activation_gated_smokes")
+    pre_required_surfaces = _get_nested_list(
+        proof, "pre_activation_gated_smokes", "required_surfaces"
+    )
+    if pre_required_surfaces != ["direct_execute"]:
+        return _reject(
+            "invalid_scope",
+            "Runtime proof pre-activation scope must be direct_execute only",
+        )
+    pre_surface_results = _get_nested_dict(proof, "pre_activation_gated_smokes", "surface_results")
+    if set(pre_surface_results) != {"direct_execute"}:
+        return _reject("invalid_scope", "Runtime proof pre-activation scope is unsupported")
+    pre_direct_execute_result = _get_nested_dict(
+        proof, "pre_activation_gated_smokes", "surface_results", "direct_execute"
+    )
+    if pre_smokes.get("status") != "passed":
+        return _reject("proof_invalid", "Runtime proof pre-activation smoke has not passed")
+    if pre_direct_execute_result.get("engine_state") != "policy_blocked":
+        return _reject(
+            "proof_invalid",
+            "Runtime proof pre-activation direct_execute smoke did not block",
+        )
+    if pre_direct_execute_result.get("error_code") != "runtime_readiness_required":
+        return _reject(
+            "proof_invalid",
+            "Runtime proof pre-activation direct_execute smoke did not require runtime readiness",
+        )
+    if pre_direct_execute_result.get("execute_surface") != "direct_execute":
+        return _reject(
+            "proof_invalid",
+            "Runtime proof pre-activation direct_execute surface mismatch",
+        )
+
     post_smokes = _get_nested_dict(proof, "post_activation_gated_smokes")
     required_surfaces = _get_nested_list(proof, "post_activation_gated_smokes", "required_surfaces")
     if required_surfaces != ["direct_execute"]:
@@ -308,66 +370,104 @@ def _verify_runtime_readiness_proof_fields(
     expected_plugin_manifest_path = installed_root / ".codex-plugin" / "plugin.json"
     if plugin_manifest_path != expected_plugin_manifest_path:
         return _reject("plugin_manifest_path_mismatch", "Plugin manifest path mismatch")
-    if not plugin_manifest_path.is_file():
-        return _reject("raw_evidence_missing", f"Plugin manifest missing at {plugin_manifest_path}")
-    if sha256_file(plugin_manifest_path) != _get_nested_str(
-        proof, "ticket_plugin", "plugin_manifest_sha256"
-    ):
+    missing = _ensure_readable_evidence_file(plugin_manifest_path)
+    if missing is not None:
+        return missing
+    plugin_manifest_sha256, hash_error = _safe_evidence_sha256(plugin_manifest_path)
+    if hash_error is not None:
+        return hash_error
+    assert plugin_manifest_sha256 is not None
+    if plugin_manifest_sha256 != _get_nested_str(proof, "ticket_plugin", "plugin_manifest_sha256"):
         return _reject("plugin_manifest_hash_mismatch", "Plugin manifest hash mismatch")
 
     hook_manifest_path = Path(_get_nested_str(proof, "inventory", "hook", "hook_manifest_path"))
     expected_hook_manifest_path = installed_root / "hooks" / "hooks.json"
     if hook_manifest_path != expected_hook_manifest_path:
         return _reject("hook_manifest_path_mismatch", "Hook manifest path mismatch")
-    if not hook_manifest_path.is_file():
-        return _reject("raw_evidence_missing", f"Hook manifest missing at {hook_manifest_path}")
-    if sha256_file(hook_manifest_path) != _get_nested_str(
-        proof, "inventory", "hook", "hook_manifest_sha256"
-    ):
+    missing = _ensure_readable_evidence_file(hook_manifest_path)
+    if missing is not None:
+        return missing
+    hook_manifest_sha256, hash_error = _safe_evidence_sha256(hook_manifest_path)
+    if hash_error is not None:
+        return hash_error
+    assert hook_manifest_sha256 is not None
+    if hook_manifest_sha256 != _get_nested_str(proof, "inventory", "hook", "hook_manifest_sha256"):
         return _reject("hook_manifest_hash_mismatch", "Hook manifest hash mismatch")
 
     guard_script_path = Path(_get_nested_str(proof, "inventory", "hook", "guard_script_path"))
     expected_guard_script_path = installed_root / "hooks" / "ticket_engine_guard.py"
     if guard_script_path != expected_guard_script_path:
         return _reject("guard_script_path_mismatch", "Guard script path mismatch")
-    if not guard_script_path.is_file():
-        return _reject("raw_evidence_missing", f"Guard script missing at {guard_script_path}")
-    if sha256_file(guard_script_path) != _get_nested_str(
-        proof, "inventory", "hook", "guard_script_sha256"
-    ):
+    missing = _ensure_readable_evidence_file(guard_script_path)
+    if missing is not None:
+        return missing
+    guard_script_sha256, hash_error = _safe_evidence_sha256(guard_script_path)
+    if hash_error is not None:
+        return hash_error
+    assert guard_script_sha256 is not None
+    if guard_script_sha256 != _get_nested_str(proof, "inventory", "hook", "guard_script_sha256"):
         return _reject("guard_script_hash_mismatch", "Guard script hash mismatch")
 
     try:
         run_dir = evidence_project_root / proof["raw_evidence"]["run_dir"]
         inventory_transcript = run_dir / proof["raw_evidence"]["app_server_inventory_transcript"]
         hook_events = run_dir / proof["raw_evidence"]["hook_membrane_events"]
+        pre_events = run_dir / proof["raw_evidence"]["pre_activation_events"]
         post_events = run_dir / proof["raw_evidence"]["post_activation_events"]
         payload_before = run_dir / proof["raw_evidence"]["payload_before"]
         engine_stdout = run_dir / proof["raw_evidence"]["engine_stdout"]
     except KeyError as exc:
         return _reject("proof_invalid", f"Missing raw_evidence field: {exc}")
 
-    for path in (
-        inventory_transcript,
-        hook_events,
+    for path in (inventory_transcript, hook_events, payload_before, engine_stdout):
+        missing = _ensure_readable_evidence_file(path)
+        if missing is not None:
+            return missing
+    missing = _ensure_readable_evidence_file(
+        pre_events,
+        empty_message="Pre-activation transcript empty",
+    )
+    if missing is not None:
+        return missing
+    missing = _ensure_readable_evidence_file(
         post_events,
-        payload_before,
-        engine_stdout,
-    ):
-        if not path.is_file():
-            return _reject("raw_evidence_missing", f"Raw evidence missing at {path}")
-    if not allow_pending_post_activation and post_events.stat().st_size == 0:
-        return _reject("raw_evidence_missing", f"Post-activation transcript empty at {post_events}")
+        allow_empty=allow_pending_post_activation,
+        empty_message="Post-activation transcript empty",
+    )
+    if missing is not None:
+        return missing
 
-    if sha256_file(inventory_transcript) != _get_nested_str(
-        proof, "inventory", "transcript_sha256"
-    ):
+    inventory_sha256, hash_error = _safe_evidence_sha256(inventory_transcript)
+    if hash_error is not None:
+        return hash_error
+    assert inventory_sha256 is not None
+    if inventory_sha256 != _get_nested_str(proof, "inventory", "transcript_sha256"):
         return _reject("inventory_transcript_hash_mismatch", "Inventory transcript hash mismatch")
-    if sha256_file(hook_events) != _get_nested_str(
-        proof, "hook_membrane_proof", "raw_events_sha256"
-    ):
+    hook_events_sha256, hash_error = _safe_evidence_sha256(hook_events)
+    if hash_error is not None:
+        return hash_error
+    assert hook_events_sha256 is not None
+    if hook_events_sha256 != _get_nested_str(proof, "hook_membrane_proof", "raw_events_sha256"):
         return _reject("hook_transcript_hash_mismatch", "Hook membrane transcript hash mismatch")
-    if sha256_file(post_events) != _get_nested_str(
+
+    pre_events_sha256, hash_error = _safe_evidence_sha256(pre_events)
+    if hash_error is not None:
+        return hash_error
+    assert pre_events_sha256 is not None
+    if pre_events_sha256 != _get_nested_str(
+        proof,
+        "pre_activation_gated_smokes",
+        "surface_results",
+        "direct_execute",
+        "raw_events_sha256",
+    ):
+        return _reject("proof_invalid", "Pre-activation transcript hash mismatch")
+
+    post_events_sha256, hash_error = _safe_evidence_sha256(post_events)
+    if hash_error is not None:
+        return hash_error
+    assert post_events_sha256 is not None
+    if post_events_sha256 != _get_nested_str(
         proof,
         "post_activation_gated_smokes",
         "surface_results",
@@ -387,12 +487,19 @@ def _verify_runtime_readiness_proof_fields(
                 "ticket_path",
             )
         )
-        if not ticket_path.is_file():
-            return _reject(
-                "raw_evidence_missing",
-                f"Post-activation ticket missing at {ticket_path}",
-            )
-        if sha256_file(ticket_path) != _get_nested_str(
+        try:
+            if not ticket_path.is_file():
+                return _reject(
+                    "raw_evidence_missing",
+                    f"Post-activation ticket missing at {ticket_path}",
+                )
+        except OSError as exc:
+            return _raw_evidence_missing(ticket_path, str(exc))
+        ticket_sha256, hash_error = _safe_evidence_sha256(ticket_path)
+        if hash_error is not None:
+            return hash_error
+        assert ticket_sha256 is not None
+        if ticket_sha256 != _get_nested_str(
             proof,
             "post_activation_gated_smokes",
             "surface_results",
@@ -403,11 +510,17 @@ def _verify_runtime_readiness_proof_fields(
                 "post_activation_transcript_hash_mismatch",
                 "Post-activation ticket hash mismatch",
             )
-    if sha256_file(payload_before) != _get_nested_str(
-        proof, "hook_membrane_proof", "payload_sha256"
-    ):
+    payload_sha256, hash_error = _safe_evidence_sha256(payload_before)
+    if hash_error is not None:
+        return hash_error
+    assert payload_sha256 is not None
+    if payload_sha256 != _get_nested_str(proof, "hook_membrane_proof", "payload_sha256"):
         return _reject("payload_hash_mismatch", "Payload hash mismatch")
-    if sha256_file(engine_stdout) != _get_nested_str(
+    engine_stdout_sha256, hash_error = _safe_evidence_sha256(engine_stdout)
+    if hash_error is not None:
+        return hash_error
+    assert engine_stdout_sha256 is not None
+    if engine_stdout_sha256 != _get_nested_str(
         proof, "hook_membrane_proof", "engine_stdout_sha256"
     ):
         return _reject("engine_stdout_hash_mismatch", "Engine stdout hash mismatch")
@@ -423,6 +536,41 @@ def _key_error_field(exc: KeyError) -> str:
 
 def _reject(error_code: RuntimeReadinessErrorCode, message: str) -> RuntimeReadinessVerification:
     return ReadinessFailure(error_code=error_code, message=message)
+
+
+def _raw_evidence_missing(path: Path, reason: str | None = None) -> ReadinessFailure:
+    message = f"Raw evidence missing at {path}"
+    if reason:
+        message = f"{message}: {reason}"
+    return ReadinessFailure(error_code="raw_evidence_missing", message=message)
+
+
+def _ensure_readable_evidence_file(
+    path: Path,
+    *,
+    allow_empty: bool = True,
+    empty_message: str | None = None,
+) -> ReadinessFailure | None:
+    try:
+        if not path.is_file():
+            return _raw_evidence_missing(path)
+        if not allow_empty and path.stat().st_size == 0:
+            if empty_message is not None:
+                return ReadinessFailure(
+                    error_code="raw_evidence_missing",
+                    message=f"{empty_message} at {path}",
+                )
+            return _raw_evidence_missing(path, "file is empty")
+    except OSError as exc:
+        return _raw_evidence_missing(path, str(exc))
+    return None
+
+
+def _safe_evidence_sha256(path: Path) -> tuple[str | None, ReadinessFailure | None]:
+    try:
+        return sha256_file(path), None
+    except OSError as exc:
+        return None, _raw_evidence_missing(path, str(exc))
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -510,6 +658,19 @@ def build_activation_candidate(
     executable: str | None = None,
     now: datetime | None = None,
 ) -> RuntimeActivationBuildResult:
+    """Build a candidate installed-runtime activation proof.
+
+    Args:
+        project_root: Active project root that will own run evidence.
+        tickets_dir: Ticket storage directory for the target project.
+        marketplace_path: Marketplace descriptor used for installed plugin lookup.
+        executable: Optional codex executable override.
+        now: Optional timestamp override used to seed proof metadata.
+
+    Returns:
+        A success result containing an activation-in-progress proof, or a
+        structured activation failure if inventory or smoke capture fails.
+    """
     resolved_project_root = project_root.resolve(strict=False)
     resolved_tickets_dir = tickets_dir.resolve(strict=False)
     active_now = now or datetime.now(UTC)
@@ -613,6 +774,19 @@ def activate_runtime(
     executable: str | None = None,
     now: datetime | None = None,
 ) -> RuntimeActivationBuildResult:
+    """Activate installed Ticket runtime proof for direct execute.
+
+    Args:
+        project_root: Active project root that will receive the final proof.
+        tickets_dir: Ticket storage directory for the target project.
+        marketplace_path: Marketplace descriptor used for installed plugin lookup.
+        executable: Optional codex executable override.
+        now: Optional timestamp override used to seed proof metadata.
+
+    Returns:
+        A success result with the activated proof, or a structured failure when
+        proof build, smoke capture, verification, or final publication fails.
+    """
     candidate = build_activation_candidate(
         project_root=project_root,
         tickets_dir=tickets_dir,
@@ -627,6 +801,7 @@ def activate_runtime(
     proof = _json_deepcopy(candidate.proof)
     run_dir = resolved_project_root / _get_nested_str(proof, "raw_evidence", "run_dir")
     temp_proof_path = run_dir / "activated-ticket-runtime-proof.json"
+    post_smoke_succeeded = False
 
     try:
         _write_json(temp_proof_path, proof)
@@ -661,6 +836,7 @@ def activate_runtime(
             else:
                 os.environ[RUNTIME_ACTIVATION_BOOTSTRAP_ENV] = prior_bootstrap_override
 
+        post_smoke_succeeded = True
         proof["status"] = "activated"
         proof["post_activation_gated_smokes"] = post_smoke["post_activation_gated_smokes"]
         _write_json(temp_proof_path, proof)
@@ -673,14 +849,22 @@ def activate_runtime(
         except OSError as exc:
             return ActivationFailure(
                 error_code="deterministic_driver_unavailable",
-                message=(
-                    f"runtime proof verification failed: {exc}. Got: {str(temp_proof_path)!r:.100}"
+                message=_late_stage_activation_failure_message(
+                    stage="verification",
+                    detail=f"{exc}. Got: {str(temp_proof_path)!r:.100}",
+                    project_root=resolved_project_root,
+                    run_dir=run_dir,
                 ),
             )
         if not verification.passed:
             return ActivationFailure(
                 error_code=verification.error_code,
-                message=verification.message,
+                message=_late_stage_activation_failure_message(
+                    stage="verification",
+                    detail=verification.message,
+                    project_root=resolved_project_root,
+                    run_dir=run_dir,
+                ),
             )
 
         final_proof_path = resolved_project_root / ".codex" / "ticket-runtime-proof.json"
@@ -693,7 +877,19 @@ def activate_runtime(
     except OSError as exc:
         return ActivationFailure(
             error_code="deterministic_driver_unavailable",
-            message=f"runtime proof activation failed: {exc}. Got: {str(temp_proof_path)!r:.100}",
+            message=(
+                _late_stage_activation_failure_message(
+                    stage="publication",
+                    detail=f"{exc}. Got: {str(temp_proof_path)!r:.100}",
+                    project_root=resolved_project_root,
+                    run_dir=run_dir,
+                )
+                if post_smoke_succeeded
+                else (
+                    f"runtime proof activation failed: {exc}. "
+                    f"Got: {str(temp_proof_path)!r:.100}"
+                )
+            ),
         )
     finally:
         _unlink_if_exists(temp_proof_path)
@@ -706,6 +902,18 @@ def collect_installed_runtime_inventory(
     run_dir: Path,
     executable: str | None = None,
 ) -> dict[str, Any]:
+    """Collect installed Ticket runtime inventory through the app-server.
+
+    Args:
+        project_root: Active project root used as the app-server working directory.
+        marketplace_path: Marketplace descriptor used for installed plugin lookup.
+        run_dir: Runtime-readiness evidence directory for the current run.
+        executable: Optional codex executable override.
+
+    Returns:
+        Inventory, runtime identity, and transcript paths bound to the installed
+        Ticket plugin surfaced by the live app-server.
+    """
     raw_dir = run_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     transcript = _app_server_roundtrip(
@@ -745,6 +953,8 @@ def collect_installed_runtime_inventory(
     responses = _responses_by_id(transcript)
     _response_result(responses, 0)
     plugin_read = _response_result(responses, 1)
+    _response_result(responses, 2)
+    _response_result(responses, 3)
     hooks_result = _response_result(responses, 4)
 
     ticket_hook = _find_ticket_hook(hooks_result)
@@ -768,7 +978,7 @@ def collect_installed_runtime_inventory(
         "ticket_plugin": {
             "plugin_id": "ticket@turbo-mode",
             "name": "ticket",
-            "version": plugin_read.get("plugin", {}).get("summary", {}).get("version", "1.4.0"),
+            "version": _plugin_read_version(plugin_read),
         },
         "runtime_identity": runtime_identity,
         "inventory": {
@@ -814,6 +1024,19 @@ def run_activation_smoke(
     installed_ticket_root: Path,
     executable: str | None = None,
 ) -> dict[str, Any]:
+    """Capture activation-smoke evidence for the installed Ticket runtime.
+
+    Args:
+        project_root: Active project root for the app-server turn.
+        tickets_dir: Ticket storage directory for the target project.
+        run_dir: Runtime-readiness evidence directory for the current run.
+        installed_ticket_root: Installed Ticket plugin root being certified.
+        executable: Optional codex executable override.
+
+    Returns:
+        Hook-membrane proof, pre-activation gate smoke, pending post-activation
+        smoke metadata, and raw evidence paths for proof assembly.
+    """
     raw_dir = run_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     smoke_tickets_dir = run_dir / "docs" / "tickets"
@@ -843,20 +1066,11 @@ def run_activation_smoke(
     hook_events_path = raw_dir / "hook-membrane-events.jsonl"
     _write_transcript_jsonl(hook_events_path, transcript)
 
-    hook_runs = _hook_completed_runs(
+    hook_run = _ticket_hook_completed_run(
         transcript,
-        source_path=installed_ticket_root / "hooks" / "hooks.json",
+        installed_ticket_root=installed_ticket_root,
     )
-    if len(hook_runs) != 1:
-        raise RuntimeActivationError(
-            "deterministic_driver_unavailable",
-            f"Expected exactly one Ticket hook completion, saw {len(hook_runs)}",
-        )
-    hook_run = hook_runs[0]
-    if any(
-        "unsupported permissionDecision" in str(entry.get("text", ""))
-        for entry in hook_run.get("entries", [])
-    ):
+    if _hook_run_mentions_unsupported_permission_decision(hook_run):
         raise RuntimeActivationError(
             "hook_contract_blocked",
             "Installed Ticket hook still emits unsupported output",
@@ -950,6 +1164,17 @@ def run_pre_activation_direct_execute_gate_smoke(
     installed_ticket_root: Path,
     executable: str | None = None,
 ) -> dict[str, Any]:
+    """Prove the direct-execute lane blocks before activation.
+
+    Args:
+        project_root: Active project root for the app-server turn.
+        run_dir: Runtime-readiness evidence directory for the current run.
+        installed_ticket_root: Installed Ticket plugin root being certified.
+        executable: Optional codex executable override.
+
+    Returns:
+        Pre-activation direct-execute gate smoke metadata and raw evidence paths.
+    """
     from scripts.ticket_dedup import dedup_fingerprint as compute_dedup_fingerprint
 
     raw_dir = run_dir / "raw"
@@ -1073,6 +1298,19 @@ def run_post_activation_direct_execute_smoke(
     proof_path: Path,
     executable: str | None = None,
 ) -> dict[str, Any]:
+    """Prove the direct-execute lane succeeds after activation.
+
+    Args:
+        project_root: Active project root for the app-server turn.
+        tickets_dir: Ticket storage directory for the target project.
+        run_dir: Runtime-readiness evidence directory for the current run.
+        installed_ticket_root: Installed Ticket plugin root being certified.
+        proof_path: Temporary activation proof path injected for bootstrap.
+        executable: Optional codex executable override.
+
+    Returns:
+        Post-activation direct-execute smoke metadata for proof publication.
+    """
     from scripts.ticket_dedup import dedup_fingerprint as compute_dedup_fingerprint
 
     raw_dir = run_dir / "raw"
@@ -1127,6 +1365,16 @@ def run_post_activation_direct_execute_smoke(
 
     post_events_path = raw_dir / "post-activation-gated-events.jsonl"
     _write_transcript_jsonl(post_events_path, transcript)
+
+    hook_run = _ticket_hook_completed_run(
+        transcript,
+        installed_ticket_root=installed_ticket_root,
+    )
+    if not _hook_run_is_allow_shape(hook_run):
+        raise RuntimeActivationError(
+            "hook_contract_blocked",
+            "Installed Ticket hook did not emit an allow decision for direct execute smoke",
+        )
 
     command_items = _command_execution_items(transcript)
     if len(command_items) != 1:
@@ -1663,7 +1911,7 @@ def _response_result(responses: dict[int, dict[str, Any]], response_id: int) -> 
     if not isinstance(body, dict):
         raise RuntimeActivationError(
             "deterministic_driver_unavailable",
-            f"Missing app-server response {response_id}",
+            f"app-server response {response_id} missing",
         )
     return _response_result_by_body(body)
 
@@ -1692,6 +1940,20 @@ def _plugin_read_source_path(result: dict[str, Any]) -> str:
     raise RuntimeActivationError(
         "deterministic_driver_unavailable",
         "plugin/read missing Ticket source path",
+    )
+
+
+def _plugin_read_version(result: dict[str, Any]) -> str:
+    plugin = result.get("plugin")
+    if isinstance(plugin, dict):
+        summary = plugin.get("summary")
+        if isinstance(summary, dict):
+            version = summary.get("version")
+            if isinstance(version, str) and version:
+                return version
+    raise RuntimeActivationError(
+        "deterministic_driver_unavailable",
+        "plugin/read missing Ticket version",
     )
 
 
@@ -1728,6 +1990,47 @@ def _find_ticket_hook(result: dict[str, Any]) -> dict[str, str]:
             "Ticket hook record missing command/sourcePath",
         )
     return {"command": command, "sourcePath": source_path}
+
+
+def _ticket_hook_completed_run(
+    transcript: list[dict[str, Any]],
+    *,
+    installed_ticket_root: Path,
+) -> dict[str, Any]:
+    hook_runs = _hook_completed_runs(
+        transcript,
+        source_path=installed_ticket_root / "hooks" / "hooks.json",
+    )
+    if len(hook_runs) != 1:
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            f"Expected exactly one Ticket hook completion, saw {len(hook_runs)}",
+        )
+    return hook_runs[0]
+
+
+def _hook_run_mentions_unsupported_permission_decision(hook_run: dict[str, Any]) -> bool:
+    entries = hook_run.get("entries", [])
+    if not isinstance(entries, list):
+        return False
+    return any(
+        "unsupported permissionDecision" in str(entry.get("text", ""))
+        for entry in entries
+        if isinstance(entry, dict)
+    )
+
+
+def _hook_run_is_allow_shape(hook_run: dict[str, Any]) -> bool:
+    hook_output = hook_run.get("hookSpecificOutput")
+    if isinstance(hook_output, dict):
+        return hook_output.get("permissionDecision") == "allow"
+    entries = hook_run.get("entries")
+    if not isinstance(entries, list) or not entries:
+        return False
+    allowed_entry_kinds = {"feedback", "context"}
+    return all(
+        isinstance(entry, dict) and entry.get("kind") in allowed_entry_kinds for entry in entries
+    )
 
 
 def _hook_completed_runs(
@@ -1805,3 +2108,17 @@ def _stderr_text(transcript: list[dict[str, Any]]) -> str:
         if row.get("direction") == "stderr" and isinstance(row.get("body"), str):
             parts.append(row["body"])
     return "\n".join(parts).strip()
+
+
+def _late_stage_activation_failure_message(
+    *,
+    stage: str,
+    detail: str,
+    project_root: Path,
+    run_dir: Path,
+) -> str:
+    evidence_dir = run_dir.relative_to(project_root)
+    return (
+        "Direct execute smoke already succeeded, but final runtime proof "
+        f"{stage} failed: {detail}. Run evidence remains under {evidence_dir}"
+    )

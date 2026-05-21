@@ -184,6 +184,10 @@ def test_handbook_documents_runtime_proof_env_var_scope() -> None:
 
     assert "No shell environment variable is required for normal operation." in normalized
     assert "`ticket_engine_runner.py execute` may honor `TICKET_RUNTIME_PROOF_PATH`" in normalized
+    assert (
+        "`TICKET_RUNTIME_ACTIVATION_BOOTSTRAP=1` is an internal activation/test override"
+        in normalized
+    )
     assert "classify, plan, preflight, and ingest ignore it" in normalized
     assert "At execute and ingest stages, the engine re-validates the trust triple" in normalized
 
@@ -773,7 +777,7 @@ def test_readme_documents_ticket_ux_commands() -> None:
     assert "ticket_review.py` | `review <tickets_dir>` / `audit <tickets_dir> [--days N]`" in text
     assert (
         "ticket_doctor.py` | `diagnose <tickets_dir> --plugin-root <plugin_root> "
-        "--cache-root <cache_root>`"
+        "--cache-root <cache_root> [--runtime-probe-output <path>]`"
     ) in text
     assert (
         "ticket_doctor.py` | `activate-runtime <tickets_dir> --marketplace-path <marketplace_path>`"

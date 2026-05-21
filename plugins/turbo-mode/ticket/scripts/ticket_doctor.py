@@ -168,6 +168,17 @@ def activate_runtime_payload(
     tickets_dir: Path,
     marketplace_path: Path,
 ) -> tuple[dict[str, Any], int]:
+    """Run explicit runtime activation and format the CLI response.
+
+    Args:
+        project_root: Active project root that owns the target tickets directory.
+        tickets_dir: Ticket storage directory for the target project.
+        marketplace_path: Marketplace descriptor used to locate the installed plugin.
+
+    Returns:
+        A JSON-serializable response payload and the CLI exit code for the
+        explicit activate-runtime command.
+    """
     result = activate_runtime(
         project_root=project_root,
         tickets_dir=tickets_dir,

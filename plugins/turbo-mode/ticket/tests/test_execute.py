@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 import scripts.ticket_engine_core as ticket_engine_core
-import scripts.ticket_runtime_readiness as ticket_runtime_readiness
 from scripts.ticket_dedup import (
     dedup_fingerprint as compute_dedup_fp,
 )
@@ -21,6 +20,7 @@ from scripts.ticket_engine_core import (
 from scripts.ticket_parse import extract_fenced_yaml
 
 from tests.support.builders import expected_canonical_yaml, make_ticket, write_autonomy_config
+from tests.test_runtime_readiness import build_valid_runtime_readiness_fixture
 
 
 class TestEngineExecute:
@@ -1855,20 +1855,23 @@ class TestExecuteTrustTripleEngine:
 
     def test_agent_direct_execute_succeeds_when_runtime_proof_verifies(
         self,
-        tmp_tickets,
+        tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ):
+        project_root, _installed_root, installed_module, proof_path = (
+            build_valid_runtime_readiness_fixture(tmp_path)
+        )
+        tickets_dir = project_root / "docs" / "tickets"
+        tickets_dir.mkdir(parents=True, exist_ok=True)
         write_autonomy_config(
-            tmp_tickets,
+            tickets_dir,
             "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
         )
         problem = "Verified runtime proof should allow direct execute."
         monkeypatch.setattr(
             ticket_engine_core,
             "verify_installed_ticket_runtime_readiness_for_execute",
-            lambda **_kwargs: ticket_runtime_readiness.ReadinessSuccess(
-                message="verified",
-            ),
+            installed_module.verify_installed_ticket_runtime_readiness_for_execute,
             raising=False,
         )
         resp = engine_execute(
@@ -1879,7 +1882,7 @@ class TestExecuteTrustTripleEngine:
             request_origin="agent",
             dedup_override=False,
             dependency_override=False,
-            tickets_dir=tmp_tickets,
+            tickets_dir=tickets_dir,
             hook_injected=True,
             hook_request_origin="user",
             classify_intent="create",
@@ -1887,6 +1890,7 @@ class TestExecuteTrustTripleEngine:
             dedup_fingerprint=compute_dedup_fp(problem, []),
             autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
             runtime_execute_surface="direct_execute",
+            runtime_proof_path=proof_path,
         )
         assert resp.state == "ok_create"
 

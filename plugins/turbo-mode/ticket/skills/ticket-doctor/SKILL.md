@@ -30,14 +30,16 @@ not invent an installed cache path.
 For static plugin and storage diagnostics, run:
 
 ```bash
-uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <TICKETS_DIR> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <TICKETS_DIR> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT> [--runtime-probe-output <PATH>]
 ```
 
 Report the diagnostic result as source/cache/storage evidence. Do not describe
 it as live runtime proof.
 
 `diagnose` reports stale `.codex/ticket-tmp/` payloads older than 24 hours
-without mutating them.
+without mutating them. Pass `--runtime-probe-output <PATH>` only when you want
+the diagnose command to write a read-only runtime probe artifact under a
+caller-chosen temp path for later inspection.
 
 ## Runtime Activation
 
@@ -58,6 +60,10 @@ the synced personal plugin copy as staging only, not the proof target.
 
 Report direct-execute-only scope. Do not describe activation as caller-identity
 proof, and do not widen it to `capture`, `update`, or `ticket_workflow.py`.
+
+`TICKET_RUNTIME_PROOF_PATH` and `TICKET_RUNTIME_ACTIVATION_BOOTSTRAP=1` are
+internal activation/test overrides used by the explicit activation flow. Do not
+ask the user to set them for normal operator use.
 
 If activation blocks, report the blocker code first:
 

@@ -309,6 +309,51 @@ def test_activate_runtime_propagates_deterministic_driver_unavailable(
     assert response["error_code"] == "deterministic_driver_unavailable"
 
 
+def test_activate_runtime_preserves_late_publication_failure_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    marketplace_path = tmp_path / ".agents" / "plugins" / "marketplace.json"
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    blocked_result = ticket_runtime_readiness.ActivationFailure(
+        error_code="deterministic_driver_unavailable",
+        message=(
+            "Direct execute smoke already succeeded, but final runtime proof publication "
+            "failed: final proof denied. Run evidence remains under "
+            ".codex/ticket-runtime-smoke/run-1"
+        ),
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "activate_runtime",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "build_activation_candidate",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
+
+    response, exit_code = ticket_doctor_script.activate_runtime_payload(
+        project_root=tmp_path,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert exit_code == 1
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == "deterministic_driver_unavailable"
+    assert response["message"] == blocked_result.message
+
+
 def test_activate_runtime_propagates_hook_contract_blocked(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

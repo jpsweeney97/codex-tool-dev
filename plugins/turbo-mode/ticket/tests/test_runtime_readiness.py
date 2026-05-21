@@ -169,6 +169,22 @@ def test_deleted_raw_evidence_rejects(tmp_path: Path) -> None:
     assert result.error_code == "raw_evidence_missing"
 
 
+def test_deleted_pre_activation_raw_evidence_rejects(tmp_path: Path) -> None:
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    run_dir = project_root / proof["raw_evidence"]["run_dir"]
+    pre_events = run_dir / proof["raw_evidence"]["pre_activation_events"]
+    pre_events.unlink()
+
+    result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+
+    assert result.passed is False
+    assert result.error_code == "raw_evidence_missing"
+    assert str(pre_events) in result.message
+
+
 def test_missing_executable_sha256_rejects(tmp_path: Path) -> None:
     project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
         tmp_path
@@ -184,6 +200,32 @@ def test_missing_executable_sha256_rejects(tmp_path: Path) -> None:
     assert result.error_code == "proof_invalid"
     assert "executable_sha256" in result.message
     assert "PermissionError: denied" in result.message
+
+
+def test_hash_read_oserror_normalizes_to_raw_evidence_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    run_dir = project_root / proof["raw_evidence"]["run_dir"]
+    inventory_path = run_dir / proof["raw_evidence"]["app_server_inventory_transcript"]
+    original_sha256_file = module.sha256_file
+
+    def _raise_for_inventory(path: Path) -> str:
+        if path == inventory_path:
+            raise OSError("inventory transcript unreadable")
+        return original_sha256_file(path)
+
+    monkeypatch.setattr(module, "sha256_file", _raise_for_inventory)
+
+    result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+
+    assert result.passed is False
+    assert result.error_code == "raw_evidence_missing"
+    assert str(inventory_path) in result.message
 
 
 def test_write_json_is_atomic_when_replace_fails(
@@ -260,6 +302,8 @@ def test_activation_bootstrap_accepts_only_temporary_in_progress_proof(tmp_path:
     assert normal.error_code == "proof_invalid"
     assert bootstrap.passed is True
     assert final_path_bootstrap.passed is False
+    assert final_path_bootstrap.error_code == "proof_invalid"
+    assert final_path_bootstrap.message == "Runtime proof is not activated"
 
 
 @pytest.mark.parametrize(
@@ -903,6 +947,7 @@ def test_activate_runtime_removes_temp_proof_after_final_write_failure(
 
     assert result.proof is None
     assert result.error_code == "deterministic_driver_unavailable"
+    assert "Direct execute smoke already succeeded" in result.message
     assert "final proof denied" in result.message
     assert not (project_root / ".codex" / "ticket-runtime-proof.json").exists()
     assert not (
@@ -1418,6 +1463,19 @@ def test_run_post_activation_direct_execute_smoke_stages_auto_audit_policy_lane(
             {
                 "direction": "recv",
                 "body": {
+                    "method": "hook/completed",
+                    "params": {
+                        "run": {
+                            "eventName": "preToolUse",
+                            "sourcePath": str(installed_root / "hooks" / "hooks.json"),
+                            "entries": [{"kind": "feedback", "text": "Ticket command validated"}],
+                        }
+                    },
+                },
+            },
+            {
+                "direction": "recv",
+                "body": {
                     "params": {
                         "item": {
                             "type": "commandExecution",
@@ -1482,6 +1540,19 @@ def test_run_post_activation_direct_execute_smoke_uses_uv_run_python_launcher(
     def _fake_turn(**kwargs):
         assert f"Command: {expected_command}" in kwargs["prompt_text"]
         return [
+            {
+                "direction": "recv",
+                "body": {
+                    "method": "hook/completed",
+                    "params": {
+                        "run": {
+                            "eventName": "preToolUse",
+                            "sourcePath": str(installed_root / "hooks" / "hooks.json"),
+                            "entries": [{"kind": "feedback", "text": "Ticket command validated"}],
+                        }
+                    },
+                },
+            },
             {
                 "direction": "recv",
                 "body": {
@@ -1552,6 +1623,19 @@ def test_run_post_activation_direct_execute_smoke_accepts_aggregated_output(
             {
                 "direction": "recv",
                 "body": {
+                    "method": "hook/completed",
+                    "params": {
+                        "run": {
+                            "eventName": "preToolUse",
+                            "sourcePath": str(installed_root / "hooks" / "hooks.json"),
+                            "entries": [{"kind": "feedback", "text": "Ticket command validated"}],
+                        }
+                    },
+                },
+            },
+            {
+                "direction": "recv",
+                "body": {
                     "params": {
                         "item": {
                             "type": "commandExecution",
@@ -1582,6 +1666,77 @@ def test_run_post_activation_direct_execute_smoke_accepts_aggregated_output(
     assert result["post_activation_gated_smokes"]["surface_results"]["direct_execute"][
         "ticket_path"
     ] == str(ticket_path)
+
+
+def test_run_post_activation_direct_execute_smoke_requires_allowing_hook_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    installed_root = tmp_path / "installed"
+    proof_path = run_dir / "activated-ticket-runtime-proof.json"
+    ticket_path = run_dir / "post-direct" / "docs" / "tickets" / "2026-05-20-example.md"
+    tickets_dir.mkdir(parents=True)
+    proof_path.parent.mkdir(parents=True, exist_ok=True)
+    proof_path.write_text("{}", encoding="utf-8")
+    ticket_path.parent.mkdir(parents=True, exist_ok=True)
+    ticket_path.write_text("# T-20260520-01: Runtime activation smoke\n", encoding="utf-8")
+    expected_command = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_agent.py "
+        f"execute {run_dir / 'post-direct' / 'post-direct-payload.json'}"
+    )
+
+    def _fake_turn(**kwargs):
+        assert f"Command: {expected_command}" in kwargs["prompt_text"]
+        return [
+            {
+                "direction": "recv",
+                "body": {
+                    "method": "hook/completed",
+                    "params": {
+                        "run": {
+                            "eventName": "preToolUse",
+                            "sourcePath": str(installed_root / "hooks" / "hooks.json"),
+                            "entries": [{"kind": "stop", "text": "Ticket command blocked"}],
+                        }
+                    },
+                },
+            },
+            {
+                "direction": "recv",
+                "body": {
+                    "params": {
+                        "item": {
+                            "type": "commandExecution",
+                            "id": "cmd-1",
+                            "command": expected_command,
+                            "aggregatedOutput": json.dumps(
+                                {
+                                    "state": "ok_create",
+                                    "data": {"ticket_path": str(ticket_path)},
+                                }
+                            ),
+                        }
+                    }
+                },
+            },
+        ]
+
+    monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
+
+    with pytest.raises(ticket_runtime_readiness.RuntimeActivationError) as exc_info:
+        ticket_runtime_readiness.run_post_activation_direct_execute_smoke(
+            project_root=project_root,
+            tickets_dir=tickets_dir,
+            run_dir=run_dir,
+            installed_ticket_root=installed_root,
+            proof_path=proof_path,
+        )
+
+    assert exc_info.value.error_code == "hook_contract_blocked"
+    assert "allow" in exc_info.value.message.lower()
 
 
 @pytest.mark.parametrize(
@@ -1650,7 +1805,22 @@ def test_run_post_activation_direct_execute_smoke_rejects_bad_engine_output(
         }
         if active_stdout:
             item["aggregatedOutput"] = active_stdout
-        return [{"direction": "recv", "body": {"params": {"item": item}}}]
+        return [
+            {
+                "direction": "recv",
+                "body": {
+                    "method": "hook/completed",
+                    "params": {
+                        "run": {
+                            "eventName": "preToolUse",
+                            "sourcePath": str(installed_root / "hooks" / "hooks.json"),
+                            "entries": [{"kind": "feedback", "text": "Ticket command validated"}],
+                        }
+                    },
+                },
+            },
+            {"direction": "recv", "body": {"params": {"item": item}}},
+        ]
 
     monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
 
@@ -2031,6 +2201,8 @@ def test_collect_installed_runtime_inventory_parses_live_shapes(
                 },
             },
         },
+        {"direction": "recv", "body": {"id": 2, "result": {"plugins": []}}},
+        {"direction": "recv", "body": {"id": 3, "result": {"skills": []}}},
         {
             "direction": "recv",
             "body": {
@@ -2070,6 +2242,105 @@ def test_collect_installed_runtime_inventory_parses_live_shapes(
     )
     assert result["inventory"]["installed_runtime_root"] == str(installed_root)
     assert result["inventory"]["hook"]["guard_command"] == f"python3 {guard_script}"
+
+
+@pytest.mark.parametrize(
+    ("plugin_read_result", "missing_response_id", "expected_message"),
+    [
+        (
+            {
+                "source": {"path": "/source/ticket"},
+                "plugin": {"summary": {}},
+            },
+            None,
+            "plugin/read missing Ticket version",
+        ),
+        (
+            {
+                "source": {"path": "/source/ticket"},
+                "plugin": {"summary": {"version": "1.4.0"}},
+            },
+            2,
+            "response 2 missing",
+        ),
+        (
+            {
+                "source": {"path": "/source/ticket"},
+                "plugin": {"summary": {"version": "1.4.0"}},
+            },
+            3,
+            "response 3 missing",
+        ),
+    ],
+)
+def test_collect_installed_runtime_inventory_rejects_missing_version_or_required_responses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    plugin_read_result: dict[str, object],
+    missing_response_id: int | None,
+    expected_message: str,
+) -> None:
+    project_root = tmp_path / "project"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    marketplace_path = project_root / ".agents" / "plugins" / "marketplace.json"
+    installed_root = tmp_path / "installed-ticket"
+    hooks_dir = installed_root / "hooks"
+    plugin_manifest = installed_root / ".codex-plugin" / "plugin.json"
+    hook_manifest = hooks_dir / "hooks.json"
+    guard_script = hooks_dir / "ticket_engine_guard.py"
+    project_root.mkdir(parents=True)
+    marketplace_path.parent.mkdir(parents=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    hooks_dir.mkdir(parents=True)
+    plugin_manifest.parent.mkdir(parents=True)
+    plugin_manifest.write_text('{"name":"ticket"}\n', encoding="utf-8")
+    hook_manifest.write_text('{"hooks":{"PreToolUse":[]}}\n', encoding="utf-8")
+    guard_script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+    transcript = [
+        {"direction": "recv", "body": {"id": 0, "result": {"ok": True}}},
+        {"direction": "recv", "body": {"id": 1, "result": plugin_read_result}},
+        {"direction": "recv", "body": {"id": 2, "result": {"plugins": []}}},
+        {"direction": "recv", "body": {"id": 3, "result": {"skills": []}}},
+        {
+            "direction": "recv",
+            "body": {
+                "id": 4,
+                "result": {
+                    "hooks": [
+                        {
+                            "pluginId": "ticket@turbo-mode",
+                            "eventName": "preToolUse",
+                            "matcher": "Bash",
+                            "command": f"python3 {guard_script}",
+                            "sourcePath": str(hook_manifest),
+                        }
+                    ]
+                },
+            },
+        },
+    ]
+    if missing_response_id is not None:
+        transcript = [
+            row for row in transcript if row.get("body", {}).get("id") != missing_response_id
+        ]
+
+    monkeypatch.setattr(ticket_runtime_readiness, "_app_server_roundtrip", lambda **_kw: transcript)
+    monkeypatch.setattr(ticket_runtime_readiness, "_capture_codex_version", lambda _exe: "codex 1")
+    monkeypatch.setattr(ticket_runtime_readiness, "_resolve_codex_executable", lambda _exe: "codex")
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "_resolve_executable_sha256_with_reason",
+        lambda _exe: ("0" * 64, None),
+    )
+
+    with pytest.raises(ticket_runtime_readiness.RuntimeActivationError, match=expected_message):
+        ticket_runtime_readiness.collect_installed_runtime_inventory(
+            project_root=project_root,
+            marketplace_path=marketplace_path,
+            run_dir=run_dir,
+            executable="codex",
+        )
 
 
 @pytest.mark.parametrize(
@@ -2246,6 +2517,7 @@ def _fake_smoke_result(
     hook_events = raw_dir / "hook-membrane-events.jsonl"
     engine_stdout = raw_dir / "engine-stdout.json"
     app_server_stderr = raw_dir / "app-server-stderr.txt"
+    pre_events = raw_dir / "pre-activation-gated-events.jsonl"
     post_events = raw_dir / "post-activation-gated-events.jsonl"
     payload_before.write_text('{"tickets_dir":"docs/tickets"}\n', encoding="utf-8")
     payload_after.write_text(
@@ -2254,6 +2526,7 @@ def _fake_smoke_result(
     hook_events.write_text('{"method":"hook/completed"}\n', encoding="utf-8")
     engine_stdout.write_text('{"state":"ok_create"}\n', encoding="utf-8")
     app_server_stderr.write_text("", encoding="utf-8")
+    pre_events.write_text('{"method":"turn/completed"}\n', encoding="utf-8")
     post_events.write_text('{"method":"turn/completed"}\n', encoding="utf-8")
     activation_command = (
         "uv run python -B installed/scripts/ticket_engine_activation_smoke.py execute payload.json"
@@ -2270,6 +2543,23 @@ def _fake_smoke_result(
             "raw_events_sha256": ticket_runtime_readiness.sha256_file(hook_events),
             "engine_stdout_sha256": ticket_runtime_readiness.sha256_file(engine_stdout),
         },
+        "pre_activation_gated_smokes": {
+            "status": "passed",
+            "required_surfaces": ["direct_execute"],
+            "surface_results": {
+                "direct_execute": {
+                    "runner": "app_server_turn",
+                    "command": (
+                        "uv run python -B installed/scripts/ticket_engine_agent.py "
+                        "execute payload.json"
+                    ),
+                    "execute_surface": "direct_execute",
+                    "engine_state": "policy_blocked",
+                    "error_code": "runtime_readiness_required",
+                    "raw_events_sha256": ticket_runtime_readiness.sha256_file(pre_events),
+                }
+            },
+        },
         "post_activation_gated_smokes": {
             "status": "pending",
             "required_surfaces": ["direct_execute"],
@@ -2282,6 +2572,7 @@ def _fake_smoke_result(
         "raw_evidence": {
             "run_dir": str(run_dir.relative_to(project_root)),
             "hook_membrane_events": str(hook_events.relative_to(run_dir)),
+            "pre_activation_events": str(pre_events.relative_to(run_dir)),
             "post_activation_events": str(post_events.relative_to(run_dir)),
             "payload_before": str(payload_before.relative_to(run_dir)),
             "payload_after": str(payload_after.relative_to(run_dir)),
@@ -2334,6 +2625,7 @@ def build_valid_runtime_readiness_fixture(
 
     inventory_path = raw_dir / "app-server-inventory-transcript.jsonl"
     hook_events_path = raw_dir / "hook-membrane-events.jsonl"
+    pre_events_path = raw_dir / "pre-activation-gated-events.jsonl"
     post_events_path = raw_dir / "post-activation-gated-events.jsonl"
     payload_before_path = raw_dir / "payload-before.json"
     payload_after_path = raw_dir / "payload-after.json"
@@ -2343,6 +2635,7 @@ def build_valid_runtime_readiness_fixture(
 
     inventory_path.write_text('{"direction":"recv"}\n', encoding="utf-8")
     hook_events_path.write_text('{"method":"hook/completed"}\n', encoding="utf-8")
+    pre_events_path.write_text('{"method":"turn/completed"}\n', encoding="utf-8")
     post_events_path.write_text('{"method":"turn/completed"}\n', encoding="utf-8")
     payload_before_path.write_text('{"tickets_dir":"docs/tickets"}\n', encoding="utf-8")
     payload_after_path.write_text(
@@ -2434,6 +2727,23 @@ def build_valid_runtime_readiness_fixture(
             "raw_events_sha256": module.sha256_file(hook_events_path),
             "engine_stdout_sha256": module.sha256_file(engine_stdout_path),
         },
+        "pre_activation_gated_smokes": {
+            "status": "passed",
+            "required_surfaces": ["direct_execute"],
+            "surface_results": {
+                "direct_execute": {
+                    "runner": "app_server_turn",
+                    "command": (
+                        "uv run python -B installed/scripts/ticket_engine_agent.py "
+                        "execute payload.json"
+                    ),
+                    "execute_surface": "direct_execute",
+                    "engine_state": "policy_blocked",
+                    "error_code": "runtime_readiness_required",
+                    "raw_events_sha256": module.sha256_file(pre_events_path),
+                }
+            },
+        },
         "post_activation_gated_smokes": {
             "status": "passed",
             "required_surfaces": ["direct_execute"],
@@ -2472,6 +2782,7 @@ def build_valid_runtime_readiness_fixture(
             "run_dir": str(run_dir.relative_to(project_root)),
             "app_server_inventory_transcript": str(inventory_path.relative_to(run_dir)),
             "hook_membrane_events": str(hook_events_path.relative_to(run_dir)),
+            "pre_activation_events": str(pre_events_path.relative_to(run_dir)),
             "post_activation_events": str(post_events_path.relative_to(run_dir)),
             "payload_before": str(payload_before_path.relative_to(run_dir)),
             "payload_after": str(payload_after_path.relative_to(run_dir)),

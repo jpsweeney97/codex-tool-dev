@@ -928,6 +928,29 @@ def test_hook_denies_noncanonical_ticket_workflow_command_shapes(
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
+def test_hook_allows_resolved_ticket_workflow_path_when_plugin_root_is_symlink(
+    tmp_path: Path,
+) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    symlink_root = tmp_path / "plugin-link"
+    symlink_root.symlink_to(plugin_root, target_is_directory=True)
+    payload = tmp_path / "payload.json"
+    payload.write_text('{"action":"create","fields":{}}', encoding="utf-8")
+    event = make_hook_input(
+        (
+            "python3 -B "
+            f"{plugin_root.resolve(strict=False)}/scripts/ticket_workflow.py prepare {payload}"
+        ),
+        plugin_root=str(symlink_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(symlink_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
 def test_hook_denies_ticket_workflow_recover_without_action(tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     payload = tmp_path / "payload.json"
