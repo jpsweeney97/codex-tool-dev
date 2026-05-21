@@ -8,7 +8,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import scripts.ticket_doctor as ticket_doctor_script
 import scripts.ticket_payloads as ticket_payloads
+import scripts.ticket_runtime_readiness as ticket_runtime_readiness
 from scripts.ticket_triage import (
     DoctorInputError,
     _source_cache_report,
@@ -98,6 +100,144 @@ def test_ticket_doctor_diagnose_response_adds_cleanup_hint_for_stale_payloads(
         "summary": "Old abandoned Ticket preview state can be cleaned up after review.",
         "next_step": "Use ticket-doctor stale cleanup after reviewing the reported items.",
     }
+
+
+def test_activate_runtime_returns_engine_gate_required_with_candidate_proof(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    marketplace_path = tmp_path / ".agents" / "plugins" / "marketplace.json"
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "build_activation_candidate",
+        lambda **_kwargs: ticket_runtime_readiness.RuntimeActivationBuildResult(
+            proof={
+                "status": "activation_in_progress",
+                "activation_scope": {"gated_execute_surfaces": ["direct_execute"]},
+            },
+            error_code=None,
+            message="candidate proof built",
+        ),
+    )
+
+    response, exit_code = ticket_doctor_script.activate_runtime_payload(
+        project_root=tmp_path,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert exit_code == 1
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == "engine_gate_required"
+    assert response["data"]["mode"] == "activate-runtime"
+    assert response["data"]["proof"]["status"] == "activation_in_progress"
+    assert not (tmp_path / ".codex" / "ticket-runtime-proof.json").exists()
+
+
+def test_activate_runtime_propagates_host_policy_blocked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    marketplace_path = tmp_path / ".agents" / "plugins" / "marketplace.json"
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "build_activation_candidate",
+        lambda **_kwargs: ticket_runtime_readiness.RuntimeActivationBuildResult(
+            proof=None,
+            error_code="host_policy_blocked",
+            message="contained workspaceWrite turn failed",
+        ),
+    )
+
+    response, exit_code = ticket_doctor_script.activate_runtime_payload(
+        project_root=tmp_path,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert exit_code == 1
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == "host_policy_blocked"
+
+
+def test_activate_runtime_propagates_deterministic_driver_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    marketplace_path = tmp_path / ".agents" / "plugins" / "marketplace.json"
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "build_activation_candidate",
+        lambda **_kwargs: ticket_runtime_readiness.RuntimeActivationBuildResult(
+            proof=None,
+            error_code="deterministic_driver_unavailable",
+            message="app-server transcript did not capture the command turn",
+        ),
+    )
+
+    response, exit_code = ticket_doctor_script.activate_runtime_payload(
+        project_root=tmp_path,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert exit_code == 1
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == "deterministic_driver_unavailable"
+
+
+def test_activate_runtime_propagates_hook_contract_blocked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    marketplace_path = tmp_path / ".agents" / "plugins" / "marketplace.json"
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "build_activation_candidate",
+        lambda **_kwargs: ticket_runtime_readiness.RuntimeActivationBuildResult(
+            proof=None,
+            error_code="hook_contract_blocked",
+            message="installed hook still emits unsupported output",
+        ),
+    )
+
+    response, exit_code = ticket_doctor_script.activate_runtime_payload(
+        project_root=tmp_path,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert exit_code == 1
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == "hook_contract_blocked"
 
 
 def test_ticket_doctor_clean_stale_payloads_requires_confirmation(
@@ -547,39 +687,50 @@ def test_ticket_doctor_reports_generated_residue_separately(
 
 def test_ticket_doctor_classifies_live_hook_probe_output(tmp_tickets: Path, tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
+    guard_command = f"python3 {plugin_root}/hooks/ticket_engine_guard.py"
     probe_output = tmp_path / "hook-probe.out"
     probe_output.write_text(
-        "\n".join([
-            json.dumps({
-                "id": 1,
-                "result": {
-                    "plugin": {
-                        "summary": {
-                            "id": "ticket@turbo-mode",
-                            "enabled": True,
-                            "installed": True,
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "id": 1,
+                        "result": {
+                            "plugin": {
+                                "summary": {
+                                    "id": "ticket@turbo-mode",
+                                    "enabled": True,
+                                    "installed": True,
+                                },
+                                "marketplacePath": "/Users/jp/.agents/plugins/marketplace.json",
+                            },
                         },
-                        "marketplacePath": "/Users/jp/.agents/plugins/marketplace.json",
-                    },
-                },
-            }),
-            json.dumps({
-                "id": 2,
-                "result": {
-                    "data": [{
-                        "warnings": [],
-                        "errors": [],
-                        "hooks": [{
-                            "pluginId": "ticket@turbo-mode",
-                            "eventName": "preToolUse",
-                            "matcher": "Bash",
-                            "command": f"python3 {plugin_root}/hooks/ticket_engine_guard.py",
-                            "sourcePath": f"{plugin_root}/hooks/hooks.json",
-                        }],
-                    }],
-                },
-            }),
-        ]),
+                    }
+                ),
+                json.dumps(
+                    {
+                        "id": 2,
+                        "result": {
+                            "data": [
+                                {
+                                    "warnings": [],
+                                    "errors": [],
+                                    "hooks": [
+                                        {
+                                            "pluginId": "ticket@turbo-mode",
+                                            "eventName": "preToolUse",
+                                            "matcher": "Bash",
+                                            "command": guard_command,
+                                            "sourcePath": f"{plugin_root}/hooks/hooks.json",
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                    }
+                ),
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -597,39 +748,50 @@ def test_ticket_doctor_classifies_live_hook_probe_output(tmp_tickets: Path, tmp_
 
 def test_ticket_doctor_blocks_wrong_hook_event(tmp_tickets: Path, tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
+    guard_command = f"python3 {plugin_root}/hooks/ticket_engine_guard.py"
     probe_output = tmp_path / "wrong-event.out"
     probe_output.write_text(
-        "\n".join([
-            json.dumps({
-                "id": 1,
-                "result": {
-                    "plugin": {
-                        "summary": {
-                            "id": "ticket@turbo-mode",
-                            "enabled": True,
-                            "installed": True,
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "id": 1,
+                        "result": {
+                            "plugin": {
+                                "summary": {
+                                    "id": "ticket@turbo-mode",
+                                    "enabled": True,
+                                    "installed": True,
+                                },
+                                "marketplacePath": "/Users/jp/.agents/plugins/marketplace.json",
+                            },
                         },
-                        "marketplacePath": "/Users/jp/.agents/plugins/marketplace.json",
-                    },
-                },
-            }),
-            json.dumps({
-                "id": 2,
-                "result": {
-                    "data": [{
-                        "warnings": [],
-                        "errors": [],
-                        "hooks": [{
-                            "pluginId": "ticket@turbo-mode",
-                            "eventName": "postToolUse",
-                            "matcher": "Bash",
-                            "command": f"python3 {plugin_root}/hooks/ticket_engine_guard.py",
-                            "sourcePath": f"{plugin_root}/hooks/hooks.json",
-                        }],
-                    }],
-                },
-            }),
-        ]),
+                    }
+                ),
+                json.dumps(
+                    {
+                        "id": 2,
+                        "result": {
+                            "data": [
+                                {
+                                    "warnings": [],
+                                    "errors": [],
+                                    "hooks": [
+                                        {
+                                            "pluginId": "ticket@turbo-mode",
+                                            "eventName": "postToolUse",
+                                            "matcher": "Bash",
+                                            "command": guard_command,
+                                            "sourcePath": f"{plugin_root}/hooks/hooks.json",
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                    }
+                ),
+            ]
+        ),
         encoding="utf-8",
     )
 

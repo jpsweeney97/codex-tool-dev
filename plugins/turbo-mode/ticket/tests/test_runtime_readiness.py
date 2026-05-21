@@ -6,8 +6,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from scripts.ticket_runtime_readiness import verify_installed_ticket_runtime_readiness_for_execute
-
+import scripts.ticket_runtime_readiness as ticket_runtime_readiness
 
 MODULE_SOURCE = Path(__file__).resolve().parents[1] / "scripts" / "ticket_runtime_readiness.py"
 
@@ -16,23 +15,31 @@ def test_missing_runtime_proof_rejects(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     (project_root / ".git").mkdir(parents=True)
 
-    result = verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+    result = ticket_runtime_readiness.verify_installed_ticket_runtime_readiness_for_execute(
+        project_root=project_root
+    )
 
     assert result.passed is False
     assert result.error_code == "proof_missing"
 
 
 def test_source_checkout_execution_cannot_satisfy_installed_runtime_proof(tmp_path: Path) -> None:
-    project_root, _installed_root, _module, _proof_path = build_valid_runtime_readiness_fixture(tmp_path)
+    project_root, _installed_root, _module, _proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
 
-    result = verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+    result = ticket_runtime_readiness.verify_installed_ticket_runtime_readiness_for_execute(
+        project_root=project_root
+    )
 
     assert result.passed is False
     assert result.error_code == "executing_root_mismatch"
 
 
 def test_valid_installed_runtime_proof_passes_when_executing_root_matches(tmp_path: Path) -> None:
-    project_root, _installed_root, module, _proof_path = build_valid_runtime_readiness_fixture(tmp_path)
+    project_root, _installed_root, module, _proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
 
     result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
 
@@ -41,7 +48,9 @@ def test_valid_installed_runtime_proof_passes_when_executing_root_matches(tmp_pa
 
 
 def test_deleted_raw_evidence_rejects(tmp_path: Path) -> None:
-    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(tmp_path)
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
     proof = json.loads(proof_path.read_text(encoding="utf-8"))
     run_dir = project_root / proof["raw_evidence"]["run_dir"]
     hook_events = run_dir / proof["raw_evidence"]["hook_membrane_events"]
@@ -54,7 +63,9 @@ def test_deleted_raw_evidence_rejects(tmp_path: Path) -> None:
 
 
 def test_stale_proof_rejects(tmp_path: Path) -> None:
-    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(tmp_path)
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
     proof = json.loads(proof_path.read_text(encoding="utf-8"))
     proof["expires_at"] = "2026-05-19T00:00:00Z"
     proof_path.write_text(json.dumps(proof, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -66,7 +77,9 @@ def test_stale_proof_rejects(tmp_path: Path) -> None:
 
 
 def test_hash_mismatches_reject(tmp_path: Path) -> None:
-    project_root, installed_root, module, proof_path = build_valid_runtime_readiness_fixture(tmp_path)
+    project_root, installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
     proof = json.loads(proof_path.read_text(encoding="utf-8"))
 
     (installed_root / ".codex-plugin" / "plugin.json").write_text(
@@ -82,7 +95,9 @@ def test_hash_mismatches_reject(tmp_path: Path) -> None:
 
 
 def test_invalid_scope_rejects(tmp_path: Path) -> None:
-    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(tmp_path)
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
     proof = json.loads(proof_path.read_text(encoding="utf-8"))
     proof["activation_scope"]["gated_execute_surfaces"] = ["direct_execute", "capture_execute"]
     proof_path.write_text(json.dumps(proof, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -94,7 +109,9 @@ def test_invalid_scope_rejects(tmp_path: Path) -> None:
 
 
 def test_forbidden_surface_fields_reject(tmp_path: Path) -> None:
-    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(tmp_path)
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
     proof = json.loads(proof_path.read_text(encoding="utf-8"))
     proof["post_activation_gated_smokes"]["surface_results"]["capture_execute"] = {
         "raw_events_sha256": "bad",
@@ -108,7 +125,9 @@ def test_forbidden_surface_fields_reject(tmp_path: Path) -> None:
 
 
 def test_nonce_and_payload_hash_mismatches_reject(tmp_path: Path) -> None:
-    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(tmp_path)
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
     proof = json.loads(proof_path.read_text(encoding="utf-8"))
     proof["hook_membrane_proof"]["nonce"] = "different-nonce"
     proof["hook_membrane_proof"]["payload_sha256"] = "different-payload"
@@ -118,6 +137,193 @@ def test_nonce_and_payload_hash_mismatches_reject(tmp_path: Path) -> None:
 
     assert result.passed is False
     assert result.error_code in {"nonce_mismatch", "payload_hash_mismatch"}
+
+
+def test_build_activation_candidate_returns_candidate_without_writing_final_proof(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    marketplace_path = project_root / ".agents" / "plugins" / "marketplace.json"
+    (project_root / ".git").mkdir(parents=True)
+    tickets_dir.mkdir(parents=True)
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "collect_installed_runtime_inventory",
+        lambda **kwargs: _fake_inventory_result(tmp_path, run_dir=kwargs["run_dir"]),
+    )
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "run_activation_smoke",
+        lambda **_kwargs: _fake_smoke_result(tmp_path, project_root=project_root),
+    )
+
+    result = ticket_runtime_readiness.build_activation_candidate(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert result.error_code is None
+    assert result.proof is not None
+    assert result.proof["status"] == "activation_in_progress"
+    assert result.proof["activation_scope"]["gated_execute_surfaces"] == ["direct_execute"]
+    assert not (project_root / ".codex" / "ticket-runtime-proof.json").exists()
+
+
+def test_build_activation_candidate_propagates_hook_contract_blocker(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    marketplace_path = project_root / ".agents" / "plugins" / "marketplace.json"
+    (project_root / ".git").mkdir(parents=True)
+    tickets_dir.mkdir(parents=True)
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "collect_installed_runtime_inventory",
+        lambda **kwargs: _fake_inventory_result(tmp_path, run_dir=kwargs["run_dir"]),
+    )
+
+    def _blocked_smoke(**_kwargs):
+        raise ticket_runtime_readiness.RuntimeActivationError(
+            "hook_contract_blocked",
+            "Installed Ticket hook still emits unsupported output",
+        )
+
+    monkeypatch.setattr(ticket_runtime_readiness, "run_activation_smoke", _blocked_smoke)
+
+    result = ticket_runtime_readiness.build_activation_candidate(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert result.proof is None
+    assert result.error_code == "hook_contract_blocked"
+
+
+def _fake_inventory_result(tmp_path: Path, *, run_dir: Path) -> dict[str, object]:
+    installed_root = tmp_path / "installed-ticket"
+    hooks_dir = installed_root / "hooks"
+    plugin_manifest = installed_root / ".codex-plugin" / "plugin.json"
+    guard_script = hooks_dir / "ticket_engine_guard.py"
+    hook_manifest = hooks_dir / "hooks.json"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    plugin_manifest.parent.mkdir(parents=True, exist_ok=True)
+    plugin_manifest.write_text('{"name":"ticket","version":"1.4.0"}\n', encoding="utf-8")
+    guard_script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    hook_manifest.write_text('{"hooks":{"PreToolUse":[]}}\n', encoding="utf-8")
+    raw_dir = run_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    transcript = raw_dir / "app-server-inventory-transcript.jsonl"
+    transcript.write_text('{"direction":"recv"}\n', encoding="utf-8")
+    return {
+        "runtime_identity": {
+            "codex_version": "codex-cli 0.132.0",
+            "executable_path": "/usr/local/bin/codex",
+            "executable_sha256": None,
+            "executable_hash_unavailable_reason": "not-needed",
+            "accepted_response_schema_version": "ticket-app-server-readiness-v1",
+            "parser_version": "installed-ticket-runtime-readiness-v1",
+        },
+        "inventory": {
+            "request_methods": [
+                "initialize",
+                "initialized",
+                "plugin/read",
+                "plugin/list",
+                "skills/list",
+                "hooks/list",
+            ],
+            "marketplace_path": str(tmp_path / "project/.agents/plugins/marketplace.json"),
+            "cwd": str(tmp_path / "project"),
+            "transcript_sha256": ticket_runtime_readiness.sha256_file(transcript),
+            "plugin_read_source_path": str(tmp_path / "project/plugins/turbo-mode/ticket"),
+            "installed_runtime_root": str(installed_root),
+            "hook": {
+                "plugin_id": "ticket@turbo-mode",
+                "event_name": "preToolUse",
+                "matcher": "Bash",
+                "hook_manifest_path": str(hook_manifest),
+                "hook_manifest_sha256": ticket_runtime_readiness.sha256_file(hook_manifest),
+                "guard_command": f"python3 {guard_script}",
+                "guard_script_path": str(guard_script),
+                "guard_script_sha256": ticket_runtime_readiness.sha256_file(guard_script),
+            },
+            "plugin_manifest_path": str(plugin_manifest),
+            "plugin_manifest_sha256": ticket_runtime_readiness.sha256_file(plugin_manifest),
+        },
+        "raw_inventory_transcript": transcript,
+        "ticket_plugin": {
+            "plugin_id": "ticket@turbo-mode",
+            "name": "ticket",
+            "version": "1.4.0",
+        },
+    }
+
+
+def _fake_smoke_result(tmp_path: Path, *, project_root: Path) -> dict[str, object]:
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    raw_dir = run_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    payload_before = raw_dir / "payload-before.json"
+    payload_after = raw_dir / "payload-after.json"
+    hook_events = raw_dir / "hook-membrane-events.jsonl"
+    engine_stdout = raw_dir / "engine-stdout.json"
+    engine_stderr = raw_dir / "engine-stderr.txt"
+    post_events = raw_dir / "post-activation-gated-events.jsonl"
+    payload_before.write_text('{"tickets_dir":"docs/tickets"}\n', encoding="utf-8")
+    payload_after.write_text(
+        '{"tickets_dir":"docs/tickets","hook_injected":true}\n', encoding="utf-8"
+    )
+    hook_events.write_text('{"method":"hook/completed"}\n', encoding="utf-8")
+    engine_stdout.write_text('{"state":"ok_create"}\n', encoding="utf-8")
+    engine_stderr.write_text("", encoding="utf-8")
+    post_events.write_text('{"method":"turn/completed"}\n', encoding="utf-8")
+    activation_command = (
+        "python3 -B installed/scripts/ticket_engine_activation_smoke.py "
+        "execute payload.json"
+    )
+    return {
+        "run_nonce": "run-1",
+        "hook_membrane_proof": {
+            "runner": "app_server_turn",
+            "status": "passed",
+            "command": activation_command,
+            "payload_path": str(run_dir / "payload.json"),
+            "nonce": "run-1",
+            "payload_sha256": ticket_runtime_readiness.sha256_file(payload_before),
+            "raw_events_sha256": ticket_runtime_readiness.sha256_file(hook_events),
+            "engine_stdout_sha256": ticket_runtime_readiness.sha256_file(engine_stdout),
+        },
+        "post_activation_gated_smokes": {
+            "status": "pending",
+            "required_surfaces": ["direct_execute"],
+            "surface_results": {
+                "direct_execute": {
+                    "raw_events_sha256": ticket_runtime_readiness.sha256_file(post_events),
+                }
+            },
+        },
+        "raw_evidence": {
+            "run_dir": str(run_dir.relative_to(project_root)),
+            "hook_membrane_events": str(hook_events.relative_to(run_dir)),
+            "post_activation_events": str(post_events.relative_to(run_dir)),
+            "payload_before": str(payload_before.relative_to(run_dir)),
+            "payload_after": str(payload_after.relative_to(run_dir)),
+            "engine_stdout": str(engine_stdout.relative_to(run_dir)),
+            "engine_stderr": str(engine_stderr.relative_to(run_dir)),
+        },
+    }
 
 
 def build_valid_runtime_readiness_fixture(
@@ -142,7 +348,9 @@ def build_valid_runtime_readiness_fixture(
     hook_events_path.write_text('{"method":"hook/completed"}\n', encoding="utf-8")
     post_events_path.write_text('{"method":"turn/completed"}\n', encoding="utf-8")
     payload_before_path.write_text('{"tickets_dir":"docs/tickets"}\n', encoding="utf-8")
-    payload_after_path.write_text('{"tickets_dir":"docs/tickets","hook_injected":true}\n', encoding="utf-8")
+    payload_after_path.write_text(
+        '{"tickets_dir":"docs/tickets","hook_injected":true}\n', encoding="utf-8"
+    )
     engine_stdout_path.write_text('{"state":"ok_create"}\n', encoding="utf-8")
     engine_stderr_path.write_text("", encoding="utf-8")
 
@@ -163,6 +371,10 @@ def build_valid_runtime_readiness_fixture(
     copied_module_path = scripts_dir / "ticket_runtime_readiness.py"
     shutil.copy2(MODULE_SOURCE, copied_module_path)
     module = load_module(copied_module_path)
+    activation_command = (
+        "python3 -B installed/scripts/ticket_engine_activation_smoke.py "
+        "execute payload.json"
+    )
 
     proof = {
         "schema_version": "installed_ticket_runtime_readiness-v1",
@@ -214,8 +426,10 @@ def build_valid_runtime_readiness_fixture(
         "hook_membrane_proof": {
             "runner": "app_server_turn",
             "status": "passed",
-            "command": "python3 -B installed/scripts/ticket_engine_activation_smoke.py execute payload.json",
-            "payload_path": str(project_root / ".codex" / "ticket-runtime-smoke" / "run-1" / "payload.json"),
+            "command": activation_command,
+            "payload_path": str(
+                project_root / ".codex" / "ticket-runtime-smoke" / "run-1" / "payload.json"
+            ),
             "nonce": "run-1",
             "payload_sha256": module.sha256_file(payload_before_path),
             "raw_events_sha256": module.sha256_file(hook_events_path),
