@@ -1,0 +1,354 @@
+from __future__ import annotations
+
+import json
+import queue
+from pathlib import Path
+
+import pytest
+import refresh.app_server_turn_driver as driver_module
+
+from refresh.app_server_turn_driver import (
+    analyze_transcript,
+    build_probe_command,
+    build_probe_prompt,
+    build_thread_start_request,
+    build_turn_start_request,
+    prepare_preflight_layout,
+    write_transcript_jsonl,
+)
+
+
+def test_build_probe_command_targets_installed_ticket_engine_agent(tmp_path: Path) -> None:
+    installed_ticket_root = tmp_path / "installed-ticket"
+    payload_path = tmp_path / "contained" / "payload.json"
+
+    command = build_probe_command(
+        installed_ticket_root=installed_ticket_root,
+        payload_path=payload_path,
+    )
+
+    assert command == (
+        f"python3 -B {installed_ticket_root}/scripts/ticket_engine_agent.py "
+        f"execute {payload_path}"
+    )
+
+
+def test_build_thread_start_request_pins_ephemeral_contained_thread(contained_root: Path) -> None:
+    request = build_thread_start_request(contained_root=contained_root)
+
+    assert request["id"] == 1
+    assert request["method"] == "thread/start"
+    assert request["params"]["approvalPolicy"] == "never"
+    assert request["params"]["cwd"] == str(contained_root)
+    assert request["params"]["ephemeral"] is True
+    assert request["params"]["runtimeWorkspaceRoots"] == [str(contained_root)]
+
+
+def test_build_turn_start_request_pins_workspace_write_and_exact_prompt(
+    contained_root: Path,
+) -> None:
+    command = (
+        "python3 -B /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/"
+        "scripts/ticket_engine_agent.py execute /tmp/payload.json"
+    )
+    request = build_turn_start_request(
+        thread_id="thread-123",
+        contained_root=contained_root,
+        prompt_text=build_probe_prompt(command),
+    )
+
+    assert request["id"] == 2
+    assert request["method"] == "turn/start"
+    assert request["params"]["threadId"] == "thread-123"
+    assert request["params"]["approvalPolicy"] == "never"
+    assert request["params"]["runtimeWorkspaceRoots"] == [str(contained_root)]
+    assert request["params"]["sandboxPolicy"] == {
+        "type": "workspaceWrite",
+        "writableRoots": [str(contained_root)],
+    }
+    assert request["params"]["input"] == [{"type": "text", "text": build_probe_prompt(command)}]
+
+
+def test_prepare_preflight_layout_writes_payload_and_contained_ticket_root(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    contained_root = project_root / ".codex/ticket-runtime-smoke-preflight/contained"
+    installed_ticket_root = tmp_path / "installed-ticket"
+    out_path = project_root / ".codex/ticket-runtime-smoke-preflight/app-server-driver-preflight.jsonl"
+
+    layout = prepare_preflight_layout(
+        project_root=project_root,
+        contained_root=contained_root,
+        installed_ticket_root=installed_ticket_root,
+        out_path=out_path,
+    )
+
+    assert layout.payload_path == contained_root / "payload.json"
+    assert layout.tickets_dir == contained_root / "docs" / "tickets"
+    assert layout.out_path == out_path
+    assert json.loads(layout.payload_path.read_text(encoding="utf-8")) == {
+        "tickets_dir": str(layout.tickets_dir),
+    }
+    assert layout.probe_command == (
+        f"python3 -B {installed_ticket_root}/scripts/ticket_engine_agent.py "
+        f"execute {layout.payload_path}"
+    )
+    assert str(layout.payload_path).startswith(str(project_root / ".codex/ticket-runtime-smoke-preflight"))
+
+
+def test_write_transcript_jsonl_uses_send_recv_rows(tmp_path: Path) -> None:
+    out_path = tmp_path / "transcript.jsonl"
+    transcript = [
+        {"direction": "send", "body": {"id": 0, "method": "initialize"}},
+        {"direction": "recv", "body": {"id": 0, "result": {"ok": True}}},
+    ]
+
+    write_transcript_jsonl(out_path, transcript)
+
+    assert out_path.read_text(encoding="utf-8").splitlines() == [
+        '{"body":{"id":0,"method":"initialize"},"direction":"send"}',
+        '{"body":{"id":0,"result":{"ok":true}},"direction":"recv"}',
+    ]
+
+
+def test_analyze_transcript_reports_gate_b_success_shape(
+    tmp_path: Path,
+    contained_root: Path,
+) -> None:
+    installed_ticket_root = tmp_path / "installed-ticket"
+    payload_path = contained_root / "payload.json"
+    probe_command = build_probe_command(
+        installed_ticket_root=installed_ticket_root,
+        payload_path=payload_path,
+    )
+    transcript = [
+        {"direction": "send", "body": {"id": 0, "method": "initialize"}},
+        {"direction": "send", "body": {"method": "initialized"}},
+        {
+            "direction": "send",
+            "body": {
+                "id": 1,
+                "method": "thread/start",
+                "params": {"ephemeral": True},
+            },
+        },
+        {"direction": "recv", "body": {"id": 1, "result": {"thread": {"id": "thread-1"}}}},
+        {
+            "direction": "send",
+            "body": {"id": 2, "method": "turn/start", "params": {"threadId": "thread-1"}},
+        },
+        {
+            "direction": "recv",
+            "body": {
+                "method": "hook/completed",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "run": {
+                        "eventName": "preToolUse",
+                        "status": "completed",
+                        "sourcePath": str(installed_ticket_root / "hooks" / "ticket_engine_guard.py"),
+                        "entries": [],
+                    },
+                },
+            },
+        },
+        {
+            "direction": "recv",
+            "body": {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "thread-1",
+                    "turn": {
+                        "id": "turn-1",
+                        "status": "completed",
+                        "items": [
+                            {
+                                "id": "cmd-1",
+                                "type": "commandExecution",
+                                "status": "completed",
+                                "command": probe_command,
+                                "cwd": str(contained_root),
+                            }
+                        ],
+                    },
+                },
+            },
+        },
+    ]
+
+    summary = analyze_transcript(
+        transcript,
+        probe_command=probe_command,
+        installed_ticket_root=installed_ticket_root,
+    )
+
+    assert summary.passed is True
+    assert summary.command_execution_count == 1
+    assert summary.ticket_hook_completed_count == 1
+    assert summary.approval_request_methods == ()
+    assert summary.turn_id == "turn-1"
+
+
+def test_analyze_transcript_rejects_approval_requests(
+    tmp_path: Path,
+    contained_root: Path,
+) -> None:
+    installed_ticket_root = tmp_path / "installed-ticket"
+    payload_path = contained_root / "payload.json"
+    probe_command = build_probe_command(
+        installed_ticket_root=installed_ticket_root,
+        payload_path=payload_path,
+    )
+    transcript = [
+        {"direction": "send", "body": {"id": 0, "method": "initialize"}},
+        {"direction": "send", "body": {"method": "initialized"}},
+        {
+            "direction": "recv",
+            "body": {
+                "method": "item/commandExecution/requestApproval",
+                "params": {"threadId": "thread-1"},
+            },
+        },
+    ]
+
+    summary = analyze_transcript(
+        transcript,
+        probe_command=probe_command,
+        installed_ticket_root=installed_ticket_root,
+    )
+
+    assert summary.passed is False
+    assert summary.approval_request_methods == ("item/commandExecution/requestApproval",)
+
+
+def test_analyze_transcript_accepts_live_item_started_and_failed_hook_shape(
+    tmp_path: Path,
+    contained_root: Path,
+) -> None:
+    installed_ticket_root = tmp_path / "installed-ticket"
+    payload_path = contained_root / "payload.json"
+    probe_command = build_probe_command(
+        installed_ticket_root=installed_ticket_root,
+        payload_path=payload_path,
+    )
+    transcript = [
+        {"direction": "send", "body": {"id": 0, "method": "initialize"}},
+        {"direction": "send", "body": {"method": "initialized"}},
+        {
+            "direction": "send",
+            "body": {
+                "id": 1,
+                "method": "thread/start",
+                "params": {"ephemeral": True},
+            },
+        },
+        {"direction": "recv", "body": {"id": 1, "result": {"thread": {"id": "thread-1"}}}},
+        {
+            "direction": "send",
+            "body": {"id": 2, "method": "turn/start", "params": {"threadId": "thread-1"}},
+        },
+        {
+            "direction": "recv",
+            "body": {
+                "method": "hook/completed",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "run": {
+                        "eventName": "preToolUse",
+                        "status": "failed",
+                        "sourcePath": str(installed_ticket_root / "hooks" / "hooks.json"),
+                        "entries": [
+                            {
+                                "kind": "error",
+                                "text": "PreToolUse hook returned unsupported permissionDecision:allow",
+                            }
+                        ],
+                    },
+                },
+            },
+        },
+        {
+            "direction": "recv",
+            "body": {
+                "method": "item/started",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "item": {
+                        "id": "cmd-1",
+                        "type": "commandExecution",
+                        "status": "inProgress",
+                        "command": f"/bin/bash -c '{probe_command}'",
+                        "cwd": str(contained_root),
+                    },
+                },
+            },
+        },
+        {
+            "direction": "recv",
+            "body": {
+                "method": "item/completed",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "item": {
+                        "id": "cmd-1",
+                        "type": "commandExecution",
+                        "status": "completed",
+                        "command": f"/bin/bash -c '{probe_command}'",
+                        "cwd": str(contained_root),
+                    },
+                },
+            },
+        },
+    ]
+
+    summary = analyze_transcript(
+        transcript,
+        probe_command=probe_command,
+        installed_ticket_root=installed_ticket_root,
+    )
+
+    assert summary.command_execution_count == 1
+    assert summary.ticket_hook_completed_count == 1
+    assert summary.probe_command_seen is True
+
+
+def test_send_and_record_retries_after_empty_poll(monkeypatch: pytest.MonkeyPatch) -> None:
+    class DummyStdin:
+        def write(self, _chunk: str) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    class DummyProc:
+        stdin = DummyStdin()
+
+    transcript: list[dict[str, object]] = []
+    polls = iter([None, {"id": 0, "result": {"ok": True}}])
+
+    monkeypatch.setattr(
+        driver_module,
+        "_read_next_message",
+        lambda **_kwargs: next(polls),
+    )
+
+    response = driver_module._send_and_record(
+        proc=DummyProc(),
+        output=queue.Queue(),
+        request={"id": 0, "method": "initialize", "params": {}},
+        transcript=transcript,
+    )
+
+    assert response == {"id": 0, "result": {"ok": True}}
+
+
+@pytest.fixture
+def contained_root(tmp_path: Path) -> Path:
+    path = tmp_path / "contained"
+    path.mkdir(parents=True, exist_ok=True)
+    return path

@@ -23,3 +23,7 @@ docs/tickets/.audit/
 .codex/plugin-dev/**/.codex/ticket-tmp/
 .codex/plugin-dev/
 .codex/plugins/
+.codex/ticket-runtime-proof.json
+.codex/ticket-runtime-smoke-preflight/
+.codex/ticket-runtime-smoke/
+.worktrees/
