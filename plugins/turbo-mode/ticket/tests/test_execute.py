@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import get_args
 
 import pytest
 import scripts.ticket_engine_core as ticket_engine_core
@@ -21,6 +22,10 @@ from scripts.ticket_parse import extract_fenced_yaml
 
 from tests.support.builders import expected_canonical_yaml, make_ticket, write_autonomy_config
 from tests.test_runtime_readiness import build_valid_runtime_readiness_fixture
+
+
+def test_runtime_execute_surface_type_is_direct_execute_only() -> None:
+    assert get_args(ticket_engine_core.RuntimeExecuteSurface) == ("direct_execute",)
 
 
 class TestEngineExecute:

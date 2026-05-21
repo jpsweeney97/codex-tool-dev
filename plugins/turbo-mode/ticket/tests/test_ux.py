@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import get_args
 
 import pytest
 from scripts.ticket_parse import parse_ticket
+from scripts.ticket_runtime_readiness import RuntimeReadinessErrorCode
 from scripts.ticket_ux import (
     INTERNAL_RECOVERY_PATH_PATTERNS,
     INTERNAL_RECOVERY_TERMS,
@@ -317,6 +319,7 @@ def test_close_readiness_ready_matches_close_policy_for_successful_close(tmp_tic
 
 def test_recovery_hint_contract_is_transcript_safe() -> None:
     expected_codes = {
+        *get_args(RuntimeReadinessErrorCode),
         "stale_plan",
         "trust_setup",
         "retry_preview",
@@ -328,8 +331,6 @@ def test_recovery_hint_contract_is_transcript_safe() -> None:
         "hook_contract_blocked",
         "engine_gate_required",
         "runtime_readiness_required",
-        "proof_invalid",
-        "stale_proof",
     }
 
     assert set(RECOVERY_HINTS) == expected_codes
@@ -357,7 +358,7 @@ def test_recovery_hint_contract_is_transcript_safe() -> None:
     for code in expected_codes:
         hint = recovery_hint(code)
         assert set(hint) == {"code", "summary", "next_step"}
-        rendered = " ".join(hint.values())
+        rendered = " ".join([hint["summary"], hint["next_step"]])
         for term in INTERNAL_RECOVERY_TERMS:
             assert term.lower() not in rendered.lower()
         for pattern in INTERNAL_RECOVERY_PATH_PATTERNS:

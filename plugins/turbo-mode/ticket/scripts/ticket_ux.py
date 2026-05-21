@@ -29,6 +29,28 @@ STATE_LABELS = {
     "dependency_override": "Ignore blockers for this operation",
 }
 
+_RUNTIME_PROOF_MISSING_HINT = {
+    "summary": "The Ticket runtime proof is missing.",
+    "next_step": "Rerun the explicit activate-runtime flow before retrying direct execute.",
+}
+
+_RUNTIME_PROOF_SCOPE_HINT = {
+    "summary": "The Ticket runtime proof does not match the expected activation scope.",
+    "next_step": "Rerun the explicit activate-runtime flow before retrying direct execute.",
+}
+
+_RUNTIME_IDENTITY_HINT = {
+    "summary": "The installed Ticket runtime has changed since activation.",
+    "next_step": (
+        "Refresh the installed Ticket runtime or rerun activate-runtime before retrying."
+    ),
+}
+
+_RUNTIME_EVIDENCE_HINT = {
+    "summary": "Ticket runtime activation evidence no longer matches the saved proof.",
+    "next_step": "Rerun the explicit activate-runtime flow to capture fresh evidence.",
+}
+
 RECOVERY_HINTS: dict[str, dict[str, str]] = {
     "stale_plan": {
         "summary": "The saved preview is no longer current.",
@@ -85,6 +107,7 @@ RECOVERY_HINTS: dict[str, dict[str, str]] = {
             "before retrying."
         ),
     },
+    "proof_missing": _RUNTIME_PROOF_MISSING_HINT,
     "proof_invalid": {
         "summary": "The Ticket runtime proof is invalid or incomplete.",
         "next_step": "Rerun the explicit activate-runtime flow to rebuild the runtime proof.",
@@ -93,6 +116,21 @@ RECOVERY_HINTS: dict[str, dict[str, str]] = {
         "summary": "The Ticket runtime proof has expired.",
         "next_step": "Rerun the explicit activate-runtime flow before retrying direct execute.",
     },
+    "nonce_mismatch": _RUNTIME_PROOF_SCOPE_HINT,
+    "invalid_scope": _RUNTIME_PROOF_SCOPE_HINT,
+    "executing_root_mismatch": _RUNTIME_IDENTITY_HINT,
+    "plugin_manifest_path_mismatch": _RUNTIME_IDENTITY_HINT,
+    "plugin_manifest_hash_mismatch": _RUNTIME_IDENTITY_HINT,
+    "hook_manifest_path_mismatch": _RUNTIME_IDENTITY_HINT,
+    "hook_manifest_hash_mismatch": _RUNTIME_IDENTITY_HINT,
+    "guard_script_path_mismatch": _RUNTIME_IDENTITY_HINT,
+    "guard_script_hash_mismatch": _RUNTIME_IDENTITY_HINT,
+    "raw_evidence_missing": _RUNTIME_EVIDENCE_HINT,
+    "inventory_transcript_hash_mismatch": _RUNTIME_EVIDENCE_HINT,
+    "hook_transcript_hash_mismatch": _RUNTIME_EVIDENCE_HINT,
+    "post_activation_transcript_hash_mismatch": _RUNTIME_EVIDENCE_HINT,
+    "payload_hash_mismatch": _RUNTIME_EVIDENCE_HINT,
+    "engine_stdout_hash_mismatch": _RUNTIME_EVIDENCE_HINT,
 }
 
 INTERNAL_RECOVERY_TERMS = (

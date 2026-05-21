@@ -274,12 +274,23 @@ def _runtime_proof_status(project_root: Path) -> dict[str, Any]:
     expires_at = proof.get("expires_at")
     status = raw_status
     error_code = None
-    if raw_status == "activated" and isinstance(expires_at, str):
-        try:
-            parsed_expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-        except ValueError:
-            parsed_expires_at = None
-        if parsed_expires_at is not None and parsed_expires_at <= datetime.now(UTC):
+    error = None
+    if raw_status == "activated":
+        parsed_expires_at = None
+        if isinstance(expires_at, str) and expires_at:
+            try:
+                parsed_expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            except ValueError:
+                parsed_expires_at = None
+        if (
+            parsed_expires_at is None
+            or parsed_expires_at.tzinfo is None
+            or parsed_expires_at.utcoffset() is None
+        ):
+            status = "invalid"
+            error_code = "proof_invalid"
+            error = "Runtime proof expires_at is invalid"
+        elif parsed_expires_at <= datetime.now(UTC):
             status = "stale"
             error_code = "stale_proof"
     result = {
@@ -292,6 +303,8 @@ def _runtime_proof_status(project_root: Path) -> dict[str, Any]:
     }
     if error_code is not None:
         result["error_code"] = error_code
+    if error is not None:
+        result["error"] = error
     return result
 
 

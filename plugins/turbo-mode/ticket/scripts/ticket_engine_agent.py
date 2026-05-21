@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Agent entrypoint for the ticket engine.
 
-Hardcodes request_origin="agent". Called by ticket-autocreate agent.
-Usage: python3 ticket_engine_agent.py <subcommand> <payload_file>
+Hardcodes request_origin="agent" for guarded direct-execute Ticket operations.
+Launcher: uv run python -B <PLUGIN_ROOT>/scripts/ticket_engine_agent.py <subcommand> <payload_file>
 """
 
 from __future__ import annotations

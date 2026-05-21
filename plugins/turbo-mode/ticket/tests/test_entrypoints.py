@@ -14,6 +14,15 @@ SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 REPO_ROOT = SCRIPTS_DIR.parents[3]
 
 
+def test_engine_entrypoint_docstrings_match_current_launch_contract() -> None:
+    for script in ("ticket_engine_user.py", "ticket_engine_agent.py"):
+        text = (SCRIPTS_DIR / script).read_text(encoding="utf-8")
+        assert "ticket-ops" not in text
+        assert "ticket-autocreate" not in text
+        assert "Usage: python3" not in text
+        assert "uv run python -B <PLUGIN_ROOT>/scripts/" in text
+
+
 def run_entrypoint(script: str, subcommand: str, payload: dict, tmp_path: Path) -> dict:
     """Run an entrypoint script as a subprocess and return parsed JSON output."""
     # Ensure cwd has a project-root marker so discover_project_root() succeeds.

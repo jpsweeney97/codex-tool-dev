@@ -113,6 +113,36 @@ def test_ticket_doctor_reports_stale_runtime_proof_status(tmp_tickets: Path) -> 
     assert report["runtime_proof"]["error_code"] == "stale_proof"
 
 
+def test_ticket_doctor_reports_naive_runtime_proof_expiry_as_invalid(
+    tmp_tickets: Path,
+) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    proof_path = tmp_tickets.parent.parent / ".codex" / "ticket-runtime-proof.json"
+    proof_path.parent.mkdir(parents=True)
+    proof_path.write_text(
+        json.dumps(
+            {
+                "status": "activated",
+                "schema_version": "installed_ticket_runtime_readiness-v1",
+                "expires_at": "2026-05-21T23:59:59",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = ticket_doctor(
+        tmp_tickets,
+        plugin_root=plugin_root,
+        cache_root=plugin_root,
+    )
+
+    assert report["runtime_proof"]["status"] == "invalid"
+    assert report["runtime_proof"]["raw_status"] == "activated"
+    assert report["runtime_proof"]["error_code"] == "proof_invalid"
+    assert "expires_at" in report["runtime_proof"]["error"]
+
+
 def test_ticket_doctor_reports_stale_ticket_tmp_payloads(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

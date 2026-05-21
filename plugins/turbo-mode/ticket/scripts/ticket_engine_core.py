@@ -17,7 +17,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 
 from scripts.ticket_id import allocate_id, build_filename
 from scripts.ticket_parse import (
@@ -47,6 +47,7 @@ def _list_tickets_with_closed(tickets_dir: Path) -> list[ParsedTicket]:
 
 _V10_GENERATION = 10  # v1.0 tickets have generation=10; legacy is 1-4.
 _CONTRACT_VERSION = "1.0"  # Current contract version; stamped on every write.
+RuntimeExecuteSurface: TypeAlias = Literal["direct_execute"]
 
 
 def _check_legacy_gate(ticket: ParsedTicket) -> EngineResponse | None:
@@ -1299,7 +1300,7 @@ def engine_execute(
     classify_confidence: float | None = None,
     dedup_fingerprint: str | None = None,
     duplicate_of: str | None = None,
-    runtime_execute_surface: str | None = None,
+    runtime_execute_surface: RuntimeExecuteSurface | None = None,
     runtime_proof_path: Path | None = None,
     allow_activation_bootstrap: bool = False,
 ) -> EngineResponse:

@@ -380,9 +380,11 @@ def _verify_runtime_readiness_proof_fields(
     if plugin_manifest_sha256 != _get_nested_str(proof, "ticket_plugin", "plugin_manifest_sha256"):
         return _reject("plugin_manifest_hash_mismatch", "Plugin manifest hash mismatch")
 
-    hook_manifest_path = Path(_get_nested_str(proof, "inventory", "hook", "hook_manifest_path"))
+    hook_manifest_path = Path(
+        _get_nested_str(proof, "inventory", "hook", "hook_manifest_path")
+    ).resolve(strict=False)
     expected_hook_manifest_path = installed_root / "hooks" / "hooks.json"
-    if hook_manifest_path != expected_hook_manifest_path:
+    if not _same_path(hook_manifest_path, expected_hook_manifest_path):
         return _reject("hook_manifest_path_mismatch", "Hook manifest path mismatch")
     missing = _ensure_readable_evidence_file(hook_manifest_path)
     if missing is not None:
@@ -1057,9 +1059,12 @@ def _parse_utc_timestamp(raw: object) -> datetime | None:
     if not isinstance(raw, str) or not raw:
         return None
     try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(UTC)
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
         return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(UTC)
 
 
 def _get_nested_str(mapping: dict[str, Any], *path: str) -> str:
@@ -1403,7 +1408,8 @@ def collect_installed_runtime_inventory(
     hooks_result = _response_result(responses, 4)
 
     ticket_hook = _find_ticket_hook(hooks_result)
-    installed_runtime_root = Path(ticket_hook["sourcePath"]).resolve(strict=False).parents[1]
+    hook_manifest_path = Path(ticket_hook["sourcePath"]).resolve(strict=False)
+    installed_runtime_root = hook_manifest_path.parents[1]
     expected_guard_script_path = installed_runtime_root / "hooks" / "ticket_engine_guard.py"
     guard_command_error = _guard_command_validation_error(
         ticket_hook["command"],
@@ -1412,7 +1418,7 @@ def collect_installed_runtime_inventory(
     if guard_command_error is not None:
         raise RuntimeActivationError("deterministic_driver_unavailable", guard_command_error)
     hook_manifest_error = _hook_manifest_guard_command_validation_error(
-        hook_manifest_path=Path(ticket_hook["sourcePath"]),
+        hook_manifest_path=hook_manifest_path,
         guard_command=ticket_hook["command"],
         expected_guard_script_path=expected_guard_script_path,
     )
@@ -1460,8 +1466,8 @@ def collect_installed_runtime_inventory(
                 "plugin_id": "ticket@turbo-mode",
                 "event_name": "preToolUse",
                 "matcher": "Bash",
-                "hook_manifest_path": ticket_hook["sourcePath"],
-                "hook_manifest_sha256": sha256_file(Path(ticket_hook["sourcePath"])),
+                "hook_manifest_path": str(hook_manifest_path),
+                "hook_manifest_sha256": sha256_file(hook_manifest_path),
                 "guard_command": ticket_hook["command"],
                 "guard_script_path": str(expected_guard_script_path),
                 "guard_script_sha256": sha256_file(expected_guard_script_path),
@@ -2357,6 +2363,11 @@ def _responses_by_id(transcript: list[dict[str, Any]]) -> dict[int, dict[str, An
             continue
         response_id = body.get("id")
         if isinstance(response_id, int):
+            if response_id in responses:
+                raise RuntimeActivationError(
+                    "deterministic_driver_unavailable",
+                    f"app-server duplicate response id {response_id}",
+                )
             responses[response_id] = body
     return responses
 
@@ -2467,7 +2478,7 @@ def _ticket_hook_completed_run(
 def _hook_run_mentions_unsupported_permission_decision(hook_run: dict[str, Any]) -> bool:
     entries = hook_run.get("entries", [])
     if not isinstance(entries, list):
-        return False
+        return "entries" in hook_run
     return any(
         "unsupported permissionDecision" in str(entry.get("text", ""))
         for entry in entries

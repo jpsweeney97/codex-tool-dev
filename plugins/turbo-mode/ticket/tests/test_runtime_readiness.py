@@ -36,6 +36,29 @@ def _set_nested(mapping: dict[str, object], path: tuple[str, ...], value: object
     target[path[-1]] = value
 
 
+def _run_dir_from_result(
+    project_root: Path,
+    result: ticket_runtime_readiness.ActivationFailure,
+) -> Path:
+    marker = "Run evidence remains under "
+    assert marker in result.message
+    evidence_root = result.message.split(marker, 1)[1].strip().rstrip(".")
+    run_dir = project_root / evidence_root
+    assert run_dir.is_relative_to(project_root)
+    return run_dir
+
+
+def _assert_late_failure_evidence_preserved(project_root: Path, run_dir: Path) -> None:
+    assert run_dir.is_relative_to(project_root)
+    raw_dir = run_dir / "raw"
+    assert (raw_dir / "hook-membrane-events.jsonl").exists()
+    assert (raw_dir / "engine-stdout.json").exists()
+    assert (raw_dir / "payload-before.json").exists()
+    assert (
+        run_dir / "post-direct" / "docs" / "tickets" / "2026-05-20-example.md"
+    ).exists()
+
+
 def _hook_manifest_payload(guard_command: str) -> dict[str, object]:
     return {
         "hooks": {
@@ -217,6 +240,34 @@ def test_valid_installed_runtime_proof_passes_when_executing_root_matches(tmp_pa
     project_root, _installed_root, module, _proof_path = build_valid_runtime_readiness_fixture(
         tmp_path
     )
+
+    result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+
+    assert result.passed is True
+    assert result.error_code is None
+
+
+def test_hook_manifest_path_accepts_resolved_equivalent_path(tmp_path: Path) -> None:
+    project_root, installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    linked_root = tmp_path / "installed-ticket-link"
+    linked_root.symlink_to(installed_root, target_is_directory=True)
+    linked_hook_manifest = linked_root / "hooks" / "hooks.json"
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    run_dir = project_root / proof["raw_evidence"]["run_dir"]
+    inventory_transcript = run_dir / proof["raw_evidence"]["app_server_inventory_transcript"]
+    proof["inventory"]["hook"]["hook_manifest_path"] = str(linked_hook_manifest)
+    _write_jsonl(
+        inventory_transcript,
+        _inventory_transcript_rows(
+            project_root=project_root,
+            hook_manifest=linked_hook_manifest,
+            guard_command=proof["inventory"]["hook"]["guard_command"],
+        ),
+    )
+    proof["inventory"]["transcript_sha256"] = module.sha256_file(inventory_transcript)
+    _write_proof(proof_path, proof)
 
     result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
 
@@ -468,6 +519,7 @@ def test_activated_proof_requires_passed_post_activation_evidence(
         (lambda proof: proof.update({"schema_version": "unexpected"}), "schema_version"),
         (lambda proof: proof.update({"status": "activation_in_progress"}), "not activated"),
         (lambda proof: proof.update({"expires_at": "not-a-timestamp"}), "expires_at"),
+        (lambda proof: proof.update({"expires_at": "2026-05-21T23:59:59"}), "expires_at"),
         (
             lambda proof: proof["activation_scope"].pop("gated_execute_surfaces"),
             "activation_scope.gated_execute_surfaces",
@@ -769,6 +821,30 @@ def test_verifier_binds_guard_command_to_expected_script(tmp_path: Path) -> None
     assert "Guard command" in result.message
 
 
+def test_duplicate_inventory_transcript_response_id_rejects(tmp_path: Path) -> None:
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    run_dir = project_root / proof["raw_evidence"]["run_dir"]
+    inventory_transcript = run_dir / proof["raw_evidence"]["app_server_inventory_transcript"]
+    rows = [
+        json.loads(line)
+        for line in inventory_transcript.read_text(encoding="utf-8").splitlines()
+    ]
+    duplicate = json.loads(json.dumps(rows[1]))
+    rows.append(duplicate)
+    _write_jsonl(inventory_transcript, rows)
+    proof["inventory"]["transcript_sha256"] = module.sha256_file(inventory_transcript)
+    _write_proof(proof_path, proof)
+
+    result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+
+    assert result.passed is False
+    assert result.error_code == "proof_invalid"
+    assert "duplicate response id 1" in result.message
+
+
 def test_build_activation_candidate_returns_candidate_without_writing_final_proof(
     tmp_path: Path,
     monkeypatch,
@@ -789,7 +865,11 @@ def test_build_activation_candidate_returns_candidate_without_writing_final_proo
     monkeypatch.setattr(
         ticket_runtime_readiness,
         "run_activation_smoke",
-        lambda **_kwargs: _fake_smoke_result(tmp_path, project_root=project_root),
+        lambda **kwargs: _fake_smoke_result(
+            tmp_path,
+            project_root=project_root,
+            run_dir=kwargs["run_dir"],
+        ),
     )
 
     result = ticket_runtime_readiness.build_activation_candidate(
@@ -920,7 +1000,11 @@ def test_activate_runtime_writes_final_proof_after_direct_execute_smoke(
     monkeypatch.setattr(
         ticket_runtime_readiness,
         "run_activation_smoke",
-        lambda **_kwargs: _fake_smoke_result(tmp_path, project_root=project_root),
+        lambda **kwargs: _fake_smoke_result(
+            tmp_path,
+            project_root=project_root,
+            run_dir=kwargs["run_dir"],
+        ),
     )
     def _post_activation_smoke(**kwargs):
         proof = json.loads(kwargs["proof_path"].read_text(encoding="utf-8"))
@@ -987,7 +1071,11 @@ def test_activate_runtime_propagates_post_activation_smoke_failure(
     monkeypatch.setattr(
         ticket_runtime_readiness,
         "run_activation_smoke",
-        lambda **_kwargs: _fake_smoke_result(tmp_path, project_root=project_root),
+        lambda **kwargs: _fake_smoke_result(
+            tmp_path,
+            project_root=project_root,
+            run_dir=kwargs["run_dir"],
+        ),
     )
 
     def _blocked_post_smoke(**_kwargs):
@@ -1040,7 +1128,11 @@ def test_activate_runtime_removes_temp_proof_after_verification_failure(
     monkeypatch.setattr(
         ticket_runtime_readiness,
         "run_activation_smoke",
-        lambda **_kwargs: _fake_smoke_result(tmp_path, project_root=project_root),
+        lambda **kwargs: _fake_smoke_result(
+            tmp_path,
+            project_root=project_root,
+            run_dir=kwargs["run_dir"],
+        ),
     )
     monkeypatch.setattr(
         ticket_runtime_readiness,
@@ -1064,14 +1156,11 @@ def test_activate_runtime_removes_temp_proof_after_verification_failure(
 
     assert result.proof is None
     assert result.error_code == "payload_hash_mismatch"
+    assert "Direct execute smoke already succeeded" in result.message
     assert not (project_root / ".codex" / "ticket-runtime-proof.json").exists()
-    assert not (
-        project_root
-        / ".codex"
-        / "ticket-runtime-smoke"
-        / "run-1"
-        / "activated-ticket-runtime-proof.json"
-    ).exists()
+    run_dir = _run_dir_from_result(project_root, result)
+    assert not (run_dir / "activated-ticket-runtime-proof.json").exists()
+    _assert_late_failure_evidence_preserved(project_root, run_dir)
 
 
 def test_activate_runtime_removes_temp_proof_after_verification_exception(
@@ -1094,7 +1183,11 @@ def test_activate_runtime_removes_temp_proof_after_verification_exception(
     monkeypatch.setattr(
         ticket_runtime_readiness,
         "run_activation_smoke",
-        lambda **_kwargs: _fake_smoke_result(tmp_path, project_root=project_root),
+        lambda **kwargs: _fake_smoke_result(
+            tmp_path,
+            project_root=project_root,
+            run_dir=kwargs["run_dir"],
+        ),
     )
     monkeypatch.setattr(
         ticket_runtime_readiness,
@@ -1119,15 +1212,12 @@ def test_activate_runtime_removes_temp_proof_after_verification_exception(
 
     assert result.proof is None
     assert result.error_code == "deterministic_driver_unavailable"
+    assert "Direct execute smoke already succeeded" in result.message
     assert "tampered proof path" in result.message
     assert not (project_root / ".codex" / "ticket-runtime-proof.json").exists()
-    assert not (
-        project_root
-        / ".codex"
-        / "ticket-runtime-smoke"
-        / "run-1"
-        / "activated-ticket-runtime-proof.json"
-    ).exists()
+    run_dir = _run_dir_from_result(project_root, result)
+    assert not (run_dir / "activated-ticket-runtime-proof.json").exists()
+    _assert_late_failure_evidence_preserved(project_root, run_dir)
 
 
 def test_activate_runtime_removes_temp_proof_after_final_write_failure(
@@ -1150,7 +1240,11 @@ def test_activate_runtime_removes_temp_proof_after_final_write_failure(
     monkeypatch.setattr(
         ticket_runtime_readiness,
         "run_activation_smoke",
-        lambda **_kwargs: _fake_smoke_result(tmp_path, project_root=project_root),
+        lambda **kwargs: _fake_smoke_result(
+            tmp_path,
+            project_root=project_root,
+            run_dir=kwargs["run_dir"],
+        ),
     )
     monkeypatch.setattr(
         ticket_runtime_readiness,
@@ -1184,20 +1278,9 @@ def test_activate_runtime_removes_temp_proof_after_final_write_failure(
     assert "Direct execute smoke already succeeded" in result.message
     assert "final proof denied" in result.message
     assert not (project_root / ".codex" / "ticket-runtime-proof.json").exists()
-    assert not (
-        project_root
-        / ".codex"
-        / "ticket-runtime-smoke"
-        / "run-1"
-        / "activated-ticket-runtime-proof.json"
-    ).exists()
-    assert not (
-        project_root
-        / ".codex"
-        / "ticket-runtime-smoke"
-        / "run-1"
-        / "activated-ticket-runtime-proof.json"
-    ).exists()
+    run_dir = _run_dir_from_result(project_root, result)
+    assert not (run_dir / "activated-ticket-runtime-proof.json").exists()
+    _assert_late_failure_evidence_preserved(project_root, run_dir)
 
 
 def test_run_activation_smoke_uses_uv_run_python_launcher(
@@ -1566,6 +1649,85 @@ def test_run_activation_smoke_ignores_unrelated_hook_completions(
     )
 
     assert result["hook_membrane_proof"]["status"] == "passed"
+
+
+def test_run_activation_smoke_rejects_malformed_hook_entries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    installed_root = tmp_path / "installed"
+    tickets_dir.mkdir(parents=True)
+    activation_command = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_activation_smoke.py "
+        f"execute {run_dir / 'payload.json'}"
+    )
+
+    def _fake_turn(**kwargs):
+        assert f"Command: {activation_command}" in kwargs["prompt_text"]
+        return [
+            {
+                "direction": "recv",
+                "body": {
+                    "method": "hook/completed",
+                    "params": {
+                        "run": {
+                            "eventName": "preToolUse",
+                            "sourcePath": str(installed_root / "hooks" / "hooks.json"),
+                            "entries": {"bad": "shape"},
+                        }
+                    },
+                },
+            },
+            {
+                "direction": "recv",
+                "body": {
+                    "params": {
+                        "item": {
+                            "type": "commandExecution",
+                            "id": "cmd-1",
+                            "command": activation_command,
+                            "aggregatedOutput": json.dumps({"state": "ok_create"}),
+                        }
+                    }
+                },
+            },
+        ]
+
+    monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "run_pre_activation_direct_execute_gate_smoke",
+        lambda **_kwargs: {
+            "pre_activation_gated_smokes": {
+                "status": "passed",
+                "required_surfaces": ["direct_execute"],
+                "surface_results": {
+                    "direct_execute": {
+                        "runner": "app_server_turn",
+                        "command": "uv run python -B installed/scripts/ticket_engine_agent.py",
+                        "execute_surface": "direct_execute",
+                        "engine_state": "policy_blocked",
+                        "error_code": "runtime_readiness_required",
+                        "raw_events_sha256": "0" * 64,
+                    }
+                },
+            },
+            "raw_evidence": {"pre_activation_events": "raw/pre-activation-gated-events.jsonl"},
+        },
+    )
+
+    with pytest.raises(ticket_runtime_readiness.RuntimeActivationError) as exc_info:
+        ticket_runtime_readiness.run_activation_smoke(
+            project_root=project_root,
+            tickets_dir=tickets_dir,
+            run_dir=run_dir,
+            installed_ticket_root=installed_root,
+        )
+
+    assert exc_info.value.error_code == "hook_contract_blocked"
 
 
 def test_run_activation_smoke_requires_pre_activation_gate(
@@ -2415,6 +2577,7 @@ def test_collect_installed_runtime_inventory_parses_live_shapes(
     plugin_manifest = installed_root / ".codex-plugin" / "plugin.json"
     hook_manifest = hooks_dir / "hooks.json"
     guard_script = hooks_dir / "ticket_engine_guard.py"
+    linked_root = tmp_path / "installed-ticket-link"
     project_root.mkdir(parents=True)
     marketplace_path.parent.mkdir(parents=True)
     marketplace_path.write_text("{}", encoding="utf-8")
@@ -2427,6 +2590,8 @@ def test_collect_installed_runtime_inventory_parses_live_shapes(
         json.dumps(_hook_manifest_payload(guard_command), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    linked_root.symlink_to(installed_root, target_is_directory=True)
+    linked_hook_manifest = linked_root / "hooks" / "hooks.json"
     transcript = [
         {"direction": "recv", "body": {"id": 0, "result": {"ok": True}}},
         {
@@ -2452,7 +2617,7 @@ def test_collect_installed_runtime_inventory_parses_live_shapes(
                             "eventName": "preToolUse",
                             "matcher": "Bash",
                             "command": guard_command,
-                            "sourcePath": str(hook_manifest),
+                            "sourcePath": str(linked_hook_manifest),
                         }
                     ]
                 },
@@ -2479,7 +2644,61 @@ def test_collect_installed_runtime_inventory_parses_live_shapes(
         project_root / "plugins" / "turbo-mode" / "ticket"
     )
     assert result["inventory"]["installed_runtime_root"] == str(installed_root)
+    assert result["inventory"]["hook"]["hook_manifest_path"] == str(
+        hook_manifest.resolve(strict=False)
+    )
     assert result["inventory"]["hook"]["guard_command"] == guard_command
+
+
+def test_collect_installed_runtime_inventory_rejects_duplicate_response_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    marketplace_path = project_root / ".agents" / "plugins" / "marketplace.json"
+    installed_root = tmp_path / "installed-ticket"
+    hooks_dir = installed_root / "hooks"
+    plugin_manifest = installed_root / ".codex-plugin" / "plugin.json"
+    hook_manifest = hooks_dir / "hooks.json"
+    guard_script = hooks_dir / "ticket_engine_guard.py"
+    project_root.mkdir(parents=True)
+    marketplace_path.parent.mkdir(parents=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    hooks_dir.mkdir(parents=True)
+    plugin_manifest.parent.mkdir(parents=True)
+    plugin_manifest.write_text('{"name":"ticket"}\n', encoding="utf-8")
+    guard_script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    guard_command = f"python3 {guard_script}"
+    hook_manifest.write_text(
+        json.dumps(_hook_manifest_payload(guard_command), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    transcript = _inventory_transcript_rows(
+        project_root=project_root,
+        hook_manifest=hook_manifest,
+        guard_command=guard_command,
+    )
+    transcript.append(json.loads(json.dumps(transcript[1])))
+    monkeypatch.setattr(ticket_runtime_readiness, "_app_server_roundtrip", lambda **_kw: transcript)
+    monkeypatch.setattr(ticket_runtime_readiness, "_capture_codex_version", lambda _exe: "codex 1")
+    monkeypatch.setattr(ticket_runtime_readiness, "_resolve_codex_executable", lambda _exe: "codex")
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "_resolve_executable_sha256_with_reason",
+        lambda _exe: ("0" * 64, None),
+    )
+
+    with pytest.raises(
+        ticket_runtime_readiness.RuntimeActivationError,
+        match="app-server duplicate response id 1",
+    ):
+        ticket_runtime_readiness.collect_installed_runtime_inventory(
+            project_root=project_root,
+            marketplace_path=marketplace_path,
+            run_dir=run_dir,
+            executable="codex",
+        )
 
 
 def test_collect_installed_runtime_inventory_rejects_non_guard_hook_command(

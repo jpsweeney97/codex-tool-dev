@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """User entrypoint for the ticket engine.
 
-Hardcodes request_origin="user". Called by ticket-ops skill.
-Usage: python3 ticket_engine_user.py <subcommand> <payload_file>
+Hardcodes request_origin="user" for user-confirmed Ticket operations.
+Launcher: uv run python -B <PLUGIN_ROOT>/scripts/ticket_engine_user.py <subcommand> <payload_file>
 """
 
 from __future__ import annotations
