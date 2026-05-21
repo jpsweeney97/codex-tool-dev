@@ -1301,6 +1301,7 @@ def engine_execute(
     classify_confidence: float | None = None,
     dedup_fingerprint: str | None = None,
     duplicate_of: str | None = None,
+    runtime_execute_surface: str | None = None,
     runtime_proof_path: Path | None = None,
 ) -> EngineResponse:
     """Execute the mutation: create, update, close, or reopen.
@@ -1335,7 +1336,9 @@ def engine_execute(
 
     # --- Transport-layer trust triple (defense-in-depth for all origins) ---
     allow_direct_execute_provenance_mismatch = (
-        request_origin == "agent" and hook_request_origin == "user"
+        runtime_execute_surface == "direct_execute"
+        and request_origin == "agent"
+        and hook_request_origin == "user"
     )
     if (
         hook_request_origin is not None
@@ -1478,32 +1481,33 @@ def engine_execute(
                     message=f"Defense-in-depth: session create cap ({config.max_creates})",
                     error_code="policy_blocked",
                 )
-        project_root = discover_project_root(tickets_dir)
-        if project_root is None:
-            return EngineResponse(
-                state="policy_blocked",
-                message=(
-                    "Cannot determine project root: no .codex/ or .git/ marker found "
-                    "for runtime readiness verification"
-                ),
-                error_code="policy_blocked",
+        if runtime_execute_surface == "direct_execute":
+            project_root = discover_project_root(tickets_dir)
+            if project_root is None:
+                return EngineResponse(
+                    state="policy_blocked",
+                    message=(
+                        "Cannot determine project root: no .codex/ or .git/ marker found "
+                        "for runtime readiness verification"
+                    ),
+                    error_code="policy_blocked",
+                )
+            runtime_verification = verify_installed_ticket_runtime_readiness_for_execute(
+                project_root=project_root,
+                proof_path=runtime_proof_path,
             )
-        runtime_verification = verify_installed_ticket_runtime_readiness_for_execute(
-            project_root=project_root,
-            proof_path=runtime_proof_path,
-        )
-        if not runtime_verification.passed:
-            return EngineResponse(
-                state="policy_blocked",
-                message=runtime_verification.message,
-                error_code="runtime_readiness_required",
-                data={
-                    "runtime_readiness": {
-                        "error_code": runtime_verification.error_code,
-                        "message": runtime_verification.message,
-                    }
-                },
-            )
+            if not runtime_verification.passed:
+                return EngineResponse(
+                    state="policy_blocked",
+                    message=runtime_verification.message,
+                    error_code="runtime_readiness_required",
+                    data={
+                        "runtime_readiness": {
+                            "error_code": runtime_verification.error_code,
+                            "message": runtime_verification.message,
+                        }
+                    },
+                )
 
     # C-008: dedup_override must be bound to a specific duplicate candidate.
     if action == "create" and dedup_override and not duplicate_of:

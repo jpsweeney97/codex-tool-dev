@@ -516,6 +516,9 @@ def _dispatch(
                 classify_confidence=inp.classify_confidence,
                 dedup_fingerprint=inp.dedup_fingerprint,
                 duplicate_of=inp.duplicate_of,
+                runtime_execute_surface=(
+                    "direct_execute" if request_origin == "agent" else None
+                ),
                 runtime_proof_path=runtime_proof_path,
             )
         elif subcommand == "ingest":

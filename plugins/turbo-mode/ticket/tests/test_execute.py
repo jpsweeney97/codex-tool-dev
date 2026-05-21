@@ -1742,8 +1742,7 @@ class TestExecuteTrustTripleEngine:
             hook_injected=True,
             hook_request_origin="user",
         )
-        assert resp.state == "policy_blocked"
-        assert "classify_intent" in resp.message
+        assert resp.error_code == "origin_mismatch"
 
     def test_agent_direct_execute_requires_runtime_readiness_when_proof_missing(
         self,
@@ -1769,6 +1768,7 @@ class TestExecuteTrustTripleEngine:
             classify_confidence=0.95,
             dedup_fingerprint=compute_dedup_fp(problem, []),
             autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
+            runtime_execute_surface="direct_execute",
         )
         assert resp.state == "policy_blocked"
         assert resp.error_code == "runtime_readiness_required"
@@ -1808,6 +1808,7 @@ class TestExecuteTrustTripleEngine:
             classify_confidence=0.95,
             dedup_fingerprint=compute_dedup_fp(problem, []),
             autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
+            runtime_execute_surface="direct_execute",
         )
         assert resp.state == "ok_create"
 
