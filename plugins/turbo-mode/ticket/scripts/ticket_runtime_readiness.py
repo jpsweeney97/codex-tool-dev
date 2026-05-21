@@ -398,6 +398,20 @@ def _verify_runtime_readiness_proof_fields(
     expected_guard_script_path = installed_root / "hooks" / "ticket_engine_guard.py"
     if guard_script_path != expected_guard_script_path:
         return _reject("guard_script_path_mismatch", "Guard script path mismatch")
+    guard_command = _get_nested_str(proof, "inventory", "hook", "guard_command")
+    guard_command_error = _guard_command_validation_error(
+        guard_command,
+        expected_guard_script_path=expected_guard_script_path,
+    )
+    if guard_command_error is not None:
+        return _reject("proof_invalid", guard_command_error)
+    hook_manifest_error = _hook_manifest_guard_command_validation_error(
+        hook_manifest_path=hook_manifest_path,
+        guard_command=guard_command,
+        expected_guard_script_path=expected_guard_script_path,
+    )
+    if hook_manifest_error is not None:
+        return _reject("proof_invalid", hook_manifest_error)
     missing = _ensure_readable_evidence_file(guard_script_path)
     if missing is not None:
         return missing
@@ -525,6 +539,20 @@ def _verify_runtime_readiness_proof_fields(
     ):
         return _reject("engine_stdout_hash_mismatch", "Engine stdout hash mismatch")
 
+    semantic_error = _verify_raw_runtime_evidence_semantics(
+        proof=proof,
+        installed_root=installed_root,
+        inventory_transcript=inventory_transcript,
+        hook_events=hook_events,
+        pre_events=pre_events,
+        post_events=post_events,
+        engine_stdout=engine_stdout,
+        run_dir=run_dir,
+        allow_pending_post_activation=allow_pending_post_activation,
+    )
+    if semantic_error is not None:
+        return semantic_error
+
     return ReadinessSuccess(
         message="Runtime readiness proof verified for direct_execute",
     )
@@ -571,6 +599,423 @@ def _safe_evidence_sha256(path: Path) -> tuple[str | None, ReadinessFailure | No
         return sha256_file(path), None
     except OSError as exc:
         return None, _raw_evidence_missing(path, str(exc))
+
+
+def _verify_raw_runtime_evidence_semantics(
+    *,
+    proof: dict[str, Any],
+    installed_root: Path,
+    inventory_transcript: Path,
+    hook_events: Path,
+    pre_events: Path,
+    post_events: Path,
+    engine_stdout: Path,
+    run_dir: Path,
+    allow_pending_post_activation: bool,
+) -> ReadinessFailure | None:
+    inventory_rows, evidence_error = _load_jsonl_evidence(
+        inventory_transcript,
+        label="Inventory transcript",
+    )
+    if evidence_error is not None:
+        return evidence_error
+    assert inventory_rows is not None
+    inventory_error = _verify_inventory_transcript_semantics(
+        proof=proof,
+        rows=inventory_rows,
+        installed_root=installed_root,
+    )
+    if inventory_error is not None:
+        return inventory_error
+
+    hook_rows, evidence_error = _load_jsonl_evidence(
+        hook_events,
+        label="Hook membrane transcript",
+    )
+    if evidence_error is not None:
+        return evidence_error
+    assert hook_rows is not None
+    engine_response, evidence_error = _load_json_object_evidence(
+        engine_stdout,
+        label="Activation smoke engine stdout",
+    )
+    if evidence_error is not None:
+        return evidence_error
+    assert engine_response is not None
+    hook_error = _verify_hook_membrane_semantics(
+        proof=proof,
+        rows=hook_rows,
+        installed_root=installed_root,
+        engine_response=engine_response,
+        run_dir=run_dir,
+    )
+    if hook_error is not None:
+        return hook_error
+
+    pre_rows, evidence_error = _load_jsonl_evidence(
+        pre_events,
+        label="Pre-activation transcript",
+    )
+    if evidence_error is not None:
+        return evidence_error
+    assert pre_rows is not None
+    _pre_response, pre_error = _verify_command_transcript_semantics(
+        rows=pre_rows,
+        label="Pre-activation direct_execute transcript",
+        expected_command=_get_nested_str(
+            proof,
+            "pre_activation_gated_smokes",
+            "surface_results",
+            "direct_execute",
+            "command",
+        ),
+        expected_state="policy_blocked",
+        expected_error_code="runtime_readiness_required",
+    )
+    if pre_error is not None:
+        return pre_error
+
+    if allow_pending_post_activation:
+        return None
+
+    post_rows, evidence_error = _load_jsonl_evidence(
+        post_events,
+        label="Post-activation transcript",
+    )
+    if evidence_error is not None:
+        return evidence_error
+    assert post_rows is not None
+    try:
+        hook_run = _ticket_hook_completed_run(post_rows, installed_ticket_root=installed_root)
+    except RuntimeActivationError as exc:
+        return _reject(
+            "proof_invalid",
+            f"Post-activation hook completion invalid: {exc.message}",
+        )
+    if not _hook_run_is_allow_shape(hook_run):
+        return _reject(
+            "proof_invalid",
+            "Post-activation hook completion did not allow direct_execute",
+        )
+    _post_response, post_error = _verify_command_transcript_semantics(
+        rows=post_rows,
+        label="Post-activation direct_execute transcript",
+        expected_command=_get_nested_str(
+            proof,
+            "post_activation_gated_smokes",
+            "surface_results",
+            "direct_execute",
+            "command",
+        ),
+        expected_state="ok_create",
+        expected_ticket_path=_get_nested_str(
+            proof,
+            "post_activation_gated_smokes",
+            "surface_results",
+            "direct_execute",
+            "ticket_path",
+        ),
+    )
+    return post_error
+
+
+def _verify_inventory_transcript_semantics(
+    *,
+    proof: dict[str, Any],
+    rows: list[dict[str, Any]],
+    installed_root: Path,
+) -> ReadinessFailure | None:
+    try:
+        responses = _responses_by_id(rows)
+        _response_result(responses, 0)
+        plugin_read = _response_result(responses, 1)
+        _response_result(responses, 2)
+        _response_result(responses, 3)
+        hooks_result = _response_result(responses, 4)
+        ticket_hook = _find_ticket_hook(hooks_result)
+    except RuntimeActivationError as exc:
+        return _reject("proof_invalid", f"Inventory transcript invalid: {exc.message}")
+
+    if _plugin_read_source_path(plugin_read) != _get_nested_str(
+        proof, "inventory", "plugin_read_source_path"
+    ):
+        return _reject("proof_invalid", "Inventory transcript plugin source path mismatch")
+    if _plugin_read_version(plugin_read) != _get_nested_str(proof, "ticket_plugin", "version"):
+        return _reject("proof_invalid", "Inventory transcript Ticket version mismatch")
+    hook_manifest_path = Path(_get_nested_str(proof, "inventory", "hook", "hook_manifest_path"))
+    if not _same_path(Path(ticket_hook["sourcePath"]), hook_manifest_path):
+        return _reject("proof_invalid", "Inventory transcript hook manifest path mismatch")
+    guard_command = _get_nested_str(proof, "inventory", "hook", "guard_command")
+    if ticket_hook["command"] != guard_command:
+        return _reject("proof_invalid", "Inventory transcript guard command mismatch")
+    expected_guard_script_path = installed_root / "hooks" / "ticket_engine_guard.py"
+    guard_command_error = _guard_command_validation_error(
+        ticket_hook["command"],
+        expected_guard_script_path=expected_guard_script_path,
+    )
+    if guard_command_error is not None:
+        return _reject("proof_invalid", guard_command_error)
+    return None
+
+
+def _verify_hook_membrane_semantics(
+    *,
+    proof: dict[str, Any],
+    rows: list[dict[str, Any]],
+    installed_root: Path,
+    engine_response: dict[str, Any],
+    run_dir: Path,
+) -> ReadinessFailure | None:
+    if engine_response.get("state") != "ok_create":
+        return _reject("proof_invalid", "Activation smoke engine stdout did not report ok_create")
+    try:
+        hook_run = _ticket_hook_completed_run(rows, installed_ticket_root=installed_root)
+    except RuntimeActivationError as exc:
+        return _reject(
+            "proof_invalid",
+            f"Activation smoke hook completion invalid: {exc.message}",
+        )
+    if _hook_run_mentions_unsupported_permission_decision(hook_run):
+        return _reject(
+            "proof_invalid",
+            "Activation smoke hook completion used unsupported permissionDecision output",
+        )
+    transcript_response, transcript_error = _verify_command_transcript_semantics(
+        rows=rows,
+        label="Activation smoke transcript",
+        expected_command=_get_nested_str(proof, "hook_membrane_proof", "command"),
+        expected_state="ok_create",
+    )
+    if transcript_error is not None:
+        return transcript_error
+    if transcript_response != engine_response:
+        return _reject(
+            "proof_invalid",
+            "Activation smoke engine stdout does not match transcript output",
+        )
+    payload_path = Path(_get_nested_str(proof, "hook_membrane_proof", "payload_path"))
+    if payload_path != run_dir / "payload.json":
+        return _reject("proof_invalid", "Activation smoke payload path mismatch")
+    if run_dir.name != _get_nested_str(proof, "hook_membrane_proof", "nonce"):
+        return _reject("nonce_mismatch", "Runtime proof nonce does not match raw run directory")
+    return None
+
+
+def _verify_command_transcript_semantics(
+    *,
+    rows: list[dict[str, Any]],
+    label: str,
+    expected_command: str,
+    expected_state: str,
+    expected_error_code: str | None = None,
+    expected_ticket_path: str | None = None,
+) -> tuple[dict[str, Any] | None, ReadinessFailure | None]:
+    command_items = _command_execution_items(rows)
+    if len(command_items) != 1:
+        return None, _reject(
+            "proof_invalid",
+            f"{label} expected exactly one command execution item, saw {len(command_items)}",
+        )
+    actual_command = command_items[0].get("command")
+    if actual_command != expected_command:
+        return None, _reject("proof_invalid", f"{label} command mismatch")
+    output_text = _command_output_text(rows)
+    response, error = _parse_engine_response_text(output_text, label=label)
+    if error is not None:
+        return None, error
+    assert response is not None
+    if response.get("state") != expected_state:
+        return None, _reject(
+            "proof_invalid",
+            f"{label} did not report {expected_state}",
+        )
+    if expected_error_code is not None and response.get("error_code") != expected_error_code:
+        return None, _reject(
+            "proof_invalid",
+            f"{label} did not report {expected_error_code}",
+        )
+    if expected_ticket_path is not None:
+        data = response.get("data")
+        if not isinstance(data, dict) or data.get("ticket_path") != expected_ticket_path:
+            return None, _reject("proof_invalid", f"{label} ticket path mismatch")
+    return response, None
+
+
+def _load_jsonl_evidence(
+    path: Path,
+    *,
+    label: str,
+) -> tuple[list[dict[str, Any]] | None, ReadinessFailure | None]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return None, _raw_evidence_missing(path, str(exc))
+    rows: list[dict[str, Any]] = []
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            return None, _reject(
+                "proof_invalid",
+                f"{label} contains malformed JSON at line {line_number}: {exc}",
+            )
+        if not isinstance(row, dict):
+            return None, _reject(
+                "proof_invalid",
+                f"{label} row {line_number} must be a JSON object",
+            )
+        rows.append(row)
+    if not rows:
+        return None, _reject("proof_invalid", f"{label} contains no events")
+    return rows, None
+
+
+def _load_json_object_evidence(
+    path: Path,
+    *,
+    label: str,
+) -> tuple[dict[str, Any] | None, ReadinessFailure | None]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return None, _raw_evidence_missing(path, str(exc))
+    return _parse_engine_response_text(text, label=label)
+
+
+def _parse_engine_response_text(
+    text: str,
+    *,
+    label: str,
+) -> tuple[dict[str, Any] | None, ReadinessFailure | None]:
+    if not text.strip():
+        return None, _reject("proof_invalid", f"{label} did not emit engine output")
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return None, _reject("proof_invalid", f"{label} returned invalid engine output: {exc}")
+    if not isinstance(payload, dict):
+        return None, _reject("proof_invalid", f"{label} returned non-object engine output")
+    return payload, None
+
+
+def _guard_command_validation_error(
+    guard_command: str,
+    *,
+    expected_guard_script_path: Path,
+) -> str | None:
+    if not guard_command.strip():
+        return "Guard command is empty"
+    if not _command_invokes_script(
+        guard_command,
+        expected_script_path=expected_guard_script_path,
+    ):
+        return f"Guard command does not invoke {expected_guard_script_path}"
+    return None
+
+
+def _hook_manifest_guard_command_validation_error(
+    *,
+    hook_manifest_path: Path,
+    guard_command: str,
+    expected_guard_script_path: Path,
+) -> str | None:
+    commands, manifest_error = _hook_manifest_guard_commands(hook_manifest_path)
+    if manifest_error is not None:
+        return manifest_error
+    if commands != [guard_command]:
+        return "Hook manifest guard command mismatch"
+    return _guard_command_validation_error(
+        guard_command,
+        expected_guard_script_path=expected_guard_script_path,
+    )
+
+
+def _hook_manifest_guard_commands(path: Path) -> tuple[list[str], str | None]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [], f"Hook manifest command parse failed: {exc}"
+    if not isinstance(payload, dict):
+        return [], "Hook manifest must be a JSON object"
+    hooks = payload.get("hooks")
+    if not isinstance(hooks, dict):
+        return [], "Hook manifest missing hooks object"
+    pre_tool_use = hooks.get("PreToolUse")
+    if not isinstance(pre_tool_use, list):
+        return [], "Hook manifest missing PreToolUse hooks"
+    commands: list[str] = []
+    for entry in pre_tool_use:
+        if not isinstance(entry, dict) or entry.get("matcher") != "Bash":
+            continue
+        hook_records = entry.get("hooks")
+        if not isinstance(hook_records, list):
+            continue
+        for hook_record in hook_records:
+            if not isinstance(hook_record, dict) or hook_record.get("type") != "command":
+                continue
+            command = hook_record.get("command")
+            if isinstance(command, str) and command.strip():
+                commands.append(command)
+    if not commands:
+        return [], "Hook manifest missing Ticket guard command"
+    return commands, None
+
+
+def _command_invokes_script(command: str, *, expected_script_path: Path) -> bool:
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return False
+    if not argv:
+        return False
+    expected = expected_script_path.resolve(strict=False)
+    if _path_token_matches(argv[0], expected):
+        return len(argv) == 1
+    index = 0
+    if Path(argv[0]).name == "uv" and len(argv) >= 3 and argv[1] == "run":
+        index = 2
+    if index >= len(argv) or not _is_python_executable(argv[index]):
+        return False
+    script_index = _python_script_index(argv, index + 1)
+    return (
+        script_index is not None
+        and script_index == len(argv) - 1
+        and _path_token_matches(argv[script_index], expected)
+    )
+
+
+def _python_script_index(argv: list[str], start: int) -> int | None:
+    index = start
+    flags_with_value = {"-W", "-X"}
+    while index < len(argv):
+        token = argv[index]
+        if token in {"-c", "-m"}:
+            return None
+        if token in flags_with_value:
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return index
+    return None
+
+
+def _is_python_executable(token: str) -> bool:
+    name = Path(token).name
+    return name == "python" or name.startswith("python3")
+
+
+def _path_token_matches(token: str, expected: Path) -> bool:
+    if not token:
+        return False
+    return Path(token).resolve(strict=False) == expected
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    return left.resolve(strict=False) == right.resolve(strict=False)
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -959,6 +1404,20 @@ def collect_installed_runtime_inventory(
 
     ticket_hook = _find_ticket_hook(hooks_result)
     installed_runtime_root = Path(ticket_hook["sourcePath"]).resolve(strict=False).parents[1]
+    expected_guard_script_path = installed_runtime_root / "hooks" / "ticket_engine_guard.py"
+    guard_command_error = _guard_command_validation_error(
+        ticket_hook["command"],
+        expected_guard_script_path=expected_guard_script_path,
+    )
+    if guard_command_error is not None:
+        raise RuntimeActivationError("deterministic_driver_unavailable", guard_command_error)
+    hook_manifest_error = _hook_manifest_guard_command_validation_error(
+        hook_manifest_path=Path(ticket_hook["sourcePath"]),
+        guard_command=ticket_hook["command"],
+        expected_guard_script_path=expected_guard_script_path,
+    )
+    if hook_manifest_error is not None:
+        raise RuntimeActivationError("deterministic_driver_unavailable", hook_manifest_error)
     plugin_manifest_path = installed_runtime_root / ".codex-plugin" / "plugin.json"
     if not plugin_manifest_path.is_file():
         raise RuntimeActivationError(
@@ -1004,12 +1463,8 @@ def collect_installed_runtime_inventory(
                 "hook_manifest_path": ticket_hook["sourcePath"],
                 "hook_manifest_sha256": sha256_file(Path(ticket_hook["sourcePath"])),
                 "guard_command": ticket_hook["command"],
-                "guard_script_path": str(
-                    installed_runtime_root / "hooks" / "ticket_engine_guard.py"
-                ),
-                "guard_script_sha256": sha256_file(
-                    installed_runtime_root / "hooks" / "ticket_engine_guard.py"
-                ),
+                "guard_script_path": str(expected_guard_script_path),
+                "guard_script_sha256": sha256_file(expected_guard_script_path),
             },
         },
         "raw_inventory_transcript": transcript_path,

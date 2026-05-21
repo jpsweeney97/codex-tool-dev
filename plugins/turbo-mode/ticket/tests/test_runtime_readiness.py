@@ -20,6 +20,13 @@ def _write_proof(proof_path: Path, proof: dict[str, object]) -> None:
     proof_path.write_text(json.dumps(proof, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
+    path.write_text(
+        "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+
 def _set_nested(mapping: dict[str, object], path: tuple[str, ...], value: object) -> None:
     target = mapping
     for key in path[:-1]:
@@ -27,6 +34,97 @@ def _set_nested(mapping: dict[str, object], path: tuple[str, ...], value: object
         assert isinstance(child, dict)
         target = child
     target[path[-1]] = value
+
+
+def _hook_manifest_payload(guard_command: str) -> dict[str, object]:
+    return {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": guard_command,
+                            "timeout": 10,
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+
+
+def _hook_completed_row(source_path: Path) -> dict[str, object]:
+    return {
+        "direction": "recv",
+        "body": {
+            "method": "hook/completed",
+            "params": {
+                "run": {
+                    "eventName": "preToolUse",
+                    "sourcePath": str(source_path),
+                    "entries": [{"kind": "feedback", "text": "Ticket command validated"}],
+                }
+            },
+        },
+    }
+
+
+def _command_item_row(command: str, output: dict[str, object]) -> dict[str, object]:
+    return {
+        "direction": "recv",
+        "body": {
+            "params": {
+                "item": {
+                    "type": "commandExecution",
+                    "id": "cmd-1",
+                    "command": command,
+                    "aggregatedOutput": json.dumps(output),
+                }
+            }
+        },
+    }
+
+
+def _inventory_transcript_rows(
+    *,
+    project_root: Path,
+    hook_manifest: Path,
+    guard_command: str,
+) -> list[dict[str, object]]:
+    return [
+        {"direction": "recv", "body": {"id": 0, "result": {"ok": True}}},
+        {
+            "direction": "recv",
+            "body": {
+                "id": 1,
+                "result": {
+                    "source": {"path": str(project_root / "plugins" / "turbo-mode" / "ticket")},
+                    "plugin": {"summary": {"version": "1.4.0"}},
+                },
+            },
+        },
+        {"direction": "recv", "body": {"id": 2, "result": {"plugins": []}}},
+        {"direction": "recv", "body": {"id": 3, "result": {"skills": []}}},
+        {
+            "direction": "recv",
+            "body": {
+                "id": 4,
+                "result": {
+                    "hooks": [
+                        {
+                            "pluginId": "ticket@turbo-mode",
+                            "eventName": "preToolUse",
+                            "matcher": "Bash",
+                            "command": guard_command,
+                            "sourcePath": str(hook_manifest),
+                        }
+                    ]
+                },
+            },
+        },
+    ]
 
 
 def test_missing_runtime_proof_rejects(tmp_path: Path) -> None:
@@ -535,6 +633,142 @@ def test_payload_hash_mismatch_rejects(tmp_path: Path) -> None:
     assert result.error_code == "payload_hash_mismatch"
 
 
+def test_verifier_rederives_pre_activation_gate_from_raw_transcript(tmp_path: Path) -> None:
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    run_dir = project_root / proof["raw_evidence"]["run_dir"]
+    pre_events = run_dir / proof["raw_evidence"]["pre_activation_events"]
+    pre_result = proof["pre_activation_gated_smokes"]["surface_results"]["direct_execute"]
+    pre_events.write_text(
+        json.dumps(
+            _command_item_row(
+                pre_result["command"],
+                {"state": "policy_blocked", "error_code": "proof_invalid"},
+            ),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    pre_result["raw_events_sha256"] = module.sha256_file(pre_events)
+    _write_proof(proof_path, proof)
+
+    result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+
+    assert result.passed is False
+    assert result.error_code == "proof_invalid"
+    assert "runtime_readiness_required" in result.message
+
+
+def test_verifier_rederives_post_activation_result_from_raw_transcript(tmp_path: Path) -> None:
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    run_dir = project_root / proof["raw_evidence"]["run_dir"]
+    hook_manifest = Path(proof["inventory"]["hook"]["hook_manifest_path"])
+    post_events = run_dir / proof["raw_evidence"]["post_activation_events"]
+    post_result = proof["post_activation_gated_smokes"]["surface_results"]["direct_execute"]
+    _write_jsonl(
+        post_events,
+        [
+            _hook_completed_row(hook_manifest),
+            _command_item_row(
+                post_result["command"],
+                {"state": "policy_blocked", "error_code": "runtime_readiness_required"},
+            ),
+        ],
+    )
+    post_result["raw_events_sha256"] = module.sha256_file(post_events)
+    _write_proof(proof_path, proof)
+
+    result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+
+    assert result.passed is False
+    assert result.error_code == "proof_invalid"
+    assert "ok_create" in result.message
+
+
+def test_verifier_rederives_hook_membrane_completion_from_raw_transcript(tmp_path: Path) -> None:
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    run_dir = project_root / proof["raw_evidence"]["run_dir"]
+    hook_events = run_dir / proof["raw_evidence"]["hook_membrane_events"]
+    _write_jsonl(
+        hook_events,
+        [
+            _command_item_row(
+                proof["hook_membrane_proof"]["command"],
+                {"state": "ok_create"},
+            )
+        ],
+    )
+    proof["hook_membrane_proof"]["raw_events_sha256"] = module.sha256_file(hook_events)
+    _write_proof(proof_path, proof)
+
+    result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+
+    assert result.passed is False
+    assert result.error_code == "proof_invalid"
+    assert "hook completion" in result.message
+
+
+def test_verifier_rederives_activation_engine_stdout_from_raw_file(tmp_path: Path) -> None:
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    run_dir = project_root / proof["raw_evidence"]["run_dir"]
+    engine_stdout = run_dir / proof["raw_evidence"]["engine_stdout"]
+    engine_stdout.write_text('{"state":"policy_blocked"}\n', encoding="utf-8")
+    proof["hook_membrane_proof"]["engine_stdout_sha256"] = module.sha256_file(engine_stdout)
+    _write_proof(proof_path, proof)
+
+    result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+
+    assert result.passed is False
+    assert result.error_code == "proof_invalid"
+    assert "ok_create" in result.message
+
+
+def test_verifier_binds_guard_command_to_expected_script(tmp_path: Path) -> None:
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+    run_dir = project_root / proof["raw_evidence"]["run_dir"]
+    hook_manifest = Path(proof["inventory"]["hook"]["hook_manifest_path"])
+    inventory_transcript = run_dir / proof["raw_evidence"]["app_server_inventory_transcript"]
+    wrong_guard = f"python3 {tmp_path / 'other' / 'ticket_engine_guard.py'}"
+    hook_manifest.write_text(
+        json.dumps(_hook_manifest_payload(wrong_guard), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    _write_jsonl(
+        inventory_transcript,
+        _inventory_transcript_rows(
+            project_root=project_root,
+            hook_manifest=hook_manifest,
+            guard_command=wrong_guard,
+        ),
+    )
+    proof["inventory"]["hook"]["guard_command"] = wrong_guard
+    proof["inventory"]["hook"]["hook_manifest_sha256"] = module.sha256_file(hook_manifest)
+    proof["inventory"]["transcript_sha256"] = module.sha256_file(inventory_transcript)
+    _write_proof(proof_path, proof)
+
+    result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
+
+    assert result.passed is False
+    assert result.error_code == "proof_invalid"
+    assert "Guard command" in result.message
+
+
 def test_build_activation_candidate_returns_candidate_without_writing_final_proof(
     tmp_path: Path,
     monkeypatch,
@@ -612,8 +846,8 @@ def test_build_activation_candidate_output_verifies_with_real_installed_verifier
     proof = result.proof
     run_dir = project_root / proof["raw_evidence"]["run_dir"]
     proof["status"] = "activated"
-    proof.update(_fake_post_activation_smoke_result(run_dir=run_dir))
     installed_root = Path(proof["ticket_plugin"]["installed_cache_root"])
+    proof.update(_fake_post_activation_smoke_result(run_dir=run_dir, installed_root=installed_root))
     installed_module_path = installed_root / "scripts" / "ticket_runtime_readiness.py"
     installed_module_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(MODULE_SOURCE, installed_module_path)
@@ -2187,8 +2421,12 @@ def test_collect_installed_runtime_inventory_parses_live_shapes(
     hooks_dir.mkdir(parents=True)
     plugin_manifest.parent.mkdir(parents=True)
     plugin_manifest.write_text('{"name":"ticket"}\n', encoding="utf-8")
-    hook_manifest.write_text('{"hooks":{"PreToolUse":[]}}\n', encoding="utf-8")
     guard_script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    guard_command = f"python3 {guard_script}"
+    hook_manifest.write_text(
+        json.dumps(_hook_manifest_payload(guard_command), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     transcript = [
         {"direction": "recv", "body": {"id": 0, "result": {"ok": True}}},
         {
@@ -2213,7 +2451,7 @@ def test_collect_installed_runtime_inventory_parses_live_shapes(
                             "pluginId": "ticket@turbo-mode",
                             "eventName": "preToolUse",
                             "matcher": "Bash",
-                            "command": f"python3 {guard_script}",
+                            "command": guard_command,
                             "sourcePath": str(hook_manifest),
                         }
                     ]
@@ -2241,7 +2479,69 @@ def test_collect_installed_runtime_inventory_parses_live_shapes(
         project_root / "plugins" / "turbo-mode" / "ticket"
     )
     assert result["inventory"]["installed_runtime_root"] == str(installed_root)
-    assert result["inventory"]["hook"]["guard_command"] == f"python3 {guard_script}"
+    assert result["inventory"]["hook"]["guard_command"] == guard_command
+
+
+def test_collect_installed_runtime_inventory_rejects_non_guard_hook_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    marketplace_path = project_root / ".agents" / "plugins" / "marketplace.json"
+    installed_root = tmp_path / "installed-ticket"
+    hooks_dir = installed_root / "hooks"
+    plugin_manifest = installed_root / ".codex-plugin" / "plugin.json"
+    hook_manifest = hooks_dir / "hooks.json"
+    guard_script = hooks_dir / "ticket_engine_guard.py"
+    wrong_command = f"python3 {tmp_path / 'wrong' / 'ticket_engine_guard.py'}"
+    project_root.mkdir(parents=True)
+    marketplace_path.parent.mkdir(parents=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    hooks_dir.mkdir(parents=True)
+    plugin_manifest.parent.mkdir(parents=True)
+    plugin_manifest.write_text('{"name":"ticket"}\n', encoding="utf-8")
+    guard_script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    hook_manifest.write_text(
+        json.dumps(_hook_manifest_payload(wrong_command), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    transcript = _inventory_transcript_rows(
+        project_root=project_root,
+        hook_manifest=hook_manifest,
+        guard_command=wrong_command,
+    )
+    monkeypatch.setattr(ticket_runtime_readiness, "_app_server_roundtrip", lambda **_kw: transcript)
+    monkeypatch.setattr(ticket_runtime_readiness, "_capture_codex_version", lambda _exe: "codex 1")
+    monkeypatch.setattr(ticket_runtime_readiness, "_resolve_codex_executable", lambda _exe: "codex")
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "_resolve_executable_sha256_with_reason",
+        lambda _exe: ("0" * 64, None),
+    )
+
+    with pytest.raises(ticket_runtime_readiness.RuntimeActivationError, match="Guard command"):
+        ticket_runtime_readiness.collect_installed_runtime_inventory(
+            project_root=project_root,
+            marketplace_path=marketplace_path,
+            run_dir=run_dir,
+            executable="codex",
+        )
+
+
+def test_guard_command_parser_requires_canonical_script_as_final_token(tmp_path: Path) -> None:
+    guard_script = tmp_path / "ticket" / "hooks" / "ticket_engine_guard.py"
+    guard_script.parent.mkdir(parents=True)
+    guard_script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+    assert ticket_runtime_readiness._command_invokes_script(
+        f"uv run python -B {guard_script}",
+        expected_script_path=guard_script,
+    )
+    assert not ticket_runtime_readiness._command_invokes_script(
+        f"python3 {guard_script} ; python3 /tmp/other.py",
+        expected_script_path=guard_script,
+    )
 
 
 @pytest.mark.parametrize(
@@ -2294,8 +2594,12 @@ def test_collect_installed_runtime_inventory_rejects_missing_version_or_required
     hooks_dir.mkdir(parents=True)
     plugin_manifest.parent.mkdir(parents=True)
     plugin_manifest.write_text('{"name":"ticket"}\n', encoding="utf-8")
-    hook_manifest.write_text('{"hooks":{"PreToolUse":[]}}\n', encoding="utf-8")
     guard_script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    guard_command = f"python3 {guard_script}"
+    hook_manifest.write_text(
+        json.dumps(_hook_manifest_payload(guard_command), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
     transcript = [
         {"direction": "recv", "body": {"id": 0, "result": {"ok": True}}},
@@ -2312,7 +2616,7 @@ def test_collect_installed_runtime_inventory_rejects_missing_version_or_required
                             "pluginId": "ticket@turbo-mode",
                             "eventName": "preToolUse",
                             "matcher": "Bash",
-                            "command": f"python3 {guard_script}",
+                            "command": guard_command,
                             "sourcePath": str(hook_manifest),
                         }
                     ]
@@ -2451,11 +2755,22 @@ def _fake_inventory_result(
     plugin_manifest.parent.mkdir(parents=True, exist_ok=True)
     plugin_manifest.write_text('{"name":"ticket","version":"1.4.0"}\n', encoding="utf-8")
     guard_script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
-    hook_manifest.write_text('{"hooks":{"PreToolUse":[]}}\n', encoding="utf-8")
+    guard_command = f"python3 {guard_script}"
+    hook_manifest.write_text(
+        json.dumps(_hook_manifest_payload(guard_command), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     raw_dir = run_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     transcript = raw_dir / "app-server-inventory-transcript.jsonl"
-    transcript.write_text('{"direction":"recv"}\n', encoding="utf-8")
+    _write_jsonl(
+        transcript,
+        _inventory_transcript_rows(
+            project_root=tmp_path / "project",
+            hook_manifest=hook_manifest,
+            guard_command=guard_command,
+        ),
+    )
     return {
         "runtime_identity": {
             "codex_version": "codex-cli 0.132.0",
@@ -2487,7 +2802,7 @@ def _fake_inventory_result(
                 "matcher": "Bash",
                 "hook_manifest_path": str(hook_manifest),
                 "hook_manifest_sha256": ticket_runtime_readiness.sha256_file(hook_manifest),
-                "guard_command": f"python3 {guard_script}",
+                "guard_command": guard_command,
                 "guard_script_path": str(guard_script),
                 "guard_script_sha256": ticket_runtime_readiness.sha256_file(guard_script),
             },
@@ -2519,18 +2834,34 @@ def _fake_smoke_result(
     app_server_stderr = raw_dir / "app-server-stderr.txt"
     pre_events = raw_dir / "pre-activation-gated-events.jsonl"
     post_events = raw_dir / "post-activation-gated-events.jsonl"
+    hook_manifest = tmp_path / "installed-ticket" / "hooks" / "hooks.json"
+    activation_command = (
+        "uv run python -B installed/scripts/ticket_engine_activation_smoke.py execute payload.json"
+    )
+    pre_command = "uv run python -B installed/scripts/ticket_engine_agent.py execute payload.json"
     payload_before.write_text('{"tickets_dir":"docs/tickets"}\n', encoding="utf-8")
     payload_after.write_text(
         '{"tickets_dir":"docs/tickets","hook_injected":true}\n', encoding="utf-8"
     )
-    hook_events.write_text('{"method":"hook/completed"}\n', encoding="utf-8")
+    _write_jsonl(
+        hook_events,
+        [
+            _hook_completed_row(hook_manifest),
+            _command_item_row(activation_command, {"state": "ok_create"}),
+        ],
+    )
     engine_stdout.write_text('{"state":"ok_create"}\n', encoding="utf-8")
     app_server_stderr.write_text("", encoding="utf-8")
-    pre_events.write_text('{"method":"turn/completed"}\n', encoding="utf-8")
-    post_events.write_text('{"method":"turn/completed"}\n', encoding="utf-8")
-    activation_command = (
-        "uv run python -B installed/scripts/ticket_engine_activation_smoke.py execute payload.json"
+    _write_jsonl(
+        pre_events,
+        [
+            _command_item_row(
+                pre_command,
+                {"state": "policy_blocked", "error_code": "runtime_readiness_required"},
+            )
+        ],
     )
+    post_events.write_text('{"method":"turn/completed"}\n', encoding="utf-8")
     return {
         "run_nonce": run_dir.name,
         "hook_membrane_proof": {
@@ -2549,10 +2880,7 @@ def _fake_smoke_result(
             "surface_results": {
                 "direct_execute": {
                     "runner": "app_server_turn",
-                    "command": (
-                        "uv run python -B installed/scripts/ticket_engine_agent.py "
-                        "execute payload.json"
-                    ),
+                    "command": pre_command,
                     "execute_surface": "direct_execute",
                     "engine_state": "policy_blocked",
                     "error_code": "runtime_readiness_required",
@@ -2582,14 +2910,30 @@ def _fake_smoke_result(
     }
 
 
-def _fake_post_activation_smoke_result(*, run_dir: Path) -> dict[str, object]:
+def _fake_post_activation_smoke_result(
+    *,
+    run_dir: Path,
+    installed_root: Path | None = None,
+) -> dict[str, object]:
     raw_dir = run_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     post_events = raw_dir / "post-activation-gated-events.jsonl"
-    post_events.write_text('{"method":"turn/completed"}\n', encoding="utf-8")
+    active_installed_root = installed_root or run_dir / "installed-ticket"
+    hook_manifest = active_installed_root / "hooks" / "hooks.json"
     ticket_path = run_dir / "post-direct" / "docs" / "tickets" / "2026-05-20-example.md"
     ticket_path.parent.mkdir(parents=True, exist_ok=True)
     ticket_path.write_text("# T-20260520-01: Runtime activation smoke\n", encoding="utf-8")
+    command = "uv run python -B installed/scripts/ticket_engine_agent.py execute payload.json"
+    _write_jsonl(
+        post_events,
+        [
+            _hook_completed_row(hook_manifest),
+            _command_item_row(
+                command,
+                {"state": "ok_create", "data": {"ticket_path": str(ticket_path)}},
+            ),
+        ],
+    )
     return {
         "post_activation_gated_smokes": {
             "status": "passed",
@@ -2597,10 +2941,7 @@ def _fake_post_activation_smoke_result(*, run_dir: Path) -> dict[str, object]:
             "surface_results": {
                 "direct_execute": {
                     "runner": "app_server_turn",
-                    "command": (
-                        "uv run python -B installed/scripts/ticket_engine_agent.py "
-                        "execute payload.json"
-                    ),
+                    "command": command,
                     "execute_surface": "direct_execute",
                     "runtime_readiness_required": True,
                     "engine_state": "ok_create",
@@ -2633,10 +2974,6 @@ def build_valid_runtime_readiness_fixture(
     app_server_stderr_path = raw_dir / "app-server-stderr.txt"
     post_ticket_path = run_dir / "post-direct" / "docs" / "tickets" / "2026-05-20-example.md"
 
-    inventory_path.write_text('{"direction":"recv"}\n', encoding="utf-8")
-    hook_events_path.write_text('{"method":"hook/completed"}\n', encoding="utf-8")
-    pre_events_path.write_text('{"method":"turn/completed"}\n', encoding="utf-8")
-    post_events_path.write_text('{"method":"turn/completed"}\n', encoding="utf-8")
     payload_before_path.write_text('{"tickets_dir":"docs/tickets"}\n', encoding="utf-8")
     payload_after_path.write_text(
         '{"tickets_dir":"docs/tickets","hook_injected":true}\n', encoding="utf-8"
@@ -2657,14 +2994,54 @@ def build_valid_runtime_readiness_fixture(
     plugin_manifest.parent.mkdir(parents=True, exist_ok=True)
 
     plugin_manifest.write_text('{"name":"ticket","version":"1.4.0"}\n', encoding="utf-8")
-    hook_manifest.write_text('{"hooks":{"PreToolUse":[]}}\n', encoding="utf-8")
     guard_script.write_text("#!/usr/bin/env python3\nprint('guard')\n", encoding="utf-8")
+    guard_command = f"python3 {guard_script}"
+    hook_manifest.write_text(
+        json.dumps(_hook_manifest_payload(guard_command), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
     copied_module_path = scripts_dir / "ticket_runtime_readiness.py"
     shutil.copy2(MODULE_SOURCE, copied_module_path)
     module = load_module(copied_module_path)
     activation_command = (
         "uv run python -B installed/scripts/ticket_engine_activation_smoke.py execute payload.json"
+    )
+    pre_command = "uv run python -B installed/scripts/ticket_engine_agent.py execute payload.json"
+    post_command = pre_command
+    _write_jsonl(
+        inventory_path,
+        _inventory_transcript_rows(
+            project_root=project_root,
+            hook_manifest=hook_manifest,
+            guard_command=guard_command,
+        ),
+    )
+    _write_jsonl(
+        hook_events_path,
+        [
+            _hook_completed_row(hook_manifest),
+            _command_item_row(activation_command, {"state": "ok_create"}),
+        ],
+    )
+    _write_jsonl(
+        pre_events_path,
+        [
+            _command_item_row(
+                pre_command,
+                {"state": "policy_blocked", "error_code": "runtime_readiness_required"},
+            )
+        ],
+    )
+    _write_jsonl(
+        post_events_path,
+        [
+            _hook_completed_row(hook_manifest),
+            _command_item_row(
+                post_command,
+                {"state": "ok_create", "data": {"ticket_path": str(post_ticket_path)}},
+            ),
+        ],
     )
 
     proof = {
@@ -2710,7 +3087,7 @@ def build_valid_runtime_readiness_fixture(
                 "matcher": "Bash",
                 "hook_manifest_path": str(hook_manifest),
                 "hook_manifest_sha256": module.sha256_file(hook_manifest),
-                "guard_command": f"python3 {guard_script}",
+                "guard_command": guard_command,
                 "guard_script_path": str(guard_script),
                 "guard_script_sha256": module.sha256_file(guard_script),
             },
@@ -2733,10 +3110,7 @@ def build_valid_runtime_readiness_fixture(
             "surface_results": {
                 "direct_execute": {
                     "runner": "app_server_turn",
-                    "command": (
-                        "uv run python -B installed/scripts/ticket_engine_agent.py "
-                        "execute payload.json"
-                    ),
+                    "command": pre_command,
                     "execute_surface": "direct_execute",
                     "engine_state": "policy_blocked",
                     "error_code": "runtime_readiness_required",
@@ -2750,10 +3124,7 @@ def build_valid_runtime_readiness_fixture(
             "surface_results": {
                 "direct_execute": {
                     "runner": "app_server_turn",
-                    "command": (
-                        "uv run python -B installed/scripts/ticket_engine_agent.py "
-                        "execute payload.json"
-                    ),
+                    "command": post_command,
                     "execute_surface": "direct_execute",
                     "runtime_readiness_required": True,
                     "engine_state": "ok_create",
