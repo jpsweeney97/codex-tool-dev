@@ -19,6 +19,7 @@ from typing import Any, Literal, TypeAlias
 
 REQUEST_TIMEOUT_SECONDS = 30.0
 RUNTIME_PROOF_PATH_ENV = "TICKET_RUNTIME_PROOF_PATH"
+RUNTIME_ACTIVATION_BOOTSTRAP_ENV = "TICKET_RUNTIME_ACTIVATION_BOOTSTRAP"
 _POST_DIRECT_AUTONOMY_CONFIG = "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n"
 
 RuntimeReadinessErrorCode: TypeAlias = Literal[
@@ -179,6 +180,7 @@ def verify_installed_ticket_runtime_readiness_for_execute(
     *,
     project_root: Path,
     proof_path: Path | None = None,
+    allow_activation_bootstrap: bool = False,
 ) -> RuntimeReadinessVerification:
     resolved_project_root = project_root.resolve(strict=False)
     active_proof_path = proof_path or (
@@ -196,7 +198,19 @@ def verify_installed_ticket_runtime_readiness_for_execute(
 
     if proof.get("schema_version") != "installed_ticket_runtime_readiness-v1":
         return _reject("proof_invalid", "Unexpected runtime proof schema_version")
-    if proof.get("status") != "activated":
+    status = proof.get("status")
+    bootstrap_allowed = (
+        allow_activation_bootstrap
+        and proof_path is not None
+        and active_proof_path.name == "activated-ticket-runtime-proof.json"
+    )
+    if bootstrap_allowed:
+        if status != "activation_in_progress":
+            return _reject(
+                "proof_invalid",
+                "Runtime activation bootstrap requires a temporary activation_in_progress proof",
+            )
+    elif status != "activated":
         return _reject("proof_invalid", "Runtime proof is not activated")
 
     evidence_project_root = resolved_project_root
@@ -214,6 +228,7 @@ def verify_installed_ticket_runtime_readiness_for_execute(
         return _verify_runtime_readiness_proof_fields(
             proof=proof,
             evidence_project_root=evidence_project_root,
+            allow_pending_post_activation=bootstrap_allowed,
         )
     except KeyError as exc:
         return _reject(
@@ -226,6 +241,7 @@ def _verify_runtime_readiness_proof_fields(
     *,
     proof: dict[str, Any],
     evidence_project_root: Path,
+    allow_pending_post_activation: bool = False,
 ) -> RuntimeReadinessVerification:
     if proof.get("run_nonce") != _get_nested_str(proof, "hook_membrane_proof", "nonce"):
         return _reject("nonce_mismatch", "Runtime proof nonce mismatch")
@@ -233,9 +249,41 @@ def _verify_runtime_readiness_proof_fields(
     scope = _get_nested_list(proof, "activation_scope", "gated_execute_surfaces")
     if scope != ["direct_execute"]:
         return _reject("invalid_scope", "Runtime proof scope must be direct_execute only")
+    post_smokes = _get_nested_dict(proof, "post_activation_gated_smokes")
+    required_surfaces = _get_nested_list(proof, "post_activation_gated_smokes", "required_surfaces")
+    if required_surfaces != ["direct_execute"]:
+        return _reject(
+            "invalid_scope",
+            "Runtime proof post-activation scope must be direct_execute only",
+        )
     surface_results = _get_nested_dict(proof, "post_activation_gated_smokes", "surface_results")
-    if any(key != "direct_execute" for key in surface_results):
+    if set(surface_results) != {"direct_execute"}:
         return _reject("invalid_scope", "Runtime proof contains unsupported execute surfaces")
+    direct_execute_result = _get_nested_dict(
+        proof, "post_activation_gated_smokes", "surface_results", "direct_execute"
+    )
+    post_smoke_status = post_smokes.get("status")
+    if allow_pending_post_activation:
+        if post_smoke_status != "pending":
+            return _reject(
+                "proof_invalid",
+                "Runtime activation bootstrap proof must have pending post-activation smoke",
+            )
+    else:
+        if post_smoke_status != "passed":
+            return _reject("proof_invalid", "Runtime proof post-activation smoke has not passed")
+        if direct_execute_result.get("engine_state") != "ok_create":
+            return _reject(
+                "proof_invalid",
+                "Runtime proof direct_execute smoke did not create a ticket",
+            )
+        if direct_execute_result.get("runtime_readiness_required") is not True:
+            return _reject(
+                "proof_invalid",
+                "Runtime proof direct_execute smoke did not traverse runtime readiness",
+            )
+        if direct_execute_result.get("execute_surface") != "direct_execute":
+            return _reject("proof_invalid", "Runtime proof direct_execute surface mismatch")
 
     runtime_identity = _get_nested_dict(proof, "runtime_identity")
     executable_sha256 = runtime_identity.get("executable_sha256")
@@ -308,6 +356,8 @@ def _verify_runtime_readiness_proof_fields(
     ):
         if not path.is_file():
             return _reject("raw_evidence_missing", f"Raw evidence missing at {path}")
+    if not allow_pending_post_activation and post_events.stat().st_size == 0:
+        return _reject("raw_evidence_missing", f"Post-activation transcript empty at {post_events}")
 
     if sha256_file(inventory_transcript) != _get_nested_str(
         proof, "inventory", "transcript_sha256"
@@ -327,6 +377,32 @@ def _verify_runtime_readiness_proof_fields(
         return _reject(
             "post_activation_transcript_hash_mismatch", "Post-activation transcript hash mismatch"
         )
+    if not allow_pending_post_activation:
+        ticket_path = Path(
+            _get_nested_str(
+                proof,
+                "post_activation_gated_smokes",
+                "surface_results",
+                "direct_execute",
+                "ticket_path",
+            )
+        )
+        if not ticket_path.is_file():
+            return _reject(
+                "raw_evidence_missing",
+                f"Post-activation ticket missing at {ticket_path}",
+            )
+        if sha256_file(ticket_path) != _get_nested_str(
+            proof,
+            "post_activation_gated_smokes",
+            "surface_results",
+            "direct_execute",
+            "ticket_sha256",
+        ):
+            return _reject(
+                "post_activation_transcript_hash_mismatch",
+                "Post-activation ticket hash mismatch",
+            )
     if sha256_file(payload_before) != _get_nested_str(
         proof, "hook_membrane_proof", "payload_sha256"
     ):
@@ -549,14 +625,17 @@ def activate_runtime(
 
     resolved_project_root = project_root.resolve(strict=False)
     proof = _json_deepcopy(candidate.proof)
-    proof["status"] = "activated"
     run_dir = resolved_project_root / _get_nested_str(proof, "raw_evidence", "run_dir")
     temp_proof_path = run_dir / "activated-ticket-runtime-proof.json"
 
     try:
         _write_json(temp_proof_path, proof)
 
+        prior_proof_override = os.environ.get(RUNTIME_PROOF_PATH_ENV)
+        prior_bootstrap_override = os.environ.get(RUNTIME_ACTIVATION_BOOTSTRAP_ENV)
         try:
+            os.environ[RUNTIME_PROOF_PATH_ENV] = str(temp_proof_path)
+            os.environ[RUNTIME_ACTIVATION_BOOTSTRAP_ENV] = "1"
             post_smoke = run_post_activation_direct_execute_smoke(
                 project_root=resolved_project_root,
                 tickets_dir=tickets_dir.resolve(strict=False),
@@ -572,7 +651,17 @@ def activate_runtime(
                 error_code=exc.error_code,
                 message=exc.message,
             )
+        finally:
+            if prior_proof_override is None:
+                os.environ.pop(RUNTIME_PROOF_PATH_ENV, None)
+            else:
+                os.environ[RUNTIME_PROOF_PATH_ENV] = prior_proof_override
+            if prior_bootstrap_override is None:
+                os.environ.pop(RUNTIME_ACTIVATION_BOOTSTRAP_ENV, None)
+            else:
+                os.environ[RUNTIME_ACTIVATION_BOOTSTRAP_ENV] = prior_bootstrap_override
 
+        proof["status"] = "activated"
         proof["post_activation_gated_smokes"] = post_smoke["post_activation_gated_smokes"]
         _write_json(temp_proof_path, proof)
 
@@ -1065,6 +1154,11 @@ def run_post_activation_direct_execute_smoke(
             "deterministic_driver_unavailable",
             f"Direct execute smoke returned invalid engine output: {exc}",
         ) from exc
+    if not isinstance(engine_response, dict):
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            "Direct execute smoke returned non-object engine output",
+        )
     if engine_response.get("state") != "ok_create":
         raise RuntimeActivationError(
             "runtime_readiness_required",
@@ -1495,7 +1589,10 @@ def _read_message(
     except queue.Empty:
         return None
     if raw is None:
-        return None
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            "app-server stdout closed unexpectedly",
+        )
     try:
         message = json.loads(raw)
     except json.JSONDecodeError as exc:

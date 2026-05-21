@@ -85,6 +85,14 @@ RECOVERY_HINTS: dict[str, dict[str, str]] = {
             "before retrying."
         ),
     },
+    "proof_invalid": {
+        "summary": "The Ticket runtime proof is invalid or incomplete.",
+        "next_step": "Rerun the explicit activate-runtime flow to rebuild the runtime proof.",
+    },
+    "stale_proof": {
+        "summary": "The Ticket runtime proof has expired.",
+        "next_step": "Rerun the explicit activate-runtime flow before retrying direct execute.",
+    },
 }
 
 INTERNAL_RECOVERY_TERMS = (

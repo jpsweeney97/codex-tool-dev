@@ -6,7 +6,10 @@ from pathlib import Path
 import pytest
 from scripts.ticket_dedup import dedup_fingerprint as compute_dedup_fp
 from scripts.ticket_engine_runner import run
-from scripts.ticket_runtime_readiness import RUNTIME_PROOF_PATH_ENV
+from scripts.ticket_runtime_readiness import (
+    RUNTIME_ACTIVATION_BOOTSTRAP_ENV,
+    RUNTIME_PROOF_PATH_ENV,
+)
 
 from tests.support.builders import write_autonomy_config
 
@@ -105,6 +108,60 @@ def test_agent_execute_with_missing_runtime_proof_env_reports_proof_missing(
     assert response["error_code"] == "runtime_readiness_required"
     assert response["data"]["runtime_readiness"]["error_code"] == "proof_missing"
     assert str(missing_proof) in response["data"]["runtime_readiness"]["message"]
+
+
+def test_runner_passes_activation_bootstrap_only_with_execute_proof_env(
+    tmp_tickets: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    proof_path = (
+        project_root
+        / ".codex"
+        / "ticket-runtime-smoke"
+        / "run-1"
+        / "activated-ticket-runtime-proof.json"
+    )
+    monkeypatch.chdir(project_root)
+    monkeypatch.setenv(RUNTIME_PROOF_PATH_ENV, str(proof_path))
+    monkeypatch.setenv(RUNTIME_ACTIVATION_BOOTSTRAP_ENV, "1")
+    captured: dict[str, object] = {}
+
+    def _dispatch_stage(
+        *_args,
+        runtime_proof_path=None,
+        allow_activation_bootstrap=False,
+        **_kwargs,
+    ):
+        captured["runtime_proof_path"] = runtime_proof_path
+        captured["allow_activation_bootstrap"] = allow_activation_bootstrap
+        from scripts.ticket_engine_core import EngineResponse
+
+        return EngineResponse(state="ok", message="ok")
+
+    monkeypatch.setattr("scripts.ticket_engine_runner.dispatch_stage", _dispatch_stage)
+    payload_file = _write_payload(
+        project_root,
+        {
+            "action": "create",
+            "fields": {"title": "Runtime gate", "problem": "bootstrap", "priority": "medium"},
+            "session_id": "runner-session",
+            "hook_injected": True,
+            "hook_request_origin": "user",
+            "classify_intent": "create",
+            "classify_confidence": 0.95,
+            "dedup_fingerprint": compute_dedup_fp("bootstrap", []),
+            "autonomy_config": {"mode": "auto_audit", "max_creates": 5, "warnings": []},
+        },
+    )
+
+    exit_code = run("agent", ["execute", payload_file], prog="ticket_engine_agent.py")
+
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "ok"
+    assert captured["runtime_proof_path"] == proof_path
+    assert captured["allow_activation_bootstrap"] is True
 
 
 @pytest.mark.parametrize("subcommand", ["classify", "plan", "preflight", "ingest"])

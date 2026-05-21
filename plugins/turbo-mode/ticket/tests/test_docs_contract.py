@@ -169,6 +169,15 @@ def test_contract_separates_core_runtime_and_activation_error_codes() -> None:
     assert "`host_policy_blocked`, `deterministic_driver_unavailable`" in normalized
 
 
+def test_contract_documents_current_exit_code_mapping() -> None:
+    contract = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
+    normalized = _normalize_whitespace(contract)
+
+    assert "Exit code 2 maps only to the `need_fields` error code." in normalized
+    assert "`invalid_transition` and `parse_error` return exit 1" in normalized
+    assert "Exit code 2 maps to `need_fields` and `invalid_transition`" not in normalized
+
+
 def test_handbook_documents_runtime_proof_env_var_scope() -> None:
     handbook = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
     normalized = _normalize_whitespace(handbook)
@@ -430,6 +439,13 @@ def test_contract_documents_recovery_hint_schema_and_codes() -> None:
             "cleanup_stale_preview",
             "policy_blocked",
             "preflight_failed",
+            "host_policy_blocked",
+            "deterministic_driver_unavailable",
+            "hook_contract_blocked",
+            "engine_gate_required",
+            "runtime_readiness_required",
+            "proof_invalid",
+            "stale_proof",
         ]:
             assert f"`{code}`" in text, name
         assert "safe to show directly to a human user" in text, name
@@ -611,6 +627,8 @@ def test_ticket_doctor_skill_contract_is_explicit_maintenance_only() -> None:
     assert "`hook_contract_blocked`" in text
     assert "`engine_gate_required`" in text
     assert "`runtime_readiness_required`" in text
+    assert "`proof_invalid`" in text
+    assert "`stale_proof`" in text
     assert "cache-installed" in text
     assert "staging only, not the proof target" in text
     assert "ticket_audit.py repair <TICKETS_DIR>" not in text
@@ -635,6 +653,30 @@ def test_doctor_docs_describe_confirmed_stale_payload_cleanup() -> None:
         assert "24 hours" in text
         assert "`ticket_doctor.py clean-stale-payloads <TICKETS_DIR>`" in text
         assert "`--confirm-clean-stale-payloads`" in text
+
+
+def test_handbook_documents_runtime_activation_operator_flow() -> None:
+    handbook = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
+    normalized = _normalize_whitespace(handbook)
+
+    assert "`scripts/ticket_doctor.py` | User | Explicit-only diagnostics" in handbook
+    assert "runtime activation" in handbook
+    assert (
+        "uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime "
+        "<TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>"
+    ) in handbook
+    assert "`runtime_readiness_required` on direct execute" in handbook
+    assert "ticket_triage.py doctor" in handbook
+    assert "backend/diagnostic path" in handbook
+    assert "not the preferred user-facing doctor entrypoint" in handbook
+    assert "`in_progress`" in normalized
+    assert (
+        "`done` requires an Acceptance Criteria section; close flow remains separate"
+        in normalized
+    )
+    assert "open`, `in_progress`, or `blocked`" not in normalized
+    assert "The engine gates it with `policy_blocked`" in handbook
+    assert "undefined behavior" not in handbook
 
 
 def test_skill_docs_use_project_root_marker_walk_not_git_rev_parse() -> None:

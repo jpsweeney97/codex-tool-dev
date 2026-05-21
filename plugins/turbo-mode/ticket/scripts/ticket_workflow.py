@@ -101,7 +101,9 @@ def _canonical_workflow_command(subcommand: str, payload_path: Path, *extra: str
         return None
     return shlex.join(
         [
-            "python3",
+            "uv",
+            "run",
+            "python",
             "-B",
             str(Path(__file__).resolve()),
             subcommand,

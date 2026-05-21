@@ -133,6 +133,47 @@ def test_runtime_probe_status_uses_hooks_json_command(tmp_path: Path) -> None:
     assert status["ticket_hook_count"] == 1
 
 
+@pytest.mark.parametrize(
+    ("manifest_text", "expected_error"),
+    [
+        ("{not-json", "cannot parse hooks.json"),
+        (json.dumps({"hooks": []}), "hooks.json hooks field must be an object"),
+        (json.dumps({"hooks": {"PreToolUse": []}}), "hooks.json has no Bash command hooks"),
+    ],
+)
+def test_runtime_probe_status_blocks_manifest_errors(
+    tmp_path: Path,
+    manifest_text: str,
+    expected_error: str,
+) -> None:
+    from scripts.ticket_triage import _runtime_probe_status
+
+    plugin_root = tmp_path / "ticket"
+    hooks_dir = plugin_root / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "hooks.json").write_text(manifest_text, encoding="utf-8")
+    probe_output = tmp_path / "probe.jsonl"
+    probe_output.write_text('{"result":{}}\n', encoding="utf-8")
+
+    status = _runtime_probe_status(probe_output, plugin_root)
+
+    assert status["live_hook_probe"] == "blocked"
+    assert expected_error in status["manifest_error"]
+
+
+def test_runtime_probe_status_blocks_missing_manifest(tmp_path: Path) -> None:
+    from scripts.ticket_triage import _runtime_probe_status
+
+    plugin_root = tmp_path / "ticket"
+    probe_output = tmp_path / "probe.jsonl"
+    probe_output.write_text('{"result":{}}\n', encoding="utf-8")
+
+    status = _runtime_probe_status(probe_output, plugin_root)
+
+    assert status["live_hook_probe"] == "blocked"
+    assert "cannot read hooks.json" in status["manifest_error"]
+
+
 def test_dashboard_next_actions_exclude_needs_refinement_placeholders(
     tmp_tickets: Path,
 ) -> None:

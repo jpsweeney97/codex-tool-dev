@@ -86,7 +86,7 @@ Common response envelope: `{state: string, ticket_id: string|null, message: stri
 
 Exit codes: 0 (success), 1 (engine error), 2 (validation failure)
 - Error responses include `error_code` at the top level (one of the 12 defined error codes below). Success responses omit `error_code`.
-- Exit code 2 maps to `need_fields` and `invalid_transition` error codes. `parse_error` returns exit 1 (engine error) — it covers both malformed CLI payloads and corrupted stored ticket YAML.
+- Exit code 2 maps only to the `need_fields` error code. `invalid_transition` and `parse_error` return exit 1 (engine error); `parse_error` covers both malformed CLI payloads and corrupted stored ticket YAML.
 
 ### Supported Mutation Surfaces
 
@@ -102,7 +102,10 @@ When present, it is safe to show directly to a human user. The schema is:
 ```
 
 Valid codes are `stale_plan`, `trust_setup`, `retry_preview`,
-`cleanup_stale_preview`, `policy_blocked`, and `preflight_failed`.
+`cleanup_stale_preview`, `policy_blocked`, `preflight_failed`,
+`host_policy_blocked`, `deterministic_driver_unavailable`,
+`hook_contract_blocked`, `engine_gate_required`, `runtime_readiness_required`,
+`proof_invalid`, and `stale_proof`.
 Low-level direct engine/debug surfaces may remain technical unless their output
 bubbles into a user-facing wrapper.
 

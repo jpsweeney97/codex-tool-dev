@@ -547,7 +547,7 @@ def _read_next_message(
     except queue.Empty:
         return None
     if raw_line is None:
-        return None
+        fail("read app-server response", "app-server stdout closed unexpectedly", None)
     try:
         response = json.loads(raw_line)
     except json.JSONDecodeError as exc:

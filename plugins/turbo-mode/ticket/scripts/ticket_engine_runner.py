@@ -29,7 +29,10 @@ from scripts.ticket_engine_core import (
     engine_preflight,
 )
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir
-from scripts.ticket_runtime_readiness import RUNTIME_PROOF_PATH_ENV
+from scripts.ticket_runtime_readiness import (
+    RUNTIME_ACTIVATION_BOOTSTRAP_ENV,
+    RUNTIME_PROOF_PATH_ENV,
+)
 from scripts.ticket_stage_models import (
     ClassifyInput,
     ExecuteInput,
@@ -157,6 +160,7 @@ def dispatch_stage(
     request_origin: str,
     *,
     runtime_proof_path: Path | None = None,
+    allow_activation_bootstrap: bool = False,
 ) -> EngineResponse:
     """Dispatch one engine stage through the existing stage-model boundary."""
     return _dispatch(
@@ -165,6 +169,7 @@ def dispatch_stage(
         tickets_dir,
         request_origin,
         runtime_proof_path=runtime_proof_path,
+        allow_activation_bootstrap=allow_activation_bootstrap,
     )
 
 
@@ -228,16 +233,19 @@ def _run_impl(
 
     assert context is not None
     runtime_proof_path = None
+    allow_activation_bootstrap = False
     if subcommand == "execute":
         runtime_proof_raw = os.environ.get(RUNTIME_PROOF_PATH_ENV)
         if runtime_proof_raw:
             runtime_proof_path = Path(runtime_proof_raw)
+            allow_activation_bootstrap = os.environ.get(RUNTIME_ACTIVATION_BOOTSTRAP_ENV) == "1"
     resp = dispatch_stage(
         subcommand,
         context.payload,
         context.tickets_dir,
         context.request_origin,
         runtime_proof_path=runtime_proof_path,
+        allow_activation_bootstrap=allow_activation_bootstrap,
     )
     if subcommand == "ingest":
         resp = _sanitize_user_facing_ingest_response(resp)
@@ -426,8 +434,8 @@ def _dispatch_ingest(
     # Step 6: Move envelope to processed.
     try:
         move_to_processed(envelope_path)
-    except OSError as exc:
-        # Ticket was created but envelope move failed. Not fatal — report in data.
+    except FileExistsError as exc:
+        # Ticket was created but another cleanup path already recorded the envelope.
         data = dict(exec_resp.data or {})
         data.update(
             {
@@ -442,6 +450,28 @@ def _dispatch_ingest(
         return EngineResponse(
             state=exec_resp.state,
             message="Ticket was created, but Ticket could not finish ingest cleanup.",
+            ticket_id=exec_resp.ticket_id,
+            data=data,
+        )
+    except OSError as exc:
+        data = dict(exec_resp.data or {})
+        data.update(
+            {
+                "envelope_move_error": str(exc),
+                "ingest_outcome": "created_envelope_move_failed",
+                "envelope_id": envelope_id,
+                "processed_path": str(processed_path),
+                "incoming_envelope_path": str(envelope_path),
+                "ticket_created": True,
+            }
+        )
+        return EngineResponse(
+            state="escalate",
+            message=(
+                "Ticket was created, but Ticket could not finish ingest cleanup; "
+                "manual cleanup is required before replay."
+            ),
+            error_code="io_error",
             ticket_id=exec_resp.ticket_id,
             data=data,
         )
@@ -471,6 +501,7 @@ def _dispatch(
     request_origin: str,
     *,
     runtime_proof_path: Path | None = None,
+    allow_activation_bootstrap: bool = False,
 ) -> EngineResponse:
     try:
         if subcommand == "classify":
@@ -536,6 +567,7 @@ def _dispatch(
                 duplicate_of=inp.duplicate_of,
                 runtime_execute_surface=runtime_execute_surface,
                 runtime_proof_path=runtime_proof_path,
+                allow_activation_bootstrap=allow_activation_bootstrap,
             )
         elif subcommand == "ingest":
             inp = IngestInput.from_payload(payload)

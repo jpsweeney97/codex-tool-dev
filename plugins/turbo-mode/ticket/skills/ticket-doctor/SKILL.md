@@ -66,6 +66,8 @@ If activation blocks, report the blocker code first:
 - `hook_contract_blocked`
 - `engine_gate_required`
 - `runtime_readiness_required`
+- `proof_invalid`
+- `stale_proof`
 
 ## Recovery Hints
 

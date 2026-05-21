@@ -470,13 +470,12 @@ def _validate_doctor_readonly_invocation(command_clean: str, plugin_root: str) -
         return "ticket_triage.py doctor --cache-root must equal the running plugin root"
     probe = values.get("--runtime-probe-output")
     if probe is not None:
-        probe_path = Path(probe)
-        if probe_path.parent != Path("/private/tmp") or not probe_path.name.startswith(
-            "ticket-ux-"
-        ):
+        probe_path = Path(probe).resolve(strict=False)
+        temp_root = Path(tempfile.gettempdir()).resolve(strict=False)
+        if probe_path.parent != temp_root or not probe_path.name.startswith("ticket-ux-"):
             return (
                 "ticket_triage.py doctor --runtime-probe-output must be a "
-                "ticket-ux artifact under /private/tmp"
+                f"ticket-ux artifact under {temp_root}"
             )
     return None
 

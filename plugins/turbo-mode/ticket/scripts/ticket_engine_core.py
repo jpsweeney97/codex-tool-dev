@@ -1301,6 +1301,7 @@ def engine_execute(
     duplicate_of: str | None = None,
     runtime_execute_surface: str | None = None,
     runtime_proof_path: Path | None = None,
+    allow_activation_bootstrap: bool = False,
 ) -> EngineResponse:
     """Execute the mutation: create, update, close, or reopen.
 
@@ -1500,6 +1501,7 @@ def engine_execute(
             runtime_verification = verify_installed_ticket_runtime_readiness_for_execute(
                 project_root=project_root,
                 proof_path=runtime_proof_path,
+                allow_activation_bootstrap=allow_activation_bootstrap,
             )
             if not runtime_verification.passed:
                 return EngineResponse(

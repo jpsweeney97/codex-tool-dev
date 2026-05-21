@@ -184,9 +184,7 @@ def activate_runtime_payload(
             response = attach_recovery_hint(response, result.error_code)
         except ValueError as exc:
             response["data"]["recovery_hint_error"] = str(exc)
-            response["message"] = (
-                f"{response['message']} internal: recovery hint missing for {result.error_code}"
-            )
+            response = attach_recovery_hint(response, "runtime_readiness_required")
         return response, 1
     return _response("ok", {"mode": "activate-runtime", "proof": result.proof}, result.message), 0
 

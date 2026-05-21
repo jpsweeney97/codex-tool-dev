@@ -11,6 +11,7 @@ import io
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from types import ModuleType
 
@@ -790,6 +791,60 @@ def test_hook_denies_ticket_triage_doctor_personal_cache_root(tmp_path: Path) ->
         "--cache-root must equal the running plugin root"
         in result["hookSpecificOutput"]["permissionDecisionReason"]
     )
+
+
+def test_hook_allows_ticket_triage_doctor_probe_under_system_temp(tmp_path: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    probe_output = Path(tempfile.gettempdir()) / "ticket-ux-runtime-probe.json"
+    event = make_hook_input(
+        (
+            f"uv run python -B {plugin_root}/scripts/ticket_triage.py doctor {tickets_dir} "
+            f"--plugin-root {plugin_root} --cache-root {plugin_root} "
+            f"--runtime-probe-output {probe_output}"
+        ),
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(plugin_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
+@pytest.mark.parametrize(
+    "probe_output",
+    [
+        Path("/var/tmp/ticket-ux-runtime-probe.json"),
+        Path(tempfile.gettempdir()) / "not-ticket-ux-runtime-probe.json",
+    ],
+)
+def test_hook_denies_ticket_triage_doctor_probe_outside_system_temp(
+    tmp_path: Path,
+    probe_output: Path,
+) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    event = make_hook_input(
+        (
+            f"uv run python -B {plugin_root}/scripts/ticket_triage.py doctor {tickets_dir} "
+            f"--plugin-root {plugin_root} --cache-root {plugin_root} "
+            f"--runtime-probe-output {probe_output}"
+        ),
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(plugin_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    reason = result["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "ticket-ux artifact under" in reason
+    assert tempfile.gettempdir() in reason
 
 
 def test_hook_denies_ticket_triage_doctor_missing_args_with_precise_reason(tmp_path: Path) -> None:

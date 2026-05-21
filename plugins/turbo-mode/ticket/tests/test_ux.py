@@ -328,6 +328,8 @@ def test_recovery_hint_contract_is_transcript_safe() -> None:
         "hook_contract_blocked",
         "engine_gate_required",
         "runtime_readiness_required",
+        "proof_invalid",
+        "stale_proof",
     }
 
     assert set(RECOVERY_HINTS) == expected_codes
@@ -346,6 +348,11 @@ def test_recovery_hint_contract_is_transcript_safe() -> None:
             "Run the explicit activate-runtime flow or refresh the installed Ticket runtime "
             "before retrying."
         ),
+    }
+    assert recovery_hint("stale_proof") == {
+        "code": "stale_proof",
+        "summary": "The Ticket runtime proof has expired.",
+        "next_step": "Rerun the explicit activate-runtime flow before retrying direct execute.",
     }
     for code in expected_codes:
         hint = recovery_hint(code)

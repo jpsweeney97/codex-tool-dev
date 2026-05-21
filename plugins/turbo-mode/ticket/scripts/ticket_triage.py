@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,14 @@ _TICKET_ID_PATTERNS = [
 
 class DoctorInputError(ValueError):
     """Raised when doctor arguments would expand the diagnostic trust boundary."""
+
+
+@dataclass(frozen=True)
+class HookCommandManifest:
+    """Expected hook commands parsed from hooks.json."""
+
+    commands: frozenset[str]
+    manifest_error: str | None = None
 
 
 def _script_plugin_root() -> Path:
@@ -131,17 +140,29 @@ def _generated_residue(root: Path, *, label: str) -> list[str]:
 
 def _runtime_probe_status(probe_output: Path | None, plugin_root: Path) -> dict[str, Any]:
     """Classify app-server plugin/read and hooks/list output when provided."""
-    expected_hook_commands = _expected_hook_commands_from_manifest(plugin_root)
+    command_manifest = _expected_hook_commands_from_manifest(plugin_root)
     expected_source = f"{plugin_root}/hooks/hooks.json"
     if probe_output is None:
-        return {
+        result = {
             "live_hook_probe": "not_run",
             "expected_hook": "Ticket preToolUse / Bash / ticket_engine_guard.py",
         }
+        if command_manifest.manifest_error is not None:
+            result["manifest_error"] = command_manifest.manifest_error
+        return result
     if not probe_output.is_file():
-        return {
+        result = {
             "live_hook_probe": "blocked",
             "reason": f"runtime probe output not found: {probe_output}",
+            "expected_hook": "Ticket preToolUse / Bash / ticket_engine_guard.py",
+        }
+        if command_manifest.manifest_error is not None:
+            result["manifest_error"] = command_manifest.manifest_error
+        return result
+    if command_manifest.manifest_error is not None:
+        return {
+            "live_hook_probe": "blocked",
+            "manifest_error": command_manifest.manifest_error,
             "expected_hook": "Ticket preToolUse / Bash / ticket_engine_guard.py",
         }
 
@@ -172,7 +193,7 @@ def _runtime_probe_status(probe_output: Path | None, plugin_root: Path) -> dict[
                         hook.get("pluginId") == "ticket@turbo-mode"
                         and hook.get("eventName") == "preToolUse"
                         and hook.get("matcher") == "Bash"
-                        and hook.get("command") in expected_hook_commands
+                        and hook.get("command") in command_manifest.commands
                         and hook.get("sourcePath") == expected_source
                     ):
                         matching_hooks.append(hook)
@@ -185,20 +206,33 @@ def _runtime_probe_status(probe_output: Path | None, plugin_root: Path) -> dict[
     }
 
 
-def _expected_hook_commands_from_manifest(plugin_root: Path) -> set[str]:
+def _expected_hook_commands_from_manifest(plugin_root: Path) -> HookCommandManifest:
     hooks_json = plugin_root / "hooks" / "hooks.json"
-    fallback_command = f"python3 {plugin_root}/hooks/ticket_engine_guard.py"
-    commands: set[str] = {fallback_command}
     try:
         manifest = json.loads(hooks_json.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return commands
+    except OSError as exc:
+        return HookCommandManifest(
+            commands=frozenset(),
+            manifest_error=f"cannot read hooks.json: {exc}",
+        )
+    except json.JSONDecodeError as exc:
+        return HookCommandManifest(
+            commands=frozenset(),
+            manifest_error=f"cannot parse hooks.json: {exc}",
+        )
     hooks_root = manifest.get("hooks", {})
     if not isinstance(hooks_root, dict):
-        return commands
+        return HookCommandManifest(
+            commands=frozenset(),
+            manifest_error="hooks.json hooks field must be an object",
+        )
     pre_tool_entries = hooks_root.get("PreToolUse", [])
     if not isinstance(pre_tool_entries, list):
-        return commands
+        return HookCommandManifest(
+            commands=frozenset(),
+            manifest_error="hooks.json hooks.PreToolUse field must be a list",
+        )
+    commands: set[str] = set()
     for entry in pre_tool_entries:
         if not isinstance(entry, dict) or entry.get("matcher") != "Bash":
             continue
@@ -211,7 +245,12 @@ def _expected_hook_commands_from_manifest(plugin_root: Path) -> set[str]:
             command = hook.get("command")
             if isinstance(command, str) and command:
                 commands.add(command)
-    return commands
+    if not commands:
+        return HookCommandManifest(
+            commands=frozenset(),
+            manifest_error="hooks.json has no Bash command hooks",
+        )
+    return HookCommandManifest(commands=frozenset(commands))
 
 
 def _runtime_proof_status(project_root: Path) -> dict[str, Any]:
@@ -231,13 +270,29 @@ def _runtime_proof_status(project_root: Path) -> dict[str, Any]:
             "status": "invalid",
             "error": str(exc),
         }
-    return {
+    raw_status = str(proof.get("status", "unknown"))
+    expires_at = proof.get("expires_at")
+    status = raw_status
+    error_code = None
+    if raw_status == "activated" and isinstance(expires_at, str):
+        try:
+            parsed_expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            parsed_expires_at = None
+        if parsed_expires_at is not None and parsed_expires_at <= datetime.now(UTC):
+            status = "stale"
+            error_code = "stale_proof"
+    result = {
         "proof_path": str(proof_path),
         "exists": True,
-        "status": str(proof.get("status", "unknown")),
+        "status": status,
+        "raw_status": raw_status,
         "schema_version": proof.get("schema_version"),
-        "expires_at": proof.get("expires_at"),
+        "expires_at": expires_at,
     }
+    if error_code is not None:
+        result["error_code"] = error_code
+    return result
 
 
 def _source_cache_report(plugin_root: Path, cache_root: Path) -> dict[str, Any]:

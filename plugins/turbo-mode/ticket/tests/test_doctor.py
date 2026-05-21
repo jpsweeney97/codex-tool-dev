@@ -21,6 +21,11 @@ from scripts.ticket_triage import (
 DOCTOR_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "ticket_doctor.py"
 
 
+def _manifest_guard_command(plugin_root: Path) -> str:
+    manifest = json.loads((plugin_root / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+    return manifest["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+
+
 def test_ticket_doctor_reports_project_and_plugin_paths(tmp_tickets: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     report = ticket_doctor(
@@ -79,6 +84,33 @@ def test_ticket_doctor_reports_activated_runtime_proof_status(tmp_tickets: Path)
     assert report["runtime_proof"]["exists"] is True
     assert report["runtime_proof"]["status"] == "activated"
     assert report["runtime_proof"]["schema_version"] == "installed_ticket_runtime_readiness-v1"
+
+
+def test_ticket_doctor_reports_stale_runtime_proof_status(tmp_tickets: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    proof_path = tmp_tickets.parent.parent / ".codex" / "ticket-runtime-proof.json"
+    proof_path.parent.mkdir(parents=True)
+    proof_path.write_text(
+        json.dumps(
+            {
+                "status": "activated",
+                "schema_version": "installed_ticket_runtime_readiness-v1",
+                "expires_at": "2026-05-19T00:00:00Z",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = ticket_doctor(
+        tmp_tickets,
+        plugin_root=plugin_root,
+        cache_root=plugin_root,
+    )
+
+    assert report["runtime_proof"]["status"] == "stale"
+    assert report["runtime_proof"]["raw_status"] == "activated"
+    assert report["runtime_proof"]["error_code"] == "stale_proof"
 
 
 def test_ticket_doctor_reports_stale_ticket_tmp_payloads(
@@ -317,6 +349,52 @@ def test_activate_runtime_propagates_hook_contract_blocked(
     assert response["error_code"] == "hook_contract_blocked"
 
 
+@pytest.mark.parametrize(
+    ("error_code", "expected_summary"),
+    [
+        ("proof_invalid", "The Ticket runtime proof is invalid or incomplete."),
+        ("stale_proof", "The Ticket runtime proof has expired."),
+    ],
+)
+def test_activate_runtime_has_clean_proof_recovery_hints(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error_code: str,
+    expected_summary: str,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    marketplace_path = tmp_path / ".agents" / "plugins" / "marketplace.json"
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    blocked_result = ticket_runtime_readiness.ActivationFailure(
+        error_code=error_code,
+        message="runtime proof needs activation",
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "activate_runtime",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
+
+    response, exit_code = ticket_doctor_script.activate_runtime_payload(
+        project_root=tmp_path,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert exit_code == 1
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == error_code
+    assert "internal:" not in response["message"]
+    assert response["data"]["recovery_hint"]["code"] == error_code
+    assert response["data"]["recovery_hint"]["summary"] == expected_summary
+
+
 def test_activate_runtime_surfaces_unknown_recovery_hint_code(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -340,11 +418,6 @@ def test_activate_runtime_surfaces_unknown_recovery_hint_code(
         raising=False,
     )
 
-    def _unknown_hint(_response: dict[str, object], code: str) -> dict[str, object]:
-        raise ValueError(f"Unknown recovery hint code: {code}")
-
-    monkeypatch.setattr(ticket_doctor_script, "attach_recovery_hint", _unknown_hint)
-
     response, exit_code = ticket_doctor_script.activate_runtime_payload(
         project_root=tmp_path,
         tickets_dir=tickets_dir,
@@ -354,12 +427,44 @@ def test_activate_runtime_surfaces_unknown_recovery_hint_code(
     assert exit_code == 1
     assert response["state"] == "policy_blocked"
     assert response["error_code"] == "new_unregistered_code"
-    assert response["message"] == (
-        "unregistered runtime failure internal: recovery hint missing for new_unregistered_code"
-    )
+    assert response["message"] == "unregistered runtime failure"
     assert response["data"]["recovery_hint_error"] == (
-        "Unknown recovery hint code: new_unregistered_code"
+        "unknown recovery hint code: 'new_unregistered_code'"
     )
+    assert response["data"]["recovery_hint"]["code"] == "runtime_readiness_required"
+
+
+def test_activate_runtime_cli_parser_reaches_structured_handler(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    outside_tickets_dir = tmp_path.parent / f"{tmp_path.name}-outside" / "tickets"
+    marketplace_path = tmp_path / "missing-marketplace.json"
+    monkeypatch.chdir(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(DOCTOR_SCRIPT),
+            "activate-runtime",
+            str(outside_tickets_dir),
+            "--marketplace-path",
+            str(marketplace_path),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    response = json.loads(completed.stdout)
+    assert response["state"] == "policy_blocked"
+    assert "usage:" not in completed.stdout
+    assert "tickets_dir" in response["message"]
 
 
 def test_ticket_doctor_clean_stale_payloads_requires_confirmation(
@@ -809,7 +914,7 @@ def test_ticket_doctor_reports_generated_residue_separately(
 
 def test_ticket_doctor_classifies_live_hook_probe_output(tmp_tickets: Path, tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
-    guard_command = f"python3 {plugin_root}/hooks/ticket_engine_guard.py"
+    guard_command = _manifest_guard_command(plugin_root)
     probe_output = tmp_path / "hook-probe.out"
     probe_output.write_text(
         "\n".join(
@@ -870,7 +975,7 @@ def test_ticket_doctor_classifies_live_hook_probe_output(tmp_tickets: Path, tmp_
 
 def test_ticket_doctor_blocks_wrong_hook_event(tmp_tickets: Path, tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
-    guard_command = f"python3 {plugin_root}/hooks/ticket_engine_guard.py"
+    guard_command = _manifest_guard_command(plugin_root)
     probe_output = tmp_path / "wrong-event.out"
     probe_output.write_text(
         "\n".join(

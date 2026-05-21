@@ -41,7 +41,7 @@ Low-confidence captures are allowed when a next action exists; they should carry
 | `scripts/ticket_capture.py` | User | Capture-first prepare/execute workflow for new tickets |
 | `scripts/ticket_update.py` | User | Preview-first prepare/execute workflow for existing tickets |
 | `scripts/ticket_review.py` | Any | User-facing read-only review and audit wrapper |
-| `scripts/ticket_doctor.py` | User | Explicit-only diagnostics and dry-run-first audit repair wrapper |
+| `scripts/ticket_doctor.py` | User | Explicit-only diagnostics, runtime activation, stale payload cleanup, and dry-run-first audit repair wrapper |
 | `scripts/ticket_workflow.py` | Any | Internal/debugging legacy prepare/execute/recover workflow runner |
 | `scripts/ticket_read.py` | Any | Read-only: list, query by ID-prefix, and close-readiness check |
 | `scripts/ticket_triage.py` | Any | Read-only: dashboard counts, stale/blocked detection, audit summary |
@@ -71,7 +71,10 @@ low-level recovery work, not a supported user-facing mutation surface.
 User-facing mutation and recovery surfaces may include `data.recovery_hint`.
 When present, it is safe to show directly to a human user. Valid codes are
 `stale_plan`, `trust_setup`, `retry_preview`, `cleanup_stale_preview`,
-`policy_blocked`, and `preflight_failed`.
+`policy_blocked`, `preflight_failed`, `host_policy_blocked`,
+`deterministic_driver_unavailable`, `hook_contract_blocked`,
+`engine_gate_required`, `runtime_readiness_required`, `proof_invalid`, and
+`stale_proof`.
 
 The schema is `{"code": "...", "summary": "...", "next_step": "..."}`. The
 whole object is transcript-safe. `plugin hook setup` is allowed only as
@@ -362,10 +365,21 @@ repair corrupt audit logs. Casual audit, triage, or review language belongs to
    `hooks/list` and `skills/list` expose. Treat the synced personal plugin copy
    as staging only, not the proof target.
 5. For diagnostics, run `ticket_doctor.py diagnose`
-6. For stale payload cleanup, run `ticket_doctor.py clean-stale-payloads <TICKETS_DIR>` first
-7. Run `ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads` only after explicit approval
-8. For audit repair, run `ticket_doctor.py repair-audit`
-9. Run `ticket_doctor.py repair-audit --confirm-repair` only after explicit approval
+6. For runtime activation, run `ticket_doctor.py activate-runtime` only when the
+   user explicitly requests installed-runtime activation
+7. For stale payload cleanup, run `ticket_doctor.py clean-stale-payloads <TICKETS_DIR>` first
+8. Run `ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads` only after explicit approval
+9. For audit repair, run `ticket_doctor.py repair-audit`
+10. Run `ticket_doctor.py repair-audit --confirm-repair` only after explicit approval
+
+**Runtime activation:** `ticket_doctor.py activate-runtime` is an explicit
+operator flow for the installed Ticket runtime. It certifies only the
+direct-execute lane and must not be treated as source-local proof or as a broad
+mutation-surface certificate.
+
+```bash
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>
+```
 
 **Stale payload cleanup:** `ticket_doctor.py diagnose` reports stale
 `.codex/ticket-tmp/` payloads older than 24 hours without mutating them.
@@ -440,7 +454,11 @@ Lower-level health check backend; called by `ticket_review.py`. Produces dashboa
 ```bash
 uv run python -B <PLUGIN_ROOT>/scripts/ticket_triage.py dashboard <tickets_dir>
 uv run python -B <PLUGIN_ROOT>/scripts/ticket_triage.py audit <tickets_dir> [--days <N>]
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_triage.py doctor <tickets_dir> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>
 ```
+
+`ticket_triage.py doctor` is a backend/diagnostic path used by the doctor
+wrapper, not the preferred user-facing doctor entrypoint.
 
 **Failure modes**
 | Symptom | Cause | Recovery |
@@ -532,7 +550,7 @@ Key transition rules:
 
 - `open` → `in_progress` requires no extra fields
 - `open` or `in_progress` → `blocked` requires non-empty `blocked_by`
-- `open`, `in_progress`, or `blocked` → `done` requires an Acceptance Criteria section
+- `in_progress` → `done` requires an Acceptance Criteria section; close flow remains separate
 - `*` → `wontfix` is allowed
 - `done` or `wontfix` → `open` requires `reopen_reason` and is user-only in v1.0
 
@@ -557,6 +575,7 @@ At preflight, the engine takes a fingerprint snapshot of any existing ticket bei
 | `session_cap_exceeded` | Agent created ≥ `max_creates_per_session` tickets this session | Check `max_creates_per_session` in `.codex/ticket.local.md` | Raise cap or start a new session |
 | `audit_write_failed` blocks agent mutation | Disk full, permission error, or `.audit/` not writable | Check disk space and permissions on `docs/tickets/.audit/` | Fix underlying issue; mutation will proceed once audit write succeeds |
 | `stale_plan` on update | Concurrent write between preflight and execute | Inspect ticket file mtime | Re-run update after verifying current state |
+| `runtime_readiness_required` on direct execute | Runtime proof is missing, stale, invalid, or mismatched | Run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <tickets_dir> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>` | Run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>` only when explicit installed-runtime activation is intended |
 | Corrupt audit JSONL lines | Interrupted write (crash during mutation) | Run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir>` | After explicit approval, run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir> --confirm-repair` |
 | Stale `.codex/ticket-tmp/` payloads | Interrupted or abandoned prepare/execute flow | Run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <tickets_dir> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>` | After explicit approval, run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads` |
 | Stale tickets not surfaced by triage | Missing `updated` field in old ticket YAML | Inspect ticket frontmatter | Triage falls back to file mtime; results are approximate for legacy tickets |
@@ -568,7 +587,7 @@ At preflight, the engine takes a fingerprint snapshot of any existing ticket bei
 
 **Single-writer `auto_audit` boundary:** Session create cap and ID allocation are not fully serialized for intentional parallel ticket-capable agents. The direct-execute runtime proof is separate from multi-agent serialization and does not add locking or queueing. Avoid running multiple ticket-creating agents in the same session in parallel.
 
-**`auto_silent` mode reserved:** The `auto_silent` autonomy mode is defined in the contract but not implemented. Setting it has undefined behavior — do not use until implemented.
+**`auto_silent` mode reserved:** The `auto_silent` autonomy mode is defined in the contract but not implemented. The engine gates it with `policy_blocked`; do not use until implemented.
 
 **24-hour dedup window only:** Dedup fingerprinting covers a 24-hour same-day window. Tickets created on different calendar days with identical content will not be detected as duplicates, even if created minutes apart around midnight.
 

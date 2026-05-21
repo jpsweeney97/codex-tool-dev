@@ -108,7 +108,9 @@ def recovery_options(response: dict[str, Any]) -> list[dict[str, Any]]:
 def expected_prepare_command(payload_path: Path) -> str:
     return shlex.join(
         [
-            "python3",
+            "uv",
+            "run",
+            "python",
             "-B",
             str(PLUGIN_ROOT / "scripts" / "ticket_workflow.py"),
             "prepare",
@@ -120,7 +122,9 @@ def expected_prepare_command(payload_path: Path) -> str:
 def expected_execute_command(payload_path: Path) -> str:
     return shlex.join(
         [
-            "python3",
+            "uv",
+            "run",
+            "python",
             "-B",
             str(PLUGIN_ROOT / "scripts" / "ticket_workflow.py"),
             "execute",
@@ -132,7 +136,9 @@ def expected_execute_command(payload_path: Path) -> str:
 def expected_recover_command(payload_path: Path, recovery_action: str, *args: str) -> str:
     return shlex.join(
         [
-            "python3",
+            "uv",
+            "run",
+            "python",
             "-B",
             str(PLUGIN_ROOT / "scripts" / "ticket_workflow.py"),
             "recover",
