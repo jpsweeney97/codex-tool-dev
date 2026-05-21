@@ -30,6 +30,7 @@ import tempfile
 from pathlib import Path
 
 VALID_SUBCOMMANDS = frozenset({"classify", "plan", "preflight", "execute", "ingest"})
+VALID_ACTIVATION_SMOKE_SUBCOMMANDS = frozenset({"execute"})
 VALID_WORKFLOW_SUBCOMMANDS = frozenset({"prepare", "execute", "recover"})
 VALID_WORKFLOW_RECOVERY_ACTIONS = frozenset(
     {
@@ -63,7 +64,7 @@ def _build_allowlist_pattern(plugin_root: str) -> re.Pattern[str]:
     """Build the allowlist regex anchored to the plugin root."""
     escaped = re.escape(plugin_root)
     return re.compile(
-        rf"^python3(?:\s+-B)?\s+{escaped}/scripts/ticket_engine_(user|agent)\.py\s+(\w+)\s+(.+)$"
+        rf"^python3(?:\s+-B)?\s+{escaped}/scripts/ticket_engine_(user|agent|activation_smoke)\.py\s+(\w+)\s+(.+)$"
     )
 
 
@@ -88,6 +89,7 @@ _TICKET_SCRIPT_BASENAMES = frozenset(
     {
         "ticket_engine_user.py",
         "ticket_engine_agent.py",
+        "ticket_engine_activation_smoke.py",
         "ticket_read.py",
         "ticket_triage.py",
         "ticket_audit.py",
@@ -250,23 +252,11 @@ def _is_ticket_candidate(command: str) -> bool:
 
 
 def _make_allow(reason: str) -> dict:
-    return {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
-            "permissionDecisionReason": reason,
-        }
-    }
+    return {"entries": [{"kind": "feedback", "text": reason}]}
 
 
 def _make_deny(reason: str) -> dict:
-    return {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
-        }
-    }
+    return {"entries": [{"kind": "stop", "text": reason}]}
 
 
 def _malformed_session_id_reason(session_id: object) -> str:
@@ -574,16 +564,21 @@ def main() -> None:
     engine_match = engine_pattern.match(command_clean)
 
     if engine_match:
-        entrypoint_type = engine_match.group(1)  # "user" or "agent"
+        entrypoint_type = engine_match.group(1)  # "user", "agent", or "activation_smoke"
         subcommand = engine_match.group(2)
         payload_path = engine_match.group(3)
 
         # Validate subcommand.
-        if subcommand not in VALID_SUBCOMMANDS:
+        valid_subcommands = (
+            VALID_ACTIVATION_SMOKE_SUBCOMMANDS
+            if entrypoint_type == "activation_smoke"
+            else VALID_SUBCOMMANDS
+        )
+        if subcommand not in valid_subcommands:
             print(
                 json.dumps(
                     _make_deny(
-                        f"Unknown subcommand '{subcommand}'. Valid: {sorted(VALID_SUBCOMMANDS)}"
+                        f"Unknown subcommand '{subcommand}'. Valid: {sorted(valid_subcommands)}"
                     )
                 )
             )

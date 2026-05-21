@@ -30,6 +30,7 @@ def run_hook(
     *,
     agent_id: str | None = None,
     agent_type: str | None = None,
+    normalize: bool = True,
 ) -> dict:
     """Run the hook with a Bash command and return parsed output."""
     hook_input = {
@@ -54,12 +55,55 @@ def run_hook(
     )
     assert result.returncode == 0, f"Hook crashed: {result.stderr}"
     if not result.stdout.strip():
+        raw: dict = {}
+    else:
+        raw = json.loads(result.stdout)
+    return _normalize_hook_output(raw) if normalize else raw
+
+
+def _normalize_hook_output(raw: dict) -> dict:
+    if "hookSpecificOutput" in raw:
+        return raw
+    if raw == {}:
         return {}
-    return json.loads(result.stdout)
+    entries = raw.get("entries", [])
+    if not entries:
+        return {}
+    first = entries[0]
+    kind = first.get("kind", "")
+    text = first.get("text", "")
+    decision = "allow" if kind in {"feedback", "context"} else "deny"
+    return {
+        "hookSpecificOutput": {
+            "permissionDecision": decision,
+            "permissionDecisionReason": text,
+        },
+        "_raw": raw,
+    }
 
 
 class TestFullCreateFlow:
     """Full flow: hook → user entrypoint → create → audit trail."""
+
+    def test_hook_raw_allow_contract_uses_feedback_entries(self, tmp_path: Path) -> None:
+        payload_file = tmp_path / "payload.json"
+        payload_file.write_text(json.dumps({"action": "create"}), encoding="utf-8")
+
+        command = f"python3 {PLUGIN_ROOT}/scripts/ticket_engine_user.py plan {payload_file}"
+        hook_output = run_hook(command, cwd=str(tmp_path), normalize=False)
+
+        assert hook_output["entries"][0]["kind"] == "feedback"
+        assert "validated" in hook_output["entries"][0]["text"]
+
+    def test_hook_raw_deny_contract_uses_stop_entries(self, tmp_path: Path) -> None:
+        payload_file = tmp_path / "payload.json"
+        payload_file.write_text(json.dumps({"action": "create"}), encoding="utf-8")
+
+        command = f"python3 {PLUGIN_ROOT}/scripts/ticket_engine_user.py plan {payload_file} | cat"
+        hook_output = run_hook(command, cwd=str(tmp_path), normalize=False)
+
+        assert hook_output["entries"][0]["kind"] == "stop"
+        assert "metacharacters" in hook_output["entries"][0]["text"].lower()
 
     def test_full_create_flow(self, tmp_path: Path) -> None:
         from scripts.ticket_dedup import dedup_fingerprint as compute_fp

@@ -22,6 +22,7 @@ def run_hook(
     hook_input: dict,
     *,
     plugin_root: str | None = None,
+    normalize: bool = True,
 ) -> dict:
     """Send hook input JSON via stdin and return parsed output.
 
@@ -41,8 +42,10 @@ def run_hook(
     )
     assert result.returncode == 0, f"Hook exited with {result.returncode}: {result.stderr}"
     if not result.stdout.strip():
-        return {}
-    return json.loads(result.stdout)
+        raw: dict = {}
+    else:
+        raw = json.loads(result.stdout)
+    return _normalize_hook_output(raw) if normalize else raw
 
 
 def make_hook_input(
@@ -83,6 +86,27 @@ def load_guard_module() -> ModuleType:
     return module
 
 
+def _normalize_hook_output(raw: dict) -> dict:
+    if "hookSpecificOutput" in raw:
+        return raw
+    if raw == {}:
+        return {}
+    entries = raw.get("entries", [])
+    if not entries:
+        return {}
+    first = entries[0]
+    kind = first.get("kind", "")
+    text = first.get("text", "")
+    decision = "allow" if kind in {"feedback", "context"} else "deny"
+    return {
+        "hookSpecificOutput": {
+            "permissionDecision": decision,
+            "permissionDecisionReason": text,
+        },
+        "_raw": raw,
+    }
+
+
 def _decision(output: dict) -> str:
     """Extract permissionDecision from hook output."""
     return output["hookSpecificOutput"]["permissionDecision"]
@@ -100,6 +124,50 @@ def _reason(output: dict) -> str:
 
 class TestAllowlist:
     """Tests for command allowlist matching."""
+
+    def test_raw_allow_output_uses_feedback_entries(self, tmp_path: Path) -> None:
+        payload_file = make_payload_file(tmp_path)
+        plugin_root = str(tmp_path / "plugin")
+        (Path(plugin_root) / "scripts").mkdir(parents=True)
+
+        inp = make_hook_input(
+            f"python3 -B {plugin_root}/scripts/ticket_engine_user.py plan {payload_file}",
+            plugin_root=plugin_root,
+        )
+        output = run_hook(inp, plugin_root=plugin_root, normalize=False)
+
+        assert output == {
+            "entries": [
+                {
+                    "kind": "feedback",
+                    "text": "Ticket engine user/plan validated and payload injected",
+                }
+            ]
+        }
+
+    def test_raw_deny_output_uses_stop_entries(self, tmp_path: Path) -> None:
+        plugin_root = str(tmp_path / "plugin")
+        inp = make_hook_input(
+            f"python3 {plugin_root}/scripts/ticket_engine_user.py plan /tmp/p.json | cat",
+            plugin_root=plugin_root,
+        )
+        output = run_hook(inp, plugin_root=plugin_root, normalize=False)
+
+        assert output["entries"][0]["kind"] == "stop"
+        assert "metacharacters" in output["entries"][0]["text"].lower()
+
+    def test_allows_activation_smoke_execute(self, tmp_path: Path) -> None:
+        payload_file = make_payload_file(tmp_path)
+        plugin_root = str(tmp_path / "plugin")
+        (Path(plugin_root) / "scripts").mkdir(parents=True)
+
+        inp = make_hook_input(
+            f"python3 -B {plugin_root}/scripts/ticket_engine_activation_smoke.py execute {payload_file}",
+            plugin_root=plugin_root,
+        )
+        output = run_hook(inp, plugin_root=plugin_root)
+
+        assert _decision(output) == "allow"
 
     def test_allows_user_entrypoint(self, tmp_path: Path) -> None:
         payload_file = make_payload_file(tmp_path)
