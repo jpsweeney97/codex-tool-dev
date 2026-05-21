@@ -136,6 +136,10 @@ Both delegate to `ticket_engine_runner.py`, which dispatches to `ticket_engine_c
 
 Exit codes: `0` (success), `1` (engine error), `2` (validation failure / need_fields).
 
+For live installed activation and certification, use the cache-installed
+runtime authority that `hooks/list` and `skills/list` expose. Treat the synced
+personal plugin copy as staging only, not the proof target.
+
 ### Reference Documents
 
 | Document | Path | Purpose |

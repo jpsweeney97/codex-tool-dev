@@ -592,6 +592,8 @@ def test_ticket_doctor_skill_contract_is_explicit_maintenance_only() -> None:
     assert "`hook_contract_blocked`" in text
     assert "`engine_gate_required`" in text
     assert "`runtime_readiness_required`" in text
+    assert "cache-installed" in text
+    assert "staging only, not the proof target" in text
     assert "ticket_audit.py repair <TICKETS_DIR>" not in text
     assert "ask before any mutation" in text
 
@@ -715,6 +717,8 @@ def test_readme_and_handbook_use_source_authority_installed_boundary() -> None:
         assert "source-authority" in text
         assert "Source edits here do not prove installed Codex behavior" in normalized
         assert "cache-refresh or runtime-proof lane" in normalized
+        assert "cache-installed runtime authority" in normalized
+        assert "staging only, not the proof target" in normalized
 
 
 def test_handbook_update_surface_matches_focused_backend() -> None:

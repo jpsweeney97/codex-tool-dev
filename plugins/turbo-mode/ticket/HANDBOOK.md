@@ -352,11 +352,14 @@ repair corrupt audit logs. Casual audit, triage, or review language belongs to
 1. Resolve plugin root
 2. Resolve `PROJECT_ROOT` from the current working directory
 3. Resolve `TICKETS_DIR` as `<PROJECT_ROOT>/docs/tickets/`
-4. For diagnostics, run `ticket_doctor.py diagnose`
-5. For stale payload cleanup, run `ticket_doctor.py clean-stale-payloads <TICKETS_DIR>` first
-6. Run `ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads` only after explicit approval
-7. For audit repair, run `ticket_doctor.py repair-audit`
-8. Run `ticket_doctor.py repair-audit --confirm-repair` only after explicit approval
+4. For live installed activation, use the cache-installed runtime authority that
+   `hooks/list` and `skills/list` expose. Treat the synced personal plugin copy
+   as staging only, not the proof target.
+5. For diagnostics, run `ticket_doctor.py diagnose`
+6. For stale payload cleanup, run `ticket_doctor.py clean-stale-payloads <TICKETS_DIR>` first
+7. Run `ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads` only after explicit approval
+8. For audit repair, run `ticket_doctor.py repair-audit`
+9. Run `ticket_doctor.py repair-audit --confirm-repair` only after explicit approval
 
 **Stale payload cleanup:** `ticket_doctor.py diagnose` reports stale
 `.codex/ticket-tmp/` payloads older than 24 hours without mutating them.

@@ -51,6 +51,10 @@ Run:
 uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>
 ```
 
+For live installed activation, `<PLUGIN_ROOT>` must be the cache-installed
+runtime authority currently exposed by `hooks/list` and `skills/list`. Treat
+the synced personal plugin copy as staging only, not the proof target.
+
 Report direct-execute-only scope. Do not describe activation as caller-identity
 proof, and do not widen it to `capture`, `update`, or `ticket_workflow.py`.
 
