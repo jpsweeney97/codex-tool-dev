@@ -671,6 +671,25 @@ def test_hook_allows_ticket_triage_doctor_with_expected_roots(tmp_path: Path) ->
     assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
+def test_hook_allows_ticket_triage_doctor_with_uv_run_python_launcher(tmp_path: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    event = make_hook_input(
+        (
+            f"uv run python -B {plugin_root}/scripts/ticket_triage.py doctor {tickets_dir} "
+            f"--plugin-root {plugin_root} --cache-root {plugin_root}"
+        ),
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(plugin_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
 @pytest.mark.parametrize(
     "doctor_args",
     [

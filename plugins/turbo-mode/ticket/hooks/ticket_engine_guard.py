@@ -460,17 +460,15 @@ def _validate_doctor_readonly_invocation(command_clean: str, plugin_root: str) -
     except ValueError as exc:
         return f"ticket_triage.py doctor parse failed: {exc}"
     expected_script = str(Path(plugin_root) / "scripts" / "ticket_triage.py")
-    if tokens[:2] == ["python3", "-B"]:
-        tokens = [tokens[0], *tokens[2:]]
-    if (
-        len(tokens) < 7
-        or tokens[0] != "python3"
-        or tokens[1] != expected_script
-        or tokens[2] != "doctor"
-    ):
-        return "ticket_triage.py doctor must use canonical python3 [-B] invocation"
+    script_idx = _canonical_launcher_script_index(tokens)
+    if script_idx is None:
+        return "ticket_triage.py doctor must use canonical python3 or uv run python launcher"
+    if len(tokens) < script_idx + 6:
+        return "ticket_triage.py doctor must use canonical python3 or uv run python launcher"
+    if tokens[script_idx] != expected_script or tokens[script_idx + 1] != "doctor":
+        return "ticket_triage.py doctor must use canonical python3 or uv run python launcher"
 
-    args = tokens[3:]
+    args = tokens[script_idx + 2 :]
     tickets_dir = args[0]
     option_tokens = args[1:]
     if any(char.isspace() for char in tickets_dir):
