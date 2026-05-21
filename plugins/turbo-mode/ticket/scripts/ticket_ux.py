@@ -79,6 +79,10 @@ RECOVERY_HINTS: dict[str, dict[str, str]] = {
         "summary": "Ticket checks did not pass.",
         "next_step": "Review the preview or check details, update the request, then rerun preview.",
     },
+    "internal_error": {
+        "summary": "Ticket hit an unexpected internal error.",
+        "next_step": "Stop without writing and report the error details for repair.",
+    },
     "host_policy_blocked": {
         "summary": "The host refused the contained Ticket runtime activation turn.",
         "next_step": "Retry activation on a host that allows the pinned workspaceWrite policy.",
@@ -196,6 +200,8 @@ def recovery_hint_code_for_response(response: dict[str, Any]) -> str | None:
         return "retry_preview"
     if response.get("error_code") == "origin_mismatch":
         return "trust_setup"
+    if response.get("error_code") == "internal_error":
+        return "internal_error"
     if response.get("error_code") == "host_policy_blocked":
         return "host_policy_blocked"
     if response.get("error_code") == "deterministic_driver_unavailable":

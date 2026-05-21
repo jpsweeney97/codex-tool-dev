@@ -555,6 +555,48 @@ def test_activation_smoke_entrypoint_direct_execute_resolves_plugin_local_script
     assert response["error_code"] == "not_found"
 
 
+def test_activation_smoke_entrypoint_rejects_agent_hook_origin(
+    tmp_path: Path,
+) -> None:
+    payload_file = tmp_path / "activation-smoke-agent-origin.json"
+    payload_file.write_text(
+        json.dumps(
+            {
+                "action": "update",
+                "ticket_id": "T-20990101-99",
+                "fields": {"status": "in_progress"},
+                "session_id": "activation-smoke-session",
+                "hook_injected": True,
+                "hook_request_origin": "agent",
+                "classify_intent": "update",
+                "classify_confidence": 0.95,
+                "target_fingerprint": "0" * 64,
+                "tickets_dir": str(REPO_ROOT / "docs" / "tickets"),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPTS_DIR / "ticket_engine_activation_smoke.py"),
+            "execute",
+            str(payload_file),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert result.stderr == ""
+    response = json.loads(result.stdout)
+    assert response["state"] == "escalate"
+    assert response["error_code"] == "origin_mismatch"
+
+
 class TestEntrypointProjectRootDiscovery:
     """Entrypoints use marker-based project root instead of bare cwd."""
 

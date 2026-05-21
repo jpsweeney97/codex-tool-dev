@@ -30,6 +30,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `ingest` subcommand in engine runner: read-validate-map-plan-preflight-execute-move pipeline for consuming deferred work envelopes (T-04b, #70)
 - `ingest` added to guard hook `VALID_SUBCOMMANDS` allowlist (T-04b, #70)
 - `defer` field passed through `_execute_create` to `render_ticket` for envelope-originated tickets (T-04a, #69)
+- `ticket_doctor.py activate-runtime` explicit direct-execute runtime activation subcommand.
 
 ### Changed
 

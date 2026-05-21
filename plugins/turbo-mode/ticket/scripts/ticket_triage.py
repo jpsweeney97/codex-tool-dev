@@ -168,12 +168,14 @@ def _runtime_probe_status(probe_output: Path | None, plugin_root: Path) -> dict[
 
     plugin_enabled = False
     matching_hooks: list[dict[str, Any]] = []
+    probe_parse_errors = 0
     for line in probe_output.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         try:
             message = json.loads(line)
         except json.JSONDecodeError:
+            probe_parse_errors += 1
             continue
         result = message.get("result", {})
         plugin = result.get("plugin", {})
@@ -202,6 +204,7 @@ def _runtime_probe_status(probe_output: Path | None, plugin_root: Path) -> dict[
         "live_hook_probe": "proven" if plugin_enabled and len(matching_hooks) == 1 else "blocked",
         "ticket_plugin_enabled": plugin_enabled,
         "ticket_hook_count": len(matching_hooks),
+        "probe_parse_errors": probe_parse_errors,
         "expected_hook": "Ticket preToolUse / Bash / ticket_engine_guard.py",
     }
 
@@ -254,6 +257,11 @@ def _expected_hook_commands_from_manifest(plugin_root: Path) -> HookCommandManif
 
 
 def _runtime_proof_status(project_root: Path) -> dict[str, Any]:
+    """Return a lightweight diagnostic summary of the saved runtime proof.
+
+    This powers doctor/diagnose reporting only. Execute-readiness remains
+    governed by verify_installed_ticket_runtime_readiness_for_execute.
+    """
     proof_path = project_root / ".codex" / "ticket-runtime-proof.json"
     if not proof_path.is_file():
         return {

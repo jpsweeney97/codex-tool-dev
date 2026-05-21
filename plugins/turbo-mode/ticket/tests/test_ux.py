@@ -331,6 +331,7 @@ def test_recovery_hint_contract_is_transcript_safe() -> None:
         "hook_contract_blocked",
         "engine_gate_required",
         "runtime_readiness_required",
+        "internal_error",
     }
 
     assert set(RECOVERY_HINTS) == expected_codes
@@ -400,6 +401,14 @@ def test_recovery_hint_code_for_runtime_activation_errors() -> None:
     assert recovery_hint_code_for_response({"error_code": "runtime_readiness_required"}) == (
         "runtime_readiness_required"
     )
+
+
+def test_recovery_hint_code_for_internal_error() -> None:
+    assert recovery_hint_code_for_response({"error_code": "internal_error"}) == "internal_error"
+    assert RECOVERY_HINTS["internal_error"] == {
+        "summary": "Ticket hit an unexpected internal error.",
+        "next_step": "Stop without writing and report the error details for repair.",
+    }
 
 
 def test_transcript_safety_terms_match_expected_internal_leak_vocabulary() -> None:

@@ -161,10 +161,11 @@ def test_contract_separates_core_runtime_and_activation_error_codes() -> None:
     contract = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
     normalized = _normalize_whitespace(contract)
 
-    assert "Core Engine Error Codes (12)" in normalized
+    assert "Core Engine Error Codes (13)" in normalized
     assert "Runtime Readiness Error Codes" in normalized
     assert "Activation Driver Error Codes" in normalized
     assert "`need_fields`, `invalid_transition`, `policy_blocked`" in normalized
+    assert "`io_error`, `internal_error`, `not_found`" in normalized
     assert "`proof_missing`, `proof_invalid`, `stale_proof`" in normalized
     assert "`host_policy_blocked`, `deterministic_driver_unavailable`" in normalized
 
@@ -448,6 +449,7 @@ def test_contract_documents_recovery_hint_schema_and_codes() -> None:
             "hook_contract_blocked",
             "engine_gate_required",
             "runtime_readiness_required",
+            "internal_error",
             "proof_invalid",
             "stale_proof",
         ]:
@@ -681,6 +683,31 @@ def test_handbook_documents_runtime_activation_operator_flow() -> None:
     assert "open`, `in_progress`, or `blocked`" not in normalized
     assert "The engine gates it with `policy_blocked`" in handbook
     assert "undefined behavior" not in handbook
+    assert "`ticket_engine_activation_smoke.py`" in handbook
+    assert "private activation-smoke entrypoint" in normalized
+
+
+def test_readme_and_handbook_do_not_describe_guard_as_fail_open() -> None:
+    for path in (PLUGIN_ROOT / "README.md", PLUGIN_ROOT / "HANDBOOK.md"):
+        text = _read_text(path)
+        normalized = _normalize_whitespace(text)
+        assert "fail-open" not in normalized
+        assert "fail closed" in normalized or "fail-closed" in normalized
+
+
+def test_handbook_autonomy_table_lists_auto_silent_as_gated() -> None:
+    text = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
+    normalized = _normalize_whitespace(text)
+
+    assert "| `autonomy_mode` | `suggest` | `suggest`, `auto_audit`, `auto_silent`" in text
+    assert "`auto_silent`: reserved for v1.1 and gated with `policy_blocked`" in normalized
+
+
+def test_changelog_announces_activate_runtime_subcommand() -> None:
+    text = _read_text(PLUGIN_ROOT / "CHANGELOG.md")
+    unreleased = text.split("## 1.4.0", maxsplit=1)[0]
+
+    assert "`ticket_doctor.py activate-runtime`" in unreleased
 
 
 def test_skill_docs_use_project_root_marker_walk_not_git_rev_parse() -> None:

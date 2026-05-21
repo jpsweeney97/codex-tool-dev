@@ -344,9 +344,9 @@ Security checks are duplicated across pipeline stages:
 
 `ok`, `ok_create`, `ok_update`, `ok_close`, `ok_close_archived`, `ok_reopen`, `need_fields`, `duplicate_candidate`, `preflight_failed`, `policy_blocked`, `invalid_transition`, `dependency_blocked`, `not_found`, `escalate`, `merge_into_existing` (reserved, not emitted in v1.0).
 
-### Core Engine Error Codes (12)
+### Core Engine Error Codes (13)
 
-`need_fields`, `invalid_transition`, `policy_blocked`, `preflight_failed`, `stale_plan`, `duplicate_candidate`, `parse_error`, `io_error`, `not_found`, `dependency_blocked`, `intent_mismatch`, `origin_mismatch`.
+`need_fields`, `invalid_transition`, `policy_blocked`, `preflight_failed`, `stale_plan`, `duplicate_candidate`, `parse_error`, `io_error`, `internal_error`, `not_found`, `dependency_blocked`, `intent_mismatch`, `origin_mismatch`.
 
 ## Extension Points
 
@@ -435,7 +435,7 @@ Source lives in `scripts/` rather than a standard Python package directory. Modu
 - **Single-writer `auto_audit` boundary** — this source slice does not add locking or queueing. Run at most one ticket-capable agent in a Codex session; intentional delegated multi-agent `auto_audit` work is a future locking/queueing trigger.
 - **Triage detects linear dependency chains only**, not cycles
 - **Session create cap** is audit-based, not lock-based — it is not a hard safety boundary for intentionally parallel ticket-capable agents
-- **Guard hook is fail-open** at the top level — an unhandled exception allows the command through (prevents blocking all Bash commands)
+- **Guard hook fails closed for Ticket candidates** — malformed hook input and internal guard errors emit stop entries instead of allowing the command through.
 - **`auto_silent` mode** is defined in the contract but gated with an explicit error — reserved for v1.1
 
 ## License

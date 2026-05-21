@@ -106,6 +106,8 @@ class TestFullCreateFlow:
         hook_output = run_hook(command, cwd=str(tmp_path), normalize=False)
 
         assert hook_output["entries"][0]["kind"] == "stop"
+        assert {entry["kind"] for entry in hook_output["entries"]} == {"stop"}
+        assert not any(entry["kind"] == "feedback" for entry in hook_output["entries"])
         assert "metacharacters" in hook_output["entries"][0]["text"].lower()
 
     def test_full_create_flow(self, tmp_path: Path) -> None:

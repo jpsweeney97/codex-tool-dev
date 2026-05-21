@@ -1308,6 +1308,14 @@ def engine_execute(
 
     Assumes preflight has already passed. Writes ticket files.
     Wraps dispatch with JSONL audit trail.
+
+    Args:
+        runtime_execute_surface: Execute surface under certification. Only
+            `direct_execute` is defined, and only for agent-origin execute.
+        runtime_proof_path: Optional proof path used by runtime activation tests
+            and explicit activation bootstrap.
+        allow_activation_bootstrap: Permits a temporary activation-in-progress
+            proof for the direct_execute activation smoke.
     """
     if request_origin not in VALID_ORIGINS:
         return EngineResponse(
@@ -1335,6 +1343,10 @@ def engine_execute(
         config = snapshot_config or AutonomyConfig()
 
     # --- Transport-layer trust triple (defense-in-depth for all origins) ---
+    # The direct_execute exception is intentionally asymmetric: agent execute may
+    # carry user hook provenance on current hosts, but user execute with agent
+    # provenance still rejects. This only relaxes provenance matching; the
+    # runtime-readiness proof gate below still decides whether the write may run.
     allow_direct_execute_provenance_mismatch = (
         runtime_execute_surface == "direct_execute"
         and request_origin == "agent"

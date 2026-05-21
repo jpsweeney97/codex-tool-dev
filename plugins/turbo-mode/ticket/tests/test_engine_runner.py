@@ -20,6 +20,30 @@ def _write_payload(root: Path, payload: dict[str, object]) -> str:
     return str(payload_path)
 
 
+def _agent_create_payload(problem: str, hook_origin: str | None = "user") -> dict[str, object]:
+    payload: dict[str, object] = {
+        "action": "create",
+        "fields": {
+            "title": "Runtime gate",
+            "problem": problem,
+            "priority": "medium",
+        },
+        "session_id": "runner-session",
+        "hook_injected": True,
+        "classify_intent": "create",
+        "classify_confidence": 0.95,
+        "dedup_fingerprint": compute_dedup_fp(problem, []),
+        "autonomy_config": {
+            "mode": "auto_audit",
+            "max_creates": 5,
+            "warnings": [],
+        },
+    }
+    if hook_origin is not None:
+        payload["hook_request_origin"] = hook_origin
+    return payload
+
+
 def test_agent_execute_with_user_hook_origin_reaches_runtime_readiness_gate(
     tmp_tickets: Path,
     capsys,
@@ -61,6 +85,89 @@ def test_agent_execute_with_user_hook_origin_reaches_runtime_readiness_gate(
     response = json.loads(capsys.readouterr().out)
     assert response["state"] == "policy_blocked"
     assert response["error_code"] == "runtime_readiness_required"
+
+
+def test_agent_execute_with_unknown_hook_origin_rejects_before_runtime_gate(
+    tmp_tickets: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_autonomy_config(
+        tmp_tickets,
+        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
+    )
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    payload_file = _write_payload(
+        project_root,
+        _agent_create_payload(
+            "Unknown hook origins must not use the direct execute bypass.",
+            "cli",
+        ),
+    )
+
+    exit_code = run("agent", ["execute", payload_file], prog="ticket_engine_agent.py")
+
+    assert exit_code == 1
+    response = json.loads(capsys.readouterr().out)
+    assert response["state"] == "escalate"
+    assert response["error_code"] == "origin_mismatch"
+
+
+@pytest.mark.parametrize("subcommand", ["plan", "preflight", "ingest"])
+def test_agent_user_hook_origin_bypass_is_execute_only(
+    tmp_tickets: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+    subcommand: str,
+) -> None:
+    write_autonomy_config(
+        tmp_tickets,
+        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
+    )
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    payload_file = _write_payload(
+        project_root,
+        _agent_create_payload("Only execute may carry user hook provenance for agent entrypoints."),
+    )
+
+    exit_code = run("agent", [subcommand, payload_file], prog="ticket_engine_agent.py")
+
+    assert exit_code == 1
+    response = json.loads(capsys.readouterr().out)
+    assert response["error_code"] == "origin_mismatch"
+
+
+def test_agent_execute_with_agent_hook_origin_uses_normal_runtime_gate(
+    tmp_tickets: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_autonomy_config(
+        tmp_tickets,
+        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
+    )
+    project_root = tmp_tickets.parent.parent
+    missing_proof = project_root / ".codex" / "agent-hook-runtime-proof.json"
+    monkeypatch.chdir(project_root)
+    monkeypatch.setenv(RUNTIME_PROOF_PATH_ENV, str(missing_proof))
+    payload_file = _write_payload(
+        project_root,
+        _agent_create_payload(
+            "Matching agent hook provenance should use the normal runtime gate.",
+            "agent",
+        ),
+    )
+
+    exit_code = run("agent", ["execute", payload_file], prog="ticket_engine_agent.py")
+
+    assert exit_code == 1
+    response = json.loads(capsys.readouterr().out)
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == "runtime_readiness_required"
+    assert response["data"]["runtime_readiness"]["error_code"] == "proof_missing"
+    assert str(missing_proof) in response["data"]["runtime_readiness"]["message"]
 
 
 def test_agent_execute_with_missing_runtime_proof_env_reports_proof_missing(
@@ -203,7 +310,7 @@ def test_runtime_proof_env_is_ignored_outside_execute(
     assert captured["runtime_proof_path"] is None
 
 
-def test_runner_unexpected_exception_returns_json_engine_response(
+def test_runner_unexpected_exception_returns_internal_error_response(
     tmp_tickets: Path,
     capsys,
     monkeypatch: pytest.MonkeyPatch,
@@ -234,5 +341,40 @@ def test_runner_unexpected_exception_returns_json_engine_response(
     assert exit_code == 1
     response = json.loads(capsys.readouterr().out)
     assert response["state"] == "escalate"
-    assert response["error_code"] == "io_error"
+    assert response["error_code"] == "internal_error"
     assert "boom" in response["message"]
+
+
+def test_runner_oserror_returns_io_error_response(
+    tmp_tickets: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    payload_file = _write_payload(
+        project_root,
+        {
+            "action": "create",
+            "fields": {"title": "Boom", "problem": "Runner raises", "priority": "medium"},
+            "session_id": "runner-session",
+            "hook_injected": True,
+            "hook_request_origin": "user",
+            "classify_intent": "create",
+            "classify_confidence": 0.95,
+            "dedup_fingerprint": compute_dedup_fp("Runner raises", []),
+        },
+    )
+
+    def _raise(*_args, **_kwargs):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr("scripts.ticket_engine_runner.dispatch_stage", _raise)
+
+    exit_code = run("agent", ["execute", payload_file], prog="ticket_engine_agent.py")
+
+    assert exit_code == 1
+    response = json.loads(capsys.readouterr().out)
+    assert response["state"] == "escalate"
+    assert response["error_code"] == "io_error"
+    assert "disk unavailable" in response["message"]

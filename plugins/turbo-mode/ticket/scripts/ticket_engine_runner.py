@@ -81,9 +81,10 @@ def load_runner_context(
     hook_origin = payload.get("hook_request_origin")
     if hook_origin is not None and hook_origin != effective_origin:
         if subcommand == "execute" and effective_origin == "agent" and hook_origin == "user":
-            # Direct agent execute may carry user hook provenance because the hook
-            # records command-origin metadata; the engine runtime gate makes the
-            # final direct_execute readiness decision.
+            # Asymmetric direct-execute exception: current hosts may record user
+            # command provenance for ticket_engine_agent.py execute. The reverse
+            # mismatch still rejects, and engine_execute must still enforce the
+            # direct_execute runtime-readiness gate before writing.
             pass
         elif subcommand == "ingest":
             return None, attach_engine_recovery_hint(
@@ -108,19 +109,13 @@ def load_runner_context(
             payload.get("session_id", ""),
         )
         if trust_errors:
-            if subcommand in ("execute", "ingest"):
-                return None, attach_engine_recovery_hint(
-                    EngineResponse(
-                        state="policy_blocked",
-                        message="Ticket setup needs attention before this write can continue.",
-                        error_code="policy_blocked",
-                    ),
-                    "trust_setup",
-                )
-            return None, EngineResponse(
-                state="policy_blocked",
-                message=f"Execute requires verified hook provenance: {', '.join(trust_errors)}",
-                error_code="policy_blocked",
+            return None, attach_engine_recovery_hint(
+                EngineResponse(
+                    state="policy_blocked",
+                    message="Ticket setup needs attention before this write can continue.",
+                    error_code="policy_blocked",
+                ),
+                "trust_setup",
             )
 
     project_root = discover_project_root(Path.cwd())
@@ -162,7 +157,18 @@ def dispatch_stage(
     runtime_proof_path: Path | None = None,
     allow_activation_bootstrap: bool = False,
 ) -> EngineResponse:
-    """Dispatch one engine stage through the existing stage-model boundary."""
+    """Dispatch one engine stage through the existing stage-model boundary.
+
+    Args:
+        subcommand: Engine stage name.
+        payload: Loaded payload JSON.
+        tickets_dir: Project-local ticket storage directory.
+        request_origin: Entrypoint origin selected by the script name.
+        runtime_proof_path: Optional execute-only proof override used by the
+            runtime activation flow.
+        allow_activation_bootstrap: Allows execute to verify the temporary
+            activation-in-progress proof. Ignored outside execute.
+    """
     return _dispatch(
         subcommand,
         payload,
@@ -192,11 +198,19 @@ def run(
     """
     try:
         return _run_impl(request_origin, argv, prog=prog)
-    except Exception as exc:
+    except OSError as exc:
         response = EngineResponse(
             state="escalate",
             message=f"ticket engine runner failed: {type(exc).__name__}: {exc}",
             error_code="io_error",
+        )
+        print(response.to_json())
+        return 1
+    except Exception as exc:
+        response = EngineResponse(
+            state="escalate",
+            message=f"ticket engine runner failed: {type(exc).__name__}: {exc}",
+            error_code="internal_error",
         )
         print(response.to_json())
         return 1

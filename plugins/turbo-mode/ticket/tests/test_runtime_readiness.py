@@ -110,6 +110,26 @@ def _command_item_row(command: str, output: dict[str, object]) -> dict[str, obje
     }
 
 
+def _fake_pre_activation_gate_result() -> dict[str, object]:
+    return {
+        "pre_activation_gated_smokes": {
+            "status": "passed",
+            "required_surfaces": ["direct_execute"],
+            "surface_results": {
+                "direct_execute": {
+                    "runner": "app_server_turn",
+                    "command": "uv run python -B installed/scripts/ticket_engine_agent.py",
+                    "execute_surface": "direct_execute",
+                    "engine_state": "policy_blocked",
+                    "error_code": "runtime_readiness_required",
+                    "raw_events_sha256": "0" * 64,
+                }
+            },
+        },
+        "raw_evidence": {"pre_activation_events": "raw/pre-activation-gated-events.jsonl"},
+    }
+
+
 def _inventory_transcript_rows(
     *,
     project_root: Path,
@@ -1728,6 +1748,148 @@ def test_run_activation_smoke_rejects_malformed_hook_entries(
         )
 
     assert exc_info.value.error_code == "hook_contract_blocked"
+
+
+def test_run_activation_smoke_rejects_legacy_hook_specific_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    installed_root = tmp_path / "installed"
+    tickets_dir.mkdir(parents=True)
+    activation_command = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_activation_smoke.py "
+        f"execute {run_dir / 'payload.json'}"
+    )
+
+    def _fake_turn(**kwargs):
+        assert f"Command: {activation_command}" in kwargs["prompt_text"]
+        return [
+            {
+                "direction": "recv",
+                "body": {
+                    "method": "hook/completed",
+                    "params": {
+                        "run": {
+                            "eventName": "preToolUse",
+                            "sourcePath": str(installed_root / "hooks" / "hooks.json"),
+                            "hookSpecificOutput": {
+                                "permissionDecision": "allow",
+                                "permissionDecisionReason": "Ticket command validated",
+                            },
+                        }
+                    },
+                },
+            },
+            _command_item_row(activation_command, {"state": "ok_create"}),
+        ]
+
+    monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "run_pre_activation_direct_execute_gate_smoke",
+        lambda **_kwargs: _fake_pre_activation_gate_result(),
+    )
+
+    with pytest.raises(ticket_runtime_readiness.RuntimeActivationError) as exc_info:
+        ticket_runtime_readiness.run_activation_smoke(
+            project_root=project_root,
+            tickets_dir=tickets_dir,
+            run_dir=run_dir,
+            installed_ticket_root=installed_root,
+        )
+
+    assert exc_info.value.error_code == "hook_contract_blocked"
+    assert "unsupported" in exc_info.value.message.lower()
+
+
+def test_run_activation_smoke_rejects_stop_entries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    installed_root = tmp_path / "installed"
+    tickets_dir.mkdir(parents=True)
+    activation_command = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_activation_smoke.py "
+        f"execute {run_dir / 'payload.json'}"
+    )
+
+    def _fake_turn(**kwargs):
+        assert f"Command: {activation_command}" in kwargs["prompt_text"]
+        return [
+            {
+                "direction": "recv",
+                "body": {
+                    "method": "hook/completed",
+                    "params": {
+                        "run": {
+                            "eventName": "preToolUse",
+                            "sourcePath": str(installed_root / "hooks" / "hooks.json"),
+                            "entries": [{"kind": "stop", "text": "Ticket command blocked"}],
+                        }
+                    },
+                },
+            },
+            _command_item_row(activation_command, {"state": "ok_create"}),
+        ]
+
+    monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "run_pre_activation_direct_execute_gate_smoke",
+        lambda **_kwargs: _fake_pre_activation_gate_result(),
+    )
+
+    with pytest.raises(ticket_runtime_readiness.RuntimeActivationError) as exc_info:
+        ticket_runtime_readiness.run_activation_smoke(
+            project_root=project_root,
+            tickets_dir=tickets_dir,
+            run_dir=run_dir,
+            installed_ticket_root=installed_root,
+        )
+
+    assert exc_info.value.error_code == "hook_contract_blocked"
+    assert "deny" in exc_info.value.message.lower() or "stop" in exc_info.value.message.lower()
+
+
+def test_pre_activation_gate_smoke_clears_and_restores_runtime_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    installed_root = tmp_path / "installed"
+    project_root.mkdir(parents=True)
+    monkeypatch.setenv(ticket_runtime_readiness.RUNTIME_PROOF_PATH_ENV, "outer-proof.json")
+    monkeypatch.setenv(ticket_runtime_readiness.RUNTIME_ACTIVATION_BOOTSTRAP_ENV, "1")
+
+    def _fake_turn(**kwargs):
+        assert os.environ.get(ticket_runtime_readiness.RUNTIME_PROOF_PATH_ENV) is None
+        assert os.environ.get(ticket_runtime_readiness.RUNTIME_ACTIVATION_BOOTSTRAP_ENV) is None
+        command = kwargs["prompt_text"].split("Command: ", 1)[1].split("\n", 1)[0]
+        return [
+            _command_item_row(
+                command,
+                {"state": "policy_blocked", "error_code": "runtime_readiness_required"},
+            )
+        ]
+
+    monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
+
+    result = ticket_runtime_readiness.run_pre_activation_direct_execute_gate_smoke(
+        project_root=project_root,
+        run_dir=run_dir,
+        installed_ticket_root=installed_root,
+    )
+
+    assert result["pre_activation_gated_smokes"]["status"] == "passed"
+    assert os.environ[ticket_runtime_readiness.RUNTIME_PROOF_PATH_ENV] == "outer-proof.json"
+    assert os.environ[ticket_runtime_readiness.RUNTIME_ACTIVATION_BOOTSTRAP_ENV] == "1"
 
 
 def test_run_activation_smoke_requires_pre_activation_gate(

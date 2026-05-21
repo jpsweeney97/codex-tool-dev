@@ -777,10 +777,11 @@ def _verify_hook_membrane_semantics(
             "proof_invalid",
             f"Activation smoke hook completion invalid: {exc.message}",
         )
-    if _hook_run_mentions_unsupported_permission_decision(hook_run):
+    hook_contract_error = _activation_smoke_hook_contract_error(hook_run)
+    if hook_contract_error is not None:
         return _reject(
             "proof_invalid",
-            "Activation smoke hook completion used unsupported permissionDecision output",
+            f"Activation smoke hook completion invalid: {hook_contract_error}",
         )
     transcript_response, transcript_error = _verify_command_transcript_semantics(
         rows=rows,
@@ -1531,10 +1532,11 @@ def run_activation_smoke(
         transcript,
         installed_ticket_root=installed_ticket_root,
     )
-    if _hook_run_mentions_unsupported_permission_decision(hook_run):
+    hook_contract_error = _activation_smoke_hook_contract_error(hook_run)
+    if hook_contract_error is not None:
         raise RuntimeActivationError(
             "hook_contract_blocked",
-            "Installed Ticket hook still emits unsupported output",
+            f"Installed Ticket hook activation-smoke output invalid: {hook_contract_error}",
         )
 
     command_items = _command_execution_items(transcript)
@@ -1674,7 +1676,9 @@ def run_pre_activation_direct_execute_gate_smoke(
     )
 
     prior_override = os.environ.get(RUNTIME_PROOF_PATH_ENV)
+    prior_bootstrap_override = os.environ.get(RUNTIME_ACTIVATION_BOOTSTRAP_ENV)
     os.environ.pop(RUNTIME_PROOF_PATH_ENV, None)
+    os.environ.pop(RUNTIME_ACTIVATION_BOOTSTRAP_ENV, None)
     try:
         transcript = _run_app_server_turn(
             project_root=project_root,
@@ -1683,8 +1687,14 @@ def run_pre_activation_direct_execute_gate_smoke(
             executable=executable,
         )
     finally:
-        if prior_override is not None:
+        if prior_override is None:
+            os.environ.pop(RUNTIME_PROOF_PATH_ENV, None)
+        else:
             os.environ[RUNTIME_PROOF_PATH_ENV] = prior_override
+        if prior_bootstrap_override is None:
+            os.environ.pop(RUNTIME_ACTIVATION_BOOTSTRAP_ENV, None)
+        else:
+            os.environ[RUNTIME_ACTIVATION_BOOTSTRAP_ENV] = prior_bootstrap_override
 
     pre_events_path = raw_dir / "pre-activation-gated-events.jsonl"
     _write_transcript_jsonl(pre_events_path, transcript)
@@ -2475,15 +2485,25 @@ def _ticket_hook_completed_run(
     return hook_runs[0]
 
 
-def _hook_run_mentions_unsupported_permission_decision(hook_run: dict[str, Any]) -> bool:
+def _activation_smoke_hook_contract_error(hook_run: dict[str, Any]) -> str | None:
+    hook_output = hook_run.get("hookSpecificOutput")
+    if isinstance(hook_output, dict) and "permissionDecision" in hook_output:
+        return "unsupported permissionDecision output"
     entries = hook_run.get("entries", [])
     if not isinstance(entries, list):
-        return "entries" in hook_run
-    return any(
-        "unsupported permissionDecision" in str(entry.get("text", ""))
-        for entry in entries
-        if isinstance(entry, dict)
-    )
+        return "entries must be a list"
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return "entries must contain objects"
+        kind = entry.get("kind")
+        if kind in {"stop", "deny"}:
+            return f"deny entry emitted during activation smoke: {kind}"
+        if kind not in {"feedback", "context"}:
+            return f"unsupported entry kind: {kind!r}"
+        text = str(entry.get("text", ""))
+        if "unsupported" in text.lower() and "permissiondecision" in text.lower():
+            return "unsupported permissionDecision output"
+    return None
 
 
 def _hook_run_is_allow_shape(hook_run: dict[str, Any]) -> bool:

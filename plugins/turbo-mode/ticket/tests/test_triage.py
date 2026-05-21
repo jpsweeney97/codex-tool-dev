@@ -133,6 +133,72 @@ def test_runtime_probe_status_uses_hooks_json_command(tmp_path: Path) -> None:
     assert status["ticket_hook_count"] == 1
 
 
+def test_runtime_probe_status_reports_json_parse_errors(tmp_path: Path) -> None:
+    from scripts.ticket_triage import _runtime_probe_status
+
+    plugin_root = tmp_path / "ticket"
+    hooks_dir = plugin_root / "hooks"
+    hooks_dir.mkdir(parents=True)
+    hook_command = f"uv run python -B {plugin_root}/hooks/ticket_engine_guard.py"
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [{"type": "command", "command": hook_command}],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    probe_output = tmp_path / "probe.jsonl"
+    probe_output.write_text(
+        "\n".join(
+            [
+                "{not-json",
+                json.dumps(
+                    {
+                        "result": {
+                            "plugin": {
+                                "summary": {
+                                    "id": "ticket@turbo-mode",
+                                    "enabled": True,
+                                    "installed": True,
+                                }
+                            },
+                            "data": [
+                                {
+                                    "hooks": [
+                                        {
+                                            "pluginId": "ticket@turbo-mode",
+                                            "eventName": "preToolUse",
+                                            "matcher": "Bash",
+                                            "command": hook_command,
+                                            "sourcePath": str(hooks_dir / "hooks.json"),
+                                        }
+                                    ]
+                                }
+                            ],
+                        }
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    status = _runtime_probe_status(probe_output, plugin_root)
+
+    assert status["live_hook_probe"] == "proven"
+    assert status["probe_parse_errors"] == 1
+    assert status["ticket_hook_count"] == 1
+
+
 @pytest.mark.parametrize(
     ("manifest_text", "expected_error"),
     [

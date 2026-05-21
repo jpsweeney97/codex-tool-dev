@@ -105,7 +105,7 @@ Valid codes are `stale_plan`, `trust_setup`, `retry_preview`,
 `cleanup_stale_preview`, `policy_blocked`, `preflight_failed`,
 `host_policy_blocked`, `deterministic_driver_unavailable`,
 `hook_contract_blocked`, `engine_gate_required`, `runtime_readiness_required`,
-`proof_invalid`, and `stale_proof`.
+`internal_error`, `proof_invalid`, and `stale_proof`.
 Low-level direct engine/debug surfaces may remain technical unless their output
 bubbles into a user-facing wrapper.
 
@@ -154,9 +154,9 @@ and non-empty `session_id`. Activation readiness does not treat
 
 ok, ok_create, ok_update, ok_close, ok_close_archived, ok_reopen, need_fields, duplicate_candidate, preflight_failed, policy_blocked, invalid_transition, dependency_blocked, not_found, escalate, merge_into_existing (reserved)
 
-### Core Engine Error Codes (12)
+### Core Engine Error Codes (13)
 
-`need_fields`, `invalid_transition`, `policy_blocked`, `preflight_failed`, `stale_plan`, `duplicate_candidate`, `parse_error`, `io_error`, `not_found`, `dependency_blocked`, `intent_mismatch`, `origin_mismatch`
+`need_fields`, `invalid_transition`, `policy_blocked`, `preflight_failed`, `stale_plan`, `duplicate_candidate`, `parse_error`, `io_error`, `internal_error`, `not_found`, `dependency_blocked`, `intent_mismatch`, `origin_mismatch`
 
 ### Runtime Readiness Error Codes
 

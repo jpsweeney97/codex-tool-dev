@@ -73,8 +73,8 @@ When present, it is safe to show directly to a human user. Valid codes are
 `stale_plan`, `trust_setup`, `retry_preview`, `cleanup_stale_preview`,
 `policy_blocked`, `preflight_failed`, `host_policy_blocked`,
 `deterministic_driver_unavailable`, `hook_contract_blocked`,
-`engine_gate_required`, `runtime_readiness_required`, `proof_invalid`, and
-`stale_proof`.
+`engine_gate_required`, `runtime_readiness_required`, `internal_error`,
+`proof_invalid`, and `stale_proof`.
 
 The schema is `{"code": "...", "summary": "...", "next_step": "..."}`. The
 whole object is transcript-safe. `plugin hook setup` is allowed only as
@@ -164,7 +164,7 @@ max_creates_per_session: 5
 
 | Key | Default | Values | Purpose |
 |-----|---------|--------|---------|
-| `autonomy_mode` | `suggest` | `suggest`, `auto_audit` | `suggest`: only user mutations allowed. `auto_audit`: agent mutations allowed with audit trail. |
+| `autonomy_mode` | `suggest` | `suggest`, `auto_audit`, `auto_silent` | `suggest`: only user mutations allowed. `auto_audit`: agent mutations allowed with audit trail. `auto_silent`: reserved for v1.1 and gated with `policy_blocked`. |
 | `max_creates_per_session` | `5` | integer, `0` = disabled | Per-session agent create cap; tracked in audit trail |
 
 If `.codex/ticket.local.md` is absent, the plugin defaults to `autonomy_mode: suggest` and `max_creates_per_session: 5`.
@@ -383,6 +383,10 @@ mutation-surface certificate.
 ```bash
 uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>
 ```
+
+The guard also accepts `ticket_engine_activation_smoke.py` as a private
+activation-smoke entrypoint for contained proof bootstrap. It is not a normal
+operator command and must not be used outside the explicit activation flow.
 
 **Stale payload cleanup:** `ticket_doctor.py diagnose` reports stale
 `.codex/ticket-tmp/` payloads older than 24 hours without mutating them.

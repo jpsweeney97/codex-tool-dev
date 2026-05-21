@@ -194,6 +194,33 @@ class TestAllowlist:
         assert output["entries"][0]["kind"] == "stop"
         assert "metacharacters" in output["entries"][0]["text"].lower()
 
+    @pytest.mark.parametrize(
+        "command_template",
+        [
+            "python3 {plugin_root}/scripts/ticket_engine_user.py plan /tmp/p.json | cat",
+            (
+                "python3 -B {plugin_root}/scripts/ticket_engine_activation_smoke.py "
+                "plan {payload_file}"
+            ),
+        ],
+    )
+    def test_raw_deny_outputs_never_emit_feedback_entries(
+        self,
+        tmp_path: Path,
+        command_template: str,
+    ) -> None:
+        payload_file = make_payload_file(tmp_path)
+        plugin_root = str(tmp_path / "plugin")
+        (Path(plugin_root) / "scripts").mkdir(parents=True)
+        command = command_template.format(plugin_root=plugin_root, payload_file=payload_file)
+        inp = make_hook_input(command, plugin_root=plugin_root)
+
+        output = run_hook(inp, plugin_root=plugin_root, normalize=False)
+
+        assert output["entries"]
+        assert {entry["kind"] for entry in output["entries"]} == {"stop"}
+        assert not any(entry["kind"] == "feedback" for entry in output["entries"])
+
     def test_allows_activation_smoke_execute(self, tmp_path: Path) -> None:
         payload_file = make_payload_file(tmp_path)
         plugin_root = str(tmp_path / "plugin")
