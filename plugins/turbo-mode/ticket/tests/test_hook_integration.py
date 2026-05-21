@@ -7,6 +7,7 @@ that payload and runs the engine, which writes an audit trail.
 Both the hook and entrypoint are invoked via subprocess.run with
 sys.executable, matching how Codex invokes them in production.
 """
+
 from __future__ import annotations
 
 import json
@@ -50,7 +51,10 @@ def run_hook(
     result = subprocess.run(
         [sys.executable, HOOK_SCRIPT],
         input=json.dumps(hook_input),
-        capture_output=True, text=True, env=env, timeout=10,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=10,
     )
     assert result.returncode == 0, f"Hook crashed: {result.stderr}"
     if not result.stdout.strip():
@@ -145,7 +149,10 @@ class TestFullCreateFlow:
         # Step 2: Run user entrypoint subprocess — verify ok_create.
         result = subprocess.run(
             [sys.executable, USER_ENTRYPOINT, "execute", str(payload_file)],
-            capture_output=True, text=True, cwd=str(tmp_path), timeout=10,
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+            timeout=10,
         )
         assert result.returncode == 0, f"Entrypoint failed: {result.stderr}"
         resp = json.loads(result.stdout)
@@ -177,8 +184,7 @@ class TestHookDenyPreventsExecution:
 
         # Command with extra args after payload path triggers deny.
         command = (
-            f"python3 {PLUGIN_ROOT}/scripts/ticket_engine_user.py execute "
-            f"{payload_file} --verbose"
+            f"python3 {PLUGIN_ROOT}/scripts/ticket_engine_user.py execute {payload_file} --verbose"
         )
         hook_output = run_hook(command, cwd=str(tmp_path))
 
@@ -227,7 +233,10 @@ class TestHookSessionIdPropagatesToAudit:
         # Step 2: Run entrypoint.
         result = subprocess.run(
             [sys.executable, USER_ENTRYPOINT, "execute", str(payload_file)],
-            capture_output=True, text=True, cwd=str(tmp_path), timeout=10,
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+            timeout=10,
         )
         assert result.returncode == 0, f"Entrypoint failed: {result.stderr}"
 
@@ -305,11 +314,16 @@ class TestOriginMismatchIntegration:
         tickets_dir = tmp_path / "tickets"
         tickets_dir.mkdir()
         payload_file = tmp_path / "payload.json"
-        payload_file.write_text(json.dumps({
-            "action": "create",
-            "fields": {"title": "Mismatch", "problem": "Mismatch", "priority": "low"},
-            "tickets_dir": str(tickets_dir),
-        }), encoding="utf-8")
+        payload_file.write_text(
+            json.dumps(
+                {
+                    "action": "create",
+                    "fields": {"title": "Mismatch", "problem": "Mismatch", "priority": "low"},
+                    "tickets_dir": str(tickets_dir),
+                }
+            ),
+            encoding="utf-8",
+        )
 
         command = f"python3 {PLUGIN_ROOT}/scripts/ticket_engine_user.py execute {payload_file}"
         hook_output = run_hook(
@@ -322,7 +336,10 @@ class TestOriginMismatchIntegration:
 
         result = subprocess.run(
             [sys.executable, USER_ENTRYPOINT, "execute", str(payload_file)],
-            capture_output=True, text=True, cwd=str(tmp_path), timeout=10,
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+            timeout=10,
         )
         assert result.returncode == 1
         resp = json.loads(result.stdout)
@@ -334,11 +351,16 @@ class TestOriginMismatchIntegration:
         tickets_dir = tmp_path / "tickets"
         tickets_dir.mkdir()
         payload_file = tmp_path / "payload.json"
-        payload_file.write_text(json.dumps({
-            "action": "create",
-            "fields": {"title": "Mismatch", "problem": "Mismatch", "priority": "low"},
-            "tickets_dir": str(tickets_dir),
-        }), encoding="utf-8")
+        payload_file.write_text(
+            json.dumps(
+                {
+                    "action": "create",
+                    "fields": {"title": "Mismatch", "problem": "Mismatch", "priority": "low"},
+                    "tickets_dir": str(tickets_dir),
+                }
+            ),
+            encoding="utf-8",
+        )
 
         command = f"python3 {PLUGIN_ROOT}/scripts/ticket_engine_agent.py execute {payload_file}"
         hook_output = run_hook(command, cwd=str(tmp_path))
@@ -346,7 +368,10 @@ class TestOriginMismatchIntegration:
 
         result = subprocess.run(
             [sys.executable, AGENT_ENTRYPOINT, "execute", str(payload_file)],
-            capture_output=True, text=True, cwd=str(tmp_path), timeout=10,
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+            timeout=10,
         )
         assert result.returncode == 1
         resp = json.loads(result.stdout)

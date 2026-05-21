@@ -66,11 +66,7 @@ def load_runner_context(
             error_code="parse_error",
         )
 
-    effective_origin = (
-        request_origin
-        or payload.get("hook_request_origin")
-        or "user"
-    )
+    effective_origin = request_origin or payload.get("hook_request_origin") or "user"
     if not isinstance(effective_origin, str) or not effective_origin:
         return None, EngineResponse(
             state="escalate",
@@ -189,6 +185,24 @@ def run(
     Returns:
         Exit code: 0 (success), 1 (engine error), 2 (need_fields).
     """
+    try:
+        return _run_impl(request_origin, argv, prog=prog)
+    except Exception as exc:
+        response = EngineResponse(
+            state="escalate",
+            message=f"ticket engine runner failed: {type(exc).__name__}: {exc}",
+            error_code="io_error",
+        )
+        print(response.to_json())
+        return 1
+
+
+def _run_impl(
+    request_origin: str,
+    argv: list[str] | None = None,
+    *,
+    prog: str,
+) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if len(args) < 2:
         print(
@@ -503,8 +517,6 @@ def _dispatch(
                 else None
             )
             runtime_execute_surface = "direct_execute" if request_origin == "agent" else None
-            if request_origin == "agent":
-                assert runtime_execute_surface == "direct_execute"
             return engine_execute(
                 action=inp.action,
                 ticket_id=inp.ticket_id,

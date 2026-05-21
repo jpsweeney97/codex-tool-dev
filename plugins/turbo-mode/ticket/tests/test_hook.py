@@ -108,6 +108,21 @@ def test_run_cli_fails_closed_on_internal_error(
     assert "ticket_engine_guard failed closed: RuntimeError: boom" in captured.err
 
 
+def test_malformed_stdin_fails_closed() -> None:
+    result = subprocess.run(
+        [sys.executable, str(HOOK_PATH)],
+        input="{not-json",
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0
+    output = json.loads(result.stdout)
+    assert output["entries"][0]["kind"] == "stop"
+    assert "malformed hook input" in output["entries"][0]["text"].lower()
+
+
 def _normalize_hook_output(raw: dict) -> dict:
     if "hookSpecificOutput" in raw:
         return raw
@@ -192,6 +207,10 @@ class TestAllowlist:
         output = run_hook(inp, plugin_root=plugin_root)
 
         assert _decision(output) == "allow"
+        injected = json.loads(payload_file.read_text(encoding="utf-8"))
+        assert injected["session_id"] == "test-session-123"
+        assert injected["hook_injected"] is True
+        assert injected["hook_request_origin"] == "user"
 
     @pytest.mark.parametrize("subcommand", ["classify", "plan", "preflight", "ingest"])
     def test_denies_activation_smoke_non_execute_subcommands(
@@ -222,8 +241,7 @@ class TestAllowlist:
         payload_file.write_text(json.dumps({"action": "classify"}), encoding="utf-8")
 
         inp = make_hook_input(
-            f"python3 -B {plugin_root}/scripts/ticket_engine_user.py "
-            f"classify '{payload_file}'",
+            f"python3 -B {plugin_root}/scripts/ticket_engine_user.py classify '{payload_file}'",
             plugin_root=plugin_root,
         )
         output = run_hook(inp, plugin_root=plugin_root)
@@ -284,9 +302,9 @@ class TestAllowlist:
     def test_direct_core_import_passes_through(self) -> None:
         """python3 -c one-liners don't match _is_ticket_invocation — pass through.
 
-        The 4-branch gate only matches `python3 <root>/scripts/ticket_*.py ...`
+        The semantic gate only matches `python3 <root>/scripts/ticket_*.py ...`
         invocations. `python3 -c '...'` is not a ticket script invocation, so it
-        passes through as empty JSON (branch 4). The old substring gate denied
+        passes through as empty JSON. The old substring gate denied
         this, but that was overly broad — the hook's contract is to gate ticket
         script execution, not all python invocations mentioning ticket internals.
         """
@@ -768,9 +786,29 @@ def test_hook_denies_ticket_triage_doctor_personal_cache_root(tmp_path: Path) ->
     result = run_hook(event, plugin_root=str(plugin_root))
 
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert "--cache-root must equal the running plugin root" in result["hookSpecificOutput"][
-        "permissionDecisionReason"
-    ]
+    assert (
+        "--cache-root must equal the running plugin root"
+        in result["hookSpecificOutput"]["permissionDecisionReason"]
+    )
+
+
+def test_hook_denies_ticket_triage_doctor_missing_args_with_precise_reason(tmp_path: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    event = make_hook_input(
+        f"uv run python -B {plugin_root}/scripts/ticket_triage.py doctor {tickets_dir}",
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(plugin_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    reason = result["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "incomplete arguments" in reason
+    assert "canonical" not in reason
 
 
 @pytest.mark.parametrize(

@@ -6,7 +6,13 @@ import sys
 from pathlib import Path
 
 from tests.support.builders import make_ticket
-from tests.support.workflow import PLUGIN_ROOT, authorized_recovery_payload, payload_file, trusted_args_ticket_payload, trusted_payload
+from tests.support.workflow import (
+    PLUGIN_ROOT,
+    authorized_recovery_payload,
+    payload_file,
+    trusted_args_ticket_payload,
+    trusted_payload,
+)
 
 
 def test_recovery_cli_set_field_preserves_quoted_json_value(tmp_path: Path) -> None:
@@ -45,14 +51,17 @@ def test_recovery_cli_set_field_preserves_quoted_json_value(tmp_path: Path) -> N
 
 def test_cli_ready_to_execute_returns_0(tmp_tickets: Path, tmp_path: Path) -> None:
     project_root = tmp_tickets.parent.parent
-    payload_path = payload_file(tmp_path, trusted_payload(
-        "create",
-        {
-            "title": "CLI ready",
-            "problem": "Prepare should return ready_to_execute via CLI.",
-            "priority": "medium",
-        },
-    ))
+    payload_path = payload_file(
+        tmp_path,
+        trusted_payload(
+            "create",
+            {
+                "title": "CLI ready",
+                "problem": "Prepare should return ready_to_execute via CLI.",
+                "priority": "medium",
+            },
+        ),
+    )
 
     completed = subprocess.run(
         [
@@ -76,7 +85,9 @@ def test_cli_ready_to_execute_returns_0(tmp_tickets: Path, tmp_path: Path) -> No
 def test_cli_need_fields_returns_2(tmp_tickets: Path, tmp_path: Path) -> None:
     project_root = tmp_tickets.parent.parent
     make_ticket(tmp_tickets, "cli-reopen.md", id="T-20260503-67", status="done")
-    payload_path = payload_file(tmp_path, trusted_args_ticket_payload("reopen", "T-20260503-67", {}))
+    payload_path = payload_file(
+        tmp_path, trusted_args_ticket_payload("reopen", "T-20260503-67", {})
+    )
 
     completed = subprocess.run(
         [

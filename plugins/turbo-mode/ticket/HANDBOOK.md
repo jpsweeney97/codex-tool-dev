@@ -168,7 +168,12 @@ If `.codex/ticket.local.md` is absent, the plugin defaults to `autonomy_mode: su
 
 ### Path Resolution
 
-No shell environment variable is required. Skills resolve `PLUGIN_ROOT` from their installed skill path, the hook resolves it from the parent of `hooks/`, and `PROJECT_ROOT` is discovered by walking up from the current working directory to the nearest `.codex`, `.git/`, or `.git` marker.
+No shell environment variable is required for normal operation. Skills resolve
+`PLUGIN_ROOT` from their installed skill path, the hook resolves it from the
+parent of `hooks/`, and `PROJECT_ROOT` is discovered by walking up from the
+current working directory to the nearest `.codex`, `.git/`, or `.git` marker.
+During activation and test flows, `ticket_engine_runner.py execute` may honor
+`TICKET_RUNTIME_PROOF_PATH`; classify, plan, preflight, and ingest ignore it.
 
 ### Tickets Directory
 
@@ -191,7 +196,7 @@ Every mutation must carry a **trust triple** injected by the hook:
 | `hook_request_origin` | Hook | Hook-observed provenance metadata; current runtime may report `"user"` even for the certified direct-execute lane, and activation readiness does not treat it as caller identity |
 
 The hook injects these fields atomically into the payload file before allowing
-the Bash command to proceed. At classify and execute stages, the engine
+the Bash command to proceed. At execute and ingest stages, the engine
 re-validates the trust triple against the selected policy lane. Missing or
 malformed trust data rejects with an error, and the certified direct-execute
 lane accepts the current host's `hook_request_origin="user"` observation as
@@ -215,12 +220,13 @@ proves installed hook-mediated direct-execute wiring, not host-owned or
 spawned-agent identity. `hook_request_origin` is hook-observed provenance
 metadata on the current host and may still be reported as `"user"` for the
 certified direct-execute lane. `capture`, `update`, and `ticket_workflow.py`
-remain outside the activation proof scope and require a separate follow-up
-before widening certification. `dangerFullAccess` runs and prompt-driven smokes
-are diagnostics only. AgentControl child smoke, when captured, is
-same-membrane corroboration only and not identity proof. Normal agent direct
-execute fails with `runtime_readiness_required` when the runtime proof is
-missing, stale, or mismatched.
+remain outside the activation proof scope alongside `ingest_dispatch` and
+`activation_smoke_bootstrap`, and require a separate follow-up before widening
+certification. Privileged host diagnostic runs and prompt-driven smokes are
+diagnostics only. AgentControl child smoke, when captured, is same-membrane
+corroboration only and not identity proof. Normal agent direct execute fails
+with `runtime_readiness_required` when the runtime proof is missing, stale, or
+mismatched.
 
 `auto_audit` is single-writer in this slice. Do not intentionally launch two or more ticket-capable agents in the same Codex session. Future locking/queueing work is triggered by any workflow that intentionally launches two or more ticket-capable agents in the same Codex session, or enables `auto_audit` for delegated multi-agent work.
 

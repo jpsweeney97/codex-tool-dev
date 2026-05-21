@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Standalone audit maintenance utilities for ticket JSONL logs."""
+
 from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,7 @@ sys.dont_write_bytecode = True
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.ticket_paths import discover_project_root, resolve_tickets_dir
+from scripts.ticket_paths import discover_project_root, resolve_tickets_dir  # noqa: E402
 
 
 def _response(state: str, message: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -48,9 +49,7 @@ def _iter_audit_files(tickets_dir: Path) -> list[Path]:
     if not audit_root.exists():
         return []
     return sorted(
-        path
-        for path in audit_root.rglob("*.jsonl")
-        if path.is_file() and ".bak-" not in path.name
+        path for path in audit_root.rglob("*.jsonl") if path.is_file() and ".bak-" not in path.name
     )
 
 
@@ -93,15 +92,19 @@ def _write_backup_and_repair(
         backup_path.write_text(original_text, encoding="utf-8")
         audit_file.write_text(repaired_text, encoding="utf-8")
     except OSError as exc:
+        message = (
+            f"audit repair failed: cannot write repair output for {audit_file}: {exc}. "
+            f"Got: {str(audit_file)!r:.100}"
+        )
         raise OSError(
-            f"audit repair failed: cannot write repair output for {audit_file}: {exc}. Got: {str(audit_file)!r:.100}"
+            message
         ) from exc
     return backup_path
 
 
 def repair_audit_logs(*, tickets_dir: Path, dry_run: bool) -> tuple[dict[str, Any], int]:
     data = _empty_data()
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     try:
         audit_files = _iter_audit_files(tickets_dir)
@@ -149,7 +152,9 @@ def repair_audit_logs(*, tickets_dir: Path, dry_run: bool) -> tuple[dict[str, An
 
 
 def main(argv: list[str] | None = None) -> int:
-    command, raw_tickets_dir, dry_run, error = _parse_args(list(sys.argv[1:] if argv is None else argv))
+    command, raw_tickets_dir, dry_run, error = _parse_args(
+        list(sys.argv[1:] if argv is None else argv)
+    )
     data = _empty_data()
     if error is not None or command is None or raw_tickets_dir is None:
         print(json.dumps(_response("error", error or "Invalid arguments", data)))
@@ -157,7 +162,15 @@ def main(argv: list[str] | None = None) -> int:
 
     project_root = discover_project_root(Path.cwd())
     if project_root is None:
-        print(json.dumps(_response("error", "Cannot find project root (no .git or .codex marker in ancestors)", data)))
+        print(
+            json.dumps(
+                _response(
+                    "error",
+                    "Cannot find project root (no .git or .codex marker in ancestors)",
+                    data,
+                )
+            )
+        )
         return 1
     tickets_dir, path_error = resolve_tickets_dir(raw_tickets_dir, project_root=project_root)
     if path_error is not None or tickets_dir is None:

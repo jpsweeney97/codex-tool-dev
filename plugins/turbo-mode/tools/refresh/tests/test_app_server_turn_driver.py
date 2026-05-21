@@ -37,6 +37,11 @@ class _Proc:
         self.stdin = stdin
 
 
+class _RaisingIterable:
+    def __iter__(self):
+        raise RuntimeError("late stderr failure")
+
+
 def test_build_probe_command_targets_installed_ticket_engine_agent(tmp_path: Path) -> None:
     installed_ticket_root = tmp_path / "installed-ticket"
     payload_path = tmp_path / "contained" / "payload.json"
@@ -489,6 +494,62 @@ def test_send_and_record_rejects_reader_exception() -> None:
         )
 
 
+def test_run_driver_reports_late_reader_error_after_transcript_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "repo"
+    contained_root = project_root / ".codex/ticket-runtime-smoke-preflight/contained"
+    installed_ticket_root = tmp_path / "installed-ticket"
+    out_path = (
+        project_root
+        / ".codex"
+        / "ticket-runtime-smoke-preflight"
+        / "app-server-driver-preflight.jsonl"
+    )
+    layout = prepare_preflight_layout(
+        project_root=project_root,
+        contained_root=contained_root,
+        installed_ticket_root=installed_ticket_root,
+        out_path=out_path,
+    )
+
+    class FakeProc:
+        def __init__(self) -> None:
+            self.stdin = _StringWriter()
+            self.stdout = iter(
+                [
+                    '{"id":0,"result":{"ok":true}}\n',
+                    '{"id":1,"result":{"thread":{"id":"thread-1"}}}\n',
+                    '{"id":2,"result":{"turn":{"id":"turn-1"}}}\n',
+                    '{"method":"turn/completed","params":{"turn":{"id":"turn-1"}}}\n',
+                ]
+            )
+            self.stderr = _RaisingIterable()
+            self.returncode = None
+
+        def terminate(self) -> None:
+            return None
+
+        def wait(self, timeout: int) -> int:
+            self.returncode = 0
+            return 0
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+        def poll(self) -> None:
+            return None
+
+    monkeypatch.setattr(driver_module.subprocess, "Popen", lambda *_args, **_kwargs: FakeProc())
+
+    with pytest.raises(RefreshError, match="reader failed: stderr reader failed"):
+        driver_module.run_driver(layout=layout, executable="codex")
+
+    assert out_path.is_file()
+    assert '"method":"turn/completed"' in out_path.read_text(encoding="utf-8")
+
+
 def test_transcript_summary_passed_is_derived_from_failure_reasons() -> None:
     summary = TranscriptSummary(
         request_methods=(),
@@ -503,6 +564,23 @@ def test_transcript_summary_passed_is_derived_from_failure_reasons() -> None:
 
     assert summary.passed is False
     assert transcript_summary_to_dict(summary)["passed"] is False
+
+
+def _append_extra_command(transcript, _probe, _root) -> None:
+    transcript[6]["body"]["params"]["turn"]["items"].append(
+        {
+            "id": "cmd-2",
+            "type": "commandExecution",
+            "status": "completed",
+            "command": "echo extra",
+        }
+    )
+
+
+def _change_probe_command(transcript, _probe, _root) -> None:
+    transcript[6]["body"]["params"]["turn"]["items"][0].update(
+        {"command": "echo different"}
+    )
 
 
 @pytest.mark.parametrize(
@@ -521,14 +599,7 @@ def test_transcript_summary_passed_is_derived_from_failure_reasons() -> None:
             "thread_start_missing_ephemeral",
         ),
         (
-            lambda transcript, _probe, _root: transcript[6]["body"]["params"]["turn"]["items"].append(
-                {
-                    "id": "cmd-2",
-                    "type": "commandExecution",
-                    "status": "completed",
-                    "command": "echo extra",
-                }
-            ),
+            _append_extra_command,
             "command_execution_count_mismatch",
         ),
         (
@@ -536,9 +607,7 @@ def test_transcript_summary_passed_is_derived_from_failure_reasons() -> None:
             "ticket_hook_count_mismatch",
         ),
         (
-            lambda transcript, _probe, _root: transcript[6]["body"]["params"]["turn"]["items"][0].update(
-                {"command": "echo different"}
-            ),
+            _change_probe_command,
             "probe_command_missing",
         ),
         (

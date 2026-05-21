@@ -4,6 +4,7 @@ normalize() implements the 5-step canonical normalization from the contract.
 dedup_fingerprint() produces the sha256 fingerprint for dedup detection.
 target_fingerprint() produces the TOCTOU fingerprint for a ticket file.
 """
+
 from __future__ import annotations
 
 import hashlib

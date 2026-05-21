@@ -1,8 +1,8 @@
 """Tests for ticket_stage_models.py — stage boundary input models."""
+
 from __future__ import annotations
 
 import pytest
-
 from scripts.ticket_stage_models import (
     ClassifyInput,
     ExecuteInput,
@@ -27,20 +27,24 @@ class TestPayloadError:
 
 class TestClassifyInput:
     def test_valid_payload(self):
-        inp = ClassifyInput.from_payload({
-            "action": "create",
-            "args": {"ticket_id": "T-001"},
-            "session_id": "sess-1",
-        })
+        inp = ClassifyInput.from_payload(
+            {
+                "action": "create",
+                "args": {"ticket_id": "T-001"},
+                "session_id": "sess-1",
+            }
+        )
         assert inp.action == "create"
         assert inp.args == {"ticket_id": "T-001"}
         assert inp.session_id == "sess-1"
 
     def test_defaults(self):
-        inp = ClassifyInput.from_payload({
-            "action": "create",
-            "session_id": "sess-1",
-        })
+        inp = ClassifyInput.from_payload(
+            {
+                "action": "create",
+                "session_id": "sess-1",
+            }
+        )
         assert inp.args == {}
 
     def test_empty_defaults_for_missing_strings(self):
@@ -52,22 +56,26 @@ class TestClassifyInput:
 
     def test_args_wrong_type_raises_parse_error(self):
         with pytest.raises(PayloadError) as exc_info:
-            ClassifyInput.from_payload({
-                "action": "create",
-                "args": "not a dict",
-                "session_id": "sess-1",
-            })
+            ClassifyInput.from_payload(
+                {
+                    "action": "create",
+                    "args": "not a dict",
+                    "session_id": "sess-1",
+                }
+            )
         assert exc_info.value.code == "parse_error"
         assert exc_info.value.state == "escalate"
 
     def test_extra_keys_ignored(self):
-        inp = ClassifyInput.from_payload({
-            "action": "create",
-            "args": {},
-            "session_id": "sess-1",
-            "extra_field": "ignored",
-            "hook_injected": True,
-        })
+        inp = ClassifyInput.from_payload(
+            {
+                "action": "create",
+                "args": {},
+                "session_id": "sess-1",
+                "extra_field": "ignored",
+                "hook_injected": True,
+            }
+        )
         assert inp.action == "create"
 
     def test_frozen(self):
@@ -78,37 +86,45 @@ class TestClassifyInput:
 
 class TestPlanInput:
     def test_valid_payload(self):
-        inp = PlanInput.from_payload({
-            "intent": "create",
-            "fields": {"title": "Test"},
-            "session_id": "sess-1",
-        })
+        inp = PlanInput.from_payload(
+            {
+                "intent": "create",
+                "fields": {"title": "Test"},
+                "session_id": "sess-1",
+            }
+        )
         assert inp.intent == "create"
         assert inp.fields == {"title": "Test"}
         assert inp.session_id == "sess-1"
 
     def test_intent_falls_back_to_action(self):
-        inp = PlanInput.from_payload({
-            "action": "update",
-            "session_id": "sess-1",
-        })
+        inp = PlanInput.from_payload(
+            {
+                "action": "update",
+                "session_id": "sess-1",
+            }
+        )
         assert inp.intent == "update"
 
     def test_intent_prefers_intent_over_action(self):
-        inp = PlanInput.from_payload({
-            "intent": "create",
-            "action": "update",
-            "session_id": "sess-1",
-        })
+        inp = PlanInput.from_payload(
+            {
+                "intent": "create",
+                "action": "update",
+                "session_id": "sess-1",
+            }
+        )
         assert inp.intent == "create"
 
     def test_intent_ignores_malformed_action_when_intent_present(self):
         """Lazy fallback: non-string action is not validated when intent is present."""
-        inp = PlanInput.from_payload({
-            "intent": "create",
-            "action": 42,
-            "session_id": "sess-1",
-        })
+        inp = PlanInput.from_payload(
+            {
+                "intent": "create",
+                "action": 42,
+                "session_id": "sess-1",
+            }
+        )
         assert inp.intent == "create"
 
     def test_defaults(self):
@@ -119,11 +135,13 @@ class TestPlanInput:
 
     def test_fields_wrong_type_raises_parse_error(self):
         with pytest.raises(PayloadError) as exc_info:
-            PlanInput.from_payload({
-                "intent": "create",
-                "fields": ["not", "a", "dict"],
-                "session_id": "sess-1",
-            })
+            PlanInput.from_payload(
+                {
+                    "intent": "create",
+                    "fields": ["not", "a", "dict"],
+                    "session_id": "sess-1",
+                }
+            )
         assert exc_info.value.code == "parse_error"
 
     def test_frozen(self):
@@ -134,20 +152,22 @@ class TestPlanInput:
 
 class TestPreflightInput:
     def test_valid_payload(self):
-        inp = PreflightInput.from_payload({
-            "action": "create",
-            "ticket_id": "T-20260302-01",
-            "session_id": "sess-1",
-            "classify_confidence": 0.95,
-            "classify_intent": "create",
-            "dedup_fingerprint": "abc123",
-            "target_fingerprint": "def456",
-            "fields": {"title": "Test"},
-            "duplicate_of": "T-20260301-01",
-            "dedup_override": True,
-            "dependency_override": True,
-            "hook_injected": True,
-        })
+        inp = PreflightInput.from_payload(
+            {
+                "action": "create",
+                "ticket_id": "T-20260302-01",
+                "session_id": "sess-1",
+                "classify_confidence": 0.95,
+                "classify_intent": "create",
+                "dedup_fingerprint": "abc123",
+                "target_fingerprint": "def456",
+                "fields": {"title": "Test"},
+                "duplicate_of": "T-20260301-01",
+                "dedup_override": True,
+                "dependency_override": True,
+                "hook_injected": True,
+            }
+        )
         assert inp.action == "create"
         assert inp.ticket_id == "T-20260302-01"
         assert inp.classify_confidence == 0.95
@@ -198,21 +218,23 @@ class TestPreflightInput:
 
 class TestExecuteInput:
     def test_valid_payload(self):
-        inp = ExecuteInput.from_payload({
-            "action": "update",
-            "ticket_id": "T-20260302-01",
-            "fields": {"priority": "high"},
-            "session_id": "sess-1",
-            "dedup_override": True,
-            "dependency_override": True,
-            "target_fingerprint": "abc123",
-            "autonomy_config": {"mode": "auto_audit", "max_creates": 5},
-            "hook_injected": True,
-            "hook_request_origin": "user",
-            "classify_intent": "update",
-            "classify_confidence": 0.95,
-            "dedup_fingerprint": "def456",
-        })
+        inp = ExecuteInput.from_payload(
+            {
+                "action": "update",
+                "ticket_id": "T-20260302-01",
+                "fields": {"priority": "high"},
+                "session_id": "sess-1",
+                "dedup_override": True,
+                "dependency_override": True,
+                "target_fingerprint": "abc123",
+                "autonomy_config": {"mode": "auto_audit", "max_creates": 5},
+                "hook_injected": True,
+                "hook_request_origin": "user",
+                "classify_intent": "update",
+                "classify_confidence": 0.95,
+                "dedup_fingerprint": "def456",
+            }
+        )
         assert inp.action == "update"
         assert inp.ticket_id == "T-20260302-01"
         assert inp.fields == {"priority": "high"}

@@ -3,13 +3,20 @@
 Each test creates a legacy ticket, parses it, and verifies field mapping,
 section renames, and status normalization against expected output.
 """
+
 from __future__ import annotations
 
 import textwrap
 
-
 from scripts.ticket_parse import parse_ticket
-from tests.support.builders import make_gen1_ticket, make_gen2_ticket, make_gen3_ticket, make_gen4_ticket, make_ticket
+
+from tests.support.builders import (
+    make_gen1_ticket,
+    make_gen2_ticket,
+    make_gen3_ticket,
+    make_gen4_ticket,
+    make_ticket,
+)
 
 
 class TestGen1Migration:
@@ -187,8 +194,7 @@ class TestLegacyWriteGate:
         """Regression: v1.0 tickets (generation=10) should be updatable."""
         from scripts.ticket_engine_core import _execute_update
 
-        make_ticket(tmp_tickets, "2026-03-10-normal.md",
-                    id="T-20260310-01", title="Normal ticket")
+        make_ticket(tmp_tickets, "2026-03-10-normal.md", id="T-20260310-01", title="Normal ticket")
         resp = _execute_update(
             ticket_id="T-20260310-01",
             fields={"priority": "high"},

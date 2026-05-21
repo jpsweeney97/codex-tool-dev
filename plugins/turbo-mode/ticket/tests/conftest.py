@@ -1,8 +1,10 @@
 """Shared test fixtures for ticket plugin tests."""
+
 from __future__ import annotations
 
 import sys
 from pathlib import Path
+
 import pytest
 
 sys.dont_write_bytecode = True

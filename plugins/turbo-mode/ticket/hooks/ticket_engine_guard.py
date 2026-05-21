@@ -1,21 +1,13 @@
 #!/usr/bin/env python3
 """PreToolUse hook: validates ticket script invocations and injects trust fields.
 
-Decision branches:
-- Branch 1: exact engine allowlist -> validate subcommand/payload + inject trust fields.
-- Branch 2: exact workflow allowlist (`ticket_workflow.py`) -> validate
-  subcommand/payload/recovery args + inject trust fields.
-- Branch 3: exact capture allowlist (`ticket_capture.py`) -> validate
-  subcommand/payload/edit args + inject trust fields.
-- Branch 4: exact update allowlist (`ticket_update.py`) -> validate
-  subcommand/payload + inject trust fields.
-- Branch 5: exact read-only allowlist (`ticket_read.py`, `ticket_triage.py`,
-  `ticket_review.py`) -> allow. `ticket_triage.py doctor` also validates
-  explicit roots.
-- Branch 6: exact maintenance allowlist (`ticket_audit.py`, `ticket_doctor.py`)
-  -> allow for users, deny for agents.
-- Branch 7: unknown Python invocation targeting `ticket_*.py` -> deny.
-- Branch 8: non-ticket Bash commands -> pass through silently (empty JSON).
+Decision paths:
+- Engine allowlist: validate subcommand/payload and inject trust fields.
+- Workflow/capture/update allowlists: validate command shape and inject trust fields.
+- Read-only allowlist: allow safe reads; `ticket_triage.py doctor` validates roots.
+- Maintenance allowlist: allow users, deny agents.
+- Unknown ticket script invocations: deny.
+- Non-ticket Bash commands: pass through silently.
 
 Payload injection (atomic):
 - Injects session_id, hook_injected, hook_request_origin into the payload file.
@@ -23,7 +15,7 @@ Payload injection (atomic):
 - Uses temp file + fsync + os.replace for atomic writes.
 - Denies on any injection failure (unreadable file, invalid JSON, write error).
 
-Exit code always 0 (fail-open on crash — accepted v1.0 limitation).
+Exit code always 0; ticket candidates and internal failures fail closed.
 """
 
 from __future__ import annotations
@@ -84,8 +76,8 @@ _TICKET_SCRIPT_BASENAMES = frozenset(
     }
 )
 
-# Broad pattern for any ticket_*.py script — catches unknown/rogue scripts
-# so they route to branch 3 (deny) rather than bypassing the hook entirely.
+# Broad pattern for any ticket_*.py script: catches unknown/rogue scripts so
+# they route to the deny path rather than bypassing the hook entirely.
 _TICKET_SCRIPT_RE = re.compile(r"^ticket_\w+\.py$")
 
 # Environment variable assignment tokens.
@@ -172,8 +164,8 @@ def _is_ticket_candidate(command: str) -> bool:
     - Leading env assignments: KEY=VAL python3 script.py
     - Python flags before script: python3 -u -O script.py
 
-    Returns True if detected as a ticket script candidate (routes to exact
-    allowlist validation in branches 1-3). False means pass-through (branch 4).
+    Returns True if detected as a ticket script candidate for exact allowlist
+    validation. False means pass-through.
     """
     try:
         tokens = shlex.split(command)
@@ -447,7 +439,10 @@ def _validate_doctor_readonly_invocation(command_clean: str, plugin_root: str) -
     if script_idx is None:
         return "ticket_triage.py doctor must use canonical python3 or uv run python launcher"
     if len(tokens) < script_idx + 6:
-        return "ticket_triage.py doctor must use canonical python3 or uv run python launcher"
+        return (
+            "ticket_triage.py doctor incomplete arguments: expected tickets_dir, "
+            "--plugin-root, and --cache-root"
+        )
     if tokens[script_idx] != expected_script or tokens[script_idx + 1] != "doctor":
         return "ticket_triage.py doctor must use canonical python3 or uv run python launcher"
 
@@ -593,8 +588,7 @@ def main() -> None:
     try:
         event = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
-        # Malformed input — fail open.
-        print("{}")
+        print(json.dumps(_make_deny("Malformed hook input: expected JSON object on stdin")))
         return
 
     # Non-Bash tools pass through.
@@ -611,7 +605,7 @@ def main() -> None:
     command_clean = re.sub(r"\s+2>&1\s*$", "", command)
     command_for_detection = command_clean.lstrip()
 
-    # Branch 4: Non-ticket-script invocations pass through (cat, rg, wc, etc.).
+    # Non-ticket-script invocations pass through (cat, rg, wc, etc.).
     plugin_root = _plugin_root()
     if not _is_ticket_candidate(command_for_detection):
         print("{}")
@@ -638,7 +632,7 @@ def main() -> None:
         )
         return
 
-    # Branch 1: Engine exact allowlist → validate subcommand/payload + inject.
+    # Engine exact allowlist: validate subcommand/payload and inject.
     engine_invocation = _parse_engine_invocation(command_clean, plugin_root)
     if engine_invocation is not None:
         entrypoint_type, subcommand, payload_path, extra_args = engine_invocation
@@ -865,7 +859,7 @@ def main() -> None:
         print(json.dumps(_make_allow(f"Ticket update/{subcommand} validated and payload injected")))
         return
 
-    # Branch 2: Read-only scripts (ticket_read.py, ticket_triage.py, ticket_review.py)
+    # Read-only scripts (ticket_read.py, ticket_triage.py, ticket_review.py).
     # → allow, no injection.
     readonly_invocation = _parse_readonly_invocation(command_clean, plugin_root)
     if readonly_invocation is not None:
@@ -878,8 +872,7 @@ def main() -> None:
         print(json.dumps(_make_allow(f"Ticket {script_name}/{subcommand} validated (read-only)")))
         return
 
-    # Branch 2b: Maintenance scripts (ticket_audit.py, ticket_doctor.py)
-    # → allow for users, deny for agents.
+    # Maintenance scripts (ticket_audit.py, ticket_doctor.py): allow users, deny agents.
     audit_invocation = _parse_audit_invocation(command_clean, plugin_root)
     if audit_invocation is not None:
         origin, origin_error = _resolve_origin(event, is_ticket_candidate=True)
@@ -900,7 +893,7 @@ def main() -> None:
         print(json.dumps(_make_allow(f"Ticket {script_name}/{subcommand} validated (user-only)")))
         return
 
-    # Branch 3: Unrecognized ticket script invocation → deny.
+    # Unrecognized ticket script invocation: deny.
     print(
         json.dumps(_make_deny(f"Command invokes unrecognized ticket script. Got: {command!r:.100}"))
     )

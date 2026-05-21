@@ -1,4 +1,5 @@
 """Tests for the triage analysis script."""
+
 from __future__ import annotations
 
 import json
@@ -20,13 +21,15 @@ class TestDashboard:
         """Create a mix of tickets for dashboard testing."""
         make_ticket(tmp_tickets, "t1.md", id="T-20260302-01", status="open")
         make_ticket(tmp_tickets, "t2.md", id="T-20260302-02", status="in_progress")
-        make_ticket(tmp_tickets, "t3.md", id="T-20260302-03", status="blocked",
-                    blocked_by=["T-20260302-01"])
+        make_ticket(
+            tmp_tickets, "t3.md", id="T-20260302-03", status="blocked", blocked_by=["T-20260302-01"]
+        )
         make_ticket(tmp_tickets, "t4.md", id="T-20260302-04", status="done")
         return tmp_tickets
 
     def test_status_counts(self, populated_tickets):
         from scripts.ticket_triage import triage_dashboard
+
         result = triage_dashboard(populated_tickets)
         assert result["counts"]["open"] == 1
         assert result["counts"]["in_progress"] == 1
@@ -35,6 +38,7 @@ class TestDashboard:
 
     def test_empty_directory(self, tmp_tickets):
         from scripts.ticket_triage import triage_dashboard
+
         result = triage_dashboard(tmp_tickets)
         assert result["total"] == 0
         assert result["stale"] == []
@@ -69,6 +73,66 @@ def test_dashboard_includes_recommended_next_actions(tmp_tickets: Path) -> None:
     assert dashboard["next_actions"][0]["ticket_id"] == "T-20260420-01"
 
 
+def test_runtime_probe_status_uses_hooks_json_command(tmp_path: Path) -> None:
+    from scripts.ticket_triage import _runtime_probe_status
+
+    plugin_root = tmp_path / "ticket"
+    hooks_dir = plugin_root / "hooks"
+    hooks_dir.mkdir(parents=True)
+    hook_command = f"uv run python -B {plugin_root}/hooks/ticket_engine_guard.py"
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [{"type": "command", "command": hook_command}],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    probe_output = tmp_path / "probe.jsonl"
+    probe_output.write_text(
+        json.dumps(
+            {
+                "result": {
+                    "plugin": {
+                        "summary": {
+                            "id": "ticket@turbo-mode",
+                            "enabled": True,
+                            "installed": True,
+                        }
+                    },
+                    "data": [
+                        {
+                            "hooks": [
+                                {
+                                    "pluginId": "ticket@turbo-mode",
+                                    "eventName": "preToolUse",
+                                    "matcher": "Bash",
+                                    "command": hook_command,
+                                    "sourcePath": str(hooks_dir / "hooks.json"),
+                                }
+                            ]
+                        }
+                    ],
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    status = _runtime_probe_status(probe_output, plugin_root)
+
+    assert status["live_hook_probe"] == "proven"
+    assert status["ticket_hook_count"] == 1
+
+
 def test_dashboard_next_actions_exclude_needs_refinement_placeholders(
     tmp_tickets: Path,
 ) -> None:
@@ -96,9 +160,7 @@ def test_dashboard_next_actions_exclude_needs_refinement_placeholders(
 
     dashboard = triage_dashboard(tmp_tickets)
 
-    assert [action["ticket_id"] for action in dashboard["next_actions"]] == [
-        "T-20260518-02"
-    ]
+    assert [action["ticket_id"] for action in dashboard["next_actions"]] == ["T-20260518-02"]
 
 
 class TestStaleDetection:
@@ -109,6 +171,7 @@ class TestStaleDetection:
         old_date = (datetime.now(UTC) - timedelta(days=10)).strftime("%Y-%m-%d")
         make_ticket(tmp_tickets, "old.md", id="T-20260220-01", date=old_date, status="open")
         from scripts.ticket_triage import triage_dashboard
+
         result = triage_dashboard(tmp_tickets)
         assert len(result["stale"]) == 1
         assert result["stale"][0]["id"] == "T-20260220-01"
@@ -119,6 +182,7 @@ class TestStaleDetection:
         today = datetime.now(UTC).strftime("%Y-%m-%d")
         make_ticket(tmp_tickets, "new.md", id="T-20260302-01", date=today, status="open")
         from scripts.ticket_triage import triage_dashboard
+
         result = triage_dashboard(tmp_tickets)
         assert result["stale"] == []
 
@@ -127,6 +191,7 @@ class TestStaleDetection:
         old_date = (datetime.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d")
         make_ticket(tmp_tickets, "done.md", id="T-20260201-01", date=old_date, status="done")
         from scripts.ticket_triage import triage_dashboard
+
         result = triage_dashboard(tmp_tickets)
         assert result["stale"] == []
 
@@ -137,11 +202,22 @@ class TestBlockedChain:
     def test_root_blocker_found(self, tmp_tickets):
         """Follow blocked_by chain to find root blocker."""
         make_ticket(tmp_tickets, "root.md", id="T-20260302-01", status="open")
-        make_ticket(tmp_tickets, "mid.md", id="T-20260302-02", status="blocked",
-                    blocked_by=["T-20260302-01"])
-        make_ticket(tmp_tickets, "leaf.md", id="T-20260302-03", status="blocked",
-                    blocked_by=["T-20260302-02"])
+        make_ticket(
+            tmp_tickets,
+            "mid.md",
+            id="T-20260302-02",
+            status="blocked",
+            blocked_by=["T-20260302-01"],
+        )
+        make_ticket(
+            tmp_tickets,
+            "leaf.md",
+            id="T-20260302-03",
+            status="blocked",
+            blocked_by=["T-20260302-02"],
+        )
         from scripts.ticket_triage import triage_dashboard
+
         result = triage_dashboard(tmp_tickets)
         chains = {c["id"]: c for c in result["blocked_chains"]}
         assert "T-20260302-03" in chains
@@ -150,19 +226,28 @@ class TestBlockedChain:
 
     def test_missing_blocker_is_root(self, tmp_tickets):
         """Blocker not found in ticket map -> treated as root."""
-        make_ticket(tmp_tickets, "blocked.md", id="T-20260302-01", status="blocked",
-                    blocked_by=["T-MISSING-01"])
+        make_ticket(
+            tmp_tickets,
+            "blocked.md",
+            id="T-20260302-01",
+            status="blocked",
+            blocked_by=["T-MISSING-01"],
+        )
         from scripts.ticket_triage import triage_dashboard
+
         result = triage_dashboard(tmp_tickets)
         assert result["blocked_chains"][0]["root_blockers"] == ["T-MISSING-01"]
 
     def test_circular_dependency_no_infinite_loop(self, tmp_tickets):
         """Circular blocked_by chain -> visited set prevents infinite loop."""
-        make_ticket(tmp_tickets, "a.md", id="T-20260302-01", status="blocked",
-                    blocked_by=["T-20260302-02"])
-        make_ticket(tmp_tickets, "b.md", id="T-20260302-02", status="blocked",
-                    blocked_by=["T-20260302-01"])
+        make_ticket(
+            tmp_tickets, "a.md", id="T-20260302-01", status="blocked", blocked_by=["T-20260302-02"]
+        )
+        make_ticket(
+            tmp_tickets, "b.md", id="T-20260302-02", status="blocked", blocked_by=["T-20260302-01"]
+        )
         from scripts.ticket_triage import triage_dashboard
+
         result = triage_dashboard(tmp_tickets)
         chains = {c["id"]: c for c in result["blocked_chains"]}
         assert len(chains) == 2
@@ -177,6 +262,7 @@ class TestDocSize:
         with open(path, "a") as f:
             f.write("x" * 33000)
         from scripts.ticket_triage import triage_dashboard
+
         result = triage_dashboard(tmp_tickets)
         assert len(result["size_warnings"]) == 1
         assert "strong_warn" in result["size_warnings"][0]["warning"]
@@ -188,6 +274,7 @@ class TestDocSize:
         with open(path, "a") as f:
             f.write("x" * 17000)
         from scripts.ticket_triage import triage_dashboard
+
         result = triage_dashboard(tmp_tickets)
         assert len(result["size_warnings"]) == 1
         assert "warn" in result["size_warnings"][0]["warning"]
@@ -197,6 +284,7 @@ class TestDocSize:
         """Normal-sized ticket -> no warning."""
         make_ticket(tmp_tickets, "normal.md", id="T-20260302-01")
         from scripts.ticket_triage import triage_dashboard
+
         result = triage_dashboard(tmp_tickets)
         assert result["size_warnings"] == []
 
@@ -222,36 +310,42 @@ class TestAuditReport:
 
         # Session 2: 1 blocked attempt.
         s2_file = audit_dir / "session-2.jsonl"
-        s2_file.write_text(json.dumps(
-            {"action": "create", "result": "policy_blocked", "session_id": "session-2"}
-        ) + "\n")
+        s2_file.write_text(
+            json.dumps({"action": "create", "result": "policy_blocked", "session_id": "session-2"})
+            + "\n"
+        )
 
         return tmp_tickets
 
     def test_total_entries_counted(self, audit_env):
         from scripts.ticket_triage import triage_audit_report
+
         result = triage_audit_report(audit_env)
         assert result["total_entries"] == 4
 
     def test_by_action_aggregation(self, audit_env):
         from scripts.ticket_triage import triage_audit_report
+
         result = triage_audit_report(audit_env)
         assert result["by_action"]["create"] == 3
         assert result["by_action"]["update"] == 1
 
     def test_by_result_aggregation(self, audit_env):
         from scripts.ticket_triage import triage_audit_report
+
         result = triage_audit_report(audit_env)
         assert result["by_result"]["ok_create"] == 2
         assert result["by_result"]["policy_blocked"] == 1
 
     def test_session_count(self, audit_env):
         from scripts.ticket_triage import triage_audit_report
+
         result = triage_audit_report(audit_env)
         assert result["sessions"] == 2
 
     def test_no_audit_dir_returns_empty(self, tmp_tickets):
         from scripts.ticket_triage import triage_audit_report
+
         result = triage_audit_report(tmp_tickets)
         assert result["total_entries"] == 0
         assert result["sessions"] == 0
@@ -284,14 +378,17 @@ class TestAuditReport:
     def test_skipped_lines_counted(self, tmp_tickets):
         """Corrupt JSONL lines are counted in skipped_lines."""
         from scripts.ticket_triage import triage_audit_report
+
         date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_dir = tmp_tickets / ".audit" / date_dir
         audit_dir.mkdir(parents=True)
         s_file = audit_dir / "corrupt-session.jsonl"
         s_file.write_text(
-            json.dumps({"action": "create", "result": "ok_create"}) + "\n"
+            json.dumps({"action": "create", "result": "ok_create"})
+            + "\n"
             + "NOT VALID JSON\n"
-            + json.dumps({"action": "update", "result": "ok_update"}) + "\n"
+            + json.dumps({"action": "update", "result": "ok_update"})
+            + "\n"
         )
         result = triage_audit_report(tmp_tickets)
         assert result["total_entries"] == 2
@@ -301,9 +398,11 @@ class TestAuditReport:
         """Unreadable audit files are counted in read_errors."""
         import os
         import sys
+
         if sys.platform == "win32":
             pytest.skip("chmod not effective on Windows")
         from scripts.ticket_triage import triage_audit_report
+
         date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_dir = tmp_tickets / ".audit" / date_dir
         audit_dir.mkdir(parents=True)
@@ -324,6 +423,7 @@ class TestStaleEdgeCases:
         """Tickets with unparseable dates are marked stale (fail toward visibility)."""
         make_ticket(tmp_tickets, "bad-date.md", date="not-a-date", status="open")
         from scripts.ticket_triage import triage_dashboard
+
         result = triage_dashboard(tmp_tickets)
         assert len(result["stale"]) == 1
 
@@ -334,6 +434,7 @@ class TestStaleEdgeCases:
         from types import SimpleNamespace
 
         from scripts.ticket_triage import _check_doc_size
+
         fake_ticket = SimpleNamespace(path="/nonexistent/path.md")
         assert _check_doc_size(fake_ticket) == "error: file unreadable"
 
@@ -358,6 +459,7 @@ class TestOrphanDetection:
             "# Handoff\nSession session-abc produced this work.\n"
         )
         from scripts.ticket_triage import triage_orphan_detection
+
         result = triage_orphan_detection(tickets_dir, handoffs_dir)
         assert len(result["matched"]) == 1
         assert result["matched"][0]["match_type"] == "uid_match"
@@ -367,10 +469,9 @@ class TestOrphanDetection:
         """Handoff mentioning ticket ID -> id_ref match."""
         tickets_dir, handoffs_dir = orphan_env
         make_ticket(tickets_dir, "t1.md", id="T-20260302-01")
-        (handoffs_dir / "handoff-1.md").write_text(
-            "# Handoff\nRelated to T-20260302-01.\n"
-        )
+        (handoffs_dir / "handoff-1.md").write_text("# Handoff\nRelated to T-20260302-01.\n")
         from scripts.ticket_triage import triage_orphan_detection
+
         result = triage_orphan_detection(tickets_dir, handoffs_dir)
         assert len(result["matched"]) == 1
         assert result["matched"][0]["match_type"] == "id_ref"
@@ -378,10 +479,9 @@ class TestOrphanDetection:
     def test_manual_review_fallback(self, orphan_env):
         """Handoff with no matching ticket -> manual_review."""
         tickets_dir, handoffs_dir = orphan_env
-        (handoffs_dir / "handoff-1.md").write_text(
-            "# Handoff\nSome unrelated work.\n"
-        )
+        (handoffs_dir / "handoff-1.md").write_text("# Handoff\nSome unrelated work.\n")
         from scripts.ticket_triage import triage_orphan_detection
+
         result = triage_orphan_detection(tickets_dir, handoffs_dir)
         assert len(result["orphaned"]) == 1
         assert result["orphaned"][0]["match_type"] == "manual_review"
@@ -389,6 +489,7 @@ class TestOrphanDetection:
     def test_no_handoffs_dir(self, tmp_tickets):
         """Missing handoffs directory -> empty results."""
         from scripts.ticket_triage import triage_orphan_detection
+
         result = triage_orphan_detection(tmp_tickets, Path("/nonexistent"))
         assert result["total_items"] == 0
 
@@ -400,6 +501,7 @@ class TestOrphanDetection:
             "# Handoff\nSession session-xyz about T-20260302-01.\n"
         )
         from scripts.ticket_triage import triage_orphan_detection
+
         result = triage_orphan_detection(tickets_dir, handoffs_dir)
         assert len(result["matched"]) == 1
         assert result["matched"][0]["match_type"] == "uid_match"
@@ -413,7 +515,10 @@ class TestTriageCLI:
         project_root = tmp_tickets.parent.parent
         result = subprocess.run(
             [sys.executable, str(TRIAGE_SCRIPT), "dashboard", str(tmp_tickets)],
-            capture_output=True, text=True, timeout=10, cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(project_root),
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
@@ -424,7 +529,10 @@ class TestTriageCLI:
         project_root = tmp_tickets.parent.parent
         result = subprocess.run(
             [sys.executable, str(TRIAGE_SCRIPT), "audit", str(tmp_tickets)],
-            capture_output=True, text=True, timeout=10, cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(project_root),
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
@@ -435,7 +543,10 @@ class TestTriageCLI:
         project_root = tmp_tickets.parent.parent
         result = subprocess.run(
             [sys.executable, str(TRIAGE_SCRIPT), "audit", str(tmp_tickets), "--days", "30"],
-            capture_output=True, text=True, timeout=10, cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(project_root),
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
@@ -445,14 +556,18 @@ class TestTriageCLI:
         """argparse exits 2 for invalid subcommand choice, not 1."""
         result = subprocess.run(
             [sys.executable, str(TRIAGE_SCRIPT), "bogus", str(tmp_tickets)],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         assert result.returncode == 2
 
     def test_missing_args_exits_1(self):
         result = subprocess.run(
             [sys.executable, str(TRIAGE_SCRIPT)],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         assert result.returncode == 1
 
@@ -461,7 +576,10 @@ class TestTriageCLI:
         outside = tmp_path.parent / "outside-tickets"
         result = subprocess.run(
             [sys.executable, str(TRIAGE_SCRIPT), "dashboard", str(outside)],
-            capture_output=True, text=True, timeout=10, cwd=str(tmp_path),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(tmp_path),
         )
         assert result.returncode == 1
         data = json.loads(result.stdout)

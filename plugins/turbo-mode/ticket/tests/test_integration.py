@@ -1,11 +1,12 @@
 """Integration tests — full engine pipeline end-to-end."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-
-from scripts.ticket_dedup import dedup_fingerprint as compute_dedup_fp, target_fingerprint as compute_target_fp
+from scripts.ticket_dedup import dedup_fingerprint as compute_dedup_fp
+from scripts.ticket_dedup import target_fingerprint as compute_target_fp
 from scripts.ticket_engine_core import (
     engine_classify,
     engine_execute,
@@ -13,6 +14,7 @@ from scripts.ticket_engine_core import (
     engine_preflight,
 )
 from scripts.ticket_parse import extract_fenced_yaml
+
 from tests.support.builders import expected_canonical_yaml, make_ticket
 
 
@@ -208,7 +210,7 @@ class TestFullCreatePipeline:
     def test_dedup_then_override(self, tmp_tickets):
         """Create duplicate detected -> override -> create succeeds."""
         # Use dynamic date so ticket stays within 24h dedup window.
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = datetime.now(UTC).date().isoformat()
         make_ticket(
             tmp_tickets,
             f"{today}-existing.md",
@@ -411,7 +413,9 @@ class TestEngineExecuteIntegration:
             hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp("All mutation paths should share one YAML renderer.", []),
+            dedup_fingerprint=compute_dedup_fp(
+                "All mutation paths should share one YAML renderer.", []
+            ),
         )
         assert resp.state == "ok_create"
         ticket_id = resp.ticket_id
@@ -420,6 +424,7 @@ class TestEngineExecuteIntegration:
 
         # Extract dynamic created_at from actual output.
         import re as _re
+
         _actual_yaml = extract_fenced_yaml(ticket_path.read_text(encoding="utf-8"))
         _ca_match = _re.search(r'created_at: "([^"]+)"', _actual_yaml or "")
         _created_at = _ca_match.group(1) if _ca_match else ""

@@ -41,42 +41,59 @@ def test_missing_runtime_proof_rejects(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "verification",
+    ("factory", "kwargs"),
     [
-        ticket_runtime_readiness.RuntimeReadinessVerification,
-    ],
-)
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"passed": True, "error_code": "stale_proof", "message": "bad"},
-        {"passed": False, "error_code": None, "message": "bad"},
-        {"passed": False, "error_code": "", "message": "bad"},
-        {"passed": False, "error_code": "proof_invalid", "message": ""},
+        (ticket_runtime_readiness.ReadinessSuccess, {"message": "bad", "passed": False}),
+        (
+            ticket_runtime_readiness.ReadinessSuccess,
+            {"message": "bad", "error_code": "stale_proof"},
+        ),
+        (ticket_runtime_readiness.ReadinessSuccess, {"message": ""}),
+        (
+            ticket_runtime_readiness.ReadinessFailure,
+            {"error_code": "proof_invalid", "message": "bad", "passed": True},
+        ),
+        (ticket_runtime_readiness.ReadinessFailure, {"error_code": "", "message": "bad"}),
+        (ticket_runtime_readiness.ReadinessFailure, {"error_code": "proof_invalid", "message": ""}),
     ],
 )
 def test_runtime_readiness_verification_enforces_state_invariants(
-    verification: type[ticket_runtime_readiness.RuntimeReadinessVerification],
+    factory,
     kwargs: dict[str, object],
 ) -> None:
-    with pytest.raises(ValueError, match="RuntimeReadinessVerification validation failed"):
-        verification(**kwargs)
+    with pytest.raises(ValueError, match="Readiness.* validation failed"):
+        factory(**kwargs)
 
 
 @pytest.mark.parametrize(
-    "kwargs",
+    ("factory", "kwargs"),
     [
-        {"proof": None, "error_code": None, "message": "bad"},
-        {"proof": {}, "error_code": "deterministic_driver_unavailable", "message": "bad"},
-        {"proof": None, "error_code": "", "message": "bad"},
-        {"proof": {}, "error_code": None, "message": ""},
+        (ticket_runtime_readiness.ActivationSuccess, {"proof": None, "message": "bad"}),
+        (
+            ticket_runtime_readiness.ActivationSuccess,
+            {"proof": {}, "error_code": "deterministic_driver_unavailable", "message": "bad"},
+        ),
+        (ticket_runtime_readiness.ActivationSuccess, {"proof": {}, "message": ""}),
+        (
+            ticket_runtime_readiness.ActivationFailure,
+            {"error_code": "", "message": "bad"},
+        ),
+        (
+            ticket_runtime_readiness.ActivationFailure,
+            {"error_code": "deterministic_driver_unavailable", "message": ""},
+        ),
+        (
+            ticket_runtime_readiness.ActivationFailure,
+            {"error_code": "deterministic_driver_unavailable", "message": "bad", "proof": {}},
+        ),
     ],
 )
 def test_runtime_activation_build_result_enforces_state_invariants(
+    factory,
     kwargs: dict[str, object],
 ) -> None:
-    with pytest.raises(ValueError, match="RuntimeActivationBuildResult validation failed"):
-        ticket_runtime_readiness.RuntimeActivationBuildResult(**kwargs)
+    with pytest.raises(ValueError, match="Activation.* validation failed"):
+        factory(**kwargs)
 
 
 def test_runtime_activation_error_requires_error_code() -> None:
@@ -157,6 +174,7 @@ def test_missing_executable_sha256_rejects(tmp_path: Path) -> None:
     )
     proof = json.loads(proof_path.read_text(encoding="utf-8"))
     proof["runtime_identity"]["executable_sha256"] = None
+    proof["runtime_identity"]["executable_hash_unavailable_reason"] = "PermissionError: denied"
     proof_path.write_text(json.dumps(proof, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     result = module.verify_installed_ticket_runtime_readiness_for_execute(project_root=project_root)
@@ -164,6 +182,26 @@ def test_missing_executable_sha256_rejects(tmp_path: Path) -> None:
     assert result.passed is False
     assert result.error_code == "proof_invalid"
     assert "executable_sha256" in result.message
+    assert "PermissionError: denied" in result.message
+
+
+def test_write_json_is_atomic_when_replace_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "proof.json"
+    path.write_text('{"status":"old"}\n', encoding="utf-8")
+
+    def _raise_replace(src: str, dst: str) -> None:
+        raise OSError(f"replace denied: {dst}")
+
+    monkeypatch.setattr(ticket_runtime_readiness.os, "replace", _raise_replace)
+
+    with pytest.raises(OSError, match="replace denied"):
+        ticket_runtime_readiness._write_json(path, {"status": "new"})
+
+    assert path.read_text(encoding="utf-8") == '{"status":"old"}\n'
+    assert list(tmp_path.glob("*.tmp")) == []
 
 
 def test_stale_proof_rejects(tmp_path: Path) -> None:
@@ -387,6 +425,65 @@ def test_build_activation_candidate_returns_candidate_without_writing_final_proo
     assert not (project_root / ".codex" / "ticket-runtime-proof.json").exists()
 
 
+def test_build_activation_candidate_output_verifies_with_real_installed_verifier(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    marketplace_path = project_root / ".agents" / "plugins" / "marketplace.json"
+    (project_root / ".git").mkdir(parents=True)
+    tickets_dir.mkdir(parents=True)
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "collect_installed_runtime_inventory",
+        lambda **kwargs: _fake_inventory_result(
+            tmp_path,
+            run_dir=kwargs["run_dir"],
+            executable_sha256="0" * 64,
+        ),
+    )
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "run_activation_smoke",
+        lambda **kwargs: _fake_smoke_result(
+            tmp_path,
+            project_root=project_root,
+            run_dir=kwargs["run_dir"],
+        ),
+    )
+
+    result = ticket_runtime_readiness.build_activation_candidate(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert result.proof is not None
+    proof = result.proof
+    run_dir = project_root / proof["raw_evidence"]["run_dir"]
+    proof["status"] = "activated"
+    proof.update(_fake_post_activation_smoke_result(run_dir=run_dir))
+    installed_root = Path(proof["ticket_plugin"]["installed_cache_root"])
+    installed_module_path = installed_root / "scripts" / "ticket_runtime_readiness.py"
+    installed_module_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(MODULE_SOURCE, installed_module_path)
+    installed_module = load_module(installed_module_path)
+    proof_path = project_root / ".codex" / "ticket-runtime-proof.json"
+    _write_proof(proof_path, proof)
+
+    verification = installed_module.verify_installed_ticket_runtime_readiness_for_execute(
+        project_root=project_root,
+        proof_path=proof_path,
+    )
+
+    assert verification.passed is True
+    assert verification.error_code is None
+
+
 def test_build_activation_candidate_propagates_hook_contract_blocker(
     tmp_path: Path,
     monkeypatch,
@@ -453,9 +550,7 @@ def test_activate_runtime_writes_final_proof_after_direct_execute_smoke(
     monkeypatch.setattr(
         ticket_runtime_readiness,
         "verify_installed_ticket_runtime_readiness_for_execute",
-        lambda **_kwargs: ticket_runtime_readiness.RuntimeReadinessVerification(
-            passed=True,
-            error_code=None,
+        lambda **_kwargs: ticket_runtime_readiness.ReadinessSuccess(
             message="verified",
         ),
     )
@@ -474,6 +569,13 @@ def test_activate_runtime_writes_final_proof_after_direct_execute_smoke(
     assert proof_path.exists()
     written = json.loads(proof_path.read_text(encoding="utf-8"))
     assert written["status"] == "activated"
+    assert not (
+        project_root
+        / ".codex"
+        / "ticket-runtime-smoke"
+        / "run-1"
+        / "activated-ticket-runtime-proof.json"
+    ).exists()
 
 
 def test_activate_runtime_propagates_post_activation_smoke_failure(
@@ -559,8 +661,7 @@ def test_activate_runtime_removes_temp_proof_after_verification_failure(
     monkeypatch.setattr(
         ticket_runtime_readiness,
         "verify_installed_ticket_runtime_readiness_for_execute",
-        lambda **_kwargs: ticket_runtime_readiness.RuntimeReadinessVerification(
-            passed=False,
+        lambda **_kwargs: ticket_runtime_readiness.ReadinessFailure(
             error_code="payload_hash_mismatch",
             message="Payload hash mismatch",
         ),
@@ -670,9 +771,7 @@ def test_activate_runtime_removes_temp_proof_after_final_write_failure(
     monkeypatch.setattr(
         ticket_runtime_readiness,
         "verify_installed_ticket_runtime_readiness_for_execute",
-        lambda **_kwargs: ticket_runtime_readiness.RuntimeReadinessVerification(
-            passed=True,
-            error_code=None,
+        lambda **_kwargs: ticket_runtime_readiness.ReadinessSuccess(
             message="verified",
         ),
     )
@@ -724,13 +823,139 @@ def test_run_activation_smoke_uses_uv_run_python_launcher(
         f"uv run python -B {installed_root}/scripts/ticket_engine_activation_smoke.py "
         f"execute {run_dir / 'payload.json'}"
     )
+    gate_command_prefix = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_agent.py execute "
+    )
 
     def _fake_turn(**kwargs):
-        assert f"Command: {expected_command}" in kwargs["prompt_text"]
+        if f"Command: {expected_command}" not in kwargs["prompt_text"]:
+            assert gate_command_prefix in kwargs["prompt_text"]
+            return [
+                {
+                    "direction": "recv",
+                    "body": {
+                        "params": {
+                            "item": {
+                                "type": "commandExecution",
+                                "id": "cmd-gate",
+                                "command": kwargs["prompt_text"]
+                                .split("Command: ", 1)[1]
+                                .split("\n", 1)[0],
+                                "aggregatedOutput": json.dumps(
+                                    {
+                                        "state": "policy_blocked",
+                                        "error_code": "runtime_readiness_required",
+                                    }
+                                ),
+                            }
+                        }
+                    },
+                }
+            ]
         return [
             {
                 "direction": "recv",
-                "body": {"method": "hook/completed", "params": {"run": {"entries": []}}},
+                "body": {
+                    "method": "hook/completed",
+                    "params": {
+                        "run": {
+                            "eventName": "preToolUse",
+                            "sourcePath": str(installed_root / "hooks" / "hooks.json"),
+                            "entries": [],
+                        }
+                    },
+                },
+            },
+            {
+                "direction": "recv",
+                "body": {
+                    "params": {
+                        "item": {
+                            "type": "commandExecution",
+                            "id": "cmd-1",
+                            "command": expected_command,
+                        }
+                    }
+                },
+            },
+            {
+                "direction": "recv",
+                "body": {
+                    "method": "item/commandExecution/outputDelta",
+                    "params": {"delta": '{"state":"ok_create"}'},
+                },
+            },
+        ]
+
+    monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
+
+    result = ticket_runtime_readiness.run_activation_smoke(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        run_dir=run_dir,
+        installed_ticket_root=installed_root,
+    )
+
+    assert result["hook_membrane_proof"]["command"] == expected_command
+    assert "app_server_stderr" in result["raw_evidence"]
+    assert "engine_stderr" not in result["raw_evidence"]
+
+
+def test_run_activation_smoke_rejects_empty_engine_stdout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    installed_root = tmp_path / "installed"
+    tickets_dir.mkdir(parents=True)
+    expected_command = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_activation_smoke.py "
+        f"execute {run_dir / 'payload.json'}"
+    )
+    gate_command_prefix = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_agent.py execute "
+    )
+
+    def _fake_turn(**kwargs):
+        if expected_command not in kwargs["prompt_text"]:
+            assert gate_command_prefix in kwargs["prompt_text"]
+            return [
+                {
+                    "direction": "recv",
+                    "body": {
+                        "params": {
+                            "item": {
+                                "type": "commandExecution",
+                                "id": "cmd-gate",
+                                "command": kwargs["prompt_text"]
+                                .split("Command: ", 1)[1]
+                                .split("\n", 1)[0],
+                                "aggregatedOutput": json.dumps(
+                                    {
+                                        "state": "policy_blocked",
+                                        "error_code": "runtime_readiness_required",
+                                    }
+                                ),
+                            }
+                        }
+                    },
+                }
+            ]
+        return [
+            {
+                "direction": "recv",
+                "body": {
+                    "method": "hook/completed",
+                    "params": {
+                        "run": {
+                            "eventName": "preToolUse",
+                            "sourcePath": str(installed_root / "hooks" / "hooks.json"),
+                            "entries": [],
+                        }
+                    },
+                },
             },
             {
                 "direction": "recv",
@@ -748,6 +973,201 @@ def test_run_activation_smoke_uses_uv_run_python_launcher(
 
     monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
 
+    with pytest.raises(ticket_runtime_readiness.RuntimeActivationError) as exc_info:
+        ticket_runtime_readiness.run_activation_smoke(
+            project_root=project_root,
+            tickets_dir=tickets_dir,
+            run_dir=run_dir,
+            installed_ticket_root=installed_root,
+        )
+
+    assert exc_info.value.error_code == "deterministic_driver_unavailable"
+    assert "did not emit engine output" in exc_info.value.message
+
+
+def test_run_activation_smoke_rejects_invalid_engine_stdout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    installed_root = tmp_path / "installed"
+    tickets_dir.mkdir(parents=True)
+    expected_command = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_activation_smoke.py "
+        f"execute {run_dir / 'payload.json'}"
+    )
+    gate_command_prefix = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_agent.py execute "
+    )
+
+    def _fake_turn(**kwargs):
+        if expected_command not in kwargs["prompt_text"]:
+            assert gate_command_prefix in kwargs["prompt_text"]
+            return [
+                {
+                    "direction": "recv",
+                    "body": {
+                        "params": {
+                            "item": {
+                                "type": "commandExecution",
+                                "id": "cmd-gate",
+                                "command": kwargs["prompt_text"]
+                                .split("Command: ", 1)[1]
+                                .split("\n", 1)[0],
+                                "aggregatedOutput": json.dumps(
+                                    {
+                                        "state": "policy_blocked",
+                                        "error_code": "runtime_readiness_required",
+                                    }
+                                ),
+                            }
+                        }
+                    },
+                }
+            ]
+        return [
+            {
+                "direction": "recv",
+                "body": {
+                    "method": "hook/completed",
+                    "params": {
+                        "run": {
+                            "eventName": "preToolUse",
+                            "sourcePath": str(installed_root / "hooks" / "hooks.json"),
+                            "entries": [],
+                        }
+                    },
+                },
+            },
+            {
+                "direction": "recv",
+                "body": {
+                    "params": {
+                        "item": {
+                            "type": "commandExecution",
+                            "id": "cmd-1",
+                            "command": expected_command,
+                        }
+                    }
+                },
+            },
+            {
+                "direction": "recv",
+                "body": {
+                    "method": "item/commandExecution/outputDelta",
+                    "params": {"delta": "not-json"},
+                },
+            },
+        ]
+
+    monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
+
+    with pytest.raises(ticket_runtime_readiness.RuntimeActivationError) as exc_info:
+        ticket_runtime_readiness.run_activation_smoke(
+            project_root=project_root,
+            tickets_dir=tickets_dir,
+            run_dir=run_dir,
+            installed_ticket_root=installed_root,
+        )
+
+    assert exc_info.value.error_code == "deterministic_driver_unavailable"
+    assert "invalid engine output" in exc_info.value.message
+
+
+def test_run_activation_smoke_ignores_unrelated_hook_completions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    installed_root = tmp_path / "installed"
+    tickets_dir.mkdir(parents=True)
+    expected_command = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_activation_smoke.py "
+        f"execute {run_dir / 'payload.json'}"
+    )
+    gate_command_prefix = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_agent.py execute "
+    )
+
+    def _fake_turn(**kwargs):
+        if expected_command not in kwargs["prompt_text"]:
+            assert gate_command_prefix in kwargs["prompt_text"]
+            return [
+                {
+                    "direction": "recv",
+                    "body": {
+                        "params": {
+                            "item": {
+                                "type": "commandExecution",
+                                "id": "cmd-gate",
+                                "command": kwargs["prompt_text"]
+                                .split("Command: ", 1)[1]
+                                .split("\n", 1)[0],
+                                "aggregatedOutput": json.dumps(
+                                    {
+                                        "state": "policy_blocked",
+                                        "error_code": "runtime_readiness_required",
+                                    }
+                                ),
+                            }
+                        }
+                    },
+                }
+            ]
+        return [
+            {
+                "direction": "recv",
+                "body": {
+                    "method": "hook/completed",
+                    "params": {
+                        "run": {
+                            "eventName": "preToolUse",
+                            "sourcePath": "/other/plugin/hooks/hooks.json",
+                            "entries": [],
+                        }
+                    },
+                },
+            },
+            {
+                "direction": "recv",
+                "body": {
+                    "method": "hook/completed",
+                    "params": {
+                        "run": {
+                            "eventName": "preToolUse",
+                            "sourcePath": str(installed_root / "hooks" / "hooks.json"),
+                            "entries": [],
+                        }
+                    },
+                },
+            },
+            {
+                "direction": "recv",
+                "body": {
+                    "params": {
+                        "item": {
+                            "type": "commandExecution",
+                            "id": "cmd-1",
+                            "command": expected_command,
+                        }
+                    }
+                },
+            },
+            {
+                "direction": "recv",
+                "body": {
+                    "method": "item/commandExecution/outputDelta",
+                    "params": {"delta": '{"state":"ok_create"}'},
+                },
+            },
+        ]
+
+    monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
+
     result = ticket_runtime_readiness.run_activation_smoke(
         project_root=project_root,
         tickets_dir=tickets_dir,
@@ -755,7 +1175,99 @@ def test_run_activation_smoke_uses_uv_run_python_launcher(
         installed_ticket_root=installed_root,
     )
 
-    assert result["hook_membrane_proof"]["command"] == expected_command
+    assert result["hook_membrane_proof"]["status"] == "passed"
+
+
+def test_run_activation_smoke_requires_pre_activation_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    installed_root = tmp_path / "installed"
+    tickets_dir.mkdir(parents=True)
+    activation_command = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_activation_smoke.py "
+        f"execute {run_dir / 'payload.json'}"
+    )
+    gate_command_prefix = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_agent.py execute "
+    )
+    calls: list[str] = []
+
+    def _fake_turn(**kwargs):
+        prompt = kwargs["prompt_text"]
+        calls.append(prompt)
+        if activation_command in prompt:
+            return [
+                {
+                    "direction": "recv",
+                    "body": {
+                        "method": "hook/completed",
+                        "params": {
+                            "run": {
+                                "eventName": "preToolUse",
+                                "sourcePath": str(installed_root / "hooks" / "hooks.json"),
+                                "entries": [],
+                            }
+                        },
+                    },
+                },
+                {
+                    "direction": "recv",
+                    "body": {
+                        "params": {
+                            "item": {
+                                "type": "commandExecution",
+                                "id": "cmd-1",
+                                "command": activation_command,
+                            }
+                        }
+                    },
+                },
+                {
+                    "direction": "recv",
+                    "body": {
+                        "method": "item/commandExecution/outputDelta",
+                        "params": {"delta": '{"state":"ok_create"}'},
+                    },
+                },
+            ]
+        assert gate_command_prefix in prompt
+        return [
+            {
+                "direction": "recv",
+                "body": {
+                    "params": {
+                        "item": {
+                            "type": "commandExecution",
+                            "id": "cmd-2",
+                            "command": prompt.split("Command: ", 1)[1].split("\n", 1)[0],
+                            "aggregatedOutput": json.dumps(
+                                {
+                                    "state": "ok_create",
+                                    "data": {"ticket_path": str(run_dir / "unexpected.md")},
+                                }
+                            ),
+                        }
+                    }
+                },
+            }
+        ]
+
+    monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
+
+    with pytest.raises(ticket_runtime_readiness.RuntimeActivationError) as exc_info:
+        ticket_runtime_readiness.run_activation_smoke(
+            project_root=project_root,
+            tickets_dir=tickets_dir,
+            run_dir=run_dir,
+            installed_ticket_root=installed_root,
+        )
+
+    assert len(calls) == 2
+    assert exc_info.value.error_code == "engine_gate_required"
 
 
 def test_run_post_activation_direct_execute_smoke_stages_auto_audit_policy_lane(
@@ -830,9 +1342,10 @@ def test_run_post_activation_direct_execute_smoke_stages_auto_audit_policy_lane(
         proof_path=proof_path,
     )
 
-    assert result["post_activation_gated_smokes"]["surface_results"]["direct_execute"][
-        "engine_state"
-    ] == "ok_create"
+    assert (
+        result["post_activation_gated_smokes"]["surface_results"]["direct_execute"]["engine_state"]
+        == "ok_create"
+    )
 
 
 def test_run_post_activation_direct_execute_smoke_uses_uv_run_python_launcher(
@@ -1052,6 +1565,118 @@ def test_wait_for_response_rejects_reader_exception() -> None:
         )
 
 
+def test_app_server_roundtrip_reports_late_reader_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Writer:
+        def write(self, _chunk: str) -> int:
+            return 1
+
+        def flush(self) -> None:
+            return None
+
+    class RaisingIterable:
+        def __iter__(self):
+            raise RuntimeError("late stderr failure")
+
+    class FakeProc:
+        def __init__(self) -> None:
+            self.stdin = Writer()
+            self.stdout = iter(['{"id":0,"result":{"ok":true}}\n'])
+            self.stderr = RaisingIterable()
+            self.returncode = None
+
+        def terminate(self) -> None:
+            return None
+
+        def wait(self, timeout: int) -> int:
+            self.returncode = 0
+            return 0
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+        def poll(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        ticket_runtime_readiness.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: FakeProc(),
+    )
+
+    with pytest.raises(
+        ticket_runtime_readiness.RuntimeActivationError,
+        match="app-server reader failed: stderr reader failed",
+    ):
+        ticket_runtime_readiness._app_server_roundtrip(
+            requests=[{"id": 0, "method": "initialize"}],
+            cwd=tmp_path,
+            executable="codex",
+        )
+
+
+def test_run_app_server_turn_reports_late_reader_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Writer:
+        def write(self, _chunk: str) -> int:
+            return 1
+
+        def flush(self) -> None:
+            return None
+
+    class RaisingIterable:
+        def __iter__(self):
+            raise RuntimeError("late stderr failure")
+
+    class FakeProc:
+        def __init__(self) -> None:
+            self.stdin = Writer()
+            self.stdout = iter(
+                [
+                    '{"id":0,"result":{"ok":true}}\n',
+                    '{"id":1,"result":{"thread":{"id":"thread-1"}}}\n',
+                    '{"id":2,"result":{"turn":{"id":"turn-1"}}}\n',
+                    '{"method":"turn/completed","params":{"turn":{"id":"turn-1"}}}\n',
+                ]
+            )
+            self.stderr = RaisingIterable()
+            self.returncode = None
+
+        def terminate(self) -> None:
+            return None
+
+        def wait(self, timeout: int) -> int:
+            self.returncode = 0
+            return 0
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+        def poll(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        ticket_runtime_readiness.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: FakeProc(),
+    )
+
+    with pytest.raises(
+        ticket_runtime_readiness.RuntimeActivationError,
+        match="app-server reader failed: stderr reader failed",
+    ):
+        ticket_runtime_readiness._run_app_server_turn(
+            project_root=tmp_path,
+            contained_root=tmp_path,
+            prompt_text="run one command",
+            executable="codex",
+        )
+
+
 def test_drain_until_turn_completed_requires_turn_id() -> None:
     output: queue.Queue[str | None] = queue.Queue()
     transcript: list[dict[str, object]] = []
@@ -1166,7 +1791,12 @@ def test_build_activation_candidate_reports_missing_codex_cli(
     assert result.message == "codex executable not found"
 
 
-def _fake_inventory_result(tmp_path: Path, *, run_dir: Path) -> dict[str, object]:
+def _fake_inventory_result(
+    tmp_path: Path,
+    *,
+    run_dir: Path,
+    executable_sha256: str | None = None,
+) -> dict[str, object]:
     installed_root = tmp_path / "installed-ticket"
     hooks_dir = installed_root / "hooks"
     plugin_manifest = installed_root / ".codex-plugin" / "plugin.json"
@@ -1185,8 +1815,10 @@ def _fake_inventory_result(tmp_path: Path, *, run_dir: Path) -> dict[str, object
         "runtime_identity": {
             "codex_version": "codex-cli 0.132.0",
             "executable_path": "/usr/local/bin/codex",
-            "executable_sha256": None,
-            "executable_hash_unavailable_reason": "not-needed",
+            "executable_sha256": executable_sha256,
+            "executable_hash_unavailable_reason": None
+            if executable_sha256 is not None
+            else "not-needed",
             "accepted_response_schema_version": "ticket-app-server-readiness-v1",
             "parser_version": "installed-ticket-runtime-readiness-v1",
         },
@@ -1226,15 +1858,20 @@ def _fake_inventory_result(tmp_path: Path, *, run_dir: Path) -> dict[str, object
     }
 
 
-def _fake_smoke_result(tmp_path: Path, *, project_root: Path) -> dict[str, object]:
-    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+def _fake_smoke_result(
+    tmp_path: Path,
+    *,
+    project_root: Path,
+    run_dir: Path | None = None,
+) -> dict[str, object]:
+    run_dir = run_dir or project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
     raw_dir = run_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     payload_before = raw_dir / "payload-before.json"
     payload_after = raw_dir / "payload-after.json"
     hook_events = raw_dir / "hook-membrane-events.jsonl"
     engine_stdout = raw_dir / "engine-stdout.json"
-    engine_stderr = raw_dir / "engine-stderr.txt"
+    app_server_stderr = raw_dir / "app-server-stderr.txt"
     post_events = raw_dir / "post-activation-gated-events.jsonl"
     payload_before.write_text('{"tickets_dir":"docs/tickets"}\n', encoding="utf-8")
     payload_after.write_text(
@@ -1242,20 +1879,19 @@ def _fake_smoke_result(tmp_path: Path, *, project_root: Path) -> dict[str, objec
     )
     hook_events.write_text('{"method":"hook/completed"}\n', encoding="utf-8")
     engine_stdout.write_text('{"state":"ok_create"}\n', encoding="utf-8")
-    engine_stderr.write_text("", encoding="utf-8")
+    app_server_stderr.write_text("", encoding="utf-8")
     post_events.write_text('{"method":"turn/completed"}\n', encoding="utf-8")
     activation_command = (
-        "uv run python -B installed/scripts/ticket_engine_activation_smoke.py "
-        "execute payload.json"
+        "uv run python -B installed/scripts/ticket_engine_activation_smoke.py execute payload.json"
     )
     return {
-        "run_nonce": "run-1",
+        "run_nonce": run_dir.name,
         "hook_membrane_proof": {
             "runner": "app_server_turn",
             "status": "passed",
             "command": activation_command,
             "payload_path": str(run_dir / "payload.json"),
-            "nonce": "run-1",
+            "nonce": run_dir.name,
             "payload_sha256": ticket_runtime_readiness.sha256_file(payload_before),
             "raw_events_sha256": ticket_runtime_readiness.sha256_file(hook_events),
             "engine_stdout_sha256": ticket_runtime_readiness.sha256_file(engine_stdout),
@@ -1276,7 +1912,7 @@ def _fake_smoke_result(tmp_path: Path, *, project_root: Path) -> dict[str, objec
             "payload_before": str(payload_before.relative_to(run_dir)),
             "payload_after": str(payload_after.relative_to(run_dir)),
             "engine_stdout": str(engine_stdout.relative_to(run_dir)),
-            "engine_stderr": str(engine_stderr.relative_to(run_dir)),
+            "app_server_stderr": str(app_server_stderr.relative_to(run_dir)),
         },
     }
 
@@ -1328,7 +1964,7 @@ def build_valid_runtime_readiness_fixture(
     payload_before_path = raw_dir / "payload-before.json"
     payload_after_path = raw_dir / "payload-after.json"
     engine_stdout_path = raw_dir / "engine-stdout.json"
-    engine_stderr_path = raw_dir / "engine-stderr.txt"
+    app_server_stderr_path = raw_dir / "app-server-stderr.txt"
 
     inventory_path.write_text('{"direction":"recv"}\n', encoding="utf-8")
     hook_events_path.write_text('{"method":"hook/completed"}\n', encoding="utf-8")
@@ -1338,7 +1974,7 @@ def build_valid_runtime_readiness_fixture(
         '{"tickets_dir":"docs/tickets","hook_injected":true}\n', encoding="utf-8"
     )
     engine_stdout_path.write_text('{"state":"ok_create"}\n', encoding="utf-8")
-    engine_stderr_path.write_text("", encoding="utf-8")
+    app_server_stderr_path.write_text("", encoding="utf-8")
 
     installed_root = tmp_path / "installed-ticket"
     scripts_dir = installed_root / "scripts"
@@ -1358,8 +1994,7 @@ def build_valid_runtime_readiness_fixture(
     shutil.copy2(MODULE_SOURCE, copied_module_path)
     module = load_module(copied_module_path)
     activation_command = (
-        "uv run python -B installed/scripts/ticket_engine_activation_smoke.py "
-        "execute payload.json"
+        "uv run python -B installed/scripts/ticket_engine_activation_smoke.py execute payload.json"
     )
 
     proof = {
@@ -1454,7 +2089,7 @@ def build_valid_runtime_readiness_fixture(
             "payload_before": str(payload_before_path.relative_to(run_dir)),
             "payload_after": str(payload_after_path.relative_to(run_dir)),
             "engine_stdout": str(engine_stdout_path.relative_to(run_dir)),
-            "engine_stderr": str(engine_stderr_path.relative_to(run_dir)),
+            "app_server_stderr": str(app_server_stderr_path.relative_to(run_dir)),
         },
     }
     proof_path.parent.mkdir(parents=True, exist_ok=True)

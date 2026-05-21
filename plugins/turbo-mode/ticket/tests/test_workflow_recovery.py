@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from scripts.ticket_workflow import run_recovery, run_workflow
+
 from tests.support.builders import make_ticket
 from tests.support.workflow import (
     assert_recover_command,
@@ -25,7 +26,9 @@ def test_prepare_need_fields_offers_concrete_recovery_command(
 ) -> None:
     monkeypatch.chdir(tmp_tickets.parent.parent)
     make_ticket(tmp_tickets, "reopen.md", id="T-20260503-41", status="done")
-    payload_path = payload_file(tmp_path, trusted_args_ticket_payload("reopen", "T-20260503-41", {}))
+    payload_path = payload_file(
+        tmp_path, trusted_args_ticket_payload("reopen", "T-20260503-41", {})
+    )
 
     response = run_workflow("prepare", payload_path)
     hydrated = json.loads(payload_path.read_text(encoding="utf-8"))
@@ -33,9 +36,13 @@ def test_prepare_need_fields_offers_concrete_recovery_command(
     assert response["state"] == "need_fields"
     assert_recover_command(
         response,
-        expected_recover_command(payload_path, "set_field", "reopen_reason", json.dumps("set reopen_reason")),
+        expected_recover_command(
+            payload_path, "set_field", "reopen_reason", json.dumps("set reopen_reason")
+        ),
     )
-    assert {"action": "set_field", "field": "reopen_reason"} in hydrated["workflow_recovery"]["allowed"]
+    assert {"action": "set_field", "field": "reopen_reason"} in hydrated["workflow_recovery"][
+        "allowed"
+    ]
 
 
 def test_prepare_create_need_fields_offers_title_and_problem_recovery_commands(
@@ -77,15 +84,18 @@ def test_prepare_duplicate_create_offers_create_anyway_and_update_existing(
         created_at=now_iso(),
         problem="Duplicate recovery problem",
     )
-    payload_path = payload_file(tmp_path, trusted_payload(
-        "create",
-        {
-            "title": "Duplicate create",
-            "problem": "Duplicate recovery problem",
-            "priority": "medium",
-            "key_file_paths": ["test.py"],
-        },
-    ))
+    payload_path = payload_file(
+        tmp_path,
+        trusted_payload(
+            "create",
+            {
+                "title": "Duplicate create",
+                "problem": "Duplicate recovery problem",
+                "priority": "medium",
+                "key_file_paths": ["test.py"],
+            },
+        ),
+    )
 
     response = run_workflow("prepare", payload_path)
 
@@ -101,8 +111,16 @@ def test_prepare_blocked_close_offers_dependency_recovery_commands(
 ) -> None:
     monkeypatch.chdir(tmp_tickets.parent.parent)
     make_ticket(tmp_tickets, "blocker.md", id="T-20260503-43", status="open")
-    make_ticket(tmp_tickets, "blocked.md", id="T-20260503-44", status="in_progress", blocked_by=["T-20260503-43"])
-    payload_path = payload_file(tmp_path, trusted_args_ticket_payload("close", "T-20260503-44", {"resolution": "done"}))
+    make_ticket(
+        tmp_tickets,
+        "blocked.md",
+        id="T-20260503-44",
+        status="in_progress",
+        blocked_by=["T-20260503-43"],
+    )
+    payload_path = payload_file(
+        tmp_path, trusted_args_ticket_payload("close", "T-20260503-44", {"resolution": "done"})
+    )
 
     response = run_workflow("prepare", payload_path)
 
@@ -118,7 +136,9 @@ def test_prepare_terminal_invalid_transition_offers_reopen_command_only(
 ) -> None:
     monkeypatch.chdir(tmp_tickets.parent.parent)
     make_ticket(tmp_tickets, "terminal.md", id="T-20260503-45", status="done")
-    payload_path = payload_file(tmp_path, trusted_args_ticket_payload("update", "T-20260503-45", {"status": "open"}))
+    payload_path = payload_file(
+        tmp_path, trusted_args_ticket_payload("update", "T-20260503-45", {"status": "open"})
+    )
 
     response = run_workflow("prepare", payload_path)
 
@@ -134,12 +154,16 @@ def test_prepare_nonterminal_invalid_transition_offers_valid_set_status_command(
 ) -> None:
     monkeypatch.chdir(tmp_tickets.parent.parent)
     make_ticket(tmp_tickets, "open.md", id="T-20260503-46", status="open")
-    payload_path = payload_file(tmp_path, trusted_args_ticket_payload("update", "T-20260503-46", {"status": "done"}))
+    payload_path = payload_file(
+        tmp_path, trusted_args_ticket_payload("update", "T-20260503-46", {"status": "done"})
+    )
 
     response = run_workflow("prepare", payload_path)
 
     assert response["state"] == "invalid_transition"
-    assert_recover_command(response, expected_recover_command(payload_path, "set_status", "blocked"))
+    assert_recover_command(
+        response, expected_recover_command(payload_path, "set_status", "blocked")
+    )
 
 
 def test_prepare_close_without_acceptance_criteria_offers_update_command(
@@ -150,8 +174,12 @@ def test_prepare_close_without_acceptance_criteria_offers_update_command(
     monkeypatch.chdir(tmp_tickets.parent.parent)
     path = make_ticket(tmp_tickets, "no-ac.md", id="T-20260503-47", status="in_progress")
     text = path.read_text(encoding="utf-8")
-    path.write_text(text.replace("## Acceptance Criteria\n- [ ] Issue resolved\n\n", ""), encoding="utf-8")
-    payload_path = payload_file(tmp_path, trusted_args_ticket_payload("close", "T-20260503-47", {"resolution": "done"}))
+    path.write_text(
+        text.replace("## Acceptance Criteria\n- [ ] Issue resolved\n\n", ""), encoding="utf-8"
+    )
+    payload_path = payload_file(
+        tmp_path, trusted_args_ticket_payload("close", "T-20260503-47", {"resolution": "done"})
+    )
 
     response = run_workflow("prepare", payload_path)
 
@@ -276,7 +304,9 @@ def test_recovery_set_field_validates_patched_fields_before_write(tmp_path: Path
         "update",
         {"priority": "medium"},
         allowed=[{"action": "set_field", "field": "priority"}],
-        validation_errors=["priority must be one of ['critical', 'high', 'low', 'medium'], got 'bogus'"],
+        validation_errors=[
+            "priority must be one of ['critical', 'high', 'low', 'medium'], got 'bogus'"
+        ],
         ticket_id="T-20260503-56",
     )
     path = payload_file(tmp_path, payload)

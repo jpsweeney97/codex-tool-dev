@@ -339,7 +339,7 @@ Security checks are duplicated across pipeline stages:
 
 `ok`, `ok_create`, `ok_update`, `ok_close`, `ok_close_archived`, `ok_reopen`, `need_fields`, `duplicate_candidate`, `preflight_failed`, `policy_blocked`, `invalid_transition`, `dependency_blocked`, `not_found`, `escalate`, `merge_into_existing` (reserved, not emitted in v1.0).
 
-### Error Codes (12)
+### Core Engine Error Codes (12)
 
 `need_fields`, `invalid_transition`, `policy_blocked`, `preflight_failed`, `stale_plan`, `duplicate_candidate`, `parse_error`, `io_error`, `not_found`, `dependency_blocked`, `intent_mismatch`, `origin_mismatch`.
 
@@ -363,12 +363,13 @@ proves installed hook-mediated direct-execute wiring, not host-owned or
 spawned-agent identity. `hook_request_origin` is hook-observed provenance
 metadata on the current host and may still be reported as `"user"` for the
 certified direct-execute lane. `capture`, `update`, and `ticket_workflow.py`
-remain outside the activation proof scope and require a separate follow-up
-before widening certification. `dangerFullAccess` runs and prompt-driven smokes
-are diagnostics only. AgentControl child smoke, when captured, is
-same-membrane corroboration only and not identity proof. Normal agent direct
-execute fails with `runtime_readiness_required` when the runtime proof is
-missing, stale, or mismatched.
+remain outside the activation proof scope alongside `ingest_dispatch` and
+`activation_smoke_bootstrap`, and require a separate follow-up before widening
+certification. Privileged host diagnostic runs and prompt-driven smokes are
+diagnostics only. AgentControl child smoke, when captured, is same-membrane
+corroboration only and not identity proof. Normal agent direct execute fails
+with `runtime_readiness_required` when the runtime proof is missing, stale, or
+mismatched.
 
 The `agents/` directory is a placeholder (`.gitkeep` only) — consuming projects define their own agent definitions that invoke the agent entrypoint.
 

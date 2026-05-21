@@ -460,9 +460,7 @@ def test_prepare_duplicate_default_action_update_existing_for_strong_title_path_
             tmp_tickets,
             extra_capture={
                 "component": "",
-                "related_paths": [
-                    "plugins/turbo-mode/ticket/hooks/ticket_engine_guard.py"
-                ],
+                "related_paths": ["plugins/turbo-mode/ticket/hooks/ticket_engine_guard.py"],
             },
         ),
     )

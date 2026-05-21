@@ -9,70 +9,127 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, TypeAlias
 
 REQUEST_TIMEOUT_SECONDS = 30.0
 RUNTIME_PROOF_PATH_ENV = "TICKET_RUNTIME_PROOF_PATH"
 _POST_DIRECT_AUTONOMY_CONFIG = "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n"
 
+RuntimeReadinessErrorCode: TypeAlias = Literal[
+    "proof_missing",
+    "proof_invalid",
+    "stale_proof",
+    "nonce_mismatch",
+    "invalid_scope",
+    "executing_root_mismatch",
+    "plugin_manifest_path_mismatch",
+    "raw_evidence_missing",
+    "plugin_manifest_hash_mismatch",
+    "hook_manifest_path_mismatch",
+    "hook_manifest_hash_mismatch",
+    "guard_script_path_mismatch",
+    "guard_script_hash_mismatch",
+    "inventory_transcript_hash_mismatch",
+    "hook_transcript_hash_mismatch",
+    "post_activation_transcript_hash_mismatch",
+    "payload_hash_mismatch",
+    "engine_stdout_hash_mismatch",
+]
+
+RuntimeActivationDriverErrorCode: TypeAlias = Literal[
+    "host_policy_blocked",
+    "deterministic_driver_unavailable",
+    "hook_contract_blocked",
+    "engine_gate_required",
+    "runtime_readiness_required",
+]
+
+RuntimeActivationBuildErrorCode: TypeAlias = (
+    RuntimeActivationDriverErrorCode | RuntimeReadinessErrorCode
+)
+
 
 @dataclass(frozen=True)
-class RuntimeReadinessVerification:
-    passed: bool
-    error_code: str | None
+class ReadinessSuccess:
     message: str
+    passed: Literal[True] = True
+    error_code: None = None
 
     def __post_init__(self) -> None:
         if not self.message:
             raise ValueError(
-                "RuntimeReadinessVerification validation failed: message is required. "
-                f"Got: {self!r:.100}"
+                f"ReadinessSuccess validation failed: message is required. Got: {self!r:.100}"
             )
-        if self.passed and self.error_code is not None:
+        if self.passed is not True or self.error_code is not None:
             raise ValueError(
-                "RuntimeReadinessVerification validation failed: passed result must not "
-                f"include error_code. Got: {self!r:.100}"
-            )
-        if not self.passed and not self.error_code:
-            raise ValueError(
-                "RuntimeReadinessVerification validation failed: failed result requires "
-                f"error_code. Got: {self!r:.100}"
+                "ReadinessSuccess validation failed: success must have passed=True and "
+                f"error_code=None. Got: {self!r:.100}"
             )
 
 
 @dataclass(frozen=True)
-class RuntimeActivationBuildResult:
-    proof: dict[str, Any] | None
-    error_code: str | None
+class ReadinessFailure:
+    error_code: RuntimeReadinessErrorCode
     message: str
+    passed: Literal[False] = False
 
     def __post_init__(self) -> None:
         if not self.message:
             raise ValueError(
-                "RuntimeActivationBuildResult validation failed: message is required. "
-                f"Got: {self!r:.100}"
+                f"ReadinessFailure validation failed: message is required. Got: {self!r:.100}"
             )
-        if self.error_code is not None and not self.error_code:
+        if self.passed is not False or not self.error_code:
             raise ValueError(
-                "RuntimeActivationBuildResult validation failed: error_code is required. "
-                f"Got: {self!r:.100}"
+                "ReadinessFailure validation failed: failure must have passed=False and "
+                f"a non-empty error_code. Got: {self!r:.100}"
             )
-        if self.error_code is None and self.proof is None:
+
+
+@dataclass(frozen=True)
+class ActivationSuccess:
+    proof: dict[str, Any]
+    message: str
+    error_code: None = None
+
+    def __post_init__(self) -> None:
+        if not self.message:
             raise ValueError(
-                "RuntimeActivationBuildResult validation failed: success result requires proof. "
-                f"Got: {self!r:.100}"
+                f"ActivationSuccess validation failed: message is required. Got: {self!r:.100}"
             )
-        if self.error_code is not None and self.proof is not None:
+        if self.error_code is not None or not isinstance(self.proof, dict):
             raise ValueError(
-                "RuntimeActivationBuildResult validation failed: failure result must not "
-                "include proof. "
+                "ActivationSuccess validation failed: success requires proof and "
+                f"error_code=None. Got: {self!r:.100}"
+            )
+
+
+@dataclass(frozen=True)
+class ActivationFailure:
+    error_code: RuntimeActivationBuildErrorCode
+    message: str
+    proof: None = None
+
+    def __post_init__(self) -> None:
+        if not self.message:
+            raise ValueError(
+                f"ActivationFailure validation failed: message is required. Got: {self!r:.100}"
+            )
+        if not self.error_code or self.proof is not None:
+            raise ValueError(
+                "ActivationFailure validation failed: failure requires non-empty error_code "
+                "and proof=None. "
                 f"Got: {self!r:.100}"
             )
+
+
+RuntimeReadinessVerification: TypeAlias = ReadinessSuccess | ReadinessFailure
+RuntimeActivationBuildResult: TypeAlias = ActivationSuccess | ActivationFailure
 
 
 class RuntimeActivationError(RuntimeError):
@@ -89,6 +146,18 @@ class RuntimeActivationError(RuntimeError):
 
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _json_deepcopy(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a JSON-safe deep copy for proof payloads.
+
+    Runtime proof dataclasses are frozen only at the outer object; proof dicts
+    remain mutable so callers can serialize and inspect them normally.
+    """
+    copied = json.loads(json.dumps(payload))
+    if not isinstance(copied, dict):
+        raise ValueError(f"JSON copy failed: expected object. Got: {type(copied).__name__!r:.100}")
+    return copied
 
 
 def _ticket_python_command(script_path: Path, *args: Path | str) -> str:
@@ -168,9 +237,14 @@ def _verify_runtime_readiness_proof_fields(
     if any(key != "direct_execute" for key in surface_results):
         return _reject("invalid_scope", "Runtime proof contains unsupported execute surfaces")
 
-    executable_sha256 = _get_nested_str(proof, "runtime_identity", "executable_sha256")
-    if not executable_sha256:
-        return _reject("proof_invalid", "Runtime proof executable_sha256 is required")
+    runtime_identity = _get_nested_dict(proof, "runtime_identity")
+    executable_sha256 = runtime_identity.get("executable_sha256")
+    if not isinstance(executable_sha256, str) or not executable_sha256:
+        hash_reason = runtime_identity.get("executable_hash_unavailable_reason")
+        message = "Runtime proof executable_sha256 is required"
+        if isinstance(hash_reason, str) and hash_reason:
+            message = f"{message}: {hash_reason}"
+        return _reject("proof_invalid", message)
 
     executing_root = Path(__file__).resolve().parents[1]
     installed_root = Path(_get_nested_str(proof, "ticket_plugin", "installed_cache_root")).resolve(
@@ -262,9 +336,7 @@ def _verify_runtime_readiness_proof_fields(
     ):
         return _reject("engine_stdout_hash_mismatch", "Engine stdout hash mismatch")
 
-    return RuntimeReadinessVerification(
-        passed=True,
-        error_code=None,
+    return ReadinessSuccess(
         message="Runtime readiness proof verified for direct_execute",
     )
 
@@ -273,12 +345,31 @@ def _key_error_field(exc: KeyError) -> str:
     return str(exc.args[0]) if exc.args else str(exc)
 
 
-def _reject(error_code: str, message: str) -> RuntimeReadinessVerification:
-    return RuntimeReadinessVerification(passed=False, error_code=error_code, message=message)
+def _reject(error_code: RuntimeReadinessErrorCode, message: str) -> RuntimeReadinessVerification:
+    return ReadinessFailure(error_code=error_code, message=message)
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    fd, tmp_path_raw = tempfile.mkstemp(
+        dir=str(path.parent),
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    tmp_path = Path(tmp_path_raw)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(str(tmp_path), str(path))
+    except OSError:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _unlink_if_exists(path: Path) -> None:
@@ -368,8 +459,7 @@ def build_activation_candidate(
             executable=executable,
         )
     except RuntimeActivationError as exc:
-        return RuntimeActivationBuildResult(
-            proof=None,
+        return ActivationFailure(
             error_code=exc.error_code,
             message=exc.message,
         )
@@ -390,6 +480,14 @@ def build_activation_candidate(
         "runtime_identity": inventory_result["runtime_identity"],
         "inventory": inventory_result["inventory"],
         "hook_membrane_proof": smoke_result["hook_membrane_proof"],
+        "pre_activation_gated_smokes": smoke_result.get(
+            "pre_activation_gated_smokes",
+            {
+                "status": "pending",
+                "required_surfaces": ["direct_execute"],
+                "surface_results": {},
+            },
+        ),
         "agentcontrol_hook_traversal_smoke": {
             "status": "not_captured",
             "reason": "no_concrete_harness_named",
@@ -425,9 +523,8 @@ def build_activation_candidate(
             **smoke_result["raw_evidence"],
         },
     }
-    return RuntimeActivationBuildResult(
+    return ActivationSuccess(
         proof=proof,
-        error_code=None,
         message="Candidate activation proof built",
     )
 
@@ -451,11 +548,10 @@ def activate_runtime(
         return candidate
 
     resolved_project_root = project_root.resolve(strict=False)
-    proof = json.loads(json.dumps(candidate.proof))
+    proof = _json_deepcopy(candidate.proof)
     proof["status"] = "activated"
     run_dir = resolved_project_root / _get_nested_str(proof, "raw_evidence", "run_dir")
     temp_proof_path = run_dir / "activated-ticket-runtime-proof.json"
-    activation_succeeded = False
 
     try:
         _write_json(temp_proof_path, proof)
@@ -472,8 +568,7 @@ def activate_runtime(
                 executable=executable,
             )
         except RuntimeActivationError as exc:
-            return RuntimeActivationBuildResult(
-                proof=None,
+            return ActivationFailure(
                 error_code=exc.error_code,
                 message=exc.message,
             )
@@ -487,17 +582,14 @@ def activate_runtime(
                 proof_path=temp_proof_path,
             )
         except OSError as exc:
-            return RuntimeActivationBuildResult(
-                proof=None,
+            return ActivationFailure(
                 error_code="deterministic_driver_unavailable",
                 message=(
-                    f"runtime proof verification failed: {exc}. "
-                    f"Got: {str(temp_proof_path)!r:.100}"
+                    f"runtime proof verification failed: {exc}. Got: {str(temp_proof_path)!r:.100}"
                 ),
             )
         if not verification.passed:
-            return RuntimeActivationBuildResult(
-                proof=None,
+            return ActivationFailure(
                 error_code=verification.error_code,
                 message=verification.message,
             )
@@ -505,21 +597,17 @@ def activate_runtime(
         final_proof_path = resolved_project_root / ".codex" / "ticket-runtime-proof.json"
         final_proof_path.parent.mkdir(parents=True, exist_ok=True)
         _write_json(final_proof_path, proof)
-        activation_succeeded = True
-        return RuntimeActivationBuildResult(
+        return ActivationSuccess(
             proof=proof,
-            error_code=None,
             message="Installed Ticket runtime proof activated",
         )
     except OSError as exc:
-        return RuntimeActivationBuildResult(
-            proof=None,
+        return ActivationFailure(
             error_code="deterministic_driver_unavailable",
             message=f"runtime proof activation failed: {exc}. Got: {str(temp_proof_path)!r:.100}",
         )
     finally:
-        if not activation_succeeded:
-            _unlink_if_exists(temp_proof_path)
+        _unlink_if_exists(temp_proof_path)
 
 
 def collect_installed_runtime_inventory(
@@ -666,7 +754,10 @@ def run_activation_smoke(
     hook_events_path = raw_dir / "hook-membrane-events.jsonl"
     _write_transcript_jsonl(hook_events_path, transcript)
 
-    hook_runs = _hook_completed_runs(transcript)
+    hook_runs = _hook_completed_runs(
+        transcript,
+        source_path=installed_ticket_root / "hooks" / "hooks.json",
+    )
     if len(hook_runs) != 1:
         raise RuntimeActivationError(
             "deterministic_driver_unavailable",
@@ -700,8 +791,32 @@ def run_activation_smoke(
     engine_stdout_text = _command_output_text(transcript)
     engine_stdout_path = raw_dir / "engine-stdout.json"
     engine_stdout_path.write_text(engine_stdout_text, encoding="utf-8")
-    engine_stderr_path = raw_dir / "engine-stderr.txt"
-    engine_stderr_path.write_text(_stderr_text(transcript), encoding="utf-8")
+    if not engine_stdout_text.strip():
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            "Activation smoke did not emit engine output",
+        )
+    try:
+        engine_response = json.loads(engine_stdout_text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            f"Activation smoke returned invalid engine output: {exc}",
+        ) from exc
+    if not isinstance(engine_response, dict):
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            "Activation smoke returned non-object engine output",
+        )
+
+    app_server_stderr_path = raw_dir / "app-server-stderr.txt"
+    app_server_stderr_path.write_text(_stderr_text(transcript), encoding="utf-8")
+    pre_activation_gate = run_pre_activation_direct_execute_gate_smoke(
+        project_root=project_root,
+        run_dir=run_dir,
+        installed_ticket_root=installed_ticket_root,
+        executable=executable,
+    )
     post_events_path = raw_dir / "post-activation-gated-events.jsonl"
     post_events_path.write_text("", encoding="utf-8")
 
@@ -726,13 +841,136 @@ def run_activation_smoke(
                 }
             },
         },
+        "pre_activation_gated_smokes": pre_activation_gate["pre_activation_gated_smokes"],
         "raw_evidence": {
             "hook_membrane_events": str(hook_events_path.relative_to(run_dir)),
+            "pre_activation_events": pre_activation_gate["raw_evidence"]["pre_activation_events"],
             "post_activation_events": str(post_events_path.relative_to(run_dir)),
             "payload_before": str(payload_before_path.relative_to(run_dir)),
             "payload_after": str(payload_after_path.relative_to(run_dir)),
             "engine_stdout": str(engine_stdout_path.relative_to(run_dir)),
-            "engine_stderr": str(engine_stderr_path.relative_to(run_dir)),
+            "app_server_stderr": str(app_server_stderr_path.relative_to(run_dir)),
+        },
+    }
+
+
+def run_pre_activation_direct_execute_gate_smoke(
+    *,
+    project_root: Path,
+    run_dir: Path,
+    installed_ticket_root: Path,
+    executable: str | None = None,
+) -> dict[str, Any]:
+    from scripts.ticket_dedup import dedup_fingerprint as compute_dedup_fingerprint
+
+    raw_dir = run_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    pre_root = run_dir / "pre-direct"
+    pre_tickets_dir = pre_root / "docs" / "tickets"
+    pre_tickets_dir.mkdir(parents=True, exist_ok=True)
+    payload_path = pre_root / "pre-direct-payload.json"
+    problem = "Runtime activation pre-gate direct execute smoke."
+    autonomy_config = _write_post_direct_autonomy_config(pre_root)
+    payload = {
+        "action": "create",
+        "fields": {
+            "title": "Runtime activation pre-gate smoke",
+            "problem": problem,
+            "priority": "medium",
+        },
+        "session_id": f"{run_dir.name}-pre-direct",
+        "classify_intent": "create",
+        "classify_confidence": 0.95,
+        "dedup_fingerprint": compute_dedup_fingerprint(problem, []),
+        "tickets_dir": str(pre_tickets_dir),
+        "autonomy_config": autonomy_config,
+    }
+    _write_json(payload_path, payload)
+    command = _ticket_python_command(
+        installed_ticket_root / "scripts" / "ticket_engine_agent.py",
+        "execute",
+        payload_path,
+    )
+    prompt = (
+        "Run exactly one Bash command and nothing else.\n"
+        f"Command: {command}\n"
+        "Do not inspect files, do not explain, do not ask for approval, "
+        "and do not run any other command."
+    )
+
+    prior_override = os.environ.get(RUNTIME_PROOF_PATH_ENV)
+    os.environ.pop(RUNTIME_PROOF_PATH_ENV, None)
+    try:
+        transcript = _run_app_server_turn(
+            project_root=project_root,
+            contained_root=run_dir,
+            prompt_text=prompt,
+            executable=executable,
+        )
+    finally:
+        if prior_override is not None:
+            os.environ[RUNTIME_PROOF_PATH_ENV] = prior_override
+
+    pre_events_path = raw_dir / "pre-activation-gated-events.jsonl"
+    _write_transcript_jsonl(pre_events_path, transcript)
+    command_items = _command_execution_items(transcript)
+    if len(command_items) != 1:
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            f"Expected exactly one pre-activation command execution item, saw {len(command_items)}",
+        )
+    command_item = command_items[0]
+    if command not in str(command_item.get("command", "")):
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            "Pre-activation direct execute smoke did not traverse the expected command path",
+        )
+
+    engine_stdout_text = _command_output_text(transcript)
+    if not engine_stdout_text.strip():
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            "Pre-activation direct execute smoke did not emit engine output",
+        )
+    try:
+        engine_response = json.loads(engine_stdout_text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            f"Pre-activation direct execute smoke returned invalid engine output: {exc}",
+        ) from exc
+    if not isinstance(engine_response, dict):
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            "Pre-activation direct execute smoke returned non-object engine output",
+        )
+
+    if (
+        engine_response.get("state") != "policy_blocked"
+        or engine_response.get("error_code") != "runtime_readiness_required"
+    ):
+        raise RuntimeActivationError(
+            "engine_gate_required",
+            "Pre-activation direct execute did not block with runtime_readiness_required",
+        )
+
+    return {
+        "pre_activation_gated_smokes": {
+            "status": "passed",
+            "required_surfaces": ["direct_execute"],
+            "surface_results": {
+                "direct_execute": {
+                    "runner": "app_server_turn",
+                    "command": command,
+                    "execute_surface": "direct_execute",
+                    "engine_state": "policy_blocked",
+                    "error_code": "runtime_readiness_required",
+                    "raw_events_sha256": sha256_file(pre_events_path),
+                }
+            },
+        },
+        "raw_evidence": {
+            "pre_activation_events": str(pre_events_path.relative_to(run_dir)),
         },
     }
 
@@ -967,6 +1205,7 @@ def _app_server_roundtrip(
     stderr_reader = threading.Thread(target=read_stderr, daemon=True)
     stdout_reader.start()
     stderr_reader.start()
+    completed = False
     try:
         for request in requests:
             _send_request(proc=proc, request=request, transcript=transcript)
@@ -980,6 +1219,7 @@ def _app_server_roundtrip(
                 stderr_lines=stderr_lines,
                 reader_errors=reader_errors,
             )
+        completed = True
     finally:
         proc.terminate()
         try:
@@ -992,6 +1232,8 @@ def _app_server_roundtrip(
         stderr = "".join(stderr_lines).strip()
         if stderr:
             transcript.append({"direction": "stderr", "body": stderr})
+        if completed:
+            _raise_if_reader_errors(reader_errors)
     return transcript
 
 
@@ -1043,6 +1285,7 @@ def _run_app_server_turn(
     stderr_reader = threading.Thread(target=read_stderr, daemon=True)
     stdout_reader.start()
     stderr_reader.start()
+    completed = False
     try:
         _send_request(
             proc=proc,
@@ -1131,6 +1374,7 @@ def _run_app_server_turn(
             stderr_lines=stderr_lines,
             reader_errors=reader_errors,
         )
+        completed = True
     finally:
         proc.terminate()
         try:
@@ -1143,6 +1387,8 @@ def _run_app_server_turn(
         stderr = "".join(stderr_lines).strip()
         if stderr:
             transcript.append({"direction": "stderr", "body": stderr})
+        if completed:
+            _raise_if_reader_errors(reader_errors)
     return transcript
 
 
@@ -1285,6 +1531,14 @@ def _raise_if_app_server_unavailable(
     raise RuntimeActivationError("deterministic_driver_unavailable", message)
 
 
+def _raise_if_reader_errors(reader_errors: list[str]) -> None:
+    if reader_errors:
+        raise RuntimeActivationError(
+            "deterministic_driver_unavailable",
+            f"app-server reader failed: {reader_errors[0]}",
+        )
+
+
 def _write_transcript_jsonl(path: Path, transcript: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -1379,8 +1633,13 @@ def _find_ticket_hook(result: dict[str, Any]) -> dict[str, str]:
     return {"command": command, "sourcePath": source_path}
 
 
-def _hook_completed_runs(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _hook_completed_runs(
+    transcript: list[dict[str, Any]],
+    *,
+    source_path: Path | str | None = None,
+) -> list[dict[str, Any]]:
     runs: list[dict[str, Any]] = []
+    expected_source = str(source_path) if source_path is not None else None
     for row in transcript:
         body = row.get("body")
         if row.get("direction") != "recv" or not isinstance(body, dict):
@@ -1389,7 +1648,12 @@ def _hook_completed_runs(transcript: list[dict[str, Any]]) -> list[dict[str, Any
             continue
         params = body.get("params", {})
         if isinstance(params, dict) and isinstance(params.get("run"), dict):
-            runs.append(params["run"])
+            run = params["run"]
+            if run.get("eventName") != "preToolUse":
+                continue
+            if expected_source is not None and run.get("sourcePath") != expected_source:
+                continue
+            runs.append(run)
     return runs
 
 

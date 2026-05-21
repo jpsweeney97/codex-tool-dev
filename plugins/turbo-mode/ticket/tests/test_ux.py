@@ -431,6 +431,6 @@ def test_transcript_safety_path_patterns_cover_known_host_shapes() -> None:
     )
 
     for rendered in examples:
-        assert any(
-            re.search(pattern, rendered) for pattern in INTERNAL_RECOVERY_PATH_PATTERNS
-        ), rendered
+        assert any(re.search(pattern, rendered) for pattern in INTERNAL_RECOVERY_PATH_PATTERNS), (
+            rendered
+        )

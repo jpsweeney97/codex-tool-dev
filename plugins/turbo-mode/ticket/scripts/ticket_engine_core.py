@@ -700,8 +700,7 @@ def engine_preflight(
         return EngineResponse(
             state="escalate",
             message=(
-                f"Intent_mismatch: classify returned {classify_intent!r} "
-                f"but action is {action!r}"
+                f"Intent_mismatch: classify returned {classify_intent!r} but action is {action!r}"
             ),
             error_code="intent_mismatch",
             data={
@@ -717,8 +716,7 @@ def engine_preflight(
         return EngineResponse(
             state="need_fields",
             message=(
-                "dedup_override requires duplicate_of identifying the specific "
-                "duplicate candidate"
+                "dedup_override requires duplicate_of identifying the specific duplicate candidate"
             ),
             error_code="need_fields",
             data={
@@ -1521,8 +1519,7 @@ def engine_execute(
         return EngineResponse(
             state="need_fields",
             message=(
-                "dedup_override requires duplicate_of identifying the specific "
-                "duplicate candidate"
+                "dedup_override requires duplicate_of identifying the specific duplicate candidate"
             ),
             error_code="need_fields",
             data={"missing_fields": ["duplicate_of"]},

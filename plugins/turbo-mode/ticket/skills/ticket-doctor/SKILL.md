@@ -45,7 +45,8 @@ Activation is `direct_execute only`. Use it only when the user explicitly asks
 to activate or validate the installed Ticket runtime for the certified
 direct-execute lane.
 
-Run:
+Activation is user-origin only. Do not run this command as an agent. Present
+the command below to the user and report that a user-owned shell must run it:
 
 ```bash
 uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>

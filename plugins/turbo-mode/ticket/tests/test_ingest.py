@@ -1,4 +1,5 @@
 """Tests for the ingest subcommand."""
+
 from __future__ import annotations
 
 import json
@@ -890,8 +891,7 @@ class TestIngestSubcommand:
         assert response["data"]["envelope_move_error"].startswith("simulated move failure")
         assert "recovery_hint" not in response["data"]
         assert (
-            response["message"]
-            == "Ticket was created, but Ticket could not finish ingest cleanup."
+            response["message"] == "Ticket was created, but Ticket could not finish ingest cleanup."
         )
         projection = _ingest_transcript_projection(response)
         assert (

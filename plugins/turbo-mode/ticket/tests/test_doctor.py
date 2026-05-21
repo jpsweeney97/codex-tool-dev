@@ -162,12 +162,11 @@ def test_activate_runtime_returns_ok_with_activated_proof(
     monkeypatch.setattr(
         ticket_doctor_script,
         "activate_runtime",
-        lambda **_kwargs: ticket_runtime_readiness.RuntimeActivationBuildResult(
+        lambda **_kwargs: ticket_runtime_readiness.ActivationSuccess(
             proof={
                 "status": "activated",
                 "activation_scope": {"gated_execute_surfaces": ["direct_execute"]},
             },
-            error_code=None,
             message="final proof activated",
         ),
         raising=False,
@@ -175,12 +174,11 @@ def test_activate_runtime_returns_ok_with_activated_proof(
     monkeypatch.setattr(
         ticket_doctor_script,
         "build_activation_candidate",
-        lambda **_kwargs: ticket_runtime_readiness.RuntimeActivationBuildResult(
+        lambda **_kwargs: ticket_runtime_readiness.ActivationSuccess(
             proof={
                 "status": "activated",
                 "activation_scope": {"gated_execute_surfaces": ["direct_execute"]},
             },
-            error_code=None,
             message="final proof activated",
         ),
         raising=False,
@@ -211,8 +209,7 @@ def test_activate_runtime_propagates_host_policy_blocked(
     marketplace_path.write_text("{}", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    blocked_result = ticket_runtime_readiness.RuntimeActivationBuildResult(
-        proof=None,
+    blocked_result = ticket_runtime_readiness.ActivationFailure(
         error_code="host_policy_blocked",
         message="contained workspaceWrite turn failed",
     )
@@ -252,8 +249,7 @@ def test_activate_runtime_propagates_deterministic_driver_unavailable(
     marketplace_path.write_text("{}", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    blocked_result = ticket_runtime_readiness.RuntimeActivationBuildResult(
-        proof=None,
+    blocked_result = ticket_runtime_readiness.ActivationFailure(
         error_code="deterministic_driver_unavailable",
         message="app-server transcript did not capture the command turn",
     )
@@ -293,8 +289,7 @@ def test_activate_runtime_propagates_hook_contract_blocked(
     marketplace_path.write_text("{}", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    blocked_result = ticket_runtime_readiness.RuntimeActivationBuildResult(
-        proof=None,
+    blocked_result = ticket_runtime_readiness.ActivationFailure(
         error_code="hook_contract_blocked",
         message="installed hook still emits unsupported output",
     )
@@ -334,8 +329,7 @@ def test_activate_runtime_surfaces_unknown_recovery_hint_code(
     marketplace_path.write_text("{}", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    blocked_result = ticket_runtime_readiness.RuntimeActivationBuildResult(
-        proof=None,
+    blocked_result = ticket_runtime_readiness.ActivationFailure(
         error_code="new_unregistered_code",
         message="unregistered runtime failure",
     )

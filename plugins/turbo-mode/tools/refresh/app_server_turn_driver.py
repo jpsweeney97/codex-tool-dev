@@ -161,8 +161,7 @@ def write_transcript_jsonl(out_path: Path, transcript: list[dict[str, Any]]) -> 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
         "".join(
-            json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
-            for row in transcript
+            json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in transcript
         ),
         encoding="utf-8",
     )
@@ -314,6 +313,7 @@ def run_driver(
     stdout_reader.start()
     stderr_reader.start()
 
+    completed = False
     try:
         _send_and_record(
             proc=proc,
@@ -374,6 +374,7 @@ def run_driver(
             stderr_lines=stderr_lines,
             reader_errors=reader_errors,
         )
+        completed = True
     finally:
         proc.terminate()
         try:
@@ -387,6 +388,8 @@ def run_driver(
         if stderr:
             transcript.append({"direction": "stderr", "body": stderr})
         write_transcript_jsonl(layout.out_path, transcript)
+        if completed and reader_errors:
+            fail("read app-server response", f"reader failed: {reader_errors[0]}", None)
 
     summary = analyze_transcript(
         transcript,

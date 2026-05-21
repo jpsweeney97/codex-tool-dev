@@ -162,9 +162,10 @@ def test_execute_clears_refinement_status_and_tag_for_concrete_refinement(
         "Show the refinement-clear decision in the update preview."
     )
     assert "Needs refinement" not in parsed.sections["Acceptance Criteria"]
-    assert "Preview reports when needs-refinement will be cleared." in parsed.sections[
-        "Acceptance Criteria"
-    ]
+    assert (
+        "Preview reports when needs-refinement will be cleared."
+        in parsed.sections["Acceptance Criteria"]
+    )
 
 
 def test_successful_update_execute_deletes_ticket_tmp_payload(

@@ -1,4 +1,5 @@
 """Shared path validation helpers for ticket scripts."""
+
 from __future__ import annotations
 
 import os
@@ -58,8 +59,9 @@ def resolve_tickets_dir(
     try:
         resolved.relative_to(root)
     except ValueError:
+        reason = f"path escapes project root {str(root)!r}"
         return (
             None,
-            f"tickets_dir validation failed: path escapes project root {str(root)!r}. Got: {str(value)!r:.100}",
+            f"tickets_dir validation failed: {reason}. Got: {str(value)!r:.100}",
         )
     return resolved, None

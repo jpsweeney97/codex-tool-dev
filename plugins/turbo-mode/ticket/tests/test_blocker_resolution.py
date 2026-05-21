@@ -1,7 +1,9 @@
 """Tests for blocker resolution with archived tickets (C-003)."""
+
 from __future__ import annotations
 
 from scripts.ticket_engine_core import _classify_blockers, engine_preflight
+
 from tests.support.builders import make_ticket
 
 
@@ -94,7 +96,7 @@ class TestPreflightCloseWithArchivedBlocker:
         )
 
     def test_closed_dir_nonterminal_blocker_is_unresolved(self, tmp_tickets):
-        """Edge case: ticket in closed-tickets/ with non-terminal status is unresolved, not missing."""
+        """Closed-dir ticket with non-terminal status is unresolved, not missing."""
         # A ticket physically in closed-tickets/ but with status=in_progress
         closed_dir = tmp_tickets / "closed-tickets"
         closed_dir.mkdir(parents=True, exist_ok=True)

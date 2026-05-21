@@ -1,4 +1,5 @@
 """Ticket triage — read-only analysis of ticket health and audit activity."""
+
 from __future__ import annotations
 
 import hashlib
@@ -28,8 +29,8 @@ _EXPECTED_CACHE_ROOT = Path("/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.
 # Ticket ID patterns for id_ref matching.
 _TICKET_ID_PATTERNS = [
     re.compile(r"T-\d{8}-\d{2,}"),  # v1.0: T-YYYYMMDD-NN
-    re.compile(r"T-\d{3}"),          # Gen 3: T-NNN
-    re.compile(r"T-[A-F]"),          # Gen 2: T-X
+    re.compile(r"T-\d{3}"),  # Gen 3: T-NNN
+    re.compile(r"T-[A-F]"),  # Gen 2: T-X
 ]
 
 
@@ -130,7 +131,7 @@ def _generated_residue(root: Path, *, label: str) -> list[str]:
 
 def _runtime_probe_status(probe_output: Path | None, plugin_root: Path) -> dict[str, Any]:
     """Classify app-server plugin/read and hooks/list output when provided."""
-    expected_hook_command = f"python3 {plugin_root}/hooks/ticket_engine_guard.py"
+    expected_hook_commands = _expected_hook_commands_from_manifest(plugin_root)
     expected_source = f"{plugin_root}/hooks/hooks.json"
     if probe_output is None:
         return {
@@ -171,7 +172,7 @@ def _runtime_probe_status(probe_output: Path | None, plugin_root: Path) -> dict[
                         hook.get("pluginId") == "ticket@turbo-mode"
                         and hook.get("eventName") == "preToolUse"
                         and hook.get("matcher") == "Bash"
-                        and hook.get("command") == expected_hook_command
+                        and hook.get("command") in expected_hook_commands
                         and hook.get("sourcePath") == expected_source
                     ):
                         matching_hooks.append(hook)
@@ -182,6 +183,35 @@ def _runtime_probe_status(probe_output: Path | None, plugin_root: Path) -> dict[
         "ticket_hook_count": len(matching_hooks),
         "expected_hook": "Ticket preToolUse / Bash / ticket_engine_guard.py",
     }
+
+
+def _expected_hook_commands_from_manifest(plugin_root: Path) -> set[str]:
+    hooks_json = plugin_root / "hooks" / "hooks.json"
+    fallback_command = f"python3 {plugin_root}/hooks/ticket_engine_guard.py"
+    commands: set[str] = {fallback_command}
+    try:
+        manifest = json.loads(hooks_json.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return commands
+    hooks_root = manifest.get("hooks", {})
+    if not isinstance(hooks_root, dict):
+        return commands
+    pre_tool_entries = hooks_root.get("PreToolUse", [])
+    if not isinstance(pre_tool_entries, list):
+        return commands
+    for entry in pre_tool_entries:
+        if not isinstance(entry, dict) or entry.get("matcher") != "Bash":
+            continue
+        hooks = entry.get("hooks", [])
+        if not isinstance(hooks, list):
+            continue
+        for hook in hooks:
+            if not isinstance(hook, dict) or hook.get("type") != "command":
+                continue
+            command = hook.get("command")
+            if isinstance(command, str) and command:
+                commands.add(command)
+    return commands
 
 
 def _runtime_proof_status(project_root: Path) -> dict[str, Any]:
@@ -215,14 +245,13 @@ def _source_cache_report(plugin_root: Path, cache_root: Path) -> dict[str, Any]:
     source_fp = _tree_manifest(plugin_root)
     cache_fp = _tree_manifest(cache_root)
     raw_mismatches = sorted(
-        rel for rel in set(source_fp) | set(cache_fp)
-        if source_fp.get(rel) != cache_fp.get(rel)
+        rel for rel in set(source_fp) | set(cache_fp) if source_fp.get(rel) != cache_fp.get(rel)
     )
     mismatches = [
-        rel for rel in raw_mismatches
-        if not (
-            source_fp.get(rel) == "dir:" or cache_fp.get(rel) == "dir:"
-        ) or not any(other.startswith(f"{rel}/") for other in raw_mismatches)
+        rel
+        for rel in raw_mismatches
+        if not (source_fp.get(rel) == "dir:" or cache_fp.get(rel) == "dir:")
+        or not any(other.startswith(f"{rel}/") for other in raw_mismatches)
     ]
     hooks_json = plugin_root / "hooks" / "hooks.json"
     return {
@@ -316,31 +345,37 @@ def triage_dashboard(tickets_dir: Path) -> dict[str, Any]:
             counts[ticket.status] += 1
         if ticket.priority in priority_counts:
             priority_counts[ticket.priority] += 1
-        active_ticket_rows.append({
-            "id": ticket.id,
-            "title": ticket.title,
-            "status": ticket.status,
-            "priority": ticket.priority,
-            "refinement_status": ticket.refinement_status,
-            "blocked_by": ticket.blocked_by,
-            "date": ticket.date,
-        })
-
-        if _is_stale(ticket):
-            stale.append({
+        active_ticket_rows.append(
+            {
                 "id": ticket.id,
                 "title": ticket.title,
                 "status": ticket.status,
+                "priority": ticket.priority,
+                "refinement_status": ticket.refinement_status,
+                "blocked_by": ticket.blocked_by,
                 "date": ticket.date,
-            })
+            }
+        )
+
+        if _is_stale(ticket):
+            stale.append(
+                {
+                    "id": ticket.id,
+                    "title": ticket.title,
+                    "status": ticket.status,
+                    "date": ticket.date,
+                }
+            )
 
         if ticket.status == "blocked" and ticket.blocked_by:
             root_blockers = _find_root_blockers(ticket, ticket_map)
-            blocked_chains.append({
-                "id": ticket.id,
-                "title": ticket.title,
-                "root_blockers": root_blockers,
-            })
+            blocked_chains.append(
+                {
+                    "id": ticket.id,
+                    "title": ticket.title,
+                    "root_blockers": root_blockers,
+                }
+            )
 
         warning = _check_doc_size(ticket)
         if warning:
@@ -363,30 +398,38 @@ def _next_actions(active_ticket_rows: list[dict[str, Any]]) -> list[dict[str, st
     """Recommend next actions from dashboard rows only."""
     actions: list[dict[str, str]] = []
     executable_rows = [
-        row for row in active_ticket_rows
-        if row.get("refinement_status") != "needs_refinement"
+        row for row in active_ticket_rows if row.get("refinement_status") != "needs_refinement"
     ]
     for row in executable_rows:
         if row["priority"] == "critical" and row["status"] == "open":
-            actions.append({
-                "action": "start_or_assign_critical",
-                "ticket_id": row["id"],
-                "reason": "Critical ticket is open and not in progress",
-            })
+            actions.append(
+                {
+                    "action": "start_or_assign_critical",
+                    "ticket_id": row["id"],
+                    "reason": "Critical ticket is open and not in progress",
+                }
+            )
     for row in executable_rows:
         if row["status"] == "blocked" and row["blocked_by"]:
-            actions.append({
-                "action": "resolve_blocker",
-                "ticket_id": row["id"],
-                "reason": "Blocked ticket has unresolved blockers",
-            })
+            actions.append(
+                {
+                    "action": "resolve_blocker",
+                    "ticket_id": row["id"],
+                    "reason": "Blocked ticket has unresolved blockers",
+                }
+            )
     for row in executable_rows:
         if row["status"] == "in_progress":
-            actions.append({
-                "action": "review_in_progress",
-                "ticket_id": row["id"],
-                "reason": "In-progress ticket should have recent activity or be moved back to open",
-            })
+            actions.append(
+                {
+                    "action": "review_in_progress",
+                    "ticket_id": row["id"],
+                    "reason": (
+                        "In-progress ticket should have recent activity or be moved "
+                        "back to open"
+                    ),
+                }
+            )
     return actions[:5]
 
 
@@ -396,10 +439,12 @@ def _suggested_capture_prompts(active_ticket_rows: list[dict[str, Any]]) -> list
     for row in active_ticket_rows:
         if row.get("refinement_status") != "needs_refinement":
             continue
-        prompts.append({
-            "ticket_id": row["id"],
-            "prompt": f"Use ticket-capture to refine {row['id']}: {row['title']}",
-        })
+        prompts.append(
+            {
+                "ticket_id": row["id"],
+                "prompt": f"Use ticket-capture to refine {row['id']}: {row['title']}",
+            }
+        )
     return prompts
 
 
@@ -460,8 +505,14 @@ def triage_audit_report(tickets_dir: Path, days: int = 7) -> dict[str, Any]:
     """
     audit_base = tickets_dir / ".audit"
     if not audit_base.is_dir():
-        return {"total_entries": 0, "by_action": {}, "by_result": {}, "sessions": 0,
-                "skipped_lines": 0, "read_errors": 0}
+        return {
+            "total_entries": 0,
+            "by_action": {},
+            "by_result": {},
+            "sessions": 0,
+            "skipped_lines": 0,
+            "read_errors": 0,
+        }
 
     now = datetime.now(UTC)
     cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days)
@@ -617,19 +668,27 @@ def main() -> None:
 
     project_root = discover_project_root(Path.cwd())
     if project_root is None:
-        print(json.dumps({
-            "state": "policy_blocked",
-            "message": "Cannot find project root (no .git or .codex marker in ancestors)",
-            "error_code": "policy_blocked",
-        }))
+        print(
+            json.dumps(
+                {
+                    "state": "policy_blocked",
+                    "message": "Cannot find project root (no .git or .codex marker in ancestors)",
+                    "error_code": "policy_blocked",
+                }
+            )
+        )
         sys.exit(1)
     tickets_dir, path_error = resolve_tickets_dir(args.tickets_dir, project_root=project_root)
     if path_error is not None or tickets_dir is None:
-        print(json.dumps({
-            "state": "policy_blocked",
-            "message": path_error or "tickets_dir validation failed",
-            "error_code": "policy_blocked",
-        }))
+        print(
+            json.dumps(
+                {
+                    "state": "policy_blocked",
+                    "message": path_error or "tickets_dir validation failed",
+                    "error_code": "policy_blocked",
+                }
+            )
+        )
         sys.exit(1)
 
     if args.subcommand == "dashboard":
@@ -649,11 +708,15 @@ def main() -> None:
                 runtime_probe_output=args.runtime_probe_output,
             )
         except DoctorInputError as exc:
-            print(json.dumps({
-                "state": "escalate",
-                "message": str(exc),
-                "error_code": "invalid_doctor_root",
-            }))
+            print(
+                json.dumps(
+                    {
+                        "state": "escalate",
+                        "message": str(exc),
+                        "error_code": "invalid_doctor_root",
+                    }
+                )
+            )
             sys.exit(1)
         print(json.dumps({"state": "ok", "data": result}))
 

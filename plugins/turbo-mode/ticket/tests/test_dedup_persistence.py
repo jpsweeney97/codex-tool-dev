@@ -1,11 +1,13 @@
 """Tests for dedup persistence (C-002) and dedup_override binding (C-008)."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from scripts.ticket_engine_core import _execute_create, engine_preflight
 from scripts.ticket_parse import parse_ticket
+
 from tests.support.builders import make_ticket
 
 
@@ -77,7 +79,7 @@ class TestDedupPrefersPersistedField:
         """Dedup scan uses persisted key_file_paths from YAML, not regex."""
         from scripts.ticket_engine_core import engine_plan
 
-        today = datetime.now(timezone.utc)
+        today = datetime.now(UTC)
         today_str = today.strftime("%Y-%m-%d")
         today_compact = today_str.replace("-", "")
         created_at = today.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -91,7 +93,7 @@ class TestDedupPrefersPersistedField:
             created_at=created_at,
             problem="Auth times out.",
             title="Fix auth bug",
-            extra_yaml='key_file_paths: [handler.py, auth/config.py]\n        ',
+            extra_yaml="key_file_paths: [handler.py, auth/config.py]\n        ",
         )
 
         # Try to create a duplicate with matching key_file_paths.
@@ -113,7 +115,7 @@ class TestDedupPrefersPersistedField:
         """Pre-existing tickets without key_file_paths YAML still work via regex."""
         from scripts.ticket_engine_core import engine_plan
 
-        today = datetime.now(timezone.utc)
+        today = datetime.now(UTC)
         today_str = today.strftime("%Y-%m-%d")
         today_compact = today_str.replace("-", "")
         created_at = today.strftime("%Y-%m-%dT%H:%M:%SZ")

@@ -1,4 +1,5 @@
 """Static contract checks for current-facing docs and skill files."""
+
 from __future__ import annotations
 
 import json
@@ -110,8 +111,7 @@ def test_engine_docs_state_runner_is_not_public_mutation_surface() -> None:
         "and ticket_engine_agent.py."
     ) in text
     assert (
-        "Direct engine stages are low-level compatibility, debug, "
-        "and agent-internal paths."
+        "Direct engine stages are low-level compatibility, debug, and agent-internal paths."
     ) in text
     assert "not normal user-facing mutation interfaces" in text
 
@@ -131,9 +131,12 @@ def test_docs_describe_direct_execute_activation_v1_boundary() -> None:
     )
     scope_boundary = (
         "`capture`, `update`, and `ticket_workflow.py` remain outside the activation proof "
-        "scope and require a separate follow-up before widening certification."
+        "scope alongside `ingest_dispatch` and `activation_smoke_bootstrap`, and require "
+        "a separate follow-up before widening certification."
     )
-    diagnostics_boundary = "`dangerFullAccess` runs and prompt-driven smokes are diagnostics only."
+    diagnostics_boundary = (
+        "Privileged host diagnostic runs and prompt-driven smokes are diagnostics only."
+    )
     corroboration_boundary = (
         "AgentControl child smoke, when captured, is same-membrane corroboration only "
         "and not identity proof."
@@ -151,6 +154,29 @@ def test_docs_describe_direct_execute_activation_v1_boundary() -> None:
         assert diagnostics_boundary in normalized
         assert corroboration_boundary in normalized
         assert gate_boundary in normalized
+        assert "dangerFullAccess" not in text
+
+
+def test_contract_separates_core_runtime_and_activation_error_codes() -> None:
+    contract = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
+    normalized = _normalize_whitespace(contract)
+
+    assert "Core Engine Error Codes (12)" in normalized
+    assert "Runtime Readiness Error Codes" in normalized
+    assert "Activation Driver Error Codes" in normalized
+    assert "`need_fields`, `invalid_transition`, `policy_blocked`" in normalized
+    assert "`proof_missing`, `proof_invalid`, `stale_proof`" in normalized
+    assert "`host_policy_blocked`, `deterministic_driver_unavailable`" in normalized
+
+
+def test_handbook_documents_runtime_proof_env_var_scope() -> None:
+    handbook = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
+    normalized = _normalize_whitespace(handbook)
+
+    assert "No shell environment variable is required for normal operation." in normalized
+    assert "`ticket_engine_runner.py execute` may honor `TICKET_RUNTIME_PROOF_PATH`" in normalized
+    assert "classify, plan, preflight, and ingest ignore it" in normalized
+    assert "At execute and ingest stages, the engine re-validates the trust triple" in normalized
 
 
 def test_stale_plan_is_only_public_toctou_error_code() -> None:
@@ -218,9 +244,7 @@ def test_old_broad_skill_files_do_not_exist() -> None:
 
 
 def test_retired_pipeline_guide_is_not_current_source() -> None:
-    assert not (
-        PLUGIN_ROOT / "skills" / "ticket" / "references" / "pipeline-guide.md"
-    ).exists()
+    assert not (PLUGIN_ROOT / "skills" / "ticket" / "references" / "pipeline-guide.md").exists()
 
 
 def test_task4_split_skill_files_exist() -> None:
@@ -281,14 +305,8 @@ def test_ticket_capture_skill_requires_explicit_confirmation_before_writing() ->
 
 def test_ticket_capture_skill_uses_canonical_prepare_and_execute_commands() -> None:
     text = _read_text(CAPTURE_SKILL)
-    assert (
-        "uv run python -B <PLUGIN_ROOT>/scripts/ticket_capture.py prepare <PAYLOAD_PATH>"
-        in text
-    )
-    assert (
-        "uv run python -B <PLUGIN_ROOT>/scripts/ticket_capture.py execute <PAYLOAD_PATH>"
-        in text
-    )
+    assert "uv run python -B <PLUGIN_ROOT>/scripts/ticket_capture.py prepare <PAYLOAD_PATH>" in text
+    assert "uv run python -B <PLUGIN_ROOT>/scripts/ticket_capture.py execute <PAYLOAD_PATH>" in text
 
 
 def test_ticket_capture_skill_documents_path_resolution_contract() -> None:
@@ -573,20 +591,21 @@ def test_ticket_doctor_skill_contract_is_explicit_maintenance_only() -> None:
     assert "Do not trigger on casual audit, review, triage, or backlog-health language" in text
     assert "ticket_doctor.py diagnose" in text
     assert (
-        "ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path "
-        "<MARKETPLACE_PATH>"
+        "ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>"
     ) in text
     assert "ticket_doctor.py repair-audit <TICKETS_DIR>" in text
     assert "ticket_doctor.py repair-audit <TICKETS_DIR> --confirm-repair" in text
     assert "ticket_doctor.py clean-stale-payloads <TICKETS_DIR>" in text
     assert (
-        "ticket_doctor.py clean-stale-payloads <TICKETS_DIR> "
-        "--confirm-clean-stale-payloads"
+        "ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads"
     ) in text
     assert "stale `.codex/ticket-tmp/` payloads" in text
     assert "24 hours" in text
     assert "ask before any cleanup mutation" in text
     assert "direct_execute only" in text
+    assert "Activation is user-origin only" in text
+    assert "Do not run this command as an agent" in text
+    assert "a user-owned shell must run it" in text
     assert "`host_policy_blocked`" in text
     assert "`deterministic_driver_unavailable`" in text
     assert "`hook_contract_blocked`" in text
@@ -715,8 +734,7 @@ def test_readme_documents_ticket_ux_commands() -> None:
         "--cache-root <cache_root>`"
     ) in text
     assert (
-        "ticket_doctor.py` | `activate-runtime <tickets_dir> --marketplace-path "
-        "<marketplace_path>`"
+        "ticket_doctor.py` | `activate-runtime <tickets_dir> --marketplace-path <marketplace_path>`"
     ) in text
     assert "ticket_doctor.py` | `repair-audit <tickets_dir> [--confirm-repair]`" in text
     assert "ticket_workflow.py" in text
@@ -761,8 +779,7 @@ def test_manifest_documents_required_interface_urls() -> None:
     interface = manifest["interface"]
     expected_urls = {
         "websiteURL": (
-            "https://github.com/jpsweeney97/codex-tool-dev/tree/main/"
-            "plugins/turbo-mode/ticket"
+            "https://github.com/jpsweeney97/codex-tool-dev/tree/main/plugins/turbo-mode/ticket"
         ),
         "privacyPolicyURL": (
             "https://github.com/jpsweeney97/codex-tool-dev/blob/main/"

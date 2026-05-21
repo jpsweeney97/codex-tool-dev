@@ -1,4 +1,5 @@
 """Tests for ticket field schema validation."""
+
 from __future__ import annotations
 
 from scripts.ticket_validate import validate_fields
@@ -109,7 +110,9 @@ class TestValidateFields:
 
     # --- defer ---
     def test_valid_defer(self):
-        errors = validate_fields({"defer": {"active": True, "reason": "blocked on X", "deferred_at": "2026-03-10"}})
+        errors = validate_fields(
+            {"defer": {"active": True, "reason": "blocked on X", "deferred_at": "2026-03-10"}}
+        )
         assert not errors
 
     def test_defer_non_dict_rejected(self):
@@ -118,7 +121,9 @@ class TestValidateFields:
 
     # --- key_files ---
     def test_valid_key_files(self):
-        errors = validate_fields({"key_files": [{"file": "src/main.py", "role": "entry point", "look_for": "main"}]})
+        errors = validate_fields(
+            {"key_files": [{"file": "src/main.py", "role": "entry point", "look_for": "main"}]}
+        )
         assert not errors
 
     def test_key_files_non_list_rejected(self):
@@ -187,12 +192,16 @@ class TestValidateFields:
 
     def test_valid_full_defer_passes(self):
         """Regression: fully-specified defer should pass."""
-        errors = validate_fields({"defer": {"active": True, "reason": "blocked", "deferred_at": "2026-03-10"}})
+        errors = validate_fields(
+            {"defer": {"active": True, "reason": "blocked", "deferred_at": "2026-03-10"}}
+        )
         assert errors == []
 
     def test_valid_full_key_files_passes(self):
         """Regression: fully-specified key_files should pass."""
-        errors = validate_fields({"key_files": [{"file": "foo.py", "role": "entry", "look_for": "main"}]})
+        errors = validate_fields(
+            {"key_files": [{"file": "foo.py", "role": "entry", "look_for": "main"}]}
+        )
         assert errors == []
 
     # --- omitted fields are fine ---
