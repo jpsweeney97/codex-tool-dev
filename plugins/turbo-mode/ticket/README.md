@@ -307,9 +307,11 @@ Mutations are secured by a **trust triple** injected atomically by the guard hoo
 |-------|---------|
 | `session_id` | Ties the mutation to a specific Codex session |
 | `hook_injected` | Proves the command passed through the guard hook |
-| `hook_request_origin` | Records whether the caller is `user` or `agent` |
+| `hook_request_origin` | Records hook-observed provenance such as `user` or `agent`; on current Codex runtime it is metadata, not security-grade caller identity |
 
-Execute validates all three fields before allowing any write. Agent-origin requests face higher confidence thresholds (0.65 vs 0.5) and require `auto_audit` autonomy mode.
+Execute validates all three fields before allowing any write. Requests routed
+through `ticket_engine_agent.py` face higher confidence thresholds (0.65 vs
+0.5) and require `auto_audit` autonomy mode.
 
 ### Defense in Depth
 
@@ -338,16 +340,27 @@ Security checks are duplicated across pipeline stages:
 
 ### Agent Integration
 
-External agents can use `ticket_engine_agent.py` to create and manage tickets autonomously, subject to:
+External agents can use `ticket_engine_agent.py` to create and manage tickets
+autonomously, subject to:
 
 1. **Autonomy policy** in `.codex/ticket.local.md` must be `auto_audit` or higher
-2. **Trust triple** injected by the guard hook (hook_injected=true, hook_request_origin="agent")
+2. **Trust triple** injected by the guard hook (`hook_injected=true`,
+   non-empty `session_id`, and recorded `hook_request_origin` provenance)
 3. **Higher confidence threshold** (0.65 for agents vs 0.5 for users)
 4. **Live policy re-read** at execute time blocks if policy changed since preflight
 5. **Session create cap** enforcement via audit trail (configurable via `max_creates_per_session`)
 6. **Reopen is user-only** in v1.0 — agents cannot reopen tickets
 
-Current agent-origin `auto_audit` execute remains governed by the existing guarded provenance/trust model: hook-injected payload fields, matching `hook_request_origin`, non-empty `session_id`, live autonomy config re-read, and the current engine trust checks. This slice does not add activation-capable runtime readiness, does not write `.codex/ticket-runtime-proof.json`, and does not add a new execute readiness gate. Stronger installed-runtime readiness, including live app-server inventory and live hook-mediated smoke, is future work and must land before any stronger trust claim or delegated multi-agent `auto_audit` rollout.
+Current direct-execute `auto_audit` behavior remains governed by the existing
+guarded provenance/trust model: hook-injected payload fields, non-empty
+`session_id`, live autonomy config re-read, and the current engine trust
+checks. The future activation-readiness lane is defined as installed
+hook-mediated mutation wiring, not caller identity: live app-server inventory,
+bound hook membrane proof, AgentControl child traversal through the same
+installed hook, and evidence-backed revalidation of the persisted proof index.
+Because current Codex does not expose spawned-agent identity in `PreToolUse`,
+agent identity is not a readiness prerequisite unless the hook contract
+changes.
 
 The `agents/` directory is a placeholder (`.gitkeep` only) — consuming projects define their own agent definitions that invoke the agent entrypoint.
 

@@ -188,11 +188,15 @@ Every mutation must carry a **trust triple** injected by the hook:
 |-------|--------|---------|
 | `session_id` | Hook (`event.session_id`) | Session identity; sanitized (no `/`, `\`, `\0`) before filesystem use |
 | `hook_injected` | Hook | Proves request passed through the hook |
-| `request_origin` | Hook (`agent_id` presence) | `"user"` or `"agent"`; must match the entrypoint called |
+| `hook_request_origin` | Hook | Hook-observed provenance metadata; current runtime may report `"user"` even for the certified direct-execute lane, and activation readiness does not treat it as caller identity |
 
-The hook injects these fields atomically into the payload file before allowing the Bash command to proceed. At classify and execute stages, the engine re-validates that the trust triple is internally consistent. Mismatches reject with an error — not a warning.
+The hook injects these fields atomically into the payload file before allowing
+the Bash command to proceed. At classify and execute stages, the engine
+re-validates that the trust triple is internally consistent with the selected
+policy lane. Mismatches reject with an error, not a warning.
 
-**Flow:** Hook validates and injects → entrypoint asserts origin matches → pipeline re-validates triple.
+**Flow:** Hook validates and injects → entrypoint selects a policy lane →
+pipeline re-validates the triple.
 
 ### Autonomy Enforcement
 
@@ -204,7 +208,15 @@ Agent mutations face additional gating that user mutations do not:
 
 User mutations skip the autonomy policy check — they pass through regardless of `autonomy_mode`.
 
-Current agent-origin `auto_audit` execute remains governed by the existing guarded provenance/trust model: hook-injected payload fields, matching `hook_request_origin`, non-empty `session_id`, live autonomy config re-read, and the current engine trust checks. This slice does not add activation-capable runtime readiness, does not write `.codex/ticket-runtime-proof.json`, and does not add a new execute readiness gate. Stronger installed-runtime readiness, including live app-server inventory and live hook-mediated smoke, is future work.
+Current direct-execute `auto_audit` behavior remains governed by the existing
+guarded provenance/trust model: hook-injected payload fields, non-empty
+`session_id`, live autonomy config re-read, and the current engine trust
+checks. The activation-readiness lane is defined as installed hook-mediated
+mutation wiring, not caller identity: live app-server inventory, bound hook
+membrane proof, AgentControl child traversal through the same installed hook,
+and evidence-backed revalidation of the persisted proof index. Current Codex
+does not expose spawned-agent identity in `PreToolUse`, so agent identity is
+not a readiness prerequisite unless the hook contract changes.
 
 `auto_audit` is single-writer in this slice. Do not intentionally launch two or more ticket-capable agents in the same Codex session. Future locking/queueing work is triggered by any workflow that intentionally launches two or more ticket-capable agents in the same Codex session, or enables `auto_audit` for delegated multi-agent work.
 

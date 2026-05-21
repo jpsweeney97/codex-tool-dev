@@ -139,8 +139,9 @@ The `archive` field in execute close requests controls whether the ticket file i
 does not replace the engine interface. Prepare and execute dispatch through the
 same stage-model boundary as `ticket_engine_runner.py`; recover only patches the
 payload for supported user-selected recovery actions. Execute keeps the same
-provenance requirements: `hook_injected=true`, matching `hook_request_origin`,
-and non-empty `session_id`.
+provenance requirements: `hook_injected=true`, recorded `hook_request_origin`,
+and non-empty `session_id`. Activation readiness does not treat
+`hook_request_origin` as caller-identity proof.
 
 ### Machine States (15 total: 14 emittable, 1 reserved)
 
@@ -158,11 +159,21 @@ Config: `.codex/ticket.local.md` YAML frontmatter
 
 `request_origin`: "user" (ticket_engine_user.py), "agent" (ticket_engine_agent.py), "unknown" (fail closed)
 
-Hook trust source: `agent_id` in `PreToolUse` input is the authoritative signal for subagent-origin requests. Entrypoint choice is routing convenience, not trust establishment.
+Current Codex `PreToolUse` input does not expose a stable spawned-agent
+identity signal Ticket can certify. `hook_request_origin` is hook-observed
+provenance metadata, and entrypoint choice selects the policy lane rather than
+proving caller identity.
 
 Hook candidate detection: the guard tokenizes Bash commands with `shlex` and treats Python invocations targeting any `ticket_*.py` basename as ticket candidates. Only canonical plugin-root entrypoints are allowlisted; non-canonical, wrapped, or unknown ticket script invocations are denied. Non-ticket Python commands pass through.
 
-Execute provenance: execute requires verified hook provenance (hook_injected=True, hook_request_origin matching entrypoint origin, non-empty session_id) for all mutations, both user and agent. Non-execute stages (classify, plan, preflight) remain directly runnable without hook metadata. Agent preflight requires session_id for accurate create-cap simulation but does not require hook_injected.
+Execute provenance: execute requires verified hook provenance
+(`hook_injected=True`, recorded `hook_request_origin`, non-empty session_id) for
+all mutations, both user and agent. Current runner/core behavior still keeps the
+entrypoint lane and hook metadata internally consistent for writes; activation
+readiness does not elevate that equality check into a security-grade identity
+claim. Non-execute stages (classify, plan, preflight) remain directly runnable
+without hook metadata. Agent preflight requires session_id for accurate
+create-cap simulation but does not require hook_injected.
 
 Execute prerequisites: execute requires prior-stage artifacts:
 - classify_intent (must match action)
@@ -175,7 +186,15 @@ Stage-specific missing-confidence behavior: preflight entrypoints coerce absent 
 
 Agent execute re-reads live `.codex/ticket.local.md` policy and blocks if it diverges from the preflight snapshot.
 
-Current agent-origin `auto_audit` execute remains governed by the existing guarded provenance/trust model: hook-injected payload fields, matching `hook_request_origin`, non-empty `session_id`, live autonomy config re-read, and the current engine trust checks. This slice does not add activation-capable runtime readiness, does not write `.codex/ticket-runtime-proof.json`, and does not add a new execute readiness gate. Stronger installed-runtime readiness, including live app-server inventory and live hook-mediated smoke, is future work and must land before any stronger trust claim or delegated multi-agent `auto_audit` rollout.
+Current direct-execute `auto_audit` behavior remains governed by the existing
+guarded provenance/trust model: hook-injected payload fields, non-empty
+`session_id`, live autonomy config re-read, and the current engine trust
+checks. The activation-readiness lane is defined as installed hook-mediated
+mutation wiring, not caller identity: live app-server inventory, bound hook
+membrane proof, AgentControl child traversal through the same installed hook,
+and evidence-backed revalidation of the persisted proof index. Because current
+Codex does not expose spawned-agent identity in `PreToolUse`, agent identity is
+not a readiness prerequisite unless the hook contract changes.
 
 Field validation: title, problem, reopen_reason, captured_request, next_action, capture_source, and component must be strings when present. priority, status, resolution, capture_confidence, and refinement_status are validated against contract enums before writes. key_file_paths, related_paths, tags, blocked_by, blocks, and acceptance_criteria must be lists of strings. source must be a dict with string values. key_files must be a list of dicts. defer must be a dict. Invalid inputs are rejected (need_fields), not silently coerced.
 
