@@ -192,8 +192,10 @@ Every mutation must carry a **trust triple** injected by the hook:
 
 The hook injects these fields atomically into the payload file before allowing
 the Bash command to proceed. At classify and execute stages, the engine
-re-validates that the trust triple is internally consistent with the selected
-policy lane. Mismatches reject with an error, not a warning.
+re-validates the trust triple against the selected policy lane. Missing or
+malformed trust data rejects with an error, and the certified direct-execute
+lane accepts the current host's `hook_request_origin="user"` observation as
+provenance metadata rather than caller identity.
 
 **Flow:** Hook validates and injects → entrypoint selects a policy lane →
 pipeline re-validates the triple.
@@ -208,15 +210,17 @@ Agent mutations face additional gating that user mutations do not:
 
 User mutations skip the autonomy policy check — they pass through regardless of `autonomy_mode`.
 
-Current direct-execute `auto_audit` behavior remains governed by the existing
-guarded provenance/trust model: hook-injected payload fields, non-empty
-`session_id`, live autonomy config re-read, and the current engine trust
-checks. The activation-readiness lane is defined as installed hook-mediated
-mutation wiring, not caller identity: live app-server inventory, bound hook
-membrane proof, AgentControl child traversal through the same installed hook,
-and evidence-backed revalidation of the persisted proof index. Current Codex
-does not expose spawned-agent identity in `PreToolUse`, so agent identity is
-not a readiness prerequisite unless the hook contract changes.
+Activation V1 certifies only `ticket_engine_agent.py execute`. Activation V1
+proves installed hook-mediated direct-execute wiring, not host-owned or
+spawned-agent identity. `hook_request_origin` is hook-observed provenance
+metadata on the current host and may still be reported as `"user"` for the
+certified direct-execute lane. `capture`, `update`, and `ticket_workflow.py`
+remain outside the activation proof scope and require a separate follow-up
+before widening certification. `dangerFullAccess` runs and prompt-driven smokes
+are diagnostics only. AgentControl child smoke, when captured, is
+same-membrane corroboration only and not identity proof. Normal agent direct
+execute fails with `runtime_readiness_required` when the runtime proof is
+missing, stale, or mismatched.
 
 `auto_audit` is single-writer in this slice. Do not intentionally launch two or more ticket-capable agents in the same Codex session. Future locking/queueing work is triggered by any workflow that intentionally launches two or more ticket-capable agents in the same Codex session, or enables `auto_audit` for delegated multi-agent work.
 
@@ -550,7 +554,7 @@ At preflight, the engine takes a fingerprint snapshot of any existing ticket bei
 
 ## Known Limitations
 
-**Single-writer `auto_audit` boundary:** Session create cap and ID allocation are not fully serialized for intentional parallel ticket-capable agents. This slice does not add locking, queueing, activation-capable runtime readiness, `.codex/ticket-runtime-proof.json` writes, or a new execute readiness gate. Avoid running multiple ticket-creating agents in the same session in parallel.
+**Single-writer `auto_audit` boundary:** Session create cap and ID allocation are not fully serialized for intentional parallel ticket-capable agents. The direct-execute runtime proof is separate from multi-agent serialization and does not add locking or queueing. Avoid running multiple ticket-creating agents in the same session in parallel.
 
 **`auto_silent` mode reserved:** The `auto_silent` autonomy mode is defined in the contract but not implemented. Setting it has undefined behavior — do not use until implemented.
 

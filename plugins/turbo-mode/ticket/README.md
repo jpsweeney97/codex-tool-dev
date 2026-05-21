@@ -121,6 +121,7 @@ Both delegate to `ticket_engine_runner.py`, which dispatches to `ticket_engine_c
 | `ticket_triage.py` | `audit <tickets_dir> [--days N]` | Audit trail summary (default 7 days) |
 | `ticket_review.py` | `review <tickets_dir>` / `audit <tickets_dir> [--days N]` | User-facing read-only backlog review wrapper |
 | `ticket_doctor.py` | `diagnose <tickets_dir> --plugin-root <plugin_root> --cache-root <cache_root>` | User-facing explicit diagnostics wrapper |
+| `ticket_doctor.py` | `activate-runtime <tickets_dir> --marketplace-path <marketplace_path>` | User-facing direct_execute-only runtime activation wrapper |
 | `ticket_doctor.py` | `clean-stale-payloads <tickets_dir> [--confirm-clean-stale-payloads]` | User-facing confirmed cleanup for stale prepare payloads |
 | `ticket_doctor.py` | `repair-audit <tickets_dir> [--confirm-repair]` | User-facing dry-run-first audit repair wrapper |
 | `ticket_triage.py` | `doctor <tickets_dir> --plugin-root <plugin_root> --cache-root <cache_root>` | Static source/cache/project diagnostic |
@@ -351,16 +352,17 @@ autonomously, subject to:
 5. **Session create cap** enforcement via audit trail (configurable via `max_creates_per_session`)
 6. **Reopen is user-only** in v1.0 — agents cannot reopen tickets
 
-Current direct-execute `auto_audit` behavior remains governed by the existing
-guarded provenance/trust model: hook-injected payload fields, non-empty
-`session_id`, live autonomy config re-read, and the current engine trust
-checks. The future activation-readiness lane is defined as installed
-hook-mediated mutation wiring, not caller identity: live app-server inventory,
-bound hook membrane proof, AgentControl child traversal through the same
-installed hook, and evidence-backed revalidation of the persisted proof index.
-Because current Codex does not expose spawned-agent identity in `PreToolUse`,
-agent identity is not a readiness prerequisite unless the hook contract
-changes.
+Activation V1 certifies only `ticket_engine_agent.py execute`. Activation V1
+proves installed hook-mediated direct-execute wiring, not host-owned or
+spawned-agent identity. `hook_request_origin` is hook-observed provenance
+metadata on the current host and may still be reported as `"user"` for the
+certified direct-execute lane. `capture`, `update`, and `ticket_workflow.py`
+remain outside the activation proof scope and require a separate follow-up
+before widening certification. `dangerFullAccess` runs and prompt-driven smokes
+are diagnostics only. AgentControl child smoke, when captured, is
+same-membrane corroboration only and not identity proof. Normal agent direct
+execute fails with `runtime_readiness_required` when the runtime proof is
+missing, stale, or mismatched.
 
 The `agents/` directory is a placeholder (`.gitkeep` only) — consuming projects define their own agent definitions that invoke the agent entrypoint.
 

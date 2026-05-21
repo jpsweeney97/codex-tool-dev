@@ -116,22 +116,41 @@ def test_engine_docs_state_runner_is_not_public_mutation_surface() -> None:
     assert "not normal user-facing mutation interfaces" in text
 
 
-def test_docs_describe_current_auto_audit_boundary_without_activation_readiness() -> None:
+def test_docs_describe_direct_execute_activation_v1_boundary() -> None:
     readme = _read_text(PLUGIN_ROOT / "README.md")
     handbook = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
     contract = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
-    current_boundary = (
-        "Current agent-origin `auto_audit` execute remains governed by the existing "
-        "guarded provenance/trust model"
+    certified_lane = "Activation V1 certifies only `ticket_engine_agent.py execute`."
+    trust_boundary = (
+        "Activation V1 proves installed hook-mediated direct-execute wiring, "
+        "not host-owned or spawned-agent identity."
+    )
+    metadata_boundary = (
+        "`hook_request_origin` is hook-observed provenance metadata on the current host "
+        'and may still be reported as `"user"` for the certified direct-execute lane.'
+    )
+    scope_boundary = (
+        "`capture`, `update`, and `ticket_workflow.py` remain outside the activation proof "
+        "scope and require a separate follow-up before widening certification."
+    )
+    diagnostics_boundary = "`dangerFullAccess` runs and prompt-driven smokes are diagnostics only."
+    corroboration_boundary = (
+        "AgentControl child smoke, when captured, is same-membrane corroboration only "
+        "and not identity proof."
+    )
+    gate_boundary = (
+        "Normal agent direct execute fails with `runtime_readiness_required` when the "
+        "runtime proof is missing, stale, or mismatched."
     )
     for text in [readme, handbook, contract]:
-        assert current_boundary in text
-        assert "hook-injected payload fields" in text
-        assert "matching `hook_request_origin`" in text
-        assert "This slice does not add activation-capable runtime readiness" in text
-        assert "does not write `.codex/ticket-runtime-proof.json`" in text
-        assert "does not add a new execute readiness gate" in text
-        assert "live app-server inventory and live hook-mediated smoke" in text
+        normalized = _normalize_whitespace(text)
+        assert certified_lane in normalized
+        assert trust_boundary in normalized
+        assert metadata_boundary in normalized
+        assert scope_boundary in normalized
+        assert diagnostics_boundary in normalized
+        assert corroboration_boundary in normalized
+        assert gate_boundary in normalized
 
 
 def test_stale_plan_is_only_public_toctou_error_code() -> None:
@@ -553,6 +572,10 @@ def test_ticket_doctor_skill_contract_is_explicit_maintenance_only() -> None:
     assert "validate ticket plugin health" in description
     assert "Do not trigger on casual audit, review, triage, or backlog-health language" in text
     assert "ticket_doctor.py diagnose" in text
+    assert (
+        "ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path "
+        "<MARKETPLACE_PATH>"
+    ) in text
     assert "ticket_doctor.py repair-audit <TICKETS_DIR>" in text
     assert "ticket_doctor.py repair-audit <TICKETS_DIR> --confirm-repair" in text
     assert "ticket_doctor.py clean-stale-payloads <TICKETS_DIR>" in text
@@ -563,6 +586,12 @@ def test_ticket_doctor_skill_contract_is_explicit_maintenance_only() -> None:
     assert "stale `.codex/ticket-tmp/` payloads" in text
     assert "24 hours" in text
     assert "ask before any cleanup mutation" in text
+    assert "direct_execute only" in text
+    assert "`host_policy_blocked`" in text
+    assert "`deterministic_driver_unavailable`" in text
+    assert "`hook_contract_blocked`" in text
+    assert "`engine_gate_required`" in text
+    assert "`runtime_readiness_required`" in text
     assert "ticket_audit.py repair <TICKETS_DIR>" not in text
     assert "ask before any mutation" in text
 
@@ -649,6 +678,7 @@ def test_split_skills_document_check_review_and_doctor_surfaces() -> None:
     assert "ticket_triage.py doctor" not in review_text
     assert "ticket_triage.py doctor" not in doctor_text
     assert "ticket_doctor.py diagnose" in doctor_text
+    assert "ticket_doctor.py activate-runtime" in doctor_text
     assert "ticket_doctor.py repair-audit" in doctor_text
     assert "<CACHE_ROOT>" in doctor_text
     assert "/Users/jp/.codex/plugins/cache/" not in find_text
@@ -664,6 +694,10 @@ def test_readme_documents_ticket_ux_commands() -> None:
     assert (
         "ticket_doctor.py` | `diagnose <tickets_dir> --plugin-root <plugin_root> "
         "--cache-root <cache_root>`"
+    ) in text
+    assert (
+        "ticket_doctor.py` | `activate-runtime <tickets_dir> --marketplace-path "
+        "<marketplace_path>`"
     ) in text
     assert "ticket_doctor.py` | `repair-audit <tickets_dir> [--confirm-repair]`" in text
     assert "ticket_workflow.py" in text

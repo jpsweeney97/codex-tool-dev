@@ -13,6 +13,7 @@ from scripts.ticket_ux import (
     close_readiness,
     humanize_state,
     recovery_hint,
+    recovery_hint_code_for_response,
     ticket_identity,
 )
 
@@ -322,6 +323,11 @@ def test_recovery_hint_contract_is_transcript_safe() -> None:
         "cleanup_stale_preview",
         "policy_blocked",
         "preflight_failed",
+        "host_policy_blocked",
+        "deterministic_driver_unavailable",
+        "hook_contract_blocked",
+        "engine_gate_required",
+        "runtime_readiness_required",
     }
 
     assert set(RECOVERY_HINTS) == expected_codes
@@ -331,6 +337,14 @@ def test_recovery_hint_contract_is_transcript_safe() -> None:
         "next_step": (
             "Stop without writing. Run ticket-doctor diagnostics or verify the plugin "
             "hook setup before retrying."
+        ),
+    }
+    assert recovery_hint("runtime_readiness_required") == {
+        "code": "runtime_readiness_required",
+        "summary": "Ticket runtime activation is required before this direct execute can continue.",
+        "next_step": (
+            "Run the explicit activate-runtime flow or refresh the installed Ticket runtime "
+            "before retrying."
         ),
     }
     for code in expected_codes:
@@ -360,6 +374,24 @@ def test_attach_recovery_hint_preserves_response_data() -> None:
         "next_step": "Review the preview or check details, update the request, then rerun preview.",
     }
     assert "recovery_hint" not in response["data"]
+
+
+def test_recovery_hint_code_for_runtime_activation_errors() -> None:
+    assert recovery_hint_code_for_response({"error_code": "host_policy_blocked"}) == (
+        "host_policy_blocked"
+    )
+    assert recovery_hint_code_for_response({"error_code": "deterministic_driver_unavailable"}) == (
+        "deterministic_driver_unavailable"
+    )
+    assert recovery_hint_code_for_response({"error_code": "hook_contract_blocked"}) == (
+        "hook_contract_blocked"
+    )
+    assert recovery_hint_code_for_response({"error_code": "engine_gate_required"}) == (
+        "engine_gate_required"
+    )
+    assert recovery_hint_code_for_response({"error_code": "runtime_readiness_required"}) == (
+        "runtime_readiness_required"
+    )
 
 
 def test_transcript_safety_terms_match_expected_internal_leak_vocabulary() -> None:

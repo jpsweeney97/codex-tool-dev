@@ -39,6 +39,29 @@ it as live runtime proof.
 `diagnose` reports stale `.codex/ticket-tmp/` payloads older than 24 hours
 without mutating them.
 
+## Runtime Activation
+
+Activation is `direct_execute only`. Use it only when the user explicitly asks
+to activate or validate the installed Ticket runtime for the certified
+direct-execute lane.
+
+Run:
+
+```bash
+python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>
+```
+
+Report direct-execute-only scope. Do not describe activation as caller-identity
+proof, and do not widen it to `capture`, `update`, or `ticket_workflow.py`.
+
+If activation blocks, report the blocker code first:
+
+- `host_policy_blocked`
+- `deterministic_driver_unavailable`
+- `hook_contract_blocked`
+- `engine_gate_required`
+- `runtime_readiness_required`
+
 ## Recovery Hints
 
 When a backend response includes `data.recovery_hint`, show the recovery summary and next step before any lower-level message. Do not expose payload paths, envelope paths, canonical command repair, raw temp/workspace paths, or hook/provenance fields in the transcript.
