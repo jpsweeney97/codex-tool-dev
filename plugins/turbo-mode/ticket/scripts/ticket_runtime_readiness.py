@@ -17,6 +17,7 @@ from typing import Any
 
 REQUEST_TIMEOUT_SECONDS = 30.0
 RUNTIME_PROOF_PATH_ENV = "TICKET_RUNTIME_PROOF_PATH"
+_POST_DIRECT_AUTONOMY_CONFIG = "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n"
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,16 @@ def _ticket_python_command(script_path: Path, *args: Path | str) -> str:
     return shlex.join(parts)
 
 
+def _write_post_direct_autonomy_config(post_root: Path) -> dict[str, Any]:
+    config_root = post_root / ".codex"
+    config_root.mkdir(parents=True, exist_ok=True)
+    (config_root / "ticket.local.md").write_text(
+        _POST_DIRECT_AUTONOMY_CONFIG,
+        encoding="utf-8",
+    )
+    return {"mode": "auto_audit", "max_creates": 5, "warnings": []}
+
+
 def verify_installed_ticket_runtime_readiness_for_execute(
     *,
     project_root: Path,
@@ -70,6 +81,11 @@ def verify_installed_ticket_runtime_readiness_for_execute(
         return _reject("proof_invalid", "Unexpected runtime proof schema_version")
     if proof.get("status") != "activated":
         return _reject("proof_invalid", "Runtime proof is not activated")
+
+    evidence_project_root = resolved_project_root
+    proof_project_root = proof.get("project_root")
+    if proof_path is not None and isinstance(proof_project_root, str) and proof_project_root:
+        evidence_project_root = Path(proof_project_root).resolve(strict=False)
 
     expires_at = _parse_utc_timestamp(proof.get("expires_at"))
     if expires_at is None:
@@ -131,7 +147,7 @@ def verify_installed_ticket_runtime_readiness_for_execute(
         return _reject("guard_script_hash_mismatch", "Guard script hash mismatch")
 
     try:
-        run_dir = resolved_project_root / proof["raw_evidence"]["run_dir"]
+        run_dir = evidence_project_root / proof["raw_evidence"]["run_dir"]
         inventory_transcript = run_dir / proof["raw_evidence"]["app_server_inventory_transcript"]
         hook_events = run_dir / proof["raw_evidence"]["hook_membrane_events"]
         post_events = run_dir / proof["raw_evidence"]["post_activation_events"]
@@ -572,7 +588,7 @@ def run_activation_smoke(
 
     payload_after_path = raw_dir / "payload-after.json"
     payload_after_path.write_text(payload_path.read_text(encoding="utf-8"), encoding="utf-8")
-    engine_stdout_text = "".join(_command_output_deltas(transcript))
+    engine_stdout_text = _command_output_text(transcript)
     engine_stdout_path = raw_dir / "engine-stdout.json"
     engine_stdout_path.write_text(engine_stdout_text, encoding="utf-8")
     engine_stderr_path = raw_dir / "engine-stderr.txt"
@@ -622,7 +638,6 @@ def run_post_activation_direct_execute_smoke(
     executable: str | None = None,
 ) -> dict[str, Any]:
     from scripts.ticket_dedup import dedup_fingerprint as compute_dedup_fingerprint
-    from scripts.ticket_engine_core import read_autonomy_config
 
     raw_dir = run_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -631,7 +646,7 @@ def run_post_activation_direct_execute_smoke(
     post_tickets_dir.mkdir(parents=True, exist_ok=True)
     payload_path = post_root / "post-direct-payload.json"
     problem = "Runtime activation direct execute smoke."
-    autonomy_config = read_autonomy_config(tickets_dir)
+    autonomy_config = _write_post_direct_autonomy_config(post_root)
     payload = {
         "action": "create",
         "fields": {
@@ -644,7 +659,7 @@ def run_post_activation_direct_execute_smoke(
         "classify_confidence": 0.95,
         "dedup_fingerprint": compute_dedup_fingerprint(problem, []),
         "tickets_dir": str(post_tickets_dir),
-        "autonomy_config": autonomy_config.to_dict(),
+        "autonomy_config": autonomy_config,
     }
     _write_json(payload_path, payload)
     command = _ticket_python_command(
@@ -690,7 +705,7 @@ def run_post_activation_direct_execute_smoke(
             "Direct execute smoke did not traverse the expected command execution path",
         )
 
-    engine_stdout_text = "".join(_command_output_deltas(transcript))
+    engine_stdout_text = _command_output_text(transcript)
     if not engine_stdout_text.strip():
         raise RuntimeActivationError(
             "deterministic_driver_unavailable",
@@ -1184,6 +1199,17 @@ def _command_output_deltas(transcript: list[dict[str, Any]]) -> list[str]:
         if isinstance(params, dict) and isinstance(params.get("delta"), str):
             deltas.append(params["delta"])
     return deltas
+
+
+def _command_output_text(transcript: list[dict[str, Any]]) -> str:
+    delta_text = "".join(_command_output_deltas(transcript))
+    if delta_text.strip():
+        return delta_text
+    for item in reversed(_command_execution_items(transcript)):
+        aggregated_output = item.get("aggregatedOutput")
+        if isinstance(aggregated_output, str) and aggregated_output.strip():
+            return aggregated_output
+    return ""
 
 
 def _stderr_text(transcript: list[dict[str, Any]]) -> str:

@@ -47,6 +47,22 @@ def test_valid_installed_runtime_proof_passes_when_executing_root_matches(tmp_pa
     assert result.error_code is None
 
 
+def test_explicit_proof_path_uses_proof_project_root_for_raw_evidence(tmp_path: Path) -> None:
+    project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
+        tmp_path
+    )
+    nested_root = project_root / ".codex" / "ticket-runtime-smoke" / "run-1" / "post-direct"
+    (nested_root / ".codex").mkdir(parents=True, exist_ok=True)
+
+    result = module.verify_installed_ticket_runtime_readiness_for_execute(
+        project_root=nested_root,
+        proof_path=proof_path,
+    )
+
+    assert result.passed is True
+    assert result.error_code is None
+
+
 def test_deleted_raw_evidence_rejects(tmp_path: Path) -> None:
     project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
         tmp_path
@@ -357,6 +373,83 @@ def test_run_activation_smoke_uses_uv_run_python_launcher(
     assert result["hook_membrane_proof"]["command"] == expected_command
 
 
+def test_run_post_activation_direct_execute_smoke_stages_auto_audit_policy_lane(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    installed_root = tmp_path / "installed"
+    proof_path = run_dir / "activated-ticket-runtime-proof.json"
+    tickets_dir.mkdir(parents=True)
+    proof_path.parent.mkdir(parents=True, exist_ok=True)
+    proof_path.write_text("{}", encoding="utf-8")
+    ticket_path = run_dir / "post-direct" / "docs" / "tickets" / "2026-05-20-example.md"
+    ticket_path.parent.mkdir(parents=True, exist_ok=True)
+    ticket_path.write_text("# T-20260520-01: Runtime activation smoke\n", encoding="utf-8")
+    expected_command = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_agent.py "
+        f"execute {run_dir / 'post-direct' / 'post-direct-payload.json'}"
+    )
+
+    def _fake_turn(**kwargs):
+        assert f"Command: {expected_command}" in kwargs["prompt_text"]
+        payload = json.loads(
+            (run_dir / "post-direct" / "post-direct-payload.json").read_text(encoding="utf-8")
+        )
+        assert payload["autonomy_config"] == {
+            "mode": "auto_audit",
+            "max_creates": 5,
+            "warnings": [],
+        }
+        assert (run_dir / "post-direct" / ".codex" / "ticket.local.md").read_text(
+            encoding="utf-8"
+        ) == "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n"
+        return [
+            {
+                "direction": "recv",
+                "body": {
+                    "params": {
+                        "item": {
+                            "type": "commandExecution",
+                            "id": "cmd-1",
+                            "command": expected_command,
+                        }
+                    }
+                },
+            },
+            {
+                "direction": "recv",
+                "body": {
+                    "method": "item/commandExecution/outputDelta",
+                    "params": {
+                        "delta": json.dumps(
+                            {
+                                "state": "ok_create",
+                                "data": {"ticket_path": str(ticket_path)},
+                            }
+                        )
+                    },
+                },
+            },
+        ]
+
+    monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
+
+    result = ticket_runtime_readiness.run_post_activation_direct_execute_smoke(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        run_dir=run_dir,
+        installed_ticket_root=installed_root,
+        proof_path=proof_path,
+    )
+
+    assert result["post_activation_gated_smokes"]["surface_results"]["direct_execute"][
+        "engine_state"
+    ] == "ok_create"
+
+
 def test_run_post_activation_direct_execute_smoke_uses_uv_run_python_launcher(
     tmp_path: Path,
     monkeypatch,
@@ -422,6 +515,64 @@ def test_run_post_activation_direct_execute_smoke_uses_uv_run_python_launcher(
         "command"
     ]
     assert actual_command == expected_command
+
+
+def test_run_post_activation_direct_execute_smoke_accepts_aggregated_output(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    run_dir = project_root / ".codex" / "ticket-runtime-smoke" / "run-1"
+    installed_root = tmp_path / "installed"
+    proof_path = run_dir / "activated-ticket-runtime-proof.json"
+    tickets_dir.mkdir(parents=True)
+    proof_path.parent.mkdir(parents=True, exist_ok=True)
+    proof_path.write_text("{}", encoding="utf-8")
+    ticket_path = run_dir / "post-direct" / "docs" / "tickets" / "2026-05-20-example.md"
+    ticket_path.parent.mkdir(parents=True, exist_ok=True)
+    ticket_path.write_text("# T-20260520-01: Runtime activation smoke\n", encoding="utf-8")
+    expected_command = (
+        f"uv run python -B {installed_root}/scripts/ticket_engine_agent.py "
+        f"execute {run_dir / 'post-direct' / 'post-direct-payload.json'}"
+    )
+
+    def _fake_turn(**kwargs):
+        assert f"Command: {expected_command}" in kwargs["prompt_text"]
+        return [
+            {
+                "direction": "recv",
+                "body": {
+                    "params": {
+                        "item": {
+                            "type": "commandExecution",
+                            "id": "cmd-1",
+                            "command": expected_command,
+                            "aggregatedOutput": json.dumps(
+                                {
+                                    "state": "ok_create",
+                                    "data": {"ticket_path": str(ticket_path)},
+                                }
+                            ),
+                        }
+                    }
+                },
+            },
+        ]
+
+    monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
+
+    result = ticket_runtime_readiness.run_post_activation_direct_execute_smoke(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        run_dir=run_dir,
+        installed_ticket_root=installed_root,
+        proof_path=proof_path,
+    )
+
+    assert result["post_activation_gated_smokes"]["surface_results"]["direct_execute"][
+        "ticket_path"
+    ] == str(ticket_path)
 
 
 def _fake_inventory_result(tmp_path: Path, *, run_dir: Path) -> dict[str, object]:
@@ -626,6 +777,7 @@ def build_valid_runtime_readiness_fixture(
         "created_at": "2026-05-20T00:00:00Z",
         "expires_at": "2026-05-21T23:59:59Z",
         "run_nonce": "run-1",
+        "project_root": str(project_root),
         "ticket_plugin": {
             "plugin_id": "ticket@turbo-mode",
             "name": "ticket",
