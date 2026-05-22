@@ -8,12 +8,12 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import is_typeddict
 
 import pytest
 import scripts.ticket_runtime_readiness as ticket_runtime_readiness
 
 MODULE_SOURCE = Path(__file__).resolve().parents[1] / "scripts" / "ticket_runtime_readiness.py"
-PAYLOAD_BEFORE_SHA256 = "ff8157c5a6e1429eed9c45aa18698f21ee69127ba844bd2b26d77824b0e77324"
 
 
 def _write_proof(proof_path: Path, proof: dict[str, object]) -> None:
@@ -238,6 +238,72 @@ def test_runtime_activation_build_result_enforces_state_invariants(
         factory(**kwargs)
 
 
+def test_runtime_activation_build_result_uses_passed_discriminator() -> None:
+    success = ticket_runtime_readiness.ActivationSuccess(
+        proof={"status": "activated"},
+        message="ok",
+    )
+    failure = ticket_runtime_readiness.ActivationFailure(
+        error_code="deterministic_driver_unavailable",
+        message="blocked",
+    )
+
+    assert success.passed is True
+    assert success.error_code is None
+    assert failure.passed is False
+    assert failure.proof is None
+
+    with pytest.raises(ValueError, match="ActivationSuccess validation failed"):
+        ticket_runtime_readiness.ActivationSuccess(
+            proof={"status": "activated"},
+            message="bad",
+            passed=False,
+        )
+    with pytest.raises(ValueError, match="ActivationFailure validation failed"):
+        ticket_runtime_readiness.ActivationFailure(
+            error_code="deterministic_driver_unavailable",
+            message="bad",
+            passed=True,
+        )
+
+
+def test_activation_success_proof_is_copied_and_immutable() -> None:
+    proof = {
+        "status": "activated",
+        "activation_scope": {"gated_execute_surfaces": ["direct_execute"]},
+    }
+
+    result = ticket_runtime_readiness.ActivationSuccess(proof=proof, message="ok")
+    proof["status"] = "mutated"
+    activation_scope = proof["activation_scope"]
+    assert isinstance(activation_scope, dict)
+    gated_surfaces = activation_scope["gated_execute_surfaces"]
+    assert isinstance(gated_surfaces, list)
+    gated_surfaces.append("ingest")
+
+    assert result.proof["status"] == "activated"
+    assert result.proof["activation_scope"]["gated_execute_surfaces"] == ["direct_execute"]
+    with pytest.raises(TypeError, match="immutable"):
+        result.proof["status"] = "mutated"
+    with pytest.raises(TypeError, match="immutable"):
+        result.proof["activation_scope"]["gated_execute_surfaces"].append("ingest")
+
+
+def test_activation_proof_contract_is_modeled_with_typeddicts() -> None:
+    assert is_typeddict(ticket_runtime_readiness.ActivationProof)
+    assert {
+        "schema_version",
+        "status",
+        "run_nonce",
+        "ticket_plugin",
+        "runtime_identity",
+        "inventory",
+        "hook_membrane_proof",
+        "activation_scope",
+        "raw_evidence",
+    } <= ticket_runtime_readiness.ActivationProof.__required_keys__
+
+
 def test_runtime_activation_error_requires_error_code() -> None:
     with pytest.raises(ValueError, match="RuntimeActivationError validation failed"):
         ticket_runtime_readiness.RuntimeActivationError("", "bad")
@@ -295,7 +361,7 @@ def test_hook_manifest_path_accepts_resolved_equivalent_path(tmp_path: Path) -> 
     assert result.error_code is None
 
 
-def test_fixture_payload_hash_uses_fixed_sha256_literal(tmp_path: Path) -> None:
+def test_fixture_payload_hash_matches_payload_evidence(tmp_path: Path) -> None:
     project_root, _installed_root, module, proof_path = build_valid_runtime_readiness_fixture(
         tmp_path
     )
@@ -303,8 +369,7 @@ def test_fixture_payload_hash_uses_fixed_sha256_literal(tmp_path: Path) -> None:
     run_dir = project_root / proof["raw_evidence"]["run_dir"]
     payload_before = run_dir / proof["raw_evidence"]["payload_before"]
 
-    assert module.sha256_file(payload_before) == PAYLOAD_BEFORE_SHA256
-    assert proof["hook_membrane_proof"]["payload_sha256"] == PAYLOAD_BEFORE_SHA256
+    assert proof["hook_membrane_proof"]["payload_sha256"] == module.sha256_file(payload_before)
 
 
 def test_explicit_proof_path_uses_proof_project_root_for_raw_evidence(tmp_path: Path) -> None:
@@ -943,7 +1008,7 @@ def test_build_activation_candidate_output_verifies_with_real_installed_verifier
     )
 
     assert result.proof is not None
-    proof = result.proof
+    proof = json.loads(json.dumps(result.proof))
     run_dir = project_root / proof["raw_evidence"]["run_dir"]
     proof["status"] = "activated"
     installed_root = Path(proof["ticket_plugin"]["installed_cache_root"])
@@ -3429,7 +3494,7 @@ def build_valid_runtime_readiness_fixture(
         "schema_version": "installed_ticket_runtime_readiness-v1",
         "status": "activated",
         "created_at": "2026-05-20T00:00:00Z",
-        "expires_at": "2026-05-21T23:59:59Z",
+        "expires_at": "2099-05-21T23:59:59Z",
         "run_nonce": "run-1",
         "project_root": str(project_root),
         "ticket_plugin": {

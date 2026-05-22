@@ -23,7 +23,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, NotRequired, TypeAlias, TypedDict, cast
 
 REQUEST_TIMEOUT_SECONDS = 30.0
 RUNTIME_PROOF_PATH_ENV = "TICKET_RUNTIME_PROOF_PATH"
@@ -62,6 +62,164 @@ RuntimeActivationDriverErrorCode: TypeAlias = Literal[
 RuntimeActivationBuildErrorCode: TypeAlias = (
     RuntimeActivationDriverErrorCode | RuntimeReadinessErrorCode
 )
+
+
+class TicketPluginProof(TypedDict):
+    plugin_id: str
+    name: str
+    version: str
+    installed_cache_root: str
+    plugin_manifest_path: str
+    plugin_manifest_sha256: str
+
+
+class RuntimeIdentityProof(TypedDict):
+    codex_version: str
+    executable_path: str
+    executable_sha256: str | None
+    executable_hash_unavailable_reason: str | None
+    accepted_response_schema_version: str
+    parser_version: str
+
+
+class InventoryHookProof(TypedDict):
+    plugin_id: str
+    event_name: str
+    matcher: str
+    hook_manifest_path: str
+    hook_manifest_sha256: str
+    guard_command: str
+    guard_script_path: str
+    guard_script_sha256: str
+
+
+class InventoryProof(TypedDict):
+    request_methods: list[str]
+    marketplace_path: str
+    cwd: str
+    transcript_sha256: str
+    plugin_read_source_path: str
+    installed_runtime_root: str
+    plugin_manifest_path: str
+    plugin_manifest_sha256: str
+    hook: InventoryHookProof
+
+
+class HookMembraneProof(TypedDict):
+    runner: str
+    status: Literal["passed"]
+    command: str
+    payload_path: str
+    nonce: str
+    payload_sha256: str
+    raw_events_sha256: str
+    engine_stdout_sha256: str
+
+
+class DirectExecuteSmokeResult(TypedDict):
+    raw_events_sha256: str
+    runner: NotRequired[str]
+    command: NotRequired[str]
+    execute_surface: NotRequired[Literal["direct_execute"]]
+    runtime_readiness_required: NotRequired[bool]
+    engine_state: NotRequired[str]
+    error_code: NotRequired[str]
+    ticket_path: NotRequired[str]
+    ticket_sha256: NotRequired[str]
+
+
+class GatedSmokeProof(TypedDict):
+    status: str
+    required_surfaces: list[str]
+    surface_results: dict[str, DirectExecuteSmokeResult]
+
+
+class AgentControlHookTraversalSmokeProof(TypedDict):
+    status: str
+    reason: NotRequired[str]
+
+
+class ActivationScopeProof(TypedDict):
+    gated_execute_surfaces: list[str]
+    certified_entrypoints: list[str]
+    certified_policy_lane: str
+    excluded_mutation_paths: list[str]
+    autonomy_mode: Literal["auto_audit"]
+    caller_identity_proven: bool
+    hook_request_origin_contract: str
+
+
+class RawEvidenceProof(TypedDict):
+    run_dir: str
+    app_server_inventory_transcript: str
+    hook_membrane_events: str
+    pre_activation_events: str
+    post_activation_events: str
+    payload_before: str
+    payload_after: str
+    engine_stdout: str
+    app_server_stderr: str
+
+
+class ActivationProof(TypedDict):
+    schema_version: Literal["installed_ticket_runtime_readiness-v1"]
+    status: Literal["activation_in_progress", "activated"]
+    created_at: str
+    expires_at: str
+    run_nonce: str
+    project_root: str
+    ticket_plugin: TicketPluginProof
+    runtime_identity: RuntimeIdentityProof
+    inventory: InventoryProof
+    hook_membrane_proof: HookMembraneProof
+    pre_activation_gated_smokes: GatedSmokeProof
+    agentcontrol_hook_traversal_smoke: AgentControlHookTraversalSmokeProof
+    post_activation_gated_smokes: GatedSmokeProof
+    activation_scope: ActivationScopeProof
+    raw_evidence: RawEvidenceProof
+
+
+class _FrozenJsonDict(dict[str, Any]):
+    """Dict subclass that remains JSON-serializable while blocking mutation."""
+
+    def _immutable(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("runtime proof is immutable")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    clear = _immutable
+    pop = _immutable
+    popitem = _immutable
+    setdefault = _immutable
+    update = _immutable
+    __ior__ = _immutable
+
+
+class _FrozenJsonList(list[Any]):
+    """List subclass that remains JSON-serializable while blocking mutation."""
+
+    def _immutable(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("runtime proof is immutable")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    append = _immutable
+    clear = _immutable
+    extend = _immutable
+    insert = _immutable
+    pop = _immutable
+    remove = _immutable
+    reverse = _immutable
+    sort = _immutable
+    __iadd__ = _immutable
+
+
+def _freeze_json_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return _FrozenJsonDict({key: _freeze_json_value(child) for key, child in value.items()})
+    if isinstance(value, list):
+        return _FrozenJsonList(_freeze_json_value(child) for child in value)
+    return value
 
 
 @dataclass(frozen=True)
@@ -108,8 +266,9 @@ class ReadinessFailure:
 class ActivationSuccess:
     """Successful runtime activation build or activation result."""
 
-    proof: dict[str, Any]
+    proof: ActivationProof
     message: str
+    passed: Literal[True] = True
     error_code: None = None
 
     def __post_init__(self) -> None:
@@ -117,11 +276,21 @@ class ActivationSuccess:
             raise ValueError(
                 f"ActivationSuccess validation failed: message is required. Got: {self!r:.100}"
             )
-        if self.error_code is not None or not isinstance(self.proof, dict):
+        if (
+            self.passed is not True
+            or self.error_code is not None
+            or not isinstance(self.proof, dict)
+        ):
             raise ValueError(
-                "ActivationSuccess validation failed: success requires proof and "
-                f"error_code=None. Got: {self!r:.100}"
+                "ActivationSuccess validation failed: success requires passed=True, proof, "
+                f"and error_code=None. Got: {self!r:.100}"
             )
+        proof_copy = _json_deepcopy(self.proof)
+        object.__setattr__(
+            self,
+            "proof",
+            cast(ActivationProof, _freeze_json_value(proof_copy)),
+        )
 
 
 @dataclass(frozen=True)
@@ -130,6 +299,7 @@ class ActivationFailure:
 
     error_code: RuntimeActivationBuildErrorCode
     message: str
+    passed: Literal[False] = False
     proof: None = None
 
     def __post_init__(self) -> None:
@@ -137,10 +307,10 @@ class ActivationFailure:
             raise ValueError(
                 f"ActivationFailure validation failed: message is required. Got: {self!r:.100}"
             )
-        if not self.error_code or self.proof is not None:
+        if self.passed is not False or not self.error_code or self.proof is not None:
             raise ValueError(
-                "ActivationFailure validation failed: failure requires non-empty error_code "
-                "and proof=None. "
+                "ActivationFailure validation failed: failure requires passed=False, "
+                "non-empty error_code, and proof=None. "
                 f"Got: {self!r:.100}"
             )
 
@@ -168,8 +338,8 @@ def sha256_file(path: Path) -> str:
 def _json_deepcopy(payload: dict[str, Any]) -> dict[str, Any]:
     """Return a JSON-safe deep copy for proof payloads.
 
-    Runtime proof dataclasses are frozen only at the outer object; proof dicts
-    remain mutable so callers can serialize and inspect them normally.
+    ActivationSuccess freezes a copied proof, so callers can serialize and
+    inspect proof objects without sharing mutable state with the result.
     """
     copied = json.loads(json.dumps(payload))
     if not isinstance(copied, dict):
@@ -1152,7 +1322,7 @@ def build_activation_candidate(
             message=exc.message,
         )
 
-    proof = {
+    proof: ActivationProof = {
         "schema_version": "installed_ticket_runtime_readiness-v1",
         "status": "activation_in_progress",
         "created_at": active_now.isoformat().replace("+00:00", "Z"),
@@ -1928,11 +2098,6 @@ def _resolve_codex_executable(executable: str | None) -> str:
             "deterministic_driver_unavailable", "codex executable not found"
         )
     return active
-
-
-def _resolve_executable_sha256(executable: str | None) -> str | None:
-    digest, _reason = _resolve_executable_sha256_with_reason(executable)
-    return digest
 
 
 def _resolve_executable_sha256_with_reason(executable: str | None) -> tuple[str | None, str | None]:

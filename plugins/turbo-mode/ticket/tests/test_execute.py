@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import get_args
+from typing import cast
 
 import pytest
 import scripts.ticket_engine_core as ticket_engine_core
@@ -24,8 +24,36 @@ from tests.support.builders import expected_canonical_yaml, make_ticket, write_a
 from tests.test_runtime_readiness import build_valid_runtime_readiness_fixture
 
 
-def test_runtime_execute_surface_type_is_direct_execute_only() -> None:
-    assert get_args(ticket_engine_core.RuntimeExecuteSurface) == ("direct_execute",)
+def test_unknown_runtime_execute_surface_does_not_use_direct_execute_bypass(
+    tmp_tickets: Path,
+) -> None:
+    (tmp_tickets.parent.parent / ".git").mkdir(exist_ok=True)
+    write_autonomy_config(
+        tmp_tickets,
+        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
+    )
+    problem = "Unknown runtime execute surfaces must not widen the provenance bypass."
+
+    response = engine_execute(
+        action="create",
+        ticket_id=None,
+        fields={"title": "Runtime surface", "problem": problem, "priority": "medium"},
+        session_id="surface-session",
+        request_origin="agent",
+        dedup_override=False,
+        dependency_override=False,
+        tickets_dir=tmp_tickets,
+        hook_injected=True,
+        hook_request_origin="user",
+        classify_intent="create",
+        classify_confidence=0.95,
+        dedup_fingerprint=compute_dedup_fp(problem, []),
+        autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
+        runtime_execute_surface=cast(ticket_engine_core.RuntimeExecuteSurface, "agent_control"),
+    )
+
+    assert response.state == "escalate"
+    assert response.error_code == "origin_mismatch"
 
 
 class TestEngineExecute:

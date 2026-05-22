@@ -68,7 +68,7 @@ def test_ticket_doctor_reports_activated_runtime_proof_status(tmp_tickets: Path)
             {
                 "status": "activated",
                 "schema_version": "installed_ticket_runtime_readiness-v1",
-                "expires_at": "2026-05-21T23:59:59Z",
+                "expires_at": "2099-05-21T23:59:59Z",
             }
         )
         + "\n",

@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = PLUGIN_ROOT.parents[2]
 ENGINE_RUNNER = PLUGIN_ROOT / "scripts" / "ticket_engine_runner.py"
 TICKET_PAYLOADS = PLUGIN_ROOT / "scripts" / "ticket_payloads.py"
 CAPTURE_SKILL = PLUGIN_ROOT / "skills" / "ticket-capture" / "SKILL.md"
@@ -697,10 +698,18 @@ def test_readme_and_handbook_do_not_describe_guard_as_fail_open() -> None:
 
 def test_handbook_autonomy_table_lists_auto_silent_as_gated() -> None:
     text = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
-    normalized = _normalize_whitespace(text)
+    autonomy_row = next(line for line in text.splitlines() if line.startswith("| `autonomy_mode`"))
+    cells = [cell.strip() for cell in autonomy_row.strip("|").split("|")]
 
-    assert "| `autonomy_mode` | `suggest` | `suggest`, `auto_audit`, `auto_silent`" in text
-    assert "`auto_silent`: reserved for v1.1 and gated with `policy_blocked`" in normalized
+    assert cells[0] == "`autonomy_mode`"
+    assert cells[1] == "`suggest`"
+    assert {value.strip() for value in cells[2].split(",")} == {
+        "`suggest`",
+        "`auto_audit`",
+        "`auto_silent`",
+    }
+    assert "`auto_silent`" in cells[3]
+    assert "`policy_blocked`" in cells[3]
 
 
 def test_changelog_announces_activate_runtime_subcommand() -> None:
@@ -708,6 +717,17 @@ def test_changelog_announces_activate_runtime_subcommand() -> None:
     unreleased = text.split("## 1.4.0", maxsplit=1)[0]
 
     assert "`ticket_doctor.py activate-runtime`" in unreleased
+
+
+def test_claude_instructions_reference_current_turbo_mode_source_roots() -> None:
+    text = _read_text(REPO_ROOT / ".claude" / "CLAUDE.md")
+
+    assert "plugins/turbo-mode/ticket/1.4.0" not in text
+    assert "plugins/turbo-mode/handoff/1.6.0" not in text
+    assert "`plugins/turbo-mode/ticket/` - Ticket plugin source." in text
+    assert "`plugins/turbo-mode/handoff/` - Handoff plugin source." in text
+    assert "uv run --directory plugins/turbo-mode/ticket pytest -q" in text
+    assert "uv run --directory plugins/turbo-mode/handoff pytest -q" in text
 
 
 def test_skill_docs_use_project_root_marker_walk_not_git_rev_parse() -> None:
