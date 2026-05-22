@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from scripts.ticket_workflow import run_recovery, run_workflow
+
 from tests.support.builders import make_ticket, write_autonomy_config
-from tests.support.workflow import now_iso, payload_file, trusted_args_ticket_payload, trusted_payload
+from tests.support.workflow import (
+    now_iso,
+    payload_file,
+    trusted_args_ticket_payload,
+    trusted_payload,
+)
 
 
 def test_execute_uses_executeinput_and_autonomy_config_from_shared_dispatch(
@@ -14,14 +19,17 @@ def test_execute_uses_executeinput_and_autonomy_config_from_shared_dispatch(
     monkeypatch,
 ) -> None:
     monkeypatch.chdir(tmp_tickets.parent.parent)
-    payload_path = payload_file(tmp_path, trusted_payload(
-        "create",
-        {
-            "title": "Workflow execute",
-            "problem": "Execute should still use the shared runner boundary.",
-            "priority": "medium",
-        },
-    ))
+    payload_path = payload_file(
+        tmp_path,
+        trusted_payload(
+            "create",
+            {
+                "title": "Workflow execute",
+                "problem": "Execute should still use the shared runner boundary.",
+                "priority": "medium",
+            },
+        ),
+    )
 
     prepare = run_workflow("prepare", payload_path)
     execute = run_workflow("execute", payload_path)
@@ -38,11 +46,14 @@ def test_execute_stale_target_fingerprint_offers_rerun_prepare(
 ) -> None:
     monkeypatch.chdir(tmp_tickets.parent.parent)
     ticket = make_ticket(tmp_tickets, "stale.md", id="T-20260503-63", status="open")
-    payload_path = payload_file(tmp_path, trusted_args_ticket_payload(
-        "update",
-        "T-20260503-63",
-        {"status": "in_progress"},
-    ))
+    payload_path = payload_file(
+        tmp_path,
+        trusted_args_ticket_payload(
+            "update",
+            "T-20260503-63",
+            {"status": "in_progress"},
+        ),
+    )
 
     prepare = run_workflow("prepare", payload_path)
     ticket.write_text(ticket.read_text(encoding="utf-8") + "\n<!-- changed -->\n", encoding="utf-8")
@@ -51,7 +62,9 @@ def test_execute_stale_target_fingerprint_offers_rerun_prepare(
     assert prepare["state"] == "ready_to_execute"
     assert execute["state"] == "preflight_failed"
     assert execute["error_code"] == "stale_plan"
-    assert execute["data"]["recovery_options"][0]["recover_command"].endswith(" prepare " + str(payload_path))
+    assert execute["data"]["recovery_options"][0]["recover_command"].endswith(
+        " prepare " + str(payload_path)
+    )
 
 
 def test_prepare_after_user_create_anyway_reaches_ready_to_execute(
@@ -68,15 +81,18 @@ def test_prepare_after_user_create_anyway_reaches_ready_to_execute(
         created_at=now_iso(),
         problem="Create anyway duplicate",
     )
-    payload_path = payload_file(tmp_path, trusted_payload(
-        "create",
-        {
-            "title": "Create anyway",
-            "problem": "Create anyway duplicate",
-            "priority": "medium",
-            "key_file_paths": ["test.py"],
-        },
-    ))
+    payload_path = payload_file(
+        tmp_path,
+        trusted_payload(
+            "create",
+            {
+                "title": "Create anyway",
+                "problem": "Create anyway duplicate",
+                "priority": "medium",
+                "key_file_paths": ["test.py"],
+            },
+        ),
+    )
 
     first_prepare = run_workflow("prepare", payload_path)
     recover = run_recovery(payload_path, "create_anyway")

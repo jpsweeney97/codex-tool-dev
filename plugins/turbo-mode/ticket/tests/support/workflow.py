@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import shlex
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -98,7 +98,7 @@ def authorized_recovery_payload(
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def recovery_options(response: dict[str, Any]) -> list[dict[str, Any]]:
@@ -106,35 +106,47 @@ def recovery_options(response: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def expected_prepare_command(payload_path: Path) -> str:
-    return shlex.join([
-        "python3",
-        "-B",
-        str(PLUGIN_ROOT / "scripts" / "ticket_workflow.py"),
-        "prepare",
-        str(payload_path),
-    ])
+    return shlex.join(
+        [
+            "uv",
+            "run",
+            "python",
+            "-B",
+            str(PLUGIN_ROOT / "scripts" / "ticket_workflow.py"),
+            "prepare",
+            str(payload_path),
+        ]
+    )
 
 
 def expected_execute_command(payload_path: Path) -> str:
-    return shlex.join([
-        "python3",
-        "-B",
-        str(PLUGIN_ROOT / "scripts" / "ticket_workflow.py"),
-        "execute",
-        str(payload_path),
-    ])
+    return shlex.join(
+        [
+            "uv",
+            "run",
+            "python",
+            "-B",
+            str(PLUGIN_ROOT / "scripts" / "ticket_workflow.py"),
+            "execute",
+            str(payload_path),
+        ]
+    )
 
 
 def expected_recover_command(payload_path: Path, recovery_action: str, *args: str) -> str:
-    return shlex.join([
-        "python3",
-        "-B",
-        str(PLUGIN_ROOT / "scripts" / "ticket_workflow.py"),
-        "recover",
-        str(payload_path),
-        recovery_action,
-        *args,
-    ])
+    return shlex.join(
+        [
+            "uv",
+            "run",
+            "python",
+            "-B",
+            str(PLUGIN_ROOT / "scripts" / "ticket_workflow.py"),
+            "recover",
+            str(payload_path),
+            recovery_action,
+            *args,
+        ]
+    )
 
 
 def assert_preview_schema(preview: dict[str, Any], *, action: str, payload_path: Path) -> None:

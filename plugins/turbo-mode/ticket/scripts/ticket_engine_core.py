@@ -17,7 +17,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 
 from scripts.ticket_id import allocate_id, build_filename
 from scripts.ticket_parse import (
@@ -27,6 +27,7 @@ from scripts.ticket_parse import (
 )
 from scripts.ticket_paths import discover_project_root
 from scripts.ticket_render import render_ticket, replace_fenced_yaml
+from scripts.ticket_runtime_readiness import verify_installed_ticket_runtime_readiness_for_execute
 from scripts.ticket_trust import collect_trust_triple_errors
 from scripts.ticket_validate import validate_fields
 
@@ -46,6 +47,7 @@ def _list_tickets_with_closed(tickets_dir: Path) -> list[ParsedTicket]:
 
 _V10_GENERATION = 10  # v1.0 tickets have generation=10; legacy is 1-4.
 _CONTRACT_VERSION = "1.0"  # Current contract version; stamped on every write.
+RuntimeExecuteSurface: TypeAlias = Literal["direct_execute"]
 
 
 def _check_legacy_gate(ticket: ParsedTicket) -> EngineResponse | None:
@@ -699,8 +701,7 @@ def engine_preflight(
         return EngineResponse(
             state="escalate",
             message=(
-                f"Intent_mismatch: classify returned {classify_intent!r} "
-                f"but action is {action!r}"
+                f"Intent_mismatch: classify returned {classify_intent!r} but action is {action!r}"
             ),
             error_code="intent_mismatch",
             data={
@@ -716,8 +717,7 @@ def engine_preflight(
         return EngineResponse(
             state="need_fields",
             message=(
-                "dedup_override requires duplicate_of identifying the specific "
-                "duplicate candidate"
+                "dedup_override requires duplicate_of identifying the specific duplicate candidate"
             ),
             error_code="need_fields",
             data={
@@ -1300,11 +1300,22 @@ def engine_execute(
     classify_confidence: float | None = None,
     dedup_fingerprint: str | None = None,
     duplicate_of: str | None = None,
+    runtime_execute_surface: RuntimeExecuteSurface | None = None,
+    runtime_proof_path: Path | None = None,
+    allow_activation_bootstrap: bool = False,
 ) -> EngineResponse:
     """Execute the mutation: create, update, close, or reopen.
 
     Assumes preflight has already passed. Writes ticket files.
     Wraps dispatch with JSONL audit trail.
+
+    Args:
+        runtime_execute_surface: Execute surface under certification. Only
+            `direct_execute` is defined, and only for agent-origin execute.
+        runtime_proof_path: Optional proof path used by runtime activation tests
+            and explicit activation bootstrap.
+        allow_activation_bootstrap: Permits a temporary activation-in-progress
+            proof for the direct_execute activation smoke.
     """
     if request_origin not in VALID_ORIGINS:
         return EngineResponse(
@@ -1332,7 +1343,20 @@ def engine_execute(
         config = snapshot_config or AutonomyConfig()
 
     # --- Transport-layer trust triple (defense-in-depth for all origins) ---
-    if hook_request_origin is not None and hook_request_origin != request_origin:
+    # The direct_execute exception is intentionally asymmetric: agent execute may
+    # carry user hook provenance on current hosts, but user execute with agent
+    # provenance still rejects. This only relaxes provenance matching; the
+    # runtime-readiness proof gate below still decides whether the write may run.
+    allow_direct_execute_provenance_mismatch = (
+        runtime_execute_surface == "direct_execute"
+        and request_origin == "agent"
+        and hook_request_origin == "user"
+    )
+    if (
+        hook_request_origin is not None
+        and hook_request_origin != request_origin
+        and not allow_direct_execute_provenance_mismatch
+    ):
         return EngineResponse(
             state="escalate",
             message=(
@@ -1469,14 +1493,48 @@ def engine_execute(
                     message=f"Defense-in-depth: session create cap ({config.max_creates})",
                     error_code="policy_blocked",
                 )
+        if runtime_execute_surface == "direct_execute":
+            try:
+                project_root = discover_project_root(tickets_dir)
+            except OSError as exc:
+                return EngineResponse(
+                    state="policy_blocked",
+                    message=f"Cannot determine project root: {exc}. Got: {str(tickets_dir)!r:.100}",
+                    error_code="policy_blocked",
+                )
+            if project_root is None:
+                return EngineResponse(
+                    state="policy_blocked",
+                    message=(
+                        "Cannot determine project root: no .codex/ or .git/ marker found "
+                        "for runtime readiness verification"
+                    ),
+                    error_code="policy_blocked",
+                )
+            runtime_verification = verify_installed_ticket_runtime_readiness_for_execute(
+                project_root=project_root,
+                proof_path=runtime_proof_path,
+                allow_activation_bootstrap=allow_activation_bootstrap,
+            )
+            if not runtime_verification.passed:
+                return EngineResponse(
+                    state="policy_blocked",
+                    message=runtime_verification.message,
+                    error_code="runtime_readiness_required",
+                    data={
+                        "runtime_readiness": {
+                            "error_code": runtime_verification.error_code,
+                            "message": runtime_verification.message,
+                        }
+                    },
+                )
 
     # C-008: dedup_override must be bound to a specific duplicate candidate.
     if action == "create" and dedup_override and not duplicate_of:
         return EngineResponse(
             state="need_fields",
             message=(
-                "dedup_override requires duplicate_of identifying the specific "
-                "duplicate candidate"
+                "dedup_override requires duplicate_of identifying the specific duplicate candidate"
             ),
             error_code="need_fields",
             data={"missing_fields": ["duplicate_of"]},

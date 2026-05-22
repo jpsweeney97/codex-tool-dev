@@ -1,4 +1,5 @@
 """Tests for ticket_parse.py — fenced-YAML parsing and section extraction."""
+
 from __future__ import annotations
 
 import textwrap
@@ -15,8 +16,14 @@ from scripts.ticket_parse import (
     parse_ticket,
     parse_yaml_block,
 )
-from tests.support.builders import make_gen1_ticket, make_gen2_ticket, make_gen3_ticket, make_gen4_ticket, make_ticket
 
+from tests.support.builders import (
+    make_gen1_ticket,
+    make_gen2_ticket,
+    make_gen3_ticket,
+    make_gen4_ticket,
+    make_ticket,
+)
 
 # --- extract_fenced_yaml ---
 

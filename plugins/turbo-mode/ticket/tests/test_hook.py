@@ -7,9 +7,11 @@ using sys.executable as the Python interpreter.
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from types import ModuleType
 
@@ -22,6 +24,7 @@ def run_hook(
     hook_input: dict,
     *,
     plugin_root: str | None = None,
+    normalize: bool = True,
 ) -> dict:
     """Send hook input JSON via stdin and return parsed output.
 
@@ -41,8 +44,10 @@ def run_hook(
     )
     assert result.returncode == 0, f"Hook exited with {result.returncode}: {result.stderr}"
     if not result.stdout.strip():
-        return {}
-    return json.loads(result.stdout)
+        raw: dict = {}
+    else:
+        raw = json.loads(result.stdout)
+    return _normalize_hook_output(raw) if normalize else raw
 
 
 def make_hook_input(
@@ -83,6 +88,63 @@ def load_guard_module() -> ModuleType:
     return module
 
 
+def test_run_cli_fails_closed_on_internal_error(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    guard = load_guard_module()
+
+    def _raise_internal_error() -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(guard, "main", _raise_internal_error)
+
+    assert guard._run_cli() == 0
+
+    captured = capsys.readouterr()
+    raw = json.loads(captured.out)
+    assert raw["entries"][0]["kind"] == "stop"
+    assert "guard internal error" in raw["entries"][0]["text"]
+    assert "RuntimeError('boom')" in raw["entries"][0]["text"]
+    assert "ticket_engine_guard failed closed: RuntimeError: boom" in captured.err
+
+
+def test_malformed_stdin_fails_closed() -> None:
+    result = subprocess.run(
+        [sys.executable, str(HOOK_PATH)],
+        input="{not-json",
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0
+    output = json.loads(result.stdout)
+    assert output["entries"][0]["kind"] == "stop"
+    assert "malformed hook input" in output["entries"][0]["text"].lower()
+
+
+def _normalize_hook_output(raw: dict) -> dict:
+    if "hookSpecificOutput" in raw:
+        return raw
+    if raw == {}:
+        return {}
+    entries = raw.get("entries", [])
+    if not entries:
+        return {}
+    first = entries[0]
+    kind = first.get("kind", "")
+    text = first.get("text", "")
+    decision = "allow" if kind in {"feedback", "context"} else "deny"
+    return {
+        "hookSpecificOutput": {
+            "permissionDecision": decision,
+            "permissionDecisionReason": text,
+        },
+        "_raw": raw,
+    }
+
+
 def _decision(output: dict) -> str:
     """Extract permissionDecision from hook output."""
     return output["hookSpecificOutput"]["permissionDecision"]
@@ -100,6 +162,120 @@ def _reason(output: dict) -> str:
 
 class TestAllowlist:
     """Tests for command allowlist matching."""
+
+    def test_raw_allow_output_uses_feedback_entries(self, tmp_path: Path) -> None:
+        payload_file = make_payload_file(tmp_path)
+        plugin_root = str(tmp_path / "plugin")
+        (Path(plugin_root) / "scripts").mkdir(parents=True)
+
+        inp = make_hook_input(
+            f"python3 -B {plugin_root}/scripts/ticket_engine_user.py plan {payload_file}",
+            plugin_root=plugin_root,
+        )
+        output = run_hook(inp, plugin_root=plugin_root, normalize=False)
+
+        assert output == {
+            "entries": [
+                {
+                    "kind": "feedback",
+                    "text": "Ticket engine user/plan validated and payload injected",
+                }
+            ]
+        }
+
+    def test_raw_deny_output_uses_stop_entries(self, tmp_path: Path) -> None:
+        plugin_root = str(tmp_path / "plugin")
+        inp = make_hook_input(
+            f"python3 {plugin_root}/scripts/ticket_engine_user.py plan /tmp/p.json | cat",
+            plugin_root=plugin_root,
+        )
+        output = run_hook(inp, plugin_root=plugin_root, normalize=False)
+
+        assert output["entries"][0]["kind"] == "stop"
+        assert "metacharacters" in output["entries"][0]["text"].lower()
+
+    @pytest.mark.parametrize(
+        "command_template",
+        [
+            "python3 {plugin_root}/scripts/ticket_engine_user.py plan /tmp/p.json | cat",
+            (
+                "python3 -B {plugin_root}/scripts/ticket_engine_activation_smoke.py "
+                "plan {payload_file}"
+            ),
+        ],
+    )
+    def test_raw_deny_outputs_never_emit_feedback_entries(
+        self,
+        tmp_path: Path,
+        command_template: str,
+    ) -> None:
+        payload_file = make_payload_file(tmp_path)
+        plugin_root = str(tmp_path / "plugin")
+        (Path(plugin_root) / "scripts").mkdir(parents=True)
+        command = command_template.format(plugin_root=plugin_root, payload_file=payload_file)
+        inp = make_hook_input(command, plugin_root=plugin_root)
+
+        output = run_hook(inp, plugin_root=plugin_root, normalize=False)
+
+        assert output["entries"]
+        assert {entry["kind"] for entry in output["entries"]} == {"stop"}
+        assert not any(entry["kind"] == "feedback" for entry in output["entries"])
+
+    def test_allows_activation_smoke_execute(self, tmp_path: Path) -> None:
+        payload_file = make_payload_file(tmp_path)
+        plugin_root = str(tmp_path / "plugin")
+        (Path(plugin_root) / "scripts").mkdir(parents=True)
+
+        inp = make_hook_input(
+            "python3 -B "
+            f"{plugin_root}/scripts/ticket_engine_activation_smoke.py "
+            f"execute {payload_file}",
+            plugin_root=plugin_root,
+        )
+        output = run_hook(inp, plugin_root=plugin_root)
+
+        assert _decision(output) == "allow"
+        injected = json.loads(payload_file.read_text(encoding="utf-8"))
+        assert injected["session_id"] == "test-session-123"
+        assert injected["hook_injected"] is True
+        assert injected["hook_request_origin"] == "user"
+
+    @pytest.mark.parametrize("subcommand", ["classify", "plan", "preflight", "ingest"])
+    def test_denies_activation_smoke_non_execute_subcommands(
+        self,
+        tmp_path: Path,
+        subcommand: str,
+    ) -> None:
+        payload_file = make_payload_file(tmp_path)
+        plugin_root = str(tmp_path / "plugin")
+        (Path(plugin_root) / "scripts").mkdir(parents=True)
+
+        inp = make_hook_input(
+            "python3 -B "
+            f"{plugin_root}/scripts/ticket_engine_activation_smoke.py "
+            f"{subcommand} {payload_file}",
+            plugin_root=plugin_root,
+        )
+        output = run_hook(inp, plugin_root=plugin_root)
+
+        assert _decision(output) == "deny"
+        assert "Unknown subcommand" in _reason(output)
+        assert "execute" in _reason(output)
+
+    def test_denies_engine_payload_path_with_whitespace(self, tmp_path: Path) -> None:
+        plugin_root = str(tmp_path / "plugin")
+        (Path(plugin_root) / "scripts").mkdir(parents=True)
+        payload_file = tmp_path / "payload with space.json"
+        payload_file.write_text(json.dumps({"action": "classify"}), encoding="utf-8")
+
+        inp = make_hook_input(
+            f"python3 -B {plugin_root}/scripts/ticket_engine_user.py classify '{payload_file}'",
+            plugin_root=plugin_root,
+        )
+        output = run_hook(inp, plugin_root=plugin_root)
+
+        assert _decision(output) == "deny"
+        assert "Extra arguments after payload path" in _reason(output)
 
     def test_allows_user_entrypoint(self, tmp_path: Path) -> None:
         payload_file = make_payload_file(tmp_path)
@@ -154,9 +330,9 @@ class TestAllowlist:
     def test_direct_core_import_passes_through(self) -> None:
         """python3 -c one-liners don't match _is_ticket_invocation — pass through.
 
-        The 4-branch gate only matches `python3 <root>/scripts/ticket_*.py ...`
+        The semantic gate only matches `python3 <root>/scripts/ticket_*.py ...`
         invocations. `python3 -c '...'` is not a ticket script invocation, so it
-        passes through as empty JSON (branch 4). The old substring gate denied
+        passes through as empty JSON. The old substring gate denied
         this, but that was overly broad — the hook's contract is to gate ticket
         script execution, not all python invocations mentioning ticket internals.
         """
@@ -601,6 +777,122 @@ def test_hook_allows_ticket_triage_doctor_with_expected_roots(tmp_path: Path) ->
     assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
+def test_hook_allows_ticket_triage_doctor_with_uv_run_python_launcher(tmp_path: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    event = make_hook_input(
+        (
+            f"uv run python -B {plugin_root}/scripts/ticket_triage.py doctor {tickets_dir} "
+            f"--plugin-root {plugin_root} --cache-root {plugin_root}"
+        ),
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(plugin_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
+def test_hook_denies_ticket_triage_doctor_personal_cache_root(tmp_path: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    personal_cache_root = "/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0"
+    event = make_hook_input(
+        (
+            f"uv run python -B {plugin_root}/scripts/ticket_triage.py doctor {tickets_dir} "
+            f"--plugin-root {plugin_root} --cache-root {personal_cache_root}"
+        ),
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(plugin_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert (
+        "--cache-root must equal the running plugin root"
+        in result["hookSpecificOutput"]["permissionDecisionReason"]
+    )
+
+
+def test_hook_allows_ticket_triage_doctor_probe_under_system_temp(tmp_path: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    probe_output = Path(tempfile.gettempdir()) / "ticket-ux-runtime-probe.json"
+    event = make_hook_input(
+        (
+            f"uv run python -B {plugin_root}/scripts/ticket_triage.py doctor {tickets_dir} "
+            f"--plugin-root {plugin_root} --cache-root {plugin_root} "
+            f"--runtime-probe-output {probe_output}"
+        ),
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(plugin_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
+@pytest.mark.parametrize(
+    "probe_output",
+    [
+        Path("/var/tmp/ticket-ux-runtime-probe.json"),
+        Path(tempfile.gettempdir()) / "not-ticket-ux-runtime-probe.json",
+    ],
+)
+def test_hook_denies_ticket_triage_doctor_probe_outside_system_temp(
+    tmp_path: Path,
+    probe_output: Path,
+) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    event = make_hook_input(
+        (
+            f"uv run python -B {plugin_root}/scripts/ticket_triage.py doctor {tickets_dir} "
+            f"--plugin-root {plugin_root} --cache-root {plugin_root} "
+            f"--runtime-probe-output {probe_output}"
+        ),
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(plugin_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    reason = result["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "ticket-ux artifact under" in reason
+    assert tempfile.gettempdir() in reason
+
+
+def test_hook_denies_ticket_triage_doctor_missing_args_with_precise_reason(tmp_path: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    event = make_hook_input(
+        f"uv run python -B {plugin_root}/scripts/ticket_triage.py doctor {tickets_dir}",
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(plugin_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    reason = result["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "incomplete arguments" in reason
+    assert "canonical" not in reason
+
+
 @pytest.mark.parametrize(
     "doctor_args",
     [
@@ -661,6 +953,29 @@ def test_hook_denies_noncanonical_ticket_workflow_command_shapes(
     result = run_hook(event, plugin_root=str(plugin_root))
 
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_hook_allows_resolved_ticket_workflow_path_when_plugin_root_is_symlink(
+    tmp_path: Path,
+) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    symlink_root = tmp_path / "plugin-link"
+    symlink_root.symlink_to(plugin_root, target_is_directory=True)
+    payload = tmp_path / "payload.json"
+    payload.write_text('{"action":"create","fields":{}}', encoding="utf-8")
+    event = make_hook_input(
+        (
+            "python3 -B "
+            f"{plugin_root.resolve(strict=False)}/scripts/ticket_workflow.py prepare {payload}"
+        ),
+        plugin_root=str(symlink_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+
+    result = run_hook(event, plugin_root=str(symlink_root))
+
+    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
 def test_hook_denies_ticket_workflow_recover_without_action(tmp_path: Path) -> None:
@@ -839,6 +1154,56 @@ def test_blocks_newline_injection(tmp_path: Path) -> None:
     output = run_hook(inp, plugin_root=plugin_root)
     assert _decision(output) == "deny"
     assert "metacharacters" in _reason(output).lower()
+
+
+@pytest.mark.parametrize("failing_call", ["mkstemp", "fsync", "replace"])
+def test_payload_atomic_write_failures_deny_without_mutating_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failing_call: str,
+) -> None:
+    module = load_guard_module()
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "scripts").mkdir(parents=True)
+    payload = make_payload_file(tmp_path, {"action": "plan"})
+    original_payload = payload.read_text(encoding="utf-8")
+
+    if failing_call == "mkstemp":
+
+        def _raise_mkstemp(*_args, **_kwargs):
+            raise OSError("mkstemp boom")
+
+        monkeypatch.setattr(module.tempfile, "mkstemp", _raise_mkstemp)
+    elif failing_call == "fsync":
+
+        def _raise_fsync(_fd: int) -> None:
+            raise OSError("fsync boom")
+
+        monkeypatch.setattr(module.os, "fsync", _raise_fsync)
+    else:
+
+        def _raise_replace(_src: str, _dst: str) -> None:
+            raise OSError("replace boom")
+
+        monkeypatch.setattr(module.os, "replace", _raise_replace)
+
+    event = make_hook_input(
+        f"python3 -B {plugin_root}/scripts/ticket_engine_user.py plan {payload}",
+        plugin_root=str(plugin_root),
+        cwd=str(tmp_path),
+        session_id="session-hook",
+    )
+    monkeypatch.setenv("CODEX_PLUGIN_ROOT", str(plugin_root))
+    monkeypatch.setattr(module.sys, "stdin", io.StringIO(json.dumps(event)))
+
+    module.main()
+    raw = json.loads(capsys.readouterr().out)
+    output = _normalize_hook_output(raw)
+
+    assert _decision(output) == "deny"
+    assert "Payload injection failed: Payload write failed" in _reason(output)
+    assert payload.read_text(encoding="utf-8") == original_payload
 
 
 class TestPayloadPathBoundaries:
@@ -1317,6 +1682,20 @@ class TestCandidateDetection:
         plugin_root = str(Path(__file__).parent.parent)
         payload = make_payload_file(tmp_path)
         cmd = f"python3 -B {plugin_root}/scripts/ticket_engine_user.py classify {payload}"
+        result = run_hook(make_hook_input(cmd, cwd=str(tmp_path)))
+        assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "allow"
+
+    def test_uv_run_python_with_dash_b_allowed(self, tmp_path: Path) -> None:
+        plugin_root = str(Path(__file__).parent.parent)
+        payload = make_payload_file(tmp_path)
+        cmd = f"uv run python -B {plugin_root}/scripts/ticket_engine_user.py classify {payload}"
+        result = run_hook(make_hook_input(cmd, cwd=str(tmp_path)))
+        assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "allow"
+
+    def test_uv_run_python_capture_prepare_allowed(self, tmp_path: Path) -> None:
+        plugin_root = str(Path(__file__).parent.parent)
+        payload = make_payload_file(tmp_path)
+        cmd = f"uv run python -B {plugin_root}/scripts/ticket_capture.py prepare {payload}"
         result = run_hook(make_hook_input(cmd, cwd=str(tmp_path)))
         assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "allow"
 

@@ -681,10 +681,9 @@ def _execute(payload_path: Path) -> dict[str, Any]:
             "stale_plan",
         )
     capture = payload.get("capture")
-    if (
-        not isinstance(capture, dict)
-        or prepare_artifact.get("capture_fingerprint") != _json_fingerprint(capture)
-    ):
+    if not isinstance(capture, dict) or prepare_artifact.get(
+        "capture_fingerprint"
+    ) != _json_fingerprint(capture):
         return attach_recovery_hint(
             _response(
                 "preflight_failed",

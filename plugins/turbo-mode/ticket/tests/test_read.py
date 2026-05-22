@@ -1,4 +1,5 @@
 """Tests for ticket_read.py — shared read module for query and list."""
+
 from __future__ import annotations
 
 import json
@@ -8,12 +9,13 @@ from pathlib import Path
 
 from scripts.ticket_read import (
     _ticket_to_dict,
-    find_ticket_by_id,
     filter_tickets,
+    find_ticket_by_id,
     fuzzy_match_id,
     list_tickets,
     query_tickets_payload,
 )
+
 from tests.support.builders import make_gen1_ticket, make_gen2_ticket, make_ticket
 
 
@@ -182,7 +184,10 @@ class TestReadCLI:
         project_root = tmp_tickets.parent.parent
         result = subprocess.run(
             [sys.executable, str(READ_SCRIPT), "list", str(tmp_tickets)],
-            capture_output=True, text=True, timeout=10, cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(project_root),
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
@@ -196,7 +201,10 @@ class TestReadCLI:
         project_root = tmp_tickets.parent.parent
         result = subprocess.run(
             [sys.executable, str(READ_SCRIPT), "list", str(tmp_tickets), "--status", "open"],
-            capture_output=True, text=True, timeout=10, cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(project_root),
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
@@ -208,7 +216,10 @@ class TestReadCLI:
         project_root = tmp_tickets.parent.parent
         result = subprocess.run(
             [sys.executable, str(READ_SCRIPT), "query", str(tmp_tickets), "T-20260302"],
-            capture_output=True, text=True, timeout=10, cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(project_root),
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
@@ -220,14 +231,18 @@ class TestReadCLI:
         """argparse exits 2 for invalid subcommand choice, not 1."""
         result = subprocess.run(
             [sys.executable, str(READ_SCRIPT), "bogus", str(tmp_tickets)],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         assert result.returncode == 2
 
     def test_missing_args_exits_1(self):
         result = subprocess.run(
             [sys.executable, str(READ_SCRIPT)],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         assert result.returncode == 1
 
@@ -235,7 +250,10 @@ class TestReadCLI:
         (tmp_path / ".git").mkdir(exist_ok=True)
         result = subprocess.run(
             [sys.executable, str(READ_SCRIPT), "list", str(tmp_path / "nope")],
-            capture_output=True, text=True, timeout=10, cwd=str(tmp_path),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(tmp_path),
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
@@ -246,7 +264,10 @@ class TestReadCLI:
         outside = tmp_path.parent / "outside-tickets"
         result = subprocess.run(
             [sys.executable, str(READ_SCRIPT), "list", str(outside)],
-            capture_output=True, text=True, timeout=10, cwd=str(tmp_path),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(tmp_path),
         )
         assert result.returncode == 1
         data = json.loads(result.stdout)
@@ -258,7 +279,10 @@ class TestReadCLI:
         project_root = tmp_tickets.parent.parent
         result = subprocess.run(
             [sys.executable, str(READ_SCRIPT), "query", str(tmp_tickets), "T-20260302-01"],
-            capture_output=True, text=True, timeout=10, cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(project_root),
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)

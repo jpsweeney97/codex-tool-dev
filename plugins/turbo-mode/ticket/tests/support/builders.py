@@ -1,4 +1,5 @@
 """Ticket file builders and YAML assertion helpers for tests."""
+
 from __future__ import annotations
 
 import textwrap

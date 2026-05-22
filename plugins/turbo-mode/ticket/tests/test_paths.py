@@ -1,10 +1,10 @@
 """Tests for marker-based project-root resolution and tickets_dir resolution."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
-
 import scripts.ticket_paths as ticket_paths
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir
 

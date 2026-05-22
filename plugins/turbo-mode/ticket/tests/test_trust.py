@@ -1,4 +1,5 @@
 """Tests for shared execute trust validation helpers."""
+
 from __future__ import annotations
 
 from scripts.ticket_trust import collect_trust_triple_errors

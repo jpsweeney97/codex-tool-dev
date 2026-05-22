@@ -1,8 +1,8 @@
 """Tests for ticket_id.py — ID allocation and slug generation."""
+
 from __future__ import annotations
 
 from datetime import date
-
 
 from scripts.ticket_id import (
     allocate_id,
@@ -11,6 +11,7 @@ from scripts.ticket_id import (
     is_legacy_id,
     parse_id_date,
 )
+
 from tests.support.builders import make_ticket
 
 
@@ -51,7 +52,10 @@ class TestAllocateId:
 
 class TestGenerateSlug:
     def test_basic_title(self):
-        assert generate_slug("Fix authentication timeout on large payloads") == "fix-authentication-timeout-on-large-payloads"
+        assert (
+            generate_slug("Fix authentication timeout on large payloads")
+            == "fix-authentication-timeout-on-large-payloads"
+        )
 
     def test_truncates_to_six_words(self):
         slug = generate_slug("This is a very long title that exceeds six words easily")

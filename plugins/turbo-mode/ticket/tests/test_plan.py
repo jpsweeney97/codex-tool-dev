@@ -1,7 +1,11 @@
 """Tests for engine_plan stage."""
+
 from __future__ import annotations
 
+from datetime import UTC
+
 from scripts.ticket_engine_core import engine_plan
+
 from tests.support.builders import make_ticket
 
 
@@ -52,9 +56,9 @@ class TestEnginePlan:
         assert "key_file_paths" in resp.message
 
     def test_dedup_detection(self, tmp_tickets):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(UTC).date()
         today_str = today.isoformat()
         today_compact = today_str.replace("-", "")
         make_ticket(
@@ -111,10 +115,10 @@ class TestEnginePlan:
         within the 24h dedup window. created_at has second-level precision
         and is immune to git checkout/clone mtime resets.
         """
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         # created_at = 1 hour ago (within 24h window).
-        recent = datetime.now(timezone.utc) - timedelta(hours=1)
+        recent = datetime.now(UTC) - timedelta(hours=1)
         created_at = recent.strftime("%Y-%m-%dT%H:%M:%SZ")
         # Date is 2 days ago — would be outside window with date-only logic.
         old_date = "2026-02-28"
@@ -144,10 +148,10 @@ class TestEnginePlan:
 
     def test_dedup_skips_old_created_at(self, tmp_tickets):
         """Tickets with old created_at are excluded even with recent date."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         # created_at = 3 days ago (outside 24h window).
-        old = datetime.now(timezone.utc) - timedelta(days=3)
+        old = datetime.now(UTC) - timedelta(days=3)
         created_at = old.strftime("%Y-%m-%dT%H:%M:%SZ")
         make_ticket(
             tmp_tickets,
@@ -179,9 +183,9 @@ class TestEnginePlan:
         A ticket dated today (without created_at) should always be in the
         24h window because its date is treated as 23:59:59 UTC.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         make_ticket(
             tmp_tickets,
             f"{today}-legacy.md",
@@ -262,9 +266,9 @@ class TestEnginePlan:
         so an archived ticket with identical problem text is not detected.
         After fix: _list_tickets_with_closed scans closed-tickets/ too.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        today = datetime.now(timezone.utc)
+        today = datetime.now(UTC)
         today_str = today.strftime("%Y-%m-%d")
         today_compact = today_str.replace("-", "")
         created_at = today.strftime("%Y-%m-%dT%H:%M:%SZ")

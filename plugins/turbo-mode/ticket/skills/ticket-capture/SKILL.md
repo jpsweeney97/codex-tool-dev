@@ -80,7 +80,7 @@ After creation, show a suggested second capture prompt for the remaining item.
 Run:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_capture.py prepare <PAYLOAD_PATH>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_capture.py prepare <PAYLOAD_PATH>
 ```
 
 If the response needs fields, ask for one missing field at a time. If the
@@ -137,7 +137,7 @@ approval.
 After the user chooses `create`, run:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_capture.py execute <PAYLOAD_PATH>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_capture.py execute <PAYLOAD_PATH>
 ```
 
 Execute requires the prepared payload and hook/provenance path injected by the

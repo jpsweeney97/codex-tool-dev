@@ -3,6 +3,7 @@
 Format: T-YYYYMMDD-NN (date + daily sequence, minimum 2 digits, zero-padded).
 Legacy IDs (T-NNN, T-[A-F], slugs) are preserved permanently.
 """
+
 from __future__ import annotations
 
 import re

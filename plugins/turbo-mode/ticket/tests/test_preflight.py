@@ -1,7 +1,9 @@
 """Tests for engine_preflight stage."""
+
 from __future__ import annotations
 
 from scripts.ticket_engine_core import engine_preflight
+
 from tests.support.builders import make_ticket
 
 

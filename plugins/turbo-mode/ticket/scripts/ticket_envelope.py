@@ -6,6 +6,7 @@ plugin consumes them through the normal engine pipeline.
 
 Schema version: 1.0
 """
+
 from __future__ import annotations
 
 import json
@@ -93,8 +94,7 @@ def validate_envelope(envelope: dict[str, Any]) -> list[str]:
         v = envelope["suggested_priority"]
         if not isinstance(v, str) or v not in _VALID_PRIORITIES:
             errors.append(
-                f"suggested_priority must be one of {sorted(_VALID_PRIORITIES)}, "
-                f"got {v!r}"
+                f"suggested_priority must be one of {sorted(_VALID_PRIORITIES)}, got {v!r}"
             )
 
     # suggested_tags: list of strings
@@ -241,8 +241,7 @@ def move_to_processed(envelope_path: Path) -> Path:
     processed_dir.mkdir(parents=True, exist_ok=True)
     if dest.exists():
         raise FileExistsError(
-            f"move_to_processed failed: {dest} already exists. "
-            f"Got: {str(envelope_path)!r:.100}"
+            f"move_to_processed failed: {dest} already exists. Got: {str(envelope_path)!r:.100}"
         )
     envelope_path.rename(dest)
     return dest

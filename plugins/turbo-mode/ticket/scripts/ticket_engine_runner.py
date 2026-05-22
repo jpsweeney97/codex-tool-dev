@@ -14,6 +14,7 @@ They are not normal user-facing mutation interfaces.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,10 @@ from scripts.ticket_engine_core import (
     engine_preflight,
 )
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir
+from scripts.ticket_runtime_readiness import (
+    RUNTIME_ACTIVATION_BOOTSTRAP_ENV,
+    RUNTIME_PROOF_PATH_ENV,
+)
 from scripts.ticket_stage_models import (
     ClassifyInput,
     ExecuteInput,
@@ -64,11 +69,7 @@ def load_runner_context(
             error_code="parse_error",
         )
 
-    effective_origin = (
-        request_origin
-        or payload.get("hook_request_origin")
-        or "user"
-    )
+    effective_origin = request_origin or payload.get("hook_request_origin") or "user"
     if not isinstance(effective_origin, str) or not effective_origin:
         return None, EngineResponse(
             state="escalate",
@@ -79,7 +80,13 @@ def load_runner_context(
     payload["request_origin"] = effective_origin
     hook_origin = payload.get("hook_request_origin")
     if hook_origin is not None and hook_origin != effective_origin:
-        if subcommand == "ingest":
+        if subcommand == "execute" and effective_origin == "agent" and hook_origin == "user":
+            # Asymmetric direct-execute exception: current hosts may record user
+            # command provenance for ticket_engine_agent.py execute. The reverse
+            # mismatch still rejects, and engine_execute must still enforce the
+            # direct_execute runtime-readiness gate before writing.
+            pass
+        elif subcommand == "ingest":
             return None, attach_engine_recovery_hint(
                 EngineResponse(
                     state="escalate",
@@ -88,11 +95,12 @@ def load_runner_context(
                 ),
                 "trust_setup",
             )
-        return None, EngineResponse(
-            state="escalate",
-            message=f"origin_mismatch: entrypoint={effective_origin}, hook={hook_origin}",
-            error_code="origin_mismatch",
-        )
+        else:
+            return None, EngineResponse(
+                state="escalate",
+                message=f"origin_mismatch: entrypoint={effective_origin}, hook={hook_origin}",
+                error_code="origin_mismatch",
+            )
 
     if subcommand in ("execute", "ingest"):
         trust_errors = collect_trust_triple_errors(
@@ -101,19 +109,13 @@ def load_runner_context(
             payload.get("session_id", ""),
         )
         if trust_errors:
-            if subcommand in ("execute", "ingest"):
-                return None, attach_engine_recovery_hint(
-                    EngineResponse(
-                        state="policy_blocked",
-                        message="Ticket setup needs attention before this write can continue.",
-                        error_code="policy_blocked",
-                    ),
-                    "trust_setup",
-                )
-            return None, EngineResponse(
-                state="policy_blocked",
-                message=f"Execute requires verified hook provenance: {', '.join(trust_errors)}",
-                error_code="policy_blocked",
+            return None, attach_engine_recovery_hint(
+                EngineResponse(
+                    state="policy_blocked",
+                    message="Ticket setup needs attention before this write can continue.",
+                    error_code="policy_blocked",
+                ),
+                "trust_setup",
             )
 
     project_root = discover_project_root(Path.cwd())
@@ -151,9 +153,30 @@ def dispatch_stage(
     payload: dict[str, Any],
     tickets_dir: Path,
     request_origin: str,
+    *,
+    runtime_proof_path: Path | None = None,
+    allow_activation_bootstrap: bool = False,
 ) -> EngineResponse:
-    """Dispatch one engine stage through the existing stage-model boundary."""
-    return _dispatch(subcommand, payload, tickets_dir, request_origin)
+    """Dispatch one engine stage through the existing stage-model boundary.
+
+    Args:
+        subcommand: Engine stage name.
+        payload: Loaded payload JSON.
+        tickets_dir: Project-local ticket storage directory.
+        request_origin: Entrypoint origin selected by the script name.
+        runtime_proof_path: Optional execute-only proof override used by the
+            runtime activation flow.
+        allow_activation_bootstrap: Allows execute to verify the temporary
+            activation-in-progress proof. Ignored outside execute.
+    """
+    return _dispatch(
+        subcommand,
+        payload,
+        tickets_dir,
+        request_origin,
+        runtime_proof_path=runtime_proof_path,
+        allow_activation_bootstrap=allow_activation_bootstrap,
+    )
 
 
 def run(
@@ -173,6 +196,32 @@ def run(
     Returns:
         Exit code: 0 (success), 1 (engine error), 2 (need_fields).
     """
+    try:
+        return _run_impl(request_origin, argv, prog=prog)
+    except OSError as exc:
+        response = EngineResponse(
+            state="escalate",
+            message=f"ticket engine runner failed: {type(exc).__name__}: {exc}",
+            error_code="io_error",
+        )
+        print(response.to_json())
+        return 1
+    except Exception as exc:
+        response = EngineResponse(
+            state="escalate",
+            message=f"ticket engine runner failed: {type(exc).__name__}: {exc}",
+            error_code="internal_error",
+        )
+        print(response.to_json())
+        return 1
+
+
+def _run_impl(
+    request_origin: str,
+    argv: list[str] | None = None,
+    *,
+    prog: str,
+) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if len(args) < 2:
         print(
@@ -197,11 +246,20 @@ def run(
         return _exit_code(error)
 
     assert context is not None
+    runtime_proof_path = None
+    allow_activation_bootstrap = False
+    if subcommand == "execute":
+        runtime_proof_raw = os.environ.get(RUNTIME_PROOF_PATH_ENV)
+        if runtime_proof_raw:
+            runtime_proof_path = Path(runtime_proof_raw)
+            allow_activation_bootstrap = os.environ.get(RUNTIME_ACTIVATION_BOOTSTRAP_ENV) == "1"
     resp = dispatch_stage(
         subcommand,
         context.payload,
         context.tickets_dir,
         context.request_origin,
+        runtime_proof_path=runtime_proof_path,
+        allow_activation_bootstrap=allow_activation_bootstrap,
     )
     if subcommand == "ingest":
         resp = _sanitize_user_facing_ingest_response(resp)
@@ -390,8 +448,8 @@ def _dispatch_ingest(
     # Step 6: Move envelope to processed.
     try:
         move_to_processed(envelope_path)
-    except OSError as exc:
-        # Ticket was created but envelope move failed. Not fatal — report in data.
+    except FileExistsError as exc:
+        # Ticket was created but another cleanup path already recorded the envelope.
         data = dict(exec_resp.data or {})
         data.update(
             {
@@ -406,6 +464,28 @@ def _dispatch_ingest(
         return EngineResponse(
             state=exec_resp.state,
             message="Ticket was created, but Ticket could not finish ingest cleanup.",
+            ticket_id=exec_resp.ticket_id,
+            data=data,
+        )
+    except OSError as exc:
+        data = dict(exec_resp.data or {})
+        data.update(
+            {
+                "envelope_move_error": str(exc),
+                "ingest_outcome": "created_envelope_move_failed",
+                "envelope_id": envelope_id,
+                "processed_path": str(processed_path),
+                "incoming_envelope_path": str(envelope_path),
+                "ticket_created": True,
+            }
+        )
+        return EngineResponse(
+            state="escalate",
+            message=(
+                "Ticket was created, but Ticket could not finish ingest cleanup; "
+                "manual cleanup is required before replay."
+            ),
+            error_code="io_error",
             ticket_id=exec_resp.ticket_id,
             data=data,
         )
@@ -433,6 +513,9 @@ def _dispatch(
     payload: dict[str, Any],
     tickets_dir: Path,
     request_origin: str,
+    *,
+    runtime_proof_path: Path | None = None,
+    allow_activation_bootstrap: bool = False,
 ) -> EngineResponse:
     try:
         if subcommand == "classify":
@@ -478,6 +561,7 @@ def _dispatch(
                 if isinstance(inp.autonomy_config_data, dict)
                 else None
             )
+            runtime_execute_surface = "direct_execute" if request_origin == "agent" else None
             return engine_execute(
                 action=inp.action,
                 ticket_id=inp.ticket_id,
@@ -495,6 +579,9 @@ def _dispatch(
                 classify_confidence=inp.classify_confidence,
                 dedup_fingerprint=inp.dedup_fingerprint,
                 duplicate_of=inp.duplicate_of,
+                runtime_execute_surface=runtime_execute_surface,
+                runtime_proof_path=runtime_proof_path,
+                allow_activation_bootstrap=allow_activation_bootstrap,
             )
         elif subcommand == "ingest":
             inp = IngestInput.from_payload(payload)

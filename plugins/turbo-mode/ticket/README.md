@@ -43,7 +43,7 @@ The plugin registers its hook, skills, and scripts automatically. No build step 
 | `ticket-find` | Show, list, find, open, or check close readiness | Read-only `ticket_read.py list`, `query`, and `check` |
 | `ticket-update` | Update existing ticket metadata, lifecycle, or focused refinement fields | Preview-first updates via `ticket_update.py prepare` and `execute` |
 | `ticket-review` | Backlog health, stale, blocked, or next-work questions | Read-only `ticket_review.py review` and `audit`; may suggest capture prompts |
-| `ticket-doctor` | Explicit storage/plugin diagnostics, stale payload cleanup, or audit repair | Maintenance-only `ticket_doctor.py diagnose`, confirmed `clean-stale-payloads`, and dry-run-first `repair-audit` |
+| `ticket-doctor` | Explicit storage/plugin diagnostics, installed runtime activation, stale payload cleanup, or audit repair | Maintenance-only `ticket_doctor.py diagnose`, explicit `activate-runtime`, confirmed `clean-stale-payloads`, and dry-run-first `repair-audit` |
 
 Generic creation through the old broad `ticket` skill is no longer user-facing.
 Use `ticket-capture` for new tickets. Low-confidence captures are allowed when a
@@ -60,7 +60,7 @@ not a lifecycle status.
 | close/reopen | ticket_id plus required resolution or reopen reason | `ticket_update.py prepare` then `execute` |
 | list/query/check | filters, ID prefix, or ticket_id | Direct read (`ticket_read.py`) |
 | backlog review | tickets directory | Read-only `ticket_review.py review` and `audit` |
-| doctor/repair | explicit maintenance request | `ticket_doctor.py diagnose`, confirmed `clean-stale-payloads`, or dry-run-first `repair-audit` |
+| doctor/repair | explicit maintenance request | `ticket_doctor.py diagnose`, explicit `activate-runtime`, confirmed `clean-stale-payloads`, or dry-run-first `repair-audit` |
 
 #### Supported Mutation Surfaces
 
@@ -91,12 +91,12 @@ Security: blocks shell metacharacters (`|;&`$><\n\r`), enforces path containment
 
 ### Scripts
 
-Source code lives in `scripts/`, not a standard Python package directory. Skills resolve the plugin root from their own installed location and invoke scripts through the canonical Bash launcher `python3 -B <PLUGIN_ROOT>/scripts/<script>.py`.
+Source code lives in `scripts/`, not a standard Python package directory. Skills resolve the plugin root from their own installed location and invoke scripts through the canonical Bash launcher `uv run python -B <PLUGIN_ROOT>/scripts/<script>.py`. The hook may still accept `python3` launchers as legacy compatibility, but `uv run python -B` is the documented public contract.
 
 Canonical Bash launcher for plugin scripts:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/tickets
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/tickets
 ```
 
 **Engine entrypoints (mutation pipeline):**
@@ -120,20 +120,32 @@ Both delegate to `ticket_engine_runner.py`, which dispatches to `ticket_engine_c
 | `ticket_triage.py` | `dashboard <tickets_dir>` | Health dashboard |
 | `ticket_triage.py` | `audit <tickets_dir> [--days N]` | Audit trail summary (default 7 days) |
 | `ticket_review.py` | `review <tickets_dir>` / `audit <tickets_dir> [--days N]` | User-facing read-only backlog review wrapper |
-| `ticket_doctor.py` | `diagnose <tickets_dir> --plugin-root <plugin_root> --cache-root <cache_root>` | User-facing explicit diagnostics wrapper |
+| `ticket_doctor.py` | `diagnose <tickets_dir> --plugin-root <plugin_root> --cache-root <cache_root> [--runtime-probe-output <path>]` | User-facing explicit diagnostics wrapper |
+| `ticket_triage.py` | `doctor <tickets_dir> --plugin-root <plugin_root> --cache-root <cache_root> [--runtime-probe-output <path>]` | Static source/cache/project diagnostic |
+
+**Maintenance entrypoints:**
+
+| Script | Signature | Purpose |
+|--------|-----------|---------|
+| `ticket_doctor.py` | `activate-runtime <tickets_dir> --marketplace-path <marketplace_path>` | User-facing direct_execute-only runtime activation wrapper |
 | `ticket_doctor.py` | `clean-stale-payloads <tickets_dir> [--confirm-clean-stale-payloads]` | User-facing confirmed cleanup for stale prepare payloads |
 | `ticket_doctor.py` | `repair-audit <tickets_dir> [--confirm-repair]` | User-facing dry-run-first audit repair wrapper |
-| `ticket_triage.py` | `doctor <tickets_dir> --plugin-root <plugin_root> --cache-root <cache_root>` | Static source/cache/project diagnostic |
-| `ticket_audit.py` | `repair <tickets_dir> [--dry-run]` | Repair corrupt JSONL audit logs (user-only) |
-| `ticket_workflow.py` | `prepare <payload_file>` / `execute <payload_file>` / `recover <payload_file> <action>` | Internal/debugging legacy workflow runner for lower-level mutation orchestration |
+| `ticket_audit.py` | `repair <tickets_dir> [--fix | --dry-run]` | Repair corrupt JSONL audit logs backend (defaults to dry-run; `--fix` mutates) |
+| `ticket_workflow.py` | `prepare <payload_file>` / `execute <payload_file>` / `recover <payload_file> <action>` | Internal/debugging legacy workflow runner for lower-level orchestration |
 
 **Response envelope (all engine commands):**
 
 ```json
-{"state": "<machine_state>", "ticket_id": "<string|null>", "message": "<string>", "error_code": "<string|null>", "data": {}}
+{"state": "<machine_state>", "ticket_id": "<string|null>", "message": "<string>", "data": {}, "error_code": "<string on failure only>"}
 ```
 
+Success responses omit `error_code`; error responses include it at the top level.
+
 Exit codes: `0` (success), `1` (engine error), `2` (validation failure / need_fields).
+
+For live installed activation and certification, use the cache-installed
+runtime authority that `hooks/list` and `skills/list` expose. Treat the synced
+personal plugin copy as staging only, not the proof target.
 
 ### Reference Documents
 
@@ -179,6 +191,9 @@ Skills and hooks do not require shell environment setup. Skills derive the plugi
 - `PLUGIN_ROOT` identifies this plugin package.
 - `PROJECT_ROOT` identifies the active workspace root by walking up from the current working directory until `.codex`, `.git/`, or a `.git` file is found.
 - `TICKETS_DIR` is always `<PROJECT_ROOT>/docs/tickets`, never a path under `PLUGIN_ROOT`.
+- `TICKET_RUNTIME_PROOF_PATH` and `TICKET_RUNTIME_ACTIVATION_BOOTSTRAP=1` are
+  internal activation/test overrides used only by the explicit runtime
+  activation flow. They are not normal operator inputs.
 
 `hooks/hooks.json` in this source tree describes install-target metadata for the personal marketplace. It is not live runtime proof for the installed cache copy.
 
@@ -266,8 +281,10 @@ Produces a structured report: ticket counts by status/priority, stale tickets (>
 ### Doctor stale payloads
 
 `ticket_doctor.py diagnose` reports stale `.codex/ticket-tmp/` payloads older
-than 24 hours without mutating them. Cleanup is TTL-scoped and
-confirmation-gated: first run
+than 24 hours without mutating them. Pass
+`--runtime-probe-output <path>` only when you want a read-only runtime probe
+artifact written under a caller-chosen temp path for later inspection. Cleanup
+is TTL-scoped and confirmation-gated: first run
 `ticket_doctor.py clean-stale-payloads <TICKETS_DIR>` to see that cleanup
 requires confirmation, then run
 `ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads`
@@ -332,9 +349,9 @@ Security checks are duplicated across pipeline stages:
 
 `ok`, `ok_create`, `ok_update`, `ok_close`, `ok_close_archived`, `ok_reopen`, `need_fields`, `duplicate_candidate`, `preflight_failed`, `policy_blocked`, `invalid_transition`, `dependency_blocked`, `not_found`, `escalate`, `merge_into_existing` (reserved, not emitted in v1.0).
 
-### Error Codes (12)
+### Core Engine Error Codes (13)
 
-`need_fields`, `invalid_transition`, `policy_blocked`, `preflight_failed`, `stale_plan`, `duplicate_candidate`, `parse_error`, `io_error`, `not_found`, `dependency_blocked`, `intent_mismatch`, `origin_mismatch`.
+`need_fields`, `invalid_transition`, `policy_blocked`, `preflight_failed`, `stale_plan`, `duplicate_candidate`, `parse_error`, `io_error`, `internal_error`, `not_found`, `dependency_blocked`, `intent_mismatch`, `origin_mismatch`.
 
 ## Extension Points
 
@@ -351,16 +368,18 @@ autonomously, subject to:
 5. **Session create cap** enforcement via audit trail (configurable via `max_creates_per_session`)
 6. **Reopen is user-only** in v1.0 — agents cannot reopen tickets
 
-Current direct-execute `auto_audit` behavior remains governed by the existing
-guarded provenance/trust model: hook-injected payload fields, non-empty
-`session_id`, live autonomy config re-read, and the current engine trust
-checks. The future activation-readiness lane is defined as installed
-hook-mediated mutation wiring, not caller identity: live app-server inventory,
-bound hook membrane proof, AgentControl child traversal through the same
-installed hook, and evidence-backed revalidation of the persisted proof index.
-Because current Codex does not expose spawned-agent identity in `PreToolUse`,
-agent identity is not a readiness prerequisite unless the hook contract
-changes.
+Activation V1 certifies only `ticket_engine_agent.py execute`. Activation V1
+proves installed hook-mediated direct-execute wiring, not host-owned or
+spawned-agent identity. `hook_request_origin` is hook-observed provenance
+metadata on the current host and may still be reported as `"user"` for the
+certified direct-execute lane. `capture`, `update`, and `ticket_workflow.py`
+remain outside the activation proof scope alongside `ingest_dispatch` and
+`activation_smoke_bootstrap`, and require a separate follow-up before widening
+certification. Privileged host diagnostic runs and prompt-driven smokes are
+diagnostics only. AgentControl child smoke, when captured, is same-membrane
+corroboration only and not identity proof. Normal agent direct execute fails
+with `runtime_readiness_required` when the runtime proof is missing, stale, or
+mismatched.
 
 The `agents/` directory is a placeholder (`.gitkeep` only) — consuming projects define their own agent definitions that invoke the agent entrypoint.
 
@@ -407,7 +426,7 @@ CHANGELOG.md      # Version history
 HANDBOOK.md       # Operator handbook
 ```
 
-Source lives in `scripts/` rather than a standard Python package directory. Modules use `sys.path.insert` for imports and the documented Bash contract is `python3 -B <PLUGIN_ROOT>/scripts/<script>.py ...`.
+Source lives in `scripts/` rather than a standard Python package directory. Modules use `sys.path.insert` for imports and the documented Bash contract is `uv run python -B <PLUGIN_ROOT>/scripts/<script>.py ...`. Any remaining `python3` hook acceptance is legacy compatibility, not the public launcher form.
 
 ### Dependencies
 
@@ -421,7 +440,7 @@ Source lives in `scripts/` rather than a standard Python package directory. Modu
 - **Single-writer `auto_audit` boundary** — this source slice does not add locking or queueing. Run at most one ticket-capable agent in a Codex session; intentional delegated multi-agent `auto_audit` work is a future locking/queueing trigger.
 - **Triage detects linear dependency chains only**, not cycles
 - **Session create cap** is audit-based, not lock-based — it is not a hard safety boundary for intentionally parallel ticket-capable agents
-- **Guard hook is fail-open** at the top level — an unhandled exception allows the command through (prevents blocking all Bash commands)
+- **Guard hook fails closed for Ticket candidates** — malformed hook input and internal guard errors emit stop entries instead of allowing the command through.
 - **`auto_silent` mode** is defined in the contract but gated with an explicit error — reserved for v1.1
 
 ## License

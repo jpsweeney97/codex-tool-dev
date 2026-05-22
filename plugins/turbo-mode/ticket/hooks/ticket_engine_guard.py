@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """PreToolUse hook: validates ticket script invocations and injects trust fields.
 
-Decision branches:
-- Branch 1: exact engine allowlist -> validate subcommand/payload + inject trust fields.
-- Branch 2: exact read-only allowlist (`ticket_read.py`, `ticket_triage.py`,
-  `ticket_review.py`) -> allow.
-- Branch 2b: exact audit/doctor allowlist (`ticket_audit.py`,
-  `ticket_doctor.py`) -> allow for users, deny for agents.
-- Branch 3: any other Python invocation targeting `ticket_*.py` -> deny.
-- Branch 4: non-ticket Bash commands -> pass through silently (empty JSON).
+Decision paths:
+- Engine allowlist: validate subcommand/payload and inject trust fields.
+- Workflow/capture/update allowlists: validate command shape and inject trust fields.
+- Read-only allowlist: allow safe reads; `ticket_triage.py doctor` validates roots.
+- Maintenance allowlist: allow users, deny agents.
+- Unknown ticket script invocations: deny.
+- Non-ticket Bash commands: pass through silently.
 
 Payload injection (atomic):
 - Injects session_id, hook_injected, hook_request_origin into the payload file.
@@ -16,7 +15,7 @@ Payload injection (atomic):
 - Uses temp file + fsync + os.replace for atomic writes.
 - Denies on any injection failure (unreadable file, invalid JSON, write error).
 
-Exit code always 0 (fail-open on crash — accepted v1.0 limitation).
+Exit code always 0; ticket candidates and internal failures fail closed.
 """
 
 from __future__ import annotations
@@ -30,6 +29,7 @@ import tempfile
 from pathlib import Path
 
 VALID_SUBCOMMANDS = frozenset({"classify", "plan", "preflight", "execute", "ingest"})
+VALID_ACTIVATION_SMOKE_SUBCOMMANDS = frozenset({"execute"})
 VALID_WORKFLOW_SUBCOMMANDS = frozenset({"prepare", "execute", "recover"})
 VALID_WORKFLOW_RECOVERY_ACTIONS = frozenset(
     {
@@ -56,31 +56,8 @@ SHELL_METACHAR_RE = re.compile(r"[|;&`$><\n\r]")
 
 def _plugin_root() -> str:
     """Return plugin root directory, with an optional test/development override."""
-    return os.environ.get("CODEX_PLUGIN_ROOT", str(Path(__file__).parent.parent))
-
-
-def _build_allowlist_pattern(plugin_root: str) -> re.Pattern[str]:
-    """Build the allowlist regex anchored to the plugin root."""
-    escaped = re.escape(plugin_root)
-    return re.compile(
-        rf"^python3(?:\s+-B)?\s+{escaped}/scripts/ticket_engine_(user|agent)\.py\s+(\w+)\s+(.+)$"
-    )
-
-
-def _build_readonly_pattern(plugin_root: str) -> re.Pattern[str]:
-    """Build pattern for read-only ticket scripts (no payload injection)."""
-    escaped = re.escape(plugin_root)
-    return re.compile(
-        rf"^python3(?:\s+-B)?\s+{escaped}/scripts/ticket_(read|triage|review)\.py\s+(\w+)\s+(.+)$"
-    )
-
-
-def _build_audit_pattern(plugin_root: str) -> re.Pattern[str]:
-    """Build pattern for user-only maintenance scripts (no payload injection)."""
-    escaped = re.escape(plugin_root)
-    return re.compile(
-        rf"^python3(?:\s+-B)?\s+{escaped}/scripts/ticket_(audit|doctor)\.py\s+([\w-]+)\s+(.+)$"
-    )
+    configured_root = os.environ.get("CODEX_PLUGIN_ROOT", str(Path(__file__).parent.parent))
+    return str(Path(configured_root).resolve(strict=False))
 
 
 # Known ticket script basenames for candidate detection.
@@ -88,6 +65,7 @@ _TICKET_SCRIPT_BASENAMES = frozenset(
     {
         "ticket_engine_user.py",
         "ticket_engine_agent.py",
+        "ticket_engine_activation_smoke.py",
         "ticket_read.py",
         "ticket_triage.py",
         "ticket_audit.py",
@@ -99,8 +77,8 @@ _TICKET_SCRIPT_BASENAMES = frozenset(
     }
 )
 
-# Broad pattern for any ticket_*.py script — catches unknown/rogue scripts
-# so they route to branch 3 (deny) rather than bypassing the hook entirely.
+# Broad pattern for any ticket_*.py script: catches unknown/rogue scripts so
+# they route to the deny path rather than bypassing the hook entirely.
 _TICKET_SCRIPT_RE = re.compile(r"^ticket_\w+\.py$")
 
 # Environment variable assignment tokens.
@@ -153,6 +131,24 @@ def _expand_env_split_string(tokens: list[str]) -> list[str]:
     return expanded
 
 
+def _canonical_launcher_script_index(tokens: list[str]) -> int | None:
+    """Return the script token index for exact canonical launcher forms."""
+    if not tokens:
+        return None
+    if tokens[0] == "python3":
+        script_idx = 1
+    elif len(tokens) >= 3 and tokens[:3] == ["uv", "run", "python"]:
+        script_idx = 3
+    else:
+        return None
+
+    if script_idx < len(tokens) and tokens[script_idx] == "-B":
+        script_idx += 1
+    if script_idx >= len(tokens):
+        return None
+    return script_idx
+
+
 def _is_ticket_candidate(command: str) -> bool:
     """Detect if command is a Python invocation targeting a ticket script.
 
@@ -169,8 +165,8 @@ def _is_ticket_candidate(command: str) -> bool:
     - Leading env assignments: KEY=VAL python3 script.py
     - Python flags before script: python3 -u -O script.py
 
-    Returns True if detected as a ticket script candidate (routes to exact
-    allowlist validation in branches 1-3). False means pass-through (branch 4).
+    Returns True if detected as a ticket script candidate for exact allowlist
+    validation. False means pass-through.
     """
     try:
         tokens = shlex.split(command)
@@ -223,12 +219,17 @@ def _is_ticket_candidate(command: str) -> bool:
     # Check if current token is a Python launcher.
     launcher = tokens[i]
     launcher_basename = launcher.rsplit("/", 1)[-1] if "/" in launcher else launcher
-    if not _PYTHON_LAUNCHER_RE.match(launcher_basename):
-        return False
+    if launcher == "uv":
+        if tokens[i : i + 3] != ["uv", "run", "python"]:
+            return False
+        script_idx = i + 3
+    else:
+        if not _PYTHON_LAUNCHER_RE.match(launcher_basename):
+            return False
+        script_idx = i + 1
 
     # Skip Python flags until the first non-option token, accounting for options
     # that consume a following argument (for example "-m pdb" or "-X dev").
-    script_idx = i + 1
     while script_idx < len(tokens):
         token = tokens[script_idx]
         if token in _PYTHON_OPTIONS_WITH_VALUE:
@@ -250,23 +251,11 @@ def _is_ticket_candidate(command: str) -> bool:
 
 
 def _make_allow(reason: str) -> dict:
-    return {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
-            "permissionDecisionReason": reason,
-        }
-    }
+    return {"entries": [{"kind": "feedback", "text": reason}]}
 
 
 def _make_deny(reason: str) -> dict:
-    return {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
-        }
-    }
+    return {"entries": [{"kind": "stop", "text": reason}]}
 
 
 def _malformed_session_id_reason(session_id: object) -> str:
@@ -286,12 +275,9 @@ def _parse_workflow_invocation(
         return None
     if len(tokens) < 3:
         return None
-    if tokens[0] != "python3":
+    script_idx = _canonical_launcher_script_index(tokens)
+    if script_idx is None:
         return None
-
-    script_idx = 1
-    if tokens[script_idx] == "-B":
-        script_idx += 1
 
     expected_script = str(Path(plugin_root) / "scripts" / "ticket_workflow.py")
     if script_idx >= len(tokens) or tokens[script_idx] != expected_script:
@@ -317,12 +303,9 @@ def _parse_capture_invocation(
         return None
     if len(tokens) < 3:
         return None
-    if tokens[0] != "python3":
+    script_idx = _canonical_launcher_script_index(tokens)
+    if script_idx is None:
         return None
-
-    script_idx = 1
-    if tokens[script_idx] == "-B":
-        script_idx += 1
 
     expected_script = str(Path(plugin_root) / "scripts" / "ticket_capture.py")
     if script_idx >= len(tokens) or tokens[script_idx] != expected_script:
@@ -348,12 +331,9 @@ def _parse_update_invocation(
         return None
     if len(tokens) < 3:
         return None
-    if tokens[0] != "python3":
+    script_idx = _canonical_launcher_script_index(tokens)
+    if script_idx is None:
         return None
-
-    script_idx = 1
-    if tokens[script_idx] == "-B":
-        script_idx += 1
 
     expected_script = str(Path(plugin_root) / "scripts" / "ticket_update.py")
     if script_idx >= len(tokens) or tokens[script_idx] != expected_script:
@@ -369,6 +349,86 @@ def _parse_update_invocation(
     return subcommand, payload_path, extra_args
 
 
+def _parse_engine_invocation(
+    command_clean: str,
+    plugin_root: str,
+) -> tuple[str, str, str, list[str]] | None:
+    """Parse only canonical engine entrypoint invocations."""
+    try:
+        tokens = shlex.split(command_clean)
+    except ValueError:
+        return None
+    script_idx = _canonical_launcher_script_index(tokens)
+    if script_idx is None or len(tokens) < script_idx + 3:
+        return None
+    script_path = tokens[script_idx]
+    script_name = Path(script_path).name
+    if script_name not in {
+        "ticket_engine_user.py",
+        "ticket_engine_agent.py",
+        "ticket_engine_activation_smoke.py",
+    }:
+        return None
+    expected_script = str(Path(plugin_root) / "scripts" / script_name)
+    if script_path != expected_script:
+        return None
+    entrypoint_type = script_name.removeprefix("ticket_engine_").removesuffix(".py")
+    return entrypoint_type, tokens[script_idx + 1], tokens[script_idx + 2], tokens[script_idx + 3 :]
+
+
+def _parse_readonly_invocation(
+    command_clean: str,
+    plugin_root: str,
+) -> tuple[str, str] | None:
+    """Parse only canonical read-only ticket script invocations."""
+    try:
+        tokens = shlex.split(command_clean)
+    except ValueError:
+        return None
+    script_idx = _canonical_launcher_script_index(tokens)
+    if script_idx is None or len(tokens) < script_idx + 3:
+        return None
+    script_path = tokens[script_idx]
+    script_name = Path(script_path).name
+    allowed = {
+        "ticket_read.py": "read",
+        "ticket_triage.py": "triage",
+        "ticket_review.py": "review",
+    }
+    if script_name not in allowed:
+        return None
+    expected_script = str(Path(plugin_root) / "scripts" / script_name)
+    if script_path != expected_script:
+        return None
+    return allowed[script_name], tokens[script_idx + 1]
+
+
+def _parse_audit_invocation(
+    command_clean: str,
+    plugin_root: str,
+) -> tuple[str, str] | None:
+    """Parse only canonical maintenance invocations."""
+    try:
+        tokens = shlex.split(command_clean)
+    except ValueError:
+        return None
+    script_idx = _canonical_launcher_script_index(tokens)
+    if script_idx is None or len(tokens) < script_idx + 3:
+        return None
+    script_path = tokens[script_idx]
+    script_name = Path(script_path).name
+    allowed = {
+        "ticket_audit.py": "audit",
+        "ticket_doctor.py": "doctor",
+    }
+    if script_name not in allowed:
+        return None
+    expected_script = str(Path(plugin_root) / "scripts" / script_name)
+    if script_path != expected_script:
+        return None
+    return allowed[script_name], tokens[script_idx + 1]
+
+
 def _validate_doctor_readonly_invocation(command_clean: str, plugin_root: str) -> str | None:
     """Return an error string when ticket_triage.py doctor uses unsafe roots."""
     try:
@@ -376,17 +436,18 @@ def _validate_doctor_readonly_invocation(command_clean: str, plugin_root: str) -
     except ValueError as exc:
         return f"ticket_triage.py doctor parse failed: {exc}"
     expected_script = str(Path(plugin_root) / "scripts" / "ticket_triage.py")
-    if tokens[:2] == ["python3", "-B"]:
-        tokens = [tokens[0], *tokens[2:]]
-    if (
-        len(tokens) < 7
-        or tokens[0] != "python3"
-        or tokens[1] != expected_script
-        or tokens[2] != "doctor"
-    ):
-        return "ticket_triage.py doctor must use canonical python3 [-B] invocation"
+    script_idx = _canonical_launcher_script_index(tokens)
+    if script_idx is None:
+        return "ticket_triage.py doctor must use canonical python3 or uv run python launcher"
+    if len(tokens) < script_idx + 6:
+        return (
+            "ticket_triage.py doctor incomplete arguments: expected tickets_dir, "
+            "--plugin-root, and --cache-root"
+        )
+    if tokens[script_idx] != expected_script or tokens[script_idx + 1] != "doctor":
+        return "ticket_triage.py doctor must use canonical python3 or uv run python launcher"
 
-    args = tokens[3:]
+    args = tokens[script_idx + 2 :]
     tickets_dir = args[0]
     option_tokens = args[1:]
     if any(char.isspace() for char in tickets_dir):
@@ -406,21 +467,16 @@ def _validate_doctor_readonly_invocation(command_clean: str, plugin_root: str) -
 
     if values.get("--plugin-root") != plugin_root:
         return "ticket_triage.py doctor --plugin-root must equal the running plugin root"
-    expected_cache = "/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0"
-    if values.get("--cache-root") not in {plugin_root, expected_cache}:
-        return (
-            "ticket_triage.py doctor --cache-root must equal the running plugin root "
-            "or expected Ticket cache root"
-        )
+    if values.get("--cache-root") != plugin_root:
+        return "ticket_triage.py doctor --cache-root must equal the running plugin root"
     probe = values.get("--runtime-probe-output")
     if probe is not None:
-        probe_path = Path(probe)
-        if probe_path.parent != Path("/private/tmp") or not probe_path.name.startswith(
-            "ticket-ux-"
-        ):
+        probe_path = Path(probe).resolve(strict=False)
+        temp_root = Path(tempfile.gettempdir()).resolve(strict=False)
+        if probe_path.parent != temp_root or not probe_path.name.startswith("ticket-ux-"):
             return (
                 "ticket_triage.py doctor --runtime-probe-output must be a "
-                "ticket-ux artifact under /private/tmp"
+                f"ticket-ux artifact under {temp_root}"
             )
     return None
 
@@ -532,8 +588,7 @@ def main() -> None:
     try:
         event = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
-        # Malformed input — fail open.
-        print("{}")
+        print(json.dumps(_make_deny("Malformed hook input: expected JSON object on stdin")))
         return
 
     # Non-Bash tools pass through.
@@ -550,7 +605,7 @@ def main() -> None:
     command_clean = re.sub(r"\s+2>&1\s*$", "", command)
     command_for_detection = command_clean.lstrip()
 
-    # Branch 4: Non-ticket-script invocations pass through (cat, rg, wc, etc.).
+    # Non-ticket-script invocations pass through (cat, rg, wc, etc.).
     plugin_root = _plugin_root()
     if not _is_ticket_candidate(command_for_detection):
         print("{}")
@@ -569,28 +624,37 @@ def main() -> None:
         )
         return
 
-    # Branch 1: Engine exact allowlist → validate subcommand/payload + inject.
-    engine_pattern = _build_allowlist_pattern(plugin_root)
-    engine_match = engine_pattern.match(command_clean)
+    if command_clean != command_for_detection:
+        print(
+            json.dumps(
+                _make_deny(f"Command invokes unrecognized ticket script. Got: {command!r:.100}")
+            )
+        )
+        return
 
-    if engine_match:
-        entrypoint_type = engine_match.group(1)  # "user" or "agent"
-        subcommand = engine_match.group(2)
-        payload_path = engine_match.group(3)
+    # Engine exact allowlist: validate subcommand/payload and inject.
+    engine_invocation = _parse_engine_invocation(command_clean, plugin_root)
+    if engine_invocation is not None:
+        entrypoint_type, subcommand, payload_path, extra_args = engine_invocation
 
         # Validate subcommand.
-        if subcommand not in VALID_SUBCOMMANDS:
+        valid_subcommands = (
+            VALID_ACTIVATION_SMOKE_SUBCOMMANDS
+            if entrypoint_type == "activation_smoke"
+            else VALID_SUBCOMMANDS
+        )
+        if subcommand not in valid_subcommands:
             print(
                 json.dumps(
                     _make_deny(
-                        f"Unknown subcommand '{subcommand}'. Valid: {sorted(VALID_SUBCOMMANDS)}"
+                        f"Unknown subcommand '{subcommand}'. Valid: {sorted(valid_subcommands)}"
                     )
                 )
             )
             return
 
         # Check for extra arguments (payload_path should not contain whitespace).
-        if re.search(r"\s", payload_path):
+        if re.search(r"\s", payload_path) or extra_args:
             print(
                 json.dumps(_make_deny(f"Extra arguments after payload path. Got: {command!r:.100}"))
             )
@@ -795,13 +859,11 @@ def main() -> None:
         print(json.dumps(_make_allow(f"Ticket update/{subcommand} validated and payload injected")))
         return
 
-    # Branch 2: Read-only scripts (ticket_read.py, ticket_triage.py, ticket_review.py)
+    # Read-only scripts (ticket_read.py, ticket_triage.py, ticket_review.py).
     # → allow, no injection.
-    readonly_pattern = _build_readonly_pattern(plugin_root)
-    readonly_match = readonly_pattern.match(command_clean)
-    if readonly_match:
-        script_name = readonly_match.group(1)  # "read" or "triage"
-        subcommand = readonly_match.group(2)
+    readonly_invocation = _parse_readonly_invocation(command_clean, plugin_root)
+    if readonly_invocation is not None:
+        script_name, subcommand = readonly_invocation
         if script_name == "triage" and subcommand == "doctor":
             doctor_error = _validate_doctor_readonly_invocation(command_clean, plugin_root)
             if doctor_error is not None:
@@ -810,11 +872,9 @@ def main() -> None:
         print(json.dumps(_make_allow(f"Ticket {script_name}/{subcommand} validated (read-only)")))
         return
 
-    # Branch 2b: Maintenance scripts (ticket_audit.py, ticket_doctor.py)
-    # → allow for users, deny for agents.
-    audit_pattern = _build_audit_pattern(plugin_root)
-    audit_match = audit_pattern.match(command_clean)
-    if audit_match:
+    # Maintenance scripts (ticket_audit.py, ticket_doctor.py): allow users, deny agents.
+    audit_invocation = _parse_audit_invocation(command_clean, plugin_root)
+    if audit_invocation is not None:
         origin, origin_error = _resolve_origin(event, is_ticket_candidate=True)
         if origin_error is not None:
             print(json.dumps(_make_deny(origin_error)))
@@ -829,25 +889,27 @@ def main() -> None:
                 )
             )
             return
-        script_name = audit_match.group(1)
-        subcommand = audit_match.group(2)
+        script_name, subcommand = audit_invocation
         print(json.dumps(_make_allow(f"Ticket {script_name}/{subcommand} validated (user-only)")))
         return
 
-    # Branch 3: Unrecognized ticket script invocation → deny.
+    # Unrecognized ticket script invocation: deny.
     print(
         json.dumps(_make_deny(f"Command invokes unrecognized ticket script. Got: {command!r:.100}"))
     )
 
 
-if __name__ == "__main__":
+def _run_cli() -> int:
     try:
         main()
     except Exception as exc:
-        # Fail open on unhandled exceptions — exit 0 with empty JSON.
         print(
-            f"ticket_engine_guard failed open: {type(exc).__name__}: {exc}",
+            f"ticket_engine_guard failed closed: {type(exc).__name__}: {exc}",
             file=sys.stderr,
         )
-        print("{}")
-        sys.exit(0)
+        print(json.dumps(_make_deny(f"guard internal error: {exc!r:.100}")))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(_run_cli())

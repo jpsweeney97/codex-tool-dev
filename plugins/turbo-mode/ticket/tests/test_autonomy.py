@@ -1,17 +1,20 @@
 """Tests for autonomy config parsing and enforcement."""
+
 from __future__ import annotations
 
+from datetime import UTC
 from pathlib import Path
 
 import pytest
-
-from scripts.ticket_dedup import dedup_fingerprint as compute_dedup_fp, target_fingerprint as compute_target_fp
+from scripts.ticket_dedup import dedup_fingerprint as compute_dedup_fp
+from scripts.ticket_dedup import target_fingerprint as compute_target_fp
 from scripts.ticket_engine_core import (
     AutonomyConfig,
     engine_execute,
     engine_preflight,
     read_autonomy_config,
 )
+
 from tests.support.builders import make_ticket, write_autonomy_config
 
 
@@ -47,9 +50,7 @@ class TestAutonomyConfig:
     def test_valid_auto_audit_config(self, autonomy_env):
         """Valid auto_audit config with custom max_creates."""
         tickets_dir, config_path = autonomy_env
-        config_path.write_text(
-            "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 10\n---\n"
-        )
+        config_path.write_text("---\nautonomy_mode: auto_audit\nmax_creates_per_session: 10\n---\n")
         config = read_autonomy_config(tickets_dir)
         assert config.mode == "auto_audit"
         assert config.max_creates == 10
@@ -113,9 +114,7 @@ class TestAutonomyConfig:
     def test_zero_max_creates_disables_agent_creates(self, autonomy_env):
         """max_creates=0 means disable all agent creates (not invalid)."""
         tickets_dir, config_path = autonomy_env
-        config_path.write_text(
-            "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 0\n---\n"
-        )
+        config_path.write_text("---\nautonomy_mode: auto_audit\nmax_creates_per_session: 0\n---\n")
         config = read_autonomy_config(tickets_dir)
         assert config.max_creates == 0
         assert config.warnings == ()
@@ -123,9 +122,7 @@ class TestAutonomyConfig:
     def test_negative_max_creates_warns(self, autonomy_env):
         """Negative max_creates → default 5 + warning."""
         tickets_dir, config_path = autonomy_env
-        config_path.write_text(
-            "---\nautonomy_mode: auto_audit\nmax_creates_per_session: -1\n---\n"
-        )
+        config_path.write_text("---\nautonomy_mode: auto_audit\nmax_creates_per_session: -1\n---\n")
         config = read_autonomy_config(tickets_dir)
         assert config.max_creates == 5
         assert len(config.warnings) == 1
@@ -187,9 +184,7 @@ class TestAutonomyPreflight:
     def auto_audit_env(self, autonomy_env):
         """Set up auto_audit config and return tickets_dir."""
         tickets_dir, config_path = autonomy_env
-        config_path.write_text(
-            "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 3\n---\n"
-        )
+        config_path.write_text("---\nautonomy_mode: auto_audit\nmax_creates_per_session: 3\n---\n")
         return tickets_dir
 
     def _preflight(self, tickets_dir, **overrides):
@@ -233,23 +228,34 @@ class TestAutonomyPreflight:
 
     def test_agent_reopen_user_only(self, auto_audit_env):
         resp = self._preflight(
-            auto_audit_env, request_origin="agent", hook_injected=True,
-            action="reopen", classify_intent="reopen", ticket_id="T-20260302-01",
+            auto_audit_env,
+            request_origin="agent",
+            hook_injected=True,
+            action="reopen",
+            classify_intent="reopen",
+            ticket_id="T-20260302-01",
         )
         assert resp.state == "policy_blocked"
         assert "user-only" in resp.message.lower() or "reopen" in resp.message.lower()
 
     def test_agent_dedup_override_rejected(self, auto_audit_env):
         resp = self._preflight(
-            auto_audit_env, request_origin="agent", hook_injected=True, dedup_override=True,
+            auto_audit_env,
+            request_origin="agent",
+            hook_injected=True,
+            dedup_override=True,
         )
         assert resp.state == "policy_blocked"
         assert "dedup_override" in resp.message.lower()
 
     def test_agent_dependency_override_rejected(self, auto_audit_env):
         resp = self._preflight(
-            auto_audit_env, request_origin="agent", hook_injected=True,
-            action="close", classify_intent="close", ticket_id="T-20260302-01",
+            auto_audit_env,
+            request_origin="agent",
+            hook_injected=True,
+            action="close",
+            classify_intent="close",
+            ticket_id="T-20260302-01",
             dependency_override=True,
         )
         assert resp.state == "policy_blocked"
@@ -262,13 +268,19 @@ class TestAutonomyPreflight:
 
     def test_agent_auto_audit_session_cap_reached(self, auto_audit_env):
         import json
-        from datetime import datetime, timezone
-        date_dir = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        from datetime import datetime
+
+        date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_dir = auto_audit_env / ".audit" / date_dir
         audit_dir.mkdir(parents=True)
         audit_file = audit_dir / "test-session.jsonl"
         for i in range(3):
-            entry = {"action": "attempt_started", "intent": "create", "request_origin": "agent", "session_id": "test-session"}
+            entry = {
+                "action": "attempt_started",
+                "intent": "create",
+                "request_origin": "agent",
+                "session_id": "test-session",
+            }
             with open(audit_file, "a") as f:
                 f.write(json.dumps(entry) + "\n")
         resp = self._preflight(auto_audit_env, request_origin="agent", hook_injected=True)
@@ -278,8 +290,12 @@ class TestAutonomyPreflight:
     def test_agent_auto_audit_update_no_cap_check(self, auto_audit_env):
         make_ticket(auto_audit_env, "2026-03-02-test.md")
         resp = self._preflight(
-            auto_audit_env, request_origin="agent", hook_injected=True,
-            action="update", classify_intent="update", ticket_id="T-20260302-01",
+            auto_audit_env,
+            request_origin="agent",
+            hook_injected=True,
+            action="update",
+            classify_intent="update",
+            ticket_id="T-20260302-01",
         )
         assert resp.state == "ok"
 
@@ -300,22 +316,24 @@ class TestAutonomyPreflight:
         """AUDIT_UNAVAILABLE from count → policy_blocked in preflight."""
         import os
         import sys
+
         if sys.platform == "win32":
             pytest.skip("chmod not effective on Windows")
         import json
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         # Create an audit file, then make it unreadable.
-        date_dir = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_dir = auto_audit_env / ".audit" / date_dir
         audit_dir.mkdir(parents=True)
         audit_file = audit_dir / "test-session.jsonl"
-        audit_file.write_text(
-            json.dumps({"action": "create", "result": "ok_create"}) + "\n"
-        )
+        audit_file.write_text(json.dumps({"action": "create", "result": "ok_create"}) + "\n")
         try:
             os.chmod(audit_file, 0o000)
             resp = self._preflight(
-                auto_audit_env, request_origin="agent", hook_injected=True,
+                auto_audit_env,
+                request_origin="agent",
+                hook_injected=True,
             )
             assert resp.state == "policy_blocked"
             assert "audit" in resp.message.lower()
@@ -326,8 +344,12 @@ class TestAutonomyPreflight:
         """Agent update succeeds under auto_audit (no session cap for updates)."""
         make_ticket(auto_audit_env, "2026-03-02-test.md")
         resp = self._preflight(
-            auto_audit_env, request_origin="agent", hook_injected=True,
-            action="update", classify_intent="update", ticket_id="T-20260302-01",
+            auto_audit_env,
+            request_origin="agent",
+            hook_injected=True,
+            action="update",
+            classify_intent="update",
+            ticket_id="T-20260302-01",
         )
         assert resp.state == "ok"
 
@@ -335,8 +357,12 @@ class TestAutonomyPreflight:
         """Agent close succeeds under auto_audit."""
         make_ticket(auto_audit_env, "2026-03-02-test.md")
         resp = self._preflight(
-            auto_audit_env, request_origin="agent", hook_injected=True,
-            action="close", classify_intent="close", ticket_id="T-20260302-01",
+            auto_audit_env,
+            request_origin="agent",
+            hook_injected=True,
+            action="close",
+            classify_intent="close",
+            ticket_id="T-20260302-01",
         )
         assert resp.state == "ok"
 
@@ -346,11 +372,15 @@ class TestAutonomyExecute:
 
     def test_execute_agent_suggest_blocked(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
-            tickets_dir=tmp_tickets, hook_injected=True,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
             hook_request_origin="agent",
             classify_intent="create",
             classify_confidence=0.95,
@@ -365,11 +395,15 @@ class TestAutonomyExecute:
         assert config.mode == "suggest"
         assert any("yolo" in w for w in config.warnings)
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
-            tickets_dir=tmp_tickets, hook_injected=True,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
             hook_request_origin="agent",
             classify_intent="create",
             classify_confidence=0.95,
@@ -380,11 +414,15 @@ class TestAutonomyExecute:
 
     def test_execute_agent_none_config_blocked(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
-            tickets_dir=tmp_tickets, hook_injected=True,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
             hook_request_origin="agent",
             classify_intent="create",
             classify_confidence=0.95,
@@ -396,10 +434,13 @@ class TestAutonomyExecute:
     def test_agent_execute_uses_live_config_not_payload_snapshot(self, tmp_tickets):
         write_autonomy_config(tmp_tickets, "---\nautonomy_mode: suggest\n---\n")
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
             autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
             hook_injected=True,
@@ -411,13 +452,18 @@ class TestAutonomyExecute:
         assert resp.state == "policy_blocked"
         assert "changed since preflight" in resp.message.lower()
 
-    def test_agent_execute_blocks_when_snapshot_and_live_config_diverge_to_more_restrictive(self, tmp_tickets):
+    def test_agent_execute_blocks_when_snapshot_and_live_config_diverge_to_more_restrictive(
+        self, tmp_tickets
+    ):
         write_autonomy_config(tmp_tickets, "---\nautonomy_mode: suggest\n---\n")
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
             autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
             hook_injected=True,
@@ -429,16 +475,21 @@ class TestAutonomyExecute:
         assert resp.state == "policy_blocked"
         assert "changed since preflight" in resp.message.lower()
 
-    def test_agent_execute_blocks_when_snapshot_and_live_config_diverge_to_less_restrictive(self, tmp_tickets):
+    def test_agent_execute_blocks_when_snapshot_and_live_config_diverge_to_less_restrictive(
+        self, tmp_tickets
+    ):
         write_autonomy_config(
             tmp_tickets,
             "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
         )
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
             autonomy_config=AutonomyConfig(mode="suggest"),
             hook_injected=True,
@@ -453,11 +504,15 @@ class TestAutonomyExecute:
     def test_agent_execute_fail_closed_on_malformed_live_config(self, tmp_tickets):
         write_autonomy_config(tmp_tickets, "---\n: [invalid yaml\n---\n")
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
-            tickets_dir=tmp_tickets, hook_injected=True,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
             hook_request_origin="agent",
             classify_intent="create",
             classify_confidence=0.95,
@@ -473,10 +528,15 @@ class TestAutonomyExecute:
             "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
         )
         resp = engine_execute(
-            action="reopen", ticket_id="T-20260302-01", fields={},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
-            tickets_dir=tmp_tickets, hook_injected=True,
+            action="reopen",
+            ticket_id="T-20260302-01",
+            fields={},
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
             hook_request_origin="agent",
             classify_intent="reopen",
             classify_confidence=0.95,
@@ -491,11 +551,15 @@ class TestAutonomyExecute:
             "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
         )
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="agent",
-            dedup_override=True, dependency_override=False,
-            tickets_dir=tmp_tickets, hook_injected=True,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=True,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
             hook_request_origin="agent",
             classify_intent="create",
             classify_confidence=0.95,
@@ -511,11 +575,15 @@ class TestAutonomyExecute:
             "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
         )
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
-            tickets_dir=tmp_tickets, hook_injected=True,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
             hook_request_origin="agent",
             classify_intent="create",
             classify_confidence=0.95,
@@ -532,11 +600,15 @@ class TestAutonomyExecute:
             "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
         )
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
-            tickets_dir=tmp_tickets, hook_injected=True,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
             hook_request_origin="agent",
             classify_intent="create",
             classify_confidence=0.95,
@@ -547,12 +619,13 @@ class TestAutonomyExecute:
 
     def test_execute_agent_auto_audit_cap_reached(self, tmp_tickets):
         import json
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         write_autonomy_config(
             tmp_tickets,
             "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 2\n---\n",
         )
-        date_dir = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_dir = tmp_tickets / ".audit" / date_dir
         audit_dir.mkdir(parents=True)
         audit_file = audit_dir / "sess.jsonl"
@@ -561,11 +634,15 @@ class TestAutonomyExecute:
             with open(audit_file, "a") as f:
                 f.write(json.dumps(entry) + "\n")
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
-            tickets_dir=tmp_tickets, hook_injected=True,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
             hook_request_origin="agent",
             classify_intent="create",
             classify_confidence=0.95,
@@ -590,11 +667,15 @@ class TestAutonomyExecute:
             "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
         )
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
-            tickets_dir=tmp_tickets, hook_injected=True,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
             hook_request_origin="agent",
             classify_intent="create",
             classify_confidence=0.95,
@@ -611,11 +692,15 @@ class TestAutonomyExecute:
             "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
         )
         resp = engine_execute(
-            action="update", ticket_id="T-20260302-01",
+            action="update",
+            ticket_id="T-20260302-01",
             fields={"priority": "high"},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
-            tickets_dir=tmp_tickets, hook_injected=True,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
             hook_request_origin="agent",
             classify_intent="update",
             classify_confidence=0.95,
@@ -632,11 +717,15 @@ class TestAutonomyExecute:
             "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
         )
         resp = engine_execute(
-            action="close", ticket_id="T-20260302-01",
+            action="close",
+            ticket_id="T-20260302-01",
             fields={"resolution": "done"},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
-            tickets_dir=tmp_tickets, hook_injected=True,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
             hook_request_origin="agent",
             classify_intent="close",
             classify_confidence=0.95,
@@ -649,6 +738,7 @@ class TestAutonomyExecute:
         """If audit trail can't be written, agent mutation is blocked (fail-closed)."""
         import os
         import sys as _sys
+
         if _sys.platform == "win32":
             pytest.skip("chmod not effective on Windows")
         write_autonomy_config(
@@ -660,11 +750,15 @@ class TestAutonomyExecute:
         try:
             os.chmod(audit_dir, 0o444)
             resp = engine_execute(
-                action="create", ticket_id=None,
+                action="create",
+                ticket_id=None,
                 fields={"title": "Test", "problem": "Problem"},
-                session_id="sess", request_origin="agent",
-                dedup_override=False, dependency_override=False,
-                tickets_dir=tmp_tickets, hook_injected=True,
+                session_id="sess",
+                request_origin="agent",
+                dedup_override=False,
+                dependency_override=False,
+                tickets_dir=tmp_tickets,
+                hook_injected=True,
                 hook_request_origin="agent",
                 classify_intent="create",
                 classify_confidence=0.95,

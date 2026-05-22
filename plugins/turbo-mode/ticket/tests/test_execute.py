@@ -1,19 +1,60 @@
 """Tests for engine_execute stage — dispatch, create, update, close, reopen, trust, validation."""
+
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pytest
-
 import scripts.ticket_engine_core as ticket_engine_core
+from scripts.ticket_dedup import (
+    dedup_fingerprint as compute_dedup_fp,
+)
+from scripts.ticket_dedup import (
+    target_fingerprint as compute_target_fp,
+)
 from scripts.ticket_engine_core import (
     AutonomyConfig,
     engine_execute,
     engine_preflight,
 )
-from scripts.ticket_dedup import dedup_fingerprint as compute_dedup_fp, target_fingerprint as compute_target_fp
 from scripts.ticket_parse import extract_fenced_yaml
+
 from tests.support.builders import expected_canonical_yaml, make_ticket, write_autonomy_config
+from tests.test_runtime_readiness import build_valid_runtime_readiness_fixture
+
+
+def test_unknown_runtime_execute_surface_does_not_use_direct_execute_bypass(
+    tmp_tickets: Path,
+) -> None:
+    (tmp_tickets.parent.parent / ".git").mkdir(exist_ok=True)
+    write_autonomy_config(
+        tmp_tickets,
+        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
+    )
+    problem = "Unknown runtime execute surfaces must not widen the provenance bypass."
+
+    response = engine_execute(
+        action="create",
+        ticket_id=None,
+        fields={"title": "Runtime surface", "problem": problem, "priority": "medium"},
+        session_id="surface-session",
+        request_origin="agent",
+        dedup_override=False,
+        dependency_override=False,
+        tickets_dir=tmp_tickets,
+        hook_injected=True,
+        hook_request_origin="user",
+        classify_intent="create",
+        classify_confidence=0.95,
+        dedup_fingerprint=compute_dedup_fp(problem, []),
+        autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
+        runtime_execute_surface=cast(ticket_engine_core.RuntimeExecuteSurface, "agent_control"),
+    )
+
+    assert response.state == "escalate"
+    assert response.error_code == "origin_mismatch"
+
 
 class TestEngineExecute:
     def test_invalid_transition_terminal_via_update(self, tmp_tickets):
@@ -61,7 +102,13 @@ class TestEngineExecute:
 
     def test_transition_to_blocked_requires_blocked_by(self, tmp_tickets):
 
-        make_ticket(tmp_tickets, "2026-03-02-test.md", id="T-20260302-01", status="open", blocked_by=[])
+        make_ticket(
+            tmp_tickets,
+            "2026-03-02-test.md",
+            id="T-20260302-01",
+            status="open",
+            blocked_by=[],
+        )
         resp = engine_execute(
             action="update",
             ticket_id="T-20260302-01",
@@ -187,7 +234,13 @@ class TestEngineExecute:
                 "approach": "Make timeout configurable.",
                 "acceptance_criteria": ["Timeout configurable", "Default remains 30s"],
                 "verification": "uv run pytest tests/test_auth.py",
-                "key_files": [{"file": "handler.py:45", "role": "Timeout", "look_for": "hardcoded"}],
+                "key_files": [
+                    {
+                        "file": "handler.py:45",
+                        "role": "Timeout",
+                        "look_for": "hardcoded",
+                    }
+                ],
             },
             session_id="test-session",
             request_origin="user",
@@ -232,13 +285,17 @@ class TestEngineExecute:
             hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp("Create should use the same serializer as mutations.", []),
+            dedup_fingerprint=compute_dedup_fp(
+                "Create should use the same serializer as mutations.",
+                [],
+            ),
         )
         assert resp.state == "ok_create"
         ticket_path = Path(resp.data["ticket_path"])
         ticket_yaml = extract_fenced_yaml(ticket_path.read_text(encoding="utf-8"))
         # Extract dynamic created_at from actual output for comparison.
         import re as _re
+
         _ca_match = _re.search(r'created_at: "([^"]+)"', ticket_yaml or "")
         _created_at = _ca_match.group(1) if _ca_match else ""
         assert _created_at, "created_at should be present in newly created tickets"
@@ -374,7 +431,10 @@ class TestEngineExecute:
             hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp("Exclusive create should retry instead of overwriting.", []),
+            dedup_fingerprint=compute_dedup_fp(
+                "Exclusive create should retry instead of overwriting.",
+                [],
+            ),
         )
 
         assert resp.state == "ok_create"
@@ -413,7 +473,10 @@ class TestEngineExecute:
             hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp("Create should fail after the exclusive-write retry budget.", []),
+            dedup_fingerprint=compute_dedup_fp(
+                "Create should fail after the exclusive-write retry budget.",
+                [],
+            ),
         )
 
         assert resp.state == "escalate"
@@ -539,7 +602,12 @@ class TestEngineExecute:
 
     def test_update_rejects_section_field_problem_and_leaves_file_unchanged(self, tmp_tickets):
 
-        ticket_path = make_ticket(tmp_tickets, "2026-03-02-test.md", id="T-20260302-01", status="open")
+        ticket_path = make_ticket(
+            tmp_tickets,
+            "2026-03-02-test.md",
+            id="T-20260302-01",
+            status="open",
+        )
         before = ticket_path.read_text(encoding="utf-8")
         resp = engine_execute(
             action="update",
@@ -563,7 +631,12 @@ class TestEngineExecute:
 
     def test_update_rejects_mixed_frontmatter_and_section_fields_atomically(self, tmp_tickets):
 
-        ticket_path = make_ticket(tmp_tickets, "2026-03-02-test.md", id="T-20260302-01", status="open")
+        ticket_path = make_ticket(
+            tmp_tickets,
+            "2026-03-02-test.md",
+            id="T-20260302-01",
+            status="open",
+        )
         before = ticket_path.read_text(encoding="utf-8")
         resp = engine_execute(
             action="update",
@@ -589,7 +662,12 @@ class TestEngineExecute:
 
     def test_update_rejects_unknown_field_and_leaves_file_unchanged(self, tmp_tickets):
 
-        ticket_path = make_ticket(tmp_tickets, "2026-03-02-test.md", id="T-20260302-01", status="open")
+        ticket_path = make_ticket(
+            tmp_tickets,
+            "2026-03-02-test.md",
+            id="T-20260302-01",
+            status="open",
+        )
         before = ticket_path.read_text(encoding="utf-8")
         resp = engine_execute(
             action="update",
@@ -613,7 +691,12 @@ class TestEngineExecute:
 
     def test_update_ignores_matching_fields_ticket_id(self, tmp_tickets):
 
-        ticket_path = make_ticket(tmp_tickets, "2026-03-02-test.md", id="T-20260302-01", status="open")
+        ticket_path = make_ticket(
+            tmp_tickets,
+            "2026-03-02-test.md",
+            id="T-20260302-01",
+            status="open",
+        )
         resp = engine_execute(
             action="update",
             ticket_id="T-20260302-01",
@@ -636,7 +719,12 @@ class TestEngineExecute:
 
     def test_update_rejects_mismatched_fields_ticket_id(self, tmp_tickets):
 
-        ticket_path = make_ticket(tmp_tickets, "2026-03-02-test.md", id="T-20260302-01", status="open")
+        ticket_path = make_ticket(
+            tmp_tickets,
+            "2026-03-02-test.md",
+            id="T-20260302-01",
+            status="open",
+        )
         before = ticket_path.read_text(encoding="utf-8")
         resp = engine_execute(
             action="update",
@@ -686,8 +774,14 @@ class TestEngineExecute:
     def test_update_preserves_full_field_order(self, tmp_tickets):
         """Verify all canonical field positions."""
 
-        make_ticket(tmp_tickets, "2026-03-02-test.md", id="T-20260302-01", status="open",
-                     priority="medium", effort="S")
+        make_ticket(
+            tmp_tickets,
+            "2026-03-02-test.md",
+            id="T-20260302-01",
+            status="open",
+            priority="medium",
+            effort="S",
+        )
         resp = engine_execute(
             action="update",
             ticket_id="T-20260302-01",
@@ -1194,11 +1288,11 @@ class TestEngineExecute:
             "# Archived ticket\n\n"
             "```yaml\n"
             "id: T-20260301-99\n"
-            "date: \"2026-03-01\"\n"
+            'date: "2026-03-01"\n'
             "status: done\n"
             "priority: medium\n"
-            "source: {type: ad-hoc, ref: \"\", session: \"test\"}\n"
-            "contract_version: \"1.0\"\n"
+            'source: {type: ad-hoc, ref: "", session: "test"}\n'
+            'contract_version: "1.0"\n'
             "```\n"
         )
         (closed_dir / "2026-03-02-test.md").write_text(archived_stub, encoding="utf-8")
@@ -1515,7 +1609,12 @@ class TestEngineExecute:
 
     def test_reopen_rejects_invalid_fields_before_write(self, tmp_tickets):
 
-        ticket_path = make_ticket(tmp_tickets, "2026-03-02-test.md", id="T-20260302-01", status="done")
+        ticket_path = make_ticket(
+            tmp_tickets,
+            "2026-03-02-test.md",
+            id="T-20260302-01",
+            status="done",
+        )
         resp = engine_execute(
             action="reopen",
             ticket_id="T-20260302-01",
@@ -1539,7 +1638,12 @@ class TestEngineExecute:
     def test_execute_stale_target_fingerprint_rejected(self, tmp_tickets):
         from scripts.ticket_dedup import target_fingerprint
 
-        ticket_path = make_ticket(tmp_tickets, "2026-03-02-test.md", id="T-20260302-01", status="open")
+        ticket_path = make_ticket(
+            tmp_tickets,
+            "2026-03-02-test.md",
+            id="T-20260302-01",
+            status="open",
+        )
         stale_fp = target_fingerprint(ticket_path)
         ticket_path.write_text(ticket_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
 
@@ -1562,17 +1666,19 @@ class TestEngineExecute:
         assert resp.error_code == "stale_plan"
 
 
-
 class TestTransportValidation:
     """Test hook_injected transport-layer validation."""
 
     def test_agent_without_hook_injected_rejected(self, tmp_tickets):
         """Agent without hook_injected → policy_blocked (transport validation)."""
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
         )
         assert resp.state == "policy_blocked"
@@ -1580,10 +1686,13 @@ class TestTransportValidation:
     def test_user_without_hook_injected_rejected(self, tmp_tickets):
         """User mutations without hook_injected → policy_blocked."""
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
         )
         assert resp.state == "policy_blocked"
@@ -1591,22 +1700,30 @@ class TestTransportValidation:
     def test_user_with_hook_injected_but_no_origin_rejected(self, tmp_tickets):
         """User with hook_injected but no hook_request_origin → policy_blocked."""
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
-            tickets_dir=tmp_tickets, hook_injected=True,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
         )
         assert resp.state == "policy_blocked"
 
     def test_user_with_full_triple_succeeds(self, tmp_tickets):
         """User mutations with full trust triple proceed normally."""
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
-            tickets_dir=tmp_tickets, hook_injected=True,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
             hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.95,
@@ -1620,10 +1737,13 @@ class TestExecuteTrustTripleEngine:
 
     def test_user_execute_without_hook_injected_rejected(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="test-session", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="test-session",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
             hook_injected=False,
             hook_request_origin="user",
@@ -1632,10 +1752,13 @@ class TestExecuteTrustTripleEngine:
 
     def test_user_execute_without_hook_request_origin_rejected(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="test-session", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="test-session",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
             hook_injected=True,
             # hook_request_origin not passed (defaults to None)
@@ -1644,10 +1767,13 @@ class TestExecuteTrustTripleEngine:
 
     def test_user_execute_with_mismatched_hook_origin_rejected(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="test-session", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="test-session",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
             hook_injected=True,
             hook_request_origin="agent",
@@ -1656,10 +1782,13 @@ class TestExecuteTrustTripleEngine:
 
     def test_user_execute_with_full_triple_succeeds(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="test-session", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="test-session",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
             hook_injected=True,
             hook_request_origin="user",
@@ -1671,22 +1800,142 @@ class TestExecuteTrustTripleEngine:
 
     def test_agent_execute_with_mismatched_hook_origin_rejected(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="test-session", request_origin="agent",
-            dedup_override=False, dependency_override=False,
+            session_id="test-session",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
             hook_injected=True,
             hook_request_origin="user",
         )
         assert resp.error_code == "origin_mismatch"
 
+    def test_agent_direct_execute_requires_runtime_readiness_when_proof_missing(
+        self,
+        tmp_tickets,
+    ):
+        write_autonomy_config(
+            tmp_tickets,
+            "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
+        )
+        problem = "Direct execute should fail closed without runtime proof."
+        resp = engine_execute(
+            action="create",
+            ticket_id=None,
+            fields={"title": "Runtime gate", "problem": problem, "priority": "medium"},
+            session_id="test-session",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
+            hook_request_origin="user",
+            classify_intent="create",
+            classify_confidence=0.95,
+            dedup_fingerprint=compute_dedup_fp(problem, []),
+            autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
+            runtime_execute_surface="direct_execute",
+        )
+        assert resp.state == "policy_blocked"
+        assert resp.error_code == "runtime_readiness_required"
+
+    def test_agent_direct_execute_project_root_oserror_returns_policy_blocked(
+        self,
+        tmp_tickets,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        write_autonomy_config(
+            tmp_tickets,
+            "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
+        )
+        problem = "Direct execute should fail closed on project-root errors."
+
+        def _raise_oserror(_tickets_dir: Path) -> Path:
+            raise OSError("symlink loop")
+
+        monkeypatch.setattr(
+            ticket_engine_core,
+            "read_autonomy_config",
+            lambda _tickets_dir: AutonomyConfig(mode="auto_audit", max_creates=5),
+        )
+        monkeypatch.setattr(ticket_engine_core, "discover_project_root", _raise_oserror)
+
+        resp = engine_execute(
+            action="create",
+            ticket_id=None,
+            fields={"title": "Runtime gate", "problem": problem, "priority": "medium"},
+            session_id="test-session",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tmp_tickets,
+            hook_injected=True,
+            hook_request_origin="user",
+            classify_intent="create",
+            classify_confidence=0.95,
+            dedup_fingerprint=compute_dedup_fp(problem, []),
+            autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
+            runtime_execute_surface="direct_execute",
+        )
+
+        assert resp.state == "policy_blocked"
+        assert resp.error_code == "policy_blocked"
+        assert "Cannot determine project root" in resp.message
+        assert "symlink loop" in resp.message
+
+    def test_agent_direct_execute_succeeds_when_runtime_proof_verifies(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        project_root, _installed_root, installed_module, proof_path = (
+            build_valid_runtime_readiness_fixture(tmp_path)
+        )
+        tickets_dir = project_root / "docs" / "tickets"
+        tickets_dir.mkdir(parents=True, exist_ok=True)
+        write_autonomy_config(
+            tickets_dir,
+            "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
+        )
+        problem = "Verified runtime proof should allow direct execute."
+        monkeypatch.setattr(
+            ticket_engine_core,
+            "verify_installed_ticket_runtime_readiness_for_execute",
+            installed_module.verify_installed_ticket_runtime_readiness_for_execute,
+            raising=False,
+        )
+        resp = engine_execute(
+            action="create",
+            ticket_id=None,
+            fields={"title": "Runtime gate", "problem": problem, "priority": "medium"},
+            session_id="test-session",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
+            tickets_dir=tickets_dir,
+            hook_injected=True,
+            hook_request_origin="user",
+            classify_intent="create",
+            classify_confidence=0.95,
+            dedup_fingerprint=compute_dedup_fp(problem, []),
+            autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
+            runtime_execute_surface="direct_execute",
+            runtime_proof_path=proof_path,
+        )
+        assert resp.state == "ok_create"
+
     def test_execute_with_empty_session_id_rejected(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
             hook_injected=True,
             hook_request_origin="user",
@@ -1696,10 +1945,13 @@ class TestExecuteTrustTripleEngine:
 
     def test_execute_with_unknown_request_origin_rejected(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "Test", "problem": "Problem"},
-            session_id="test-session", request_origin="",
-            dedup_override=False, dependency_override=False,
+            session_id="test-session",
+            request_origin="",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
             hook_injected=True,
             hook_request_origin="",
@@ -1739,7 +1991,13 @@ class TestYamlScalarEdgeCases:
     def test_empty_string_round_trip_preserved(self, tmp_tickets):
         from scripts.ticket_read import list_tickets
 
-        make_ticket(tmp_tickets, "2026-03-02-test.md", id="T-20260302-01", status="open", effort="M")
+        make_ticket(
+            tmp_tickets,
+            "2026-03-02-test.md",
+            id="T-20260302-01",
+            status="open",
+            effort="M",
+        )
         resp = engine_execute(
             action="update",
             ticket_id="T-20260302-01",
@@ -1765,24 +2023,32 @@ class TestExecuteStructuralPrerequisites:
 
     def test_missing_classify_intent_rejected(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "T", "problem": "P"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
-            hook_injected=True, hook_request_origin="user",
+            hook_injected=True,
+            hook_request_origin="user",
             # classify_intent missing
         )
         assert resp.state == "policy_blocked"
 
     def test_mismatched_classify_intent_rejected(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "T", "problem": "P"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
-            hook_injected=True, hook_request_origin="user",
+            hook_injected=True,
+            hook_request_origin="user",
             classify_intent="update",  # Doesn't match action="create"
             classify_confidence=0.95,
         )
@@ -1790,12 +2056,16 @@ class TestExecuteStructuralPrerequisites:
 
     def test_missing_classify_confidence_rejected(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "T", "problem": "P"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
-            hook_injected=True, hook_request_origin="user",
+            hook_injected=True,
+            hook_request_origin="user",
             classify_intent="create",
             # classify_confidence missing (defaults to None)
         )
@@ -1803,12 +2073,16 @@ class TestExecuteStructuralPrerequisites:
 
     def test_low_confidence_rejected(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "T", "problem": "P"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
-            hook_injected=True, hook_request_origin="user",
+            hook_injected=True,
+            hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.3,  # Below 0.5 threshold
         )
@@ -1817,12 +2091,16 @@ class TestExecuteStructuralPrerequisites:
     def test_exact_user_confidence_threshold_accepted(self, tmp_tickets):
         fp = compute_dedup_fp("P", [])
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "T", "problem": "P"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
-            hook_injected=True, hook_request_origin="user",
+            hook_injected=True,
+            hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.5,
             dedup_fingerprint=fp,
@@ -1831,12 +2109,16 @@ class TestExecuteStructuralPrerequisites:
 
     def test_missing_dedup_fingerprint_for_create_rejected(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "T", "problem": "P"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
-            hook_injected=True, hook_request_origin="user",
+            hook_injected=True,
+            hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.95,
             # dedup_fingerprint missing
@@ -1845,12 +2127,16 @@ class TestExecuteStructuralPrerequisites:
 
     def test_mismatched_dedup_fingerprint_rejected(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "T", "problem": "P"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
-            hook_injected=True, hook_request_origin="user",
+            hook_injected=True,
+            hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.95,
             dedup_fingerprint="wrong-fingerprint",
@@ -1860,12 +2146,16 @@ class TestExecuteStructuralPrerequisites:
     def test_correct_dedup_fingerprint_accepted(self, tmp_tickets):
         fp = compute_dedup_fp("P", [])
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "T", "problem": "P"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
-            hook_injected=True, hook_request_origin="user",
+            hook_injected=True,
+            hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.95,
             dedup_fingerprint=fp,
@@ -1875,12 +2165,16 @@ class TestExecuteStructuralPrerequisites:
     def test_missing_target_fingerprint_for_update_rejected(self, tmp_tickets):
         make_ticket(tmp_tickets, "2026-03-02-test.md", id="T-20260302-01", status="open")
         resp = engine_execute(
-            action="update", ticket_id="T-20260302-01",
+            action="update",
+            ticket_id="T-20260302-01",
             fields={"status": "in_progress"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
-            hook_injected=True, hook_request_origin="user",
+            hook_injected=True,
+            hook_request_origin="user",
             classify_intent="update",
             classify_confidence=0.95,
             # target_fingerprint missing (None)
@@ -1893,12 +2187,16 @@ class TestExecuteStructuralPrerequisites:
             "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
         )
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "T", "problem": "P"},
-            session_id="sess", request_origin="agent",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="agent",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
-            hook_injected=True, hook_request_origin="agent",
+            hook_injected=True,
+            hook_request_origin="agent",
             classify_intent="create",
             classify_confidence=0.95,
             dedup_fingerprint=compute_dedup_fp("P", []),
@@ -1913,13 +2211,18 @@ class TestExecuteFieldValidation:
     def test_create_invalid_priority_rejected(self, tmp_tickets):
         fp = compute_dedup_fp("Problem", [])
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "T", "problem": "Problem", "priority": "urgent"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
-            hook_injected=True, hook_request_origin="user",
-            classify_intent="create", classify_confidence=0.95,
+            hook_injected=True,
+            hook_request_origin="user",
+            classify_intent="create",
+            classify_confidence=0.95,
             dedup_fingerprint=fp,
         )
         assert resp.error_code == "need_fields"
@@ -1927,13 +2230,18 @@ class TestExecuteFieldValidation:
 
     def test_create_invalid_key_file_paths_rejected_before_fingerprint_recompute(self, tmp_tickets):
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "T", "problem": "Problem", "key_file_paths": "src/main.py"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
-            hook_injected=True, hook_request_origin="user",
-            classify_intent="create", classify_confidence=0.95,
+            hook_injected=True,
+            hook_request_origin="user",
+            classify_intent="create",
+            classify_confidence=0.95,
             dedup_fingerprint="placeholder",
         )
         assert resp.error_code == "need_fields"
@@ -1942,13 +2250,18 @@ class TestExecuteFieldValidation:
     def test_create_scalar_tags_rejected(self, tmp_tickets):
         fp = compute_dedup_fp("Problem", [])
         resp = engine_execute(
-            action="create", ticket_id=None,
+            action="create",
+            ticket_id=None,
             fields={"title": "T", "problem": "Problem", "tags": "bug"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
-            hook_injected=True, hook_request_origin="user",
-            classify_intent="create", classify_confidence=0.95,
+            hook_injected=True,
+            hook_request_origin="user",
+            classify_intent="create",
+            classify_confidence=0.95,
             dedup_fingerprint=fp,
         )
         assert resp.error_code == "need_fields"
@@ -1959,13 +2272,18 @@ class TestExecuteFieldValidation:
         tp = make_ticket(tmp_tickets, "2026-03-02-test.md", id="T-20260302-01", status="open")
         tfp = compute_target_fp(tp)
         resp = engine_execute(
-            action="update", ticket_id="T-20260302-01",
+            action="update",
+            ticket_id="T-20260302-01",
             fields={"blocked_by": "T-20260302-02"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
-            hook_injected=True, hook_request_origin="user",
-            classify_intent="update", classify_confidence=0.95,
+            hook_injected=True,
+            hook_request_origin="user",
+            classify_intent="update",
+            classify_confidence=0.95,
             target_fingerprint=tfp,
         )
         assert resp.error_code == "need_fields"
@@ -1973,16 +2291,26 @@ class TestExecuteFieldValidation:
 
     def test_close_invalid_resolution_rejected(self, tmp_tickets):
 
-        tp = make_ticket(tmp_tickets, "2026-03-02-test.md", id="T-20260302-01", status="in_progress")
+        tp = make_ticket(
+            tmp_tickets,
+            "2026-03-02-test.md",
+            id="T-20260302-01",
+            status="in_progress",
+        )
         tfp = compute_target_fp(tp)
         resp = engine_execute(
-            action="close", ticket_id="T-20260302-01",
+            action="close",
+            ticket_id="T-20260302-01",
             fields={"resolution": "cancelled"},
-            session_id="sess", request_origin="user",
-            dedup_override=False, dependency_override=False,
+            session_id="sess",
+            request_origin="user",
+            dedup_override=False,
+            dependency_override=False,
             tickets_dir=tmp_tickets,
-            hook_injected=True, hook_request_origin="user",
-            classify_intent="close", classify_confidence=0.95,
+            hook_injected=True,
+            hook_request_origin="user",
+            classify_intent="close",
+            classify_confidence=0.95,
             target_fingerprint=tfp,
         )
         assert resp.error_code == "need_fields"
@@ -1996,8 +2324,7 @@ class TestContractVersionEnforcement:
         """Update with contract_version in fields should be rejected as unknown field."""
         from scripts.ticket_engine_core import _execute_update
 
-        make_ticket(tmp_tickets, "2026-03-10-cv.md",
-                    id="T-20260310-01", title="Test ticket")
+        make_ticket(tmp_tickets, "2026-03-10-cv.md", id="T-20260310-01", title="Test ticket")
 
         resp = _execute_update(
             ticket_id="T-20260310-01",
@@ -2014,9 +2341,13 @@ class TestContractVersionEnforcement:
         from scripts.ticket_engine_core import _execute_update
         from scripts.ticket_parse import parse_ticket
 
-        make_ticket(tmp_tickets, "2026-03-10-cv-stamp.md",
-                    id="T-20260310-01", title="Test ticket",
-                    contract_version="0.8")
+        make_ticket(
+            tmp_tickets,
+            "2026-03-10-cv-stamp.md",
+            id="T-20260310-01",
+            title="Test ticket",
+            contract_version="0.8",
+        )
 
         resp = _execute_update(
             ticket_id="T-20260310-01",
@@ -2030,7 +2361,8 @@ class TestContractVersionEnforcement:
         ticket = parse_ticket(tmp_tickets / "2026-03-10-cv-stamp.md")
         assert ticket is not None
         assert ticket.frontmatter.get("contract_version") == "1.0", (
-            f"contract_version should be forced to 1.0, got {ticket.frontmatter.get('contract_version')!r}"
+            "contract_version should be forced to 1.0, "
+            f"got {ticket.frontmatter.get('contract_version')!r}"
         )
 
     def test_close_stamps_contract_version(self, tmp_tickets):
@@ -2038,9 +2370,14 @@ class TestContractVersionEnforcement:
         from scripts.ticket_engine_core import _execute_close
         from scripts.ticket_parse import parse_ticket
 
-        make_ticket(tmp_tickets, "2026-03-10-cv2.md",
-                    id="T-20260310-02", title="Test ticket",
-                    status="in_progress", contract_version="0.8")
+        make_ticket(
+            tmp_tickets,
+            "2026-03-10-cv2.md",
+            id="T-20260310-02",
+            title="Test ticket",
+            status="in_progress",
+            contract_version="0.8",
+        )
 
         resp = _execute_close(
             ticket_id="T-20260310-02",
@@ -2058,4 +2395,5 @@ class TestContractVersionEnforcement:
     def test_contract_version_not_in_update_keys(self):
         """contract_version should not be in _UPDATE_FRONTMATTER_KEYS."""
         from scripts.ticket_engine_core import _UPDATE_FRONTMATTER_KEYS
+
         assert "contract_version" not in _UPDATE_FRONTMATTER_KEYS

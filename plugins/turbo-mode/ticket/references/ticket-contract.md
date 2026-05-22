@@ -78,11 +78,15 @@ Captured Request → Problem → Next Action → Context → Prior Investigation
 
 ## 4. Engine Interface
 
+Canonical script launcher: `uv run python -B <PLUGIN_ROOT>/scripts/<script>.py ...`.
+Hook acceptance of `python3` launchers is legacy compatibility only, not the
+public contract.
+
 Common response envelope: `{state: string, ticket_id: string|null, message: string, data: object}`
 
 Exit codes: 0 (success), 1 (engine error), 2 (validation failure)
 - Error responses include `error_code` at the top level (one of the 12 defined error codes below). Success responses omit `error_code`.
-- Exit code 2 maps to `need_fields` and `invalid_transition` error codes. `parse_error` returns exit 1 (engine error) — it covers both malformed CLI payloads and corrupted stored ticket YAML.
+- Exit code 2 maps only to the `need_fields` error code. `invalid_transition` and `parse_error` return exit 1 (engine error); `parse_error` covers both malformed CLI payloads and corrupted stored ticket YAML.
 
 ### Supported Mutation Surfaces
 
@@ -98,7 +102,10 @@ When present, it is safe to show directly to a human user. The schema is:
 ```
 
 Valid codes are `stale_plan`, `trust_setup`, `retry_preview`,
-`cleanup_stale_preview`, `policy_blocked`, and `preflight_failed`.
+`cleanup_stale_preview`, `policy_blocked`, `preflight_failed`,
+`host_policy_blocked`, `deterministic_driver_unavailable`,
+`hook_contract_blocked`, `engine_gate_required`, `runtime_readiness_required`,
+`internal_error`, `proof_invalid`, and `stale_proof`.
 Low-level direct engine/debug surfaces may remain technical unless their output
 bubbles into a user-facing wrapper.
 
@@ -147,9 +154,28 @@ and non-empty `session_id`. Activation readiness does not treat
 
 ok, ok_create, ok_update, ok_close, ok_close_archived, ok_reopen, need_fields, duplicate_candidate, preflight_failed, policy_blocked, invalid_transition, dependency_blocked, not_found, escalate, merge_into_existing (reserved)
 
-### Error Codes (12)
+### Core Engine Error Codes (13)
 
-`need_fields`, `invalid_transition`, `policy_blocked`, `preflight_failed`, `stale_plan`, `duplicate_candidate`, `parse_error`, `io_error`, `not_found`, `dependency_blocked`, `intent_mismatch`, `origin_mismatch`
+`need_fields`, `invalid_transition`, `policy_blocked`, `preflight_failed`, `stale_plan`, `duplicate_candidate`, `parse_error`, `io_error`, `internal_error`, `not_found`, `dependency_blocked`, `intent_mismatch`, `origin_mismatch`
+
+### Runtime Readiness Error Codes
+
+Runtime proof verification uses a separate fail-closed code set:
+
+`proof_missing`, `proof_invalid`, `stale_proof`, `nonce_mismatch`, `invalid_scope`,
+`executing_root_mismatch`, `plugin_manifest_path_mismatch`,
+`plugin_manifest_hash_mismatch`, `hook_manifest_path_mismatch`,
+`hook_manifest_hash_mismatch`, `guard_script_path_mismatch`,
+`guard_script_hash_mismatch`, `inventory_transcript_hash_mismatch`,
+`hook_transcript_hash_mismatch`, `post_activation_transcript_hash_mismatch`,
+`payload_hash_mismatch`, `engine_stdout_hash_mismatch`, `raw_evidence_missing`.
+
+### Activation Driver Error Codes
+
+Runtime activation driver failures use:
+
+`host_policy_blocked`, `deterministic_driver_unavailable`, `hook_contract_blocked`,
+`engine_gate_required`, `runtime_readiness_required`.
 
 ## 5. Autonomy Model
 
@@ -168,12 +194,12 @@ Hook candidate detection: the guard tokenizes Bash commands with `shlex` and tre
 
 Execute provenance: execute requires verified hook provenance
 (`hook_injected=True`, recorded `hook_request_origin`, non-empty session_id) for
-all mutations, both user and agent. Current runner/core behavior still keeps the
-entrypoint lane and hook metadata internally consistent for writes; activation
-readiness does not elevate that equality check into a security-grade identity
-claim. Non-execute stages (classify, plan, preflight) remain directly runnable
-without hook metadata. Agent preflight requires session_id for accurate
-create-cap simulation but does not require hook_injected.
+all mutations, both user and agent. For the certified direct-execute lane,
+`hook_request_origin` remains provenance metadata and the current host may still
+report `"user"` even when `ticket_engine_agent.py execute` selected the agent
+policy lane. Non-execute stages (classify, plan, preflight) remain directly
+runnable without hook metadata. Agent preflight requires session_id for
+accurate create-cap simulation but does not require hook_injected.
 
 Execute prerequisites: execute requires prior-stage artifacts:
 - classify_intent (must match action)
@@ -186,15 +212,18 @@ Stage-specific missing-confidence behavior: preflight entrypoints coerce absent 
 
 Agent execute re-reads live `.codex/ticket.local.md` policy and blocks if it diverges from the preflight snapshot.
 
-Current direct-execute `auto_audit` behavior remains governed by the existing
-guarded provenance/trust model: hook-injected payload fields, non-empty
-`session_id`, live autonomy config re-read, and the current engine trust
-checks. The activation-readiness lane is defined as installed hook-mediated
-mutation wiring, not caller identity: live app-server inventory, bound hook
-membrane proof, AgentControl child traversal through the same installed hook,
-and evidence-backed revalidation of the persisted proof index. Because current
-Codex does not expose spawned-agent identity in `PreToolUse`, agent identity is
-not a readiness prerequisite unless the hook contract changes.
+Activation V1 certifies only `ticket_engine_agent.py execute`. Activation V1
+proves installed hook-mediated direct-execute wiring, not host-owned or
+spawned-agent identity. `hook_request_origin` is hook-observed provenance
+metadata on the current host and may still be reported as `"user"` for the
+certified direct-execute lane. `capture`, `update`, and `ticket_workflow.py`
+remain outside the activation proof scope alongside `ingest_dispatch` and
+`activation_smoke_bootstrap`, and require a separate follow-up before widening
+certification. Privileged host diagnostic runs and prompt-driven smokes are
+diagnostics only. AgentControl child smoke, when captured, is same-membrane
+corroboration only and not identity proof. Normal agent direct execute fails
+with `runtime_readiness_required` when the runtime proof is missing, stale, or
+mismatched.
 
 Field validation: title, problem, reopen_reason, captured_request, next_action, capture_source, and component must be strings when present. priority, status, resolution, capture_confidence, and refinement_status are validated against contract enums before writes. key_file_paths, related_paths, tags, blocked_by, blocks, and acceptance_criteria must be lists of strings. source must be a dict with string values. key_files must be a list of dicts. defer must be a dict. Invalid inputs are rejected (need_fields), not silently coerced.
 

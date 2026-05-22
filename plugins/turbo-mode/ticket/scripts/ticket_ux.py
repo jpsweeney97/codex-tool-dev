@@ -29,6 +29,28 @@ STATE_LABELS = {
     "dependency_override": "Ignore blockers for this operation",
 }
 
+_RUNTIME_PROOF_MISSING_HINT = {
+    "summary": "The Ticket runtime proof is missing.",
+    "next_step": "Rerun the explicit activate-runtime flow before retrying direct execute.",
+}
+
+_RUNTIME_PROOF_SCOPE_HINT = {
+    "summary": "The Ticket runtime proof does not match the expected activation scope.",
+    "next_step": "Rerun the explicit activate-runtime flow before retrying direct execute.",
+}
+
+_RUNTIME_IDENTITY_HINT = {
+    "summary": "The installed Ticket runtime has changed since activation.",
+    "next_step": (
+        "Refresh the installed Ticket runtime or rerun activate-runtime before retrying."
+    ),
+}
+
+_RUNTIME_EVIDENCE_HINT = {
+    "summary": "Ticket runtime activation evidence no longer matches the saved proof.",
+    "next_step": "Rerun the explicit activate-runtime flow to capture fresh evidence.",
+}
+
 RECOVERY_HINTS: dict[str, dict[str, str]] = {
     "stale_plan": {
         "summary": "The saved preview is no longer current.",
@@ -57,6 +79,62 @@ RECOVERY_HINTS: dict[str, dict[str, str]] = {
         "summary": "Ticket checks did not pass.",
         "next_step": "Review the preview or check details, update the request, then rerun preview.",
     },
+    "internal_error": {
+        "summary": "Ticket hit an unexpected internal error.",
+        "next_step": "Stop without writing and report the error details for repair.",
+    },
+    "host_policy_blocked": {
+        "summary": "The host refused the contained Ticket runtime activation turn.",
+        "next_step": "Retry activation on a host that allows the pinned workspaceWrite policy.",
+    },
+    "deterministic_driver_unavailable": {
+        "summary": "Ticket could not capture a deterministic runtime activation transcript.",
+        "next_step": "Repair the app-server command-driving path before retrying activation.",
+    },
+    "hook_contract_blocked": {
+        "summary": "The installed Ticket hook contract is still blocking runtime activation.",
+        "next_step": "Refresh or repair the installed Ticket runtime before retrying activation.",
+    },
+    "engine_gate_required": {
+        "summary": (
+            "Ticket runtime activation cannot finish until the direct-execute "
+            "engine gate is present."
+        ),
+        "next_step": (
+            "Update to a build with the direct-execute runtime gate, then rerun activation."
+        ),
+    },
+    "runtime_readiness_required": {
+        "summary": "Ticket runtime activation is required before this direct execute can continue.",
+        "next_step": (
+            "Run the explicit activate-runtime flow or refresh the installed Ticket runtime "
+            "before retrying."
+        ),
+    },
+    "proof_missing": _RUNTIME_PROOF_MISSING_HINT,
+    "proof_invalid": {
+        "summary": "The Ticket runtime proof is invalid or incomplete.",
+        "next_step": "Rerun the explicit activate-runtime flow to rebuild the runtime proof.",
+    },
+    "stale_proof": {
+        "summary": "The Ticket runtime proof has expired.",
+        "next_step": "Rerun the explicit activate-runtime flow before retrying direct execute.",
+    },
+    "nonce_mismatch": _RUNTIME_PROOF_SCOPE_HINT,
+    "invalid_scope": _RUNTIME_PROOF_SCOPE_HINT,
+    "executing_root_mismatch": _RUNTIME_IDENTITY_HINT,
+    "plugin_manifest_path_mismatch": _RUNTIME_IDENTITY_HINT,
+    "plugin_manifest_hash_mismatch": _RUNTIME_IDENTITY_HINT,
+    "hook_manifest_path_mismatch": _RUNTIME_IDENTITY_HINT,
+    "hook_manifest_hash_mismatch": _RUNTIME_IDENTITY_HINT,
+    "guard_script_path_mismatch": _RUNTIME_IDENTITY_HINT,
+    "guard_script_hash_mismatch": _RUNTIME_IDENTITY_HINT,
+    "raw_evidence_missing": _RUNTIME_EVIDENCE_HINT,
+    "inventory_transcript_hash_mismatch": _RUNTIME_EVIDENCE_HINT,
+    "hook_transcript_hash_mismatch": _RUNTIME_EVIDENCE_HINT,
+    "post_activation_transcript_hash_mismatch": _RUNTIME_EVIDENCE_HINT,
+    "payload_hash_mismatch": _RUNTIME_EVIDENCE_HINT,
+    "engine_stdout_hash_mismatch": _RUNTIME_EVIDENCE_HINT,
 }
 
 INTERNAL_RECOVERY_TERMS = (
@@ -76,6 +154,7 @@ INTERNAL_RECOVERY_TERMS = (
     "PAYLOAD_PATH",
     "canonical command",
     "python3 -B",
+    "uv run python -B",
 )
 
 INTERNAL_RECOVERY_PATH_PATTERNS = (
@@ -121,6 +200,18 @@ def recovery_hint_code_for_response(response: dict[str, Any]) -> str | None:
         return "retry_preview"
     if response.get("error_code") == "origin_mismatch":
         return "trust_setup"
+    if response.get("error_code") == "internal_error":
+        return "internal_error"
+    if response.get("error_code") == "host_policy_blocked":
+        return "host_policy_blocked"
+    if response.get("error_code") == "deterministic_driver_unavailable":
+        return "deterministic_driver_unavailable"
+    if response.get("error_code") == "hook_contract_blocked":
+        return "hook_contract_blocked"
+    if response.get("error_code") == "engine_gate_required":
+        return "engine_gate_required"
+    if response.get("error_code") == "runtime_readiness_required":
+        return "runtime_readiness_required"
     if response.get("state") == "policy_blocked":
         return "policy_blocked"
     if response.get("state") == "preflight_failed":

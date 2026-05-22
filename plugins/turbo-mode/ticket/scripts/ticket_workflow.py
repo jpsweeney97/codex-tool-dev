@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """High-level ticket workflow runner for prepare, execute, and recover."""
+
 from __future__ import annotations
 
 import json
@@ -13,30 +14,34 @@ from typing import Any
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.ticket_engine_core import _evaluate_workflow_policy
-from scripts.ticket_engine_runner import dispatch_stage, load_runner_context
-from scripts.ticket_read import find_ticket_by_id
-from scripts.ticket_ux import humanize_state, ticket_identity
-from scripts.ticket_validate import validate_fields
+from scripts.ticket_engine_core import _evaluate_workflow_policy  # noqa: E402
+from scripts.ticket_engine_runner import dispatch_stage, load_runner_context  # noqa: E402
+from scripts.ticket_read import find_ticket_by_id  # noqa: E402
+from scripts.ticket_ux import humanize_state, ticket_identity  # noqa: E402
+from scripts.ticket_validate import validate_fields  # noqa: E402
 
-_POLICY_OWNED_FIELDS = frozenset({
-    "archive",
-    "audit",
-    "closed_at",
-    "contract_version",
-    "created_at",
-    "defer",
-    "id",
-    "source",
-})
-_COMMANDABLE_FIELDS = frozenset({
-    "priority",
-    "tags",
-    "blocked_by",
-    "blocks",
-    "effort",
-    "reopen_reason",
-})
+_POLICY_OWNED_FIELDS = frozenset(
+    {
+        "archive",
+        "audit",
+        "closed_at",
+        "contract_version",
+        "created_at",
+        "defer",
+        "id",
+        "source",
+    }
+)
+_COMMANDABLE_FIELDS = frozenset(
+    {
+        "priority",
+        "tags",
+        "blocked_by",
+        "blocks",
+        "effort",
+        "reopen_reason",
+    }
+)
 _CREATE_NEED_FIELDS = ("title", "problem", "priority")
 _UPDATE_NEED_FIELDS = ("priority", "tags", "blocked_by", "blocks", "effort")
 _RECOVERABLE_SET_FIELDS = frozenset((*_COMMANDABLE_FIELDS, *_CREATE_NEED_FIELDS))
@@ -94,14 +99,18 @@ def _canonical_workflow_command(subcommand: str, payload_path: Path, *extra: str
     payload_str = str(payload_path)
     if any(char.isspace() for char in payload_str):
         return None
-    return shlex.join([
-        "python3",
-        "-B",
-        str(Path(__file__).resolve()),
-        subcommand,
-        payload_str,
-        *extra,
-    ])
+    return shlex.join(
+        [
+            "uv",
+            "run",
+            "python",
+            "-B",
+            str(Path(__file__).resolve()),
+            subcommand,
+            payload_str,
+            *extra,
+        ]
+    )
 
 
 def _merge_stage_data(payload: dict[str, Any], response: dict[str, Any]) -> None:
@@ -156,12 +165,24 @@ def _risk_flags(response: dict[str, Any]) -> list[str]:
     flags: list[str] = []
     state = response.get("state")
     error_code = response.get("error_code")
-    if isinstance(state, str) and state not in {"ok", "ready_to_execute", "ok_create", "ok_update", "ok_close", "ok_close_archived", "ok_reopen"}:
+    if isinstance(state, str) and state not in {
+        "ok",
+        "ready_to_execute",
+        "ok_create",
+        "ok_update",
+        "ok_close",
+        "ok_close_archived",
+        "ok_reopen",
+    }:
         flags.append(state)
     if isinstance(error_code, str) and error_code not in flags:
         flags.append(error_code)
     precondition_code = response.get("data", {}).get("precondition_code")
-    if isinstance(precondition_code, str) and precondition_code != "none" and precondition_code not in flags:
+    if (
+        isinstance(precondition_code, str)
+        and precondition_code != "none"
+        and precondition_code not in flags
+    ):
         flags.append(precondition_code)
     return flags
 
@@ -217,10 +238,7 @@ def _fields_from_validation_errors(validation_errors: Any) -> set[str]:
 
 
 def _need_fields_recovery_fields(action: str, data: dict[str, Any]) -> list[str]:
-    missing_fields = {
-        field for field in data.get("missing_fields", [])
-        if isinstance(field, str)
-    }
+    missing_fields = {field for field in data.get("missing_fields", []) if isinstance(field, str)}
     candidate_fields = missing_fields | _fields_from_validation_errors(
         data.get("validation_errors", [])
     )
@@ -228,7 +246,9 @@ def _need_fields_recovery_fields(action: str, data: dict[str, Any]) -> list[str]
         candidates = candidate_fields or set(_CREATE_NEED_FIELDS)
         return [field for field in _CREATE_NEED_FIELDS if field in candidates]
     if action == "reopen":
-        return ["reopen_reason"] if not candidate_fields or "reopen_reason" in candidate_fields else []
+        return (
+            ["reopen_reason"] if not candidate_fields or "reopen_reason" in candidate_fields else []
+        )
     if not candidate_fields:
         return []
     return [field for field in _UPDATE_NEED_FIELDS if field in candidate_fields]
@@ -263,54 +283,76 @@ def _with_recovery(
         allowed.append({"action": "create_anyway"})
         recover_command = _canonical_workflow_command("recover", payload_path, "create_anyway")
         if recover_command is not None:
-            options.append({
-                "label": "Create anyway",
-                "recover_command": recover_command,
-            })
-        options.append({
-            "label": "Update existing",
-            "suggested_ticket_command": f"ticket update {duplicate_of}",
-        })
+            options.append(
+                {
+                    "label": "Create anyway",
+                    "recover_command": recover_command,
+                }
+            )
+        options.append(
+            {
+                "label": "Update existing",
+                "suggested_ticket_command": f"ticket update {duplicate_of}",
+            }
+        )
     elif state == "dependency_blocked" and action == "close" and isinstance(ticket_id, str):
         allowed.append({"action": "close_wontfix"})
         recover_command = _canonical_workflow_command("recover", payload_path, "close_wontfix")
         if recover_command is not None:
-            options.append({
-                "label": "Close as wontfix",
-                "recover_command": recover_command,
-            })
-        options.append({
-            "label": "Resolve blockers",
-            "suggested_ticket_command": f"ticket check {ticket_id}",
-        })
+            options.append(
+                {
+                    "label": "Close as wontfix",
+                    "recover_command": recover_command,
+                }
+            )
+        options.append(
+            {
+                "label": "Resolve blockers",
+                "suggested_ticket_command": f"ticket check {ticket_id}",
+            }
+        )
     elif state == "invalid_transition":
         if data.get("requires_reopen") and isinstance(ticket_id, str):
-            options.append({
-                "label": "Reopen ticket",
-                "suggested_ticket_command": f"ticket reopen {ticket_id}",
-            })
+            options.append(
+                {
+                    "label": "Reopen ticket",
+                    "suggested_ticket_command": f"ticket reopen {ticket_id}",
+                }
+            )
         else:
             for status in data.get("valid_recovery_statuses", []):
                 allowed.append({"action": "set_status", "status": status})
-                recover_command = _canonical_workflow_command("recover", payload_path, "set_status", status)
+                recover_command = _canonical_workflow_command(
+                    "recover", payload_path, "set_status", status
+                )
                 if recover_command is not None:
-                    options.append({
-                        "label": f"Set status to {status}",
-                        "recover_command": recover_command,
-                    })
-            if data.get("precondition_code") == "missing_acceptance_criteria" and isinstance(ticket_id, str):
+                    options.append(
+                        {
+                            "label": f"Set status to {status}",
+                            "recover_command": recover_command,
+                        }
+                    )
+            if data.get("precondition_code") == "missing_acceptance_criteria" and isinstance(
+                ticket_id, str
+            ):
                 if action == "close":
                     allowed.append({"action": "close_wontfix"})
-                    recover_command = _canonical_workflow_command("recover", payload_path, "close_wontfix")
+                    recover_command = _canonical_workflow_command(
+                        "recover", payload_path, "close_wontfix"
+                    )
                     if recover_command is not None:
-                        options.append({
-                            "label": "Close as wontfix",
-                            "recover_command": recover_command,
-                        })
-                options.append({
-                    "label": "Update ticket details",
-                    "suggested_ticket_command": f"ticket update {ticket_id}",
-                })
+                        options.append(
+                            {
+                                "label": "Close as wontfix",
+                                "recover_command": recover_command,
+                            }
+                        )
+                options.append(
+                    {
+                        "label": "Update ticket details",
+                        "suggested_ticket_command": f"ticket update {ticket_id}",
+                    }
+                )
     elif state == "need_fields":
         for field in _need_fields_recovery_fields(action, data):
             allowed.append({"action": "set_field", "field": field})
@@ -322,31 +364,50 @@ def _with_recovery(
                 _placeholder_json_value(field),
             )
             if recover_command is not None:
-                options.append({
-                    "label": f"Set {field}",
-                    "recover_command": recover_command,
-                })
+                options.append(
+                    {
+                        "label": f"Set {field}",
+                        "recover_command": recover_command,
+                    }
+                )
         if not options and isinstance(ticket_id, str):
-            options.append({
-                "label": "Update ticket details",
-                "suggested_ticket_command": f"ticket update {ticket_id}",
-            })
+            options.append(
+                {
+                    "label": "Update ticket details",
+                    "suggested_ticket_command": f"ticket update {ticket_id}",
+                }
+            )
     elif state == "stale_plan" or error_code == "stale_plan":
         rerun = _canonical_workflow_command("prepare", payload_path)
         if rerun is not None:
-            options.append({
-                "label": "Rerun prepare",
-                "recover_command": rerun,
-            })
+            options.append(
+                {
+                    "label": "Rerun prepare",
+                    "recover_command": rerun,
+                }
+            )
 
     if options:
         data["recovery_options"] = options
     authority_state = (
         error_code
-        if error_code in {"need_fields", "duplicate_candidate", "invalid_transition", "dependency_blocked", "stale_plan"}
+        if error_code
+        in {
+            "need_fields",
+            "duplicate_candidate",
+            "invalid_transition",
+            "dependency_blocked",
+            "stale_plan",
+        }
         else state
     )
-    if authority_state in {"need_fields", "duplicate_candidate", "invalid_transition", "dependency_blocked", "stale_plan"}:
+    if authority_state in {
+        "need_fields",
+        "duplicate_candidate",
+        "invalid_transition",
+        "dependency_blocked",
+        "stale_plan",
+    }:
         payload["workflow_recovery"] = {
             "state": authority_state,
             "stage": stage,
@@ -357,12 +418,20 @@ def _with_recovery(
             "dedup_fingerprint": payload.get("dedup_fingerprint"),
             "duplicate_of": payload.get("duplicate_of"),
             "session_id": payload.get("session_id"),
-            "request_origin": payload.get("hook_request_origin", payload.get("request_origin", "user")),
-            "missing_fields": list(data.get("missing_fields", [])) if isinstance(data.get("missing_fields"), list) else [],
-            "validation_errors": list(data.get("validation_errors", [])) if isinstance(data.get("validation_errors"), list) else [],
+            "request_origin": payload.get(
+                "hook_request_origin", payload.get("request_origin", "user")
+            ),
+            "missing_fields": list(data.get("missing_fields", []))
+            if isinstance(data.get("missing_fields"), list)
+            else [],
+            "validation_errors": list(data.get("validation_errors", []))
+            if isinstance(data.get("validation_errors"), list)
+            else [],
             "current_status": data.get("current_status"),
             "requested_status": data.get("requested_status"),
-            "valid_recovery_statuses": list(data.get("valid_recovery_statuses", [])) if isinstance(data.get("valid_recovery_statuses"), list) else [],
+            "valid_recovery_statuses": list(data.get("valid_recovery_statuses", []))
+            if isinstance(data.get("valid_recovery_statuses"), list)
+            else [],
             "requires_reopen": bool(data.get("requires_reopen", False)),
             "precondition_code": data.get("precondition_code", "none"),
             "precondition_detail": data.get("precondition_detail"),
@@ -371,7 +440,9 @@ def _with_recovery(
     return response
 
 
-def _prepare(payload_path: Path, payload: dict[str, Any], tickets_dir: Path, request_origin: str) -> dict[str, Any]:
+def _prepare(
+    payload_path: Path, payload: dict[str, Any], tickets_dir: Path, request_origin: str
+) -> dict[str, Any]:
     current = payload
     for subcommand in ("classify", "plan", "preflight"):
         response = _engine_response_to_dict(
@@ -430,13 +501,19 @@ def _prepare(payload_path: Path, payload: dict[str, Any], tickets_dir: Path, req
     response = _response(
         "ready_to_execute",
         f"Ready to execute {action}",
-        data={"preview": _preview(payload_path, current, _response("ready_to_execute", ""), ready=True)},
+        data={
+            "preview": _preview(
+                payload_path, current, _response("ready_to_execute", ""), ready=True
+            )
+        },
         ticket_id=current.get("ticket_id") if isinstance(current.get("ticket_id"), str) else None,
     )
     return response
 
 
-def _load_workflow_payload(payload_path: Path) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def _load_workflow_payload(
+    payload_path: Path,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     context, error = load_runner_context(None, "prepare", payload_path)
     if error is not None:
         return None, _engine_response_to_dict(error)
@@ -449,7 +526,9 @@ def _load_workflow_payload(payload_path: Path) -> tuple[dict[str, Any] | None, d
     }, None
 
 
-def _validate_recovery_authority(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+def _validate_recovery_authority(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str | None]:
     authority = payload.get("workflow_recovery")
     if not isinstance(authority, dict):
         return None, "workflow recovery failed: missing workflow_recovery authority"
@@ -507,7 +586,10 @@ def _derived_recovery_allowlist(authority: dict[str, Any]) -> list[dict[str, Any
                 for status in statuses:
                     if isinstance(status, str) and status:
                         allowed.append({"action": "set_status", "status": status})
-        elif action == "close" and authority.get("precondition_code") == "missing_acceptance_criteria":
+        elif (
+            action == "close"
+            and authority.get("precondition_code") == "missing_acceptance_criteria"
+        ):
             allowed.append({"action": "close_wontfix"})
         return allowed
 
@@ -542,6 +624,18 @@ def run_recovery(
     value: str | None = None,
     status: str | None = None,
 ) -> dict[str, Any]:
+    """Apply an authorized workflow recovery mutation to a saved payload.
+
+    Args:
+        payload_path: Saved workflow payload to recover.
+        recovery_action: Recovery action name from the workflow authority block.
+        field: Optional field name for `set_field`.
+        value: Optional JSON-encoded value for `set_field`.
+        status: Optional status value for `set_status`.
+
+    Returns:
+        A workflow response dict describing the recovery outcome.
+    """
     try:
         payload = json.loads(payload_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
@@ -559,16 +653,24 @@ def run_recovery(
 
     authority, authority_error = _validate_recovery_authority(payload)
     if authority_error is not None or authority is None:
-        return _response("escalate", authority_error or "workflow recovery failed", error_code="policy_blocked")
+        return _response(
+            "escalate", authority_error or "workflow recovery failed", error_code="policy_blocked"
+        )
 
     allowed = authority.get("allowed")
     if not isinstance(allowed, list):
-        return _response("escalate", "workflow recovery failed: malformed workflow_recovery allowed list", error_code="policy_blocked")
+        return _response(
+            "escalate",
+            "workflow recovery failed: malformed workflow_recovery allowed list",
+            error_code="policy_blocked",
+        )
     derived_allowed = _derived_recovery_allowlist(authority)
 
     fields = payload.get("fields")
     if not isinstance(fields, dict):
-        return _response("escalate", "workflow recovery failed: fields must be a dict", error_code="parse_error")
+        return _response(
+            "escalate", "workflow recovery failed: fields must be a dict", error_code="parse_error"
+        )
 
     def _is_allowed(entries: list[Any], action_name: str, **criteria: Any) -> bool:
         for item in entries:
@@ -588,9 +690,13 @@ def run_recovery(
                 error_code="policy_blocked",
             )
         if not _is_allowed(derived_allowed, action_name, **criteria):
+            message = (
+                f"workflow recovery failed: {action_name} is not allowed for "
+                "current recovery state"
+            )
             return _response(
                 "escalate",
-                f"workflow recovery failed: {action_name} is not allowed for current recovery state",
+                message,
                 error_code="policy_blocked",
             )
         return None
@@ -609,7 +715,11 @@ def run_recovery(
         if authorization_error is not None:
             return authorization_error
         if not payload.get("duplicate_of"):
-            return _response("escalate", "workflow recovery failed: duplicate_of is required", error_code="policy_blocked")
+            return _response(
+                "escalate",
+                "workflow recovery failed: duplicate_of is required",
+                error_code="policy_blocked",
+            )
         new_payload["dedup_override"] = True
         new_payload.pop("workflow_recovery", None)
     elif recovery_action == "close_wontfix":
@@ -620,7 +730,9 @@ def run_recovery(
         new_payload.pop("workflow_recovery", None)
     elif recovery_action == "set_status":
         if not isinstance(status, str) or not status:
-            return _response("escalate", "workflow recovery failed: status is required", error_code="parse_error")
+            return _response(
+                "escalate", "workflow recovery failed: status is required", error_code="parse_error"
+            )
         authorization_error = _authorize("set_status", status=status)
         if authorization_error is not None:
             return authorization_error
@@ -628,20 +740,34 @@ def run_recovery(
         new_payload.pop("workflow_recovery", None)
     elif recovery_action == "set_field":
         if not isinstance(field, str) or not field:
-            return _response("escalate", "workflow recovery failed: field is required", error_code="parse_error")
+            return _response(
+                "escalate", "workflow recovery failed: field is required", error_code="parse_error"
+            )
         if field in _POLICY_OWNED_FIELDS or field not in _RECOVERABLE_SET_FIELDS:
-            return _response("escalate", f"workflow recovery failed: set_field is not allowed for {field}", error_code="policy_blocked")
+            return _response(
+                "escalate",
+                f"workflow recovery failed: set_field is not allowed for {field}",
+                error_code="policy_blocked",
+            )
         authorization_error = _authorize("set_field", field=field)
         if authorization_error is not None:
             return authorization_error
         try:
             decoded = json.loads(value or "")
         except json.JSONDecodeError as exc:
-            return _response("escalate", f"workflow recovery failed: invalid JSON value: {exc}", error_code="parse_error")
+            return _response(
+                "escalate",
+                f"workflow recovery failed: invalid JSON value: {exc}",
+                error_code="parse_error",
+            )
         new_fields[field] = decoded
         new_payload.pop("workflow_recovery", None)
     else:
-        return _response("escalate", f"workflow recovery failed: unsupported action {recovery_action!r}", error_code="intent_mismatch")
+        return _response(
+            "escalate",
+            f"workflow recovery failed: unsupported action {recovery_action!r}",
+            error_code="intent_mismatch",
+        )
 
     validation_errors = validate_fields(new_fields)
     if validation_errors:
@@ -669,6 +795,20 @@ def run_workflow(
     value: str | None = None,
     status: str | None = None,
 ) -> dict[str, Any]:
+    """Run the legacy workflow wrapper for prepare, execute, or recover.
+
+    Args:
+        subcommand: Workflow subcommand to run.
+        payload_path: Saved workflow payload path.
+        request_origin: Optional caller identity override for engine context loading.
+        recovery_action: Optional recovery action when `subcommand == "recover"`.
+        field: Optional field name for `set_field` recovery.
+        value: Optional JSON-encoded value for `set_field` recovery.
+        status: Optional status value for `set_status` recovery.
+
+    Returns:
+        A workflow response dict representing the selected workflow operation.
+    """
     if subcommand == "recover":
         if recovery_action is None:
             return _response(
@@ -690,7 +830,9 @@ def run_workflow(
         response = _engine_response_to_dict(
             dispatch_stage("execute", context.payload, context.tickets_dir, context.request_origin)
         )
-        if response.get("state") != "ok_create" and not str(response.get("state", "")).startswith("ok_"):
+        if response.get("state") != "ok_create" and not str(response.get("state", "")).startswith(
+            "ok_"
+        ):
             response = _with_recovery(payload_path, context.payload, response, stage="execute")
             _write_payload_atomic(payload_path, context.payload)
             return response
@@ -703,17 +845,34 @@ def run_workflow(
 
 
 def _exit_code(state: str) -> int:
-    if state in {"ok", "ready_to_execute", "ok_create", "ok_update", "ok_close", "ok_close_archived", "ok_reopen"}:
+    if state in {
+        "ok",
+        "ready_to_execute",
+        "ok_create",
+        "ok_update",
+        "ok_close",
+        "ok_close_archived",
+        "ok_reopen",
+    }:
         return 0
     if state == "need_fields":
         return 2
     return 1
 
 
-def main(argv: list[str] | None = None) -> int:
+def _run_main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) < 2:
-        print(json.dumps({"error": "Usage: ticket_workflow.py prepare|execute|recover <payload_file> [args...]"}))
+        print(
+            json.dumps(
+                {
+                    "error": (
+                        "Usage: ticket_workflow.py prepare|execute|recover "
+                        "<payload_file> [args...]"
+                    )
+                }
+            )
+        )
         return 1
 
     subcommand = args[0]
@@ -736,34 +895,52 @@ def main(argv: list[str] | None = None) -> int:
             kwargs: dict[str, Any] = {}
             if recovery_action == "set_field":
                 if len(args) != 5:
+                    message = (
+                        f"Recovery action '{recovery_action}' expects 2 argument(s), "
+                        f"got {len(args) - 3}"
+                    )
                     response = _response(
                         "escalate",
-                        f"Recovery action '{recovery_action}' expects 2 argument(s), got {len(args) - 3}",
+                        message,
                         error_code="intent_mismatch",
                     )
                 else:
                     kwargs["field"] = args[3]
                     kwargs["value"] = args[4]
-                    response = run_workflow(subcommand, payload_path, recovery_action=recovery_action, **kwargs)
+                    response = run_workflow(
+                        subcommand, payload_path, recovery_action=recovery_action, **kwargs
+                    )
             elif recovery_action == "set_status":
                 if len(args) != 4:
+                    message = (
+                        f"Recovery action '{recovery_action}' expects 1 argument(s), "
+                        f"got {len(args) - 3}"
+                    )
                     response = _response(
                         "escalate",
-                        f"Recovery action '{recovery_action}' expects 1 argument(s), got {len(args) - 3}",
+                        message,
                         error_code="intent_mismatch",
                     )
                 else:
                     kwargs["status"] = args[3]
-                    response = run_workflow(subcommand, payload_path, recovery_action=recovery_action, **kwargs)
+                    response = run_workflow(
+                        subcommand, payload_path, recovery_action=recovery_action, **kwargs
+                    )
             else:
                 if len(args) != 3:
+                    message = (
+                        f"Recovery action '{recovery_action}' expects 0 argument(s), "
+                        f"got {len(args) - 3}"
+                    )
                     response = _response(
                         "escalate",
-                        f"Recovery action '{recovery_action}' expects 0 argument(s), got {len(args) - 3}",
+                        message,
                         error_code="intent_mismatch",
                     )
                 else:
-                    response = run_workflow(subcommand, payload_path, recovery_action=recovery_action)
+                    response = run_workflow(
+                        subcommand, payload_path, recovery_action=recovery_action
+                    )
     else:
         response = _response(
             "escalate",
@@ -773,6 +950,33 @@ def main(argv: list[str] | None = None) -> int:
 
     print(json.dumps(response))
     return _exit_code(str(response.get("state", "")))
+
+
+def main(argv: list[str] | None = None) -> int:
+    try:
+        return _run_main(argv)
+    except OSError as exc:
+        print(
+            json.dumps(
+                _response(
+                    "escalate",
+                    f"ticket workflow failed: {type(exc).__name__}: {exc}",
+                    error_code="io_error",
+                )
+            )
+        )
+        return 1
+    except Exception as exc:
+        print(
+            json.dumps(
+                _response(
+                    "escalate",
+                    f"ticket workflow failed: {type(exc).__name__}: {exc}",
+                    error_code="internal_error",
+                )
+            )
+        )
+        return 1
 
 
 if __name__ == "__main__":

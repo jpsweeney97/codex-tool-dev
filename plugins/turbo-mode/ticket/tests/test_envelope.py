@@ -1,4 +1,5 @@
 """Tests for DeferredWorkEnvelope schema, validation, and ingestion."""
+
 from __future__ import annotations
 
 import json
@@ -25,34 +26,39 @@ class TestEnvelopeValidation:
 
     def test_valid_minimal_envelope(self) -> None:
         from scripts.ticket_envelope import validate_envelope
+
         errors = validate_envelope(_valid_envelope())
         assert errors == []
 
     def test_valid_full_envelope(self) -> None:
         from scripts.ticket_envelope import validate_envelope
+
         envelope = _valid_envelope()
-        envelope.update({
-            "context": "Found during API refactor.",
-            "prior_investigation": "Checked handler.py:45.",
-            "approach": "Increase timeout to 30s.",
-            "acceptance_criteria": ["Payloads >10MB succeed"],
-            "verification": "pytest tests/test_auth.py -v",
-            "key_files": [
-                {
-                    "file": "handler.py:45",
-                    "role": "Timeout logic",
-                    "look_for": "timeout constant",
-                }
-            ],
-            "key_file_paths": ["handler.py"],
-            "suggested_priority": "high",
-            "suggested_tags": ["auth", "api"],
-        })
+        envelope.update(
+            {
+                "context": "Found during API refactor.",
+                "prior_investigation": "Checked handler.py:45.",
+                "approach": "Increase timeout to 30s.",
+                "acceptance_criteria": ["Payloads >10MB succeed"],
+                "verification": "pytest tests/test_auth.py -v",
+                "key_files": [
+                    {
+                        "file": "handler.py:45",
+                        "role": "Timeout logic",
+                        "look_for": "timeout constant",
+                    }
+                ],
+                "key_file_paths": ["handler.py"],
+                "suggested_priority": "high",
+                "suggested_tags": ["auth", "api"],
+            }
+        )
         errors = validate_envelope(envelope)
         assert errors == []
 
     def test_missing_required_field_title(self) -> None:
         from scripts.ticket_envelope import validate_envelope
+
         env = _valid_envelope()
         del env["title"]
         errors = validate_envelope(env)
@@ -60,6 +66,7 @@ class TestEnvelopeValidation:
 
     def test_missing_required_field_problem(self) -> None:
         from scripts.ticket_envelope import validate_envelope
+
         env = _valid_envelope()
         del env["problem"]
         errors = validate_envelope(env)
@@ -67,6 +74,7 @@ class TestEnvelopeValidation:
 
     def test_missing_required_field_source(self) -> None:
         from scripts.ticket_envelope import validate_envelope
+
         env = _valid_envelope()
         del env["source"]
         errors = validate_envelope(env)
@@ -74,6 +82,7 @@ class TestEnvelopeValidation:
 
     def test_missing_required_field_emitted_at(self) -> None:
         from scripts.ticket_envelope import validate_envelope
+
         env = _valid_envelope()
         del env["emitted_at"]
         errors = validate_envelope(env)
@@ -81,6 +90,7 @@ class TestEnvelopeValidation:
 
     def test_invalid_envelope_version(self) -> None:
         from scripts.ticket_envelope import validate_envelope
+
         env = _valid_envelope()
         env["envelope_version"] = "2.0"
         errors = validate_envelope(env)
@@ -88,6 +98,7 @@ class TestEnvelopeValidation:
 
     def test_source_missing_required_keys(self) -> None:
         from scripts.ticket_envelope import validate_envelope
+
         env = _valid_envelope()
         env["source"] = {"type": "handoff"}  # missing ref, session
         errors = validate_envelope(env)
@@ -96,6 +107,7 @@ class TestEnvelopeValidation:
 
     def test_invalid_suggested_priority(self) -> None:
         from scripts.ticket_envelope import validate_envelope
+
         env = _valid_envelope()
         env["suggested_priority"] = "urgent"
         errors = validate_envelope(env)
@@ -103,6 +115,7 @@ class TestEnvelopeValidation:
 
     def test_key_files_missing_required_keys(self) -> None:
         from scripts.ticket_envelope import validate_envelope
+
         env = _valid_envelope()
         env["key_files"] = [{"file": "foo.py"}]  # missing role, look_for
         errors = validate_envelope(env)
@@ -110,6 +123,7 @@ class TestEnvelopeValidation:
 
     def test_unknown_fields_rejected(self) -> None:
         from scripts.ticket_envelope import validate_envelope
+
         env = _valid_envelope()
         env["unknown_field"] = "surprise"
         errors = validate_envelope(env)
@@ -139,6 +153,7 @@ class TestEnvelopeToFields:
 
     def test_minimal_envelope_mapping(self) -> None:
         from scripts.ticket_envelope import map_envelope_to_fields
+
         fields = map_envelope_to_fields(_valid_envelope())
 
         assert fields["title"] == "Fix auth timeout on large payloads"
@@ -154,18 +169,21 @@ class TestEnvelopeToFields:
 
     def test_full_envelope_mapping(self) -> None:
         from scripts.ticket_envelope import map_envelope_to_fields
+
         env = _valid_envelope()
-        env.update({
-            "context": "Found during refactor.",
-            "prior_investigation": "Checked handler.py.",
-            "approach": "Increase timeout.",
-            "acceptance_criteria": ["Large payloads succeed"],
-            "verification": "pytest tests/ -v",
-            "key_files": [{"file": "handler.py", "role": "Timeout", "look_for": "constant"}],
-            "key_file_paths": ["handler.py"],
-            "suggested_priority": "high",
-            "suggested_tags": ["auth"],
-        })
+        env.update(
+            {
+                "context": "Found during refactor.",
+                "prior_investigation": "Checked handler.py.",
+                "approach": "Increase timeout.",
+                "acceptance_criteria": ["Large payloads succeed"],
+                "verification": "pytest tests/ -v",
+                "key_files": [{"file": "handler.py", "role": "Timeout", "look_for": "constant"}],
+                "key_file_paths": ["handler.py"],
+                "suggested_priority": "high",
+                "suggested_tags": ["auth"],
+            }
+        )
         fields = map_envelope_to_fields(env)
 
         assert fields["priority"] == "high"
@@ -182,6 +200,7 @@ class TestEnvelopeToFields:
 
     def test_envelope_never_carries_status(self) -> None:
         from scripts.ticket_envelope import map_envelope_to_fields
+
         fields = map_envelope_to_fields(_valid_envelope())
         assert "status" not in fields, "Consumer synthesizes status; envelope must not carry it"
 
@@ -208,6 +227,7 @@ class TestEnvelopeRead:
 
     def test_read_valid_envelope(self, tmp_path: Path) -> None:
         from scripts.ticket_envelope import read_envelope
+
         path = tmp_path / "envelope.json"
         path.write_text(json.dumps(_valid_envelope()), encoding="utf-8")
 
@@ -218,6 +238,7 @@ class TestEnvelopeRead:
 
     def test_read_invalid_json(self, tmp_path: Path) -> None:
         from scripts.ticket_envelope import read_envelope
+
         path = tmp_path / "bad.json"
         path.write_text("NOT JSON {{{", encoding="utf-8")
 
@@ -227,6 +248,7 @@ class TestEnvelopeRead:
 
     def test_read_missing_file(self, tmp_path: Path) -> None:
         from scripts.ticket_envelope import read_envelope
+
         path = tmp_path / "missing.json"
 
         envelope, errors = read_envelope(path)
@@ -235,6 +257,7 @@ class TestEnvelopeRead:
 
     def test_read_invalid_schema(self, tmp_path: Path) -> None:
         from scripts.ticket_envelope import read_envelope
+
         path = tmp_path / "bad-schema.json"
         path.write_text(json.dumps({"title": "only title"}), encoding="utf-8")
 
@@ -250,11 +273,7 @@ class TestEnvelopeLifecycle:
         from scripts.ticket_envelope import envelope_id_from_path
 
         envelope_path = (
-            tmp_path
-            / "docs"
-            / "tickets"
-            / ".envelopes"
-            / "2026-05-18T120000Z-demo.json"
+            tmp_path / "docs" / "tickets" / ".envelopes" / "2026-05-18T120000Z-demo.json"
         )
 
         assert envelope_id_from_path(envelope_path) == "2026-05-18T120000Z-demo.json"
@@ -270,6 +289,7 @@ class TestEnvelopeLifecycle:
 
     def test_move_creates_processed_dir(self, tmp_path: Path) -> None:
         from scripts.ticket_envelope import move_to_processed
+
         envelopes_dir = tmp_path / ".envelopes"
         envelopes_dir.mkdir()
         path = envelopes_dir / "2026-03-10T060000Z-fix-auth.json"
@@ -284,6 +304,7 @@ class TestEnvelopeLifecycle:
 
     def test_move_existing_processed_dir(self, tmp_path: Path) -> None:
         from scripts.ticket_envelope import move_to_processed
+
         envelopes_dir = tmp_path / ".envelopes"
         processed_dir = envelopes_dir / ".processed"
         processed_dir.mkdir(parents=True)
@@ -297,6 +318,7 @@ class TestEnvelopeLifecycle:
     def test_move_rejects_overwrite(self, tmp_path: Path) -> None:
         """Cannot silently overwrite a previously processed envelope."""
         from scripts.ticket_envelope import move_to_processed
+
         envelopes_dir = tmp_path / ".envelopes"
         processed_dir = envelopes_dir / ".processed"
         processed_dir.mkdir(parents=True)
@@ -348,6 +370,7 @@ class TestDeferPassThrough:
 
         # Extract YAML block
         import re
+
         yaml_match = re.search(r"```ya?ml\s*\n(.*?)```", content, re.DOTALL)
         assert yaml_match, "YAML block not found"
         frontmatter = yaml.safe_load(yaml_match.group(1))

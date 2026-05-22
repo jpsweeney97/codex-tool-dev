@@ -11,6 +11,7 @@ from scripts.ticket_engine_core import (
     _execute_update,
 )
 from scripts.ticket_parse import parse_ticket
+
 from tests.support.builders import make_gen1_ticket, make_ticket
 
 
@@ -36,7 +37,9 @@ def test_update_invalid_transition_returns_structured_policy_data(tmp_tickets: P
     assert response.data["precondition_detail"] is None
 
 
-def test_close_terminal_invalid_transition_returns_structured_policy_data(tmp_tickets: Path) -> None:
+def test_close_terminal_invalid_transition_returns_structured_policy_data(
+    tmp_tickets: Path,
+) -> None:
     path = make_ticket(tmp_tickets, "terminal.md", id="T-20260503-22", status="done")
     ticket = parse_ticket(path)
     assert ticket is not None
@@ -61,7 +64,9 @@ def test_close_terminal_invalid_transition_returns_structured_policy_data(tmp_ti
 def test_close_missing_acceptance_criteria_returns_precondition_detail(tmp_tickets: Path) -> None:
     path = make_ticket(tmp_tickets, "no-ac.md", id="T-20260503-23", status="in_progress")
     text = path.read_text(encoding="utf-8")
-    path.write_text(text.replace("## Acceptance Criteria\n- [ ] Issue resolved\n\n", ""), encoding="utf-8")
+    path.write_text(
+        text.replace("## Acceptance Criteria\n- [ ] Issue resolved\n\n", ""), encoding="utf-8"
+    )
     ticket = parse_ticket(path)
     assert ticket is not None
 
@@ -175,7 +180,9 @@ def test_reopen_evaluator_matches_execute_rejection(tmp_tickets: Path) -> None:
         {"reopen_reason": "Need more work"},
         tmp_tickets,
     )
-    execute = _execute_reopen("T-20260503-28", {"reopen_reason": "Need more work"}, "session", "user", tmp_tickets)
+    execute = _execute_reopen(
+        "T-20260503-28", {"reopen_reason": "Need more work"}, "session", "user", tmp_tickets
+    )
 
     assert policy is not None
     assert policy.state == execute.state

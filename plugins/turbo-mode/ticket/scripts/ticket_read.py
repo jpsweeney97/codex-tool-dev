@@ -179,9 +179,7 @@ def list_tickets_payload(tickets: list[ParsedTicket]) -> dict:
         "tickets": [_ticket_to_dict(ticket) for ticket in tickets],
         "ticket_groups": {
             "ready": [_ticket_to_dict(ticket) for ticket in groups["ready"]],
-            "needs_refinement": [
-                _ticket_to_dict(ticket) for ticket in groups["needs_refinement"]
-            ],
+            "needs_refinement": [_ticket_to_dict(ticket) for ticket in groups["needs_refinement"]],
         },
     }
 

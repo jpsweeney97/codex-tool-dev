@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import get_args
 
 import pytest
 from scripts.ticket_parse import parse_ticket
+from scripts.ticket_runtime_readiness import RuntimeReadinessErrorCode
 from scripts.ticket_ux import (
     INTERNAL_RECOVERY_PATH_PATTERNS,
     INTERNAL_RECOVERY_TERMS,
@@ -13,6 +15,7 @@ from scripts.ticket_ux import (
     close_readiness,
     humanize_state,
     recovery_hint,
+    recovery_hint_code_for_response,
     ticket_identity,
 )
 
@@ -316,12 +319,19 @@ def test_close_readiness_ready_matches_close_policy_for_successful_close(tmp_tic
 
 def test_recovery_hint_contract_is_transcript_safe() -> None:
     expected_codes = {
+        *get_args(RuntimeReadinessErrorCode),
         "stale_plan",
         "trust_setup",
         "retry_preview",
         "cleanup_stale_preview",
         "policy_blocked",
         "preflight_failed",
+        "host_policy_blocked",
+        "deterministic_driver_unavailable",
+        "hook_contract_blocked",
+        "engine_gate_required",
+        "runtime_readiness_required",
+        "internal_error",
     }
 
     assert set(RECOVERY_HINTS) == expected_codes
@@ -333,10 +343,23 @@ def test_recovery_hint_contract_is_transcript_safe() -> None:
             "hook setup before retrying."
         ),
     }
+    assert recovery_hint("runtime_readiness_required") == {
+        "code": "runtime_readiness_required",
+        "summary": "Ticket runtime activation is required before this direct execute can continue.",
+        "next_step": (
+            "Run the explicit activate-runtime flow or refresh the installed Ticket runtime "
+            "before retrying."
+        ),
+    }
+    assert recovery_hint("stale_proof") == {
+        "code": "stale_proof",
+        "summary": "The Ticket runtime proof has expired.",
+        "next_step": "Rerun the explicit activate-runtime flow before retrying direct execute.",
+    }
     for code in expected_codes:
         hint = recovery_hint(code)
         assert set(hint) == {"code", "summary", "next_step"}
-        rendered = " ".join(hint.values())
+        rendered = " ".join([hint["summary"], hint["next_step"]])
         for term in INTERNAL_RECOVERY_TERMS:
             assert term.lower() not in rendered.lower()
         for pattern in INTERNAL_RECOVERY_PATH_PATTERNS:
@@ -362,6 +385,32 @@ def test_attach_recovery_hint_preserves_response_data() -> None:
     assert "recovery_hint" not in response["data"]
 
 
+def test_recovery_hint_code_for_runtime_activation_errors() -> None:
+    assert recovery_hint_code_for_response({"error_code": "host_policy_blocked"}) == (
+        "host_policy_blocked"
+    )
+    assert recovery_hint_code_for_response({"error_code": "deterministic_driver_unavailable"}) == (
+        "deterministic_driver_unavailable"
+    )
+    assert recovery_hint_code_for_response({"error_code": "hook_contract_blocked"}) == (
+        "hook_contract_blocked"
+    )
+    assert recovery_hint_code_for_response({"error_code": "engine_gate_required"}) == (
+        "engine_gate_required"
+    )
+    assert recovery_hint_code_for_response({"error_code": "runtime_readiness_required"}) == (
+        "runtime_readiness_required"
+    )
+
+
+def test_recovery_hint_code_for_internal_error() -> None:
+    assert recovery_hint_code_for_response({"error_code": "internal_error"}) == "internal_error"
+    assert RECOVERY_HINTS["internal_error"] == {
+        "summary": "Ticket hit an unexpected internal error.",
+        "next_step": "Stop without writing and report the error details for repair.",
+    }
+
+
 def test_transcript_safety_terms_match_expected_internal_leak_vocabulary() -> None:
     expected_terms = (
         "hook_injected",
@@ -380,6 +429,7 @@ def test_transcript_safety_terms_match_expected_internal_leak_vocabulary() -> No
         "PAYLOAD_PATH",
         "canonical command",
         "python3 -B",
+        "uv run python -B",
     )
 
     assert tuple(INTERNAL_RECOVERY_TERMS) == expected_terms
@@ -398,6 +448,6 @@ def test_transcript_safety_path_patterns_cover_known_host_shapes() -> None:
     )
 
     for rendered in examples:
-        assert any(
-            re.search(pattern, rendered) for pattern in INTERNAL_RECOVERY_PATH_PATTERNS
-        ), rendered
+        assert any(re.search(pattern, rendered) for pattern in INTERNAL_RECOVERY_PATH_PATTERNS), (
+            rendered
+        )

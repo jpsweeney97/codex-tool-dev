@@ -30,14 +30,50 @@ not invent an installed cache path.
 For static plugin and storage diagnostics, run:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <TICKETS_DIR> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <TICKETS_DIR> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT> [--runtime-probe-output <PATH>]
 ```
 
 Report the diagnostic result as source/cache/storage evidence. Do not describe
 it as live runtime proof.
 
 `diagnose` reports stale `.codex/ticket-tmp/` payloads older than 24 hours
-without mutating them.
+without mutating them. Pass `--runtime-probe-output <PATH>` only when you want
+the diagnose command to write a read-only runtime probe artifact under a
+caller-chosen temp path for later inspection.
+
+## Runtime Activation
+
+Activation is `direct_execute only`. Use it only when the user explicitly asks
+to activate or validate the installed Ticket runtime for the certified
+direct-execute lane.
+
+Activation is user-origin only. Do not run this command as an agent. Present
+the command below to the user and report that a user-owned shell must run it:
+
+```bash
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>
+```
+
+For live installed activation, `<PLUGIN_ROOT>` must be the cache-installed
+runtime authority currently exposed by `hooks/list` and `skills/list`. Treat
+the synced personal plugin copy as staging only, not the proof target.
+
+Report direct-execute-only scope. Do not describe activation as caller-identity
+proof, and do not widen it to `capture`, `update`, or `ticket_workflow.py`.
+
+`TICKET_RUNTIME_PROOF_PATH` and `TICKET_RUNTIME_ACTIVATION_BOOTSTRAP=1` are
+internal activation/test overrides used by the explicit activation flow. Do not
+ask the user to set them for normal operator use.
+
+If activation blocks, report the blocker code first:
+
+- `host_policy_blocked`
+- `deterministic_driver_unavailable`
+- `hook_contract_blocked`
+- `engine_gate_required`
+- `runtime_readiness_required`
+- `proof_invalid`
+- `stale_proof`
 
 ## Recovery Hints
 
@@ -52,14 +88,14 @@ When a backend response includes `data.recovery_hint`, show the recovery summary
 Always dry-run audit repair first:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <TICKETS_DIR>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <TICKETS_DIR>
 ```
 
 Show the dry-run result and ask before any mutation. If the user explicitly
 approves repair, run:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <TICKETS_DIR> --confirm-repair
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <TICKETS_DIR> --confirm-repair
 ```
 
 Stop on parse, path, permission, or backup errors. Report the failing command
@@ -72,13 +108,13 @@ report and ask before any cleanup mutation. If the user explicitly approves
 stale payload cleanup, run:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads
 ```
 
 The unconfirmed command is:
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR>
 ```
 
 Short form: `ticket_doctor.py clean-stale-payloads <TICKETS_DIR>`.

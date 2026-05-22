@@ -3,6 +3,7 @@
 Each test reproduces the exact scenario described in the finding and verifies
 the fix resolves it.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,6 +14,8 @@ from unittest.mock import patch
 
 from scripts.ticket_dedup import (
     dedup_fingerprint as compute_dedup_fp,
+)
+from scripts.ticket_dedup import (
     target_fingerprint as compute_target_fp,
 )
 from scripts.ticket_engine_core import (
@@ -23,12 +26,13 @@ from scripts.ticket_engine_core import (
 )
 from scripts.ticket_read import find_ticket_by_id
 from scripts.ticket_validate import validate_fields
-from tests.support.builders import make_ticket, write_autonomy_config
 
+from tests.support.builders import make_ticket, write_autonomy_config
 
 # ---------------------------------------------------------------------------
 # F1: Reopening an archived ticket must move it back to active directory
 # ---------------------------------------------------------------------------
+
 
 class TestF1ReopenUnarchive:
     """Repro: create -> close(archive=True) -> reopen should move ticket back."""
@@ -106,7 +110,6 @@ class TestF1ReopenUnarchive:
         assert ticket is not None
         assert ticket.status == "open"
 
-
     def test_reopen_rename_failure_preserves_closed_status(self, tmp_tickets: Path) -> None:
         """If un-archive rename fails, ticket stays closed with original status."""
         resp = engine_execute(
@@ -151,6 +154,7 @@ class TestF1ReopenUnarchive:
         # Force rename to fail.
         reopen_fp = compute_target_fp(archived_path)
         real_rename = Path.rename
+
         def failing_rename(self_path: Path, target: Path) -> Path:
             if self_path == archived_path:
                 raise OSError("simulated rename failure")
@@ -225,7 +229,14 @@ class TestF1ReopenUnarchive:
         reopen_fp = compute_target_fp(archived_path)
         active_dst = tmp_tickets / archived_path.name
         real_write_text = Path.write_text
-        def failing_write(self_path: Path, data: str, encoding: str | None = None, errors: str | None = None, newline: str | None = None) -> None:
+
+        def failing_write(
+            self_path: Path,
+            data: str,
+            encoding: str | None = None,
+            errors: str | None = None,
+            newline: str | None = None,
+        ) -> None:
             if self_path == active_dst:
                 raise OSError("simulated write failure")
             real_write_text(self_path, data, encoding=encoding, errors=errors, newline=newline)
@@ -254,7 +265,9 @@ class TestF1ReopenUnarchive:
         assert archived_path.read_text(encoding="utf-8") == original_text
         assert not active_dst.exists()
 
-    def test_reopen_write_and_rollback_both_fail_reports_inconsistency(self, tmp_tickets: Path) -> None:
+    def test_reopen_write_and_rollback_both_fail_reports_inconsistency(
+        self, tmp_tickets: Path
+    ) -> None:
         """If write fails and rollback rename also fails, message warns about inconsistent state."""
         resp = engine_execute(
             action="create",
@@ -300,7 +313,13 @@ class TestF1ReopenUnarchive:
         real_rename = Path.rename
         rename_call_count = 0
 
-        def failing_write(self_path: Path, data: str, encoding: str | None = None, errors: str | None = None, newline: str | None = None) -> None:
+        def failing_write(
+            self_path: Path,
+            data: str,
+            encoding: str | None = None,
+            errors: str | None = None,
+            newline: str | None = None,
+        ) -> None:
             if self_path == active_dst:
                 raise OSError("simulated write failure")
             real_write_text(self_path, data, encoding=encoding, errors=errors, newline=newline)
@@ -313,8 +332,10 @@ class TestF1ReopenUnarchive:
                 raise OSError("simulated rollback failure")
             return real_rename(self_path, target)
 
-        with patch.object(Path, "write_text", failing_write), \
-             patch.object(Path, "rename", failing_rollback_rename):
+        with (
+            patch.object(Path, "write_text", failing_write),
+            patch.object(Path, "rename", failing_rollback_rename),
+        ):
             reopen_resp = engine_execute(
                 action="reopen",
                 ticket_id=ticket_id,
@@ -340,10 +361,13 @@ class TestF1ReopenUnarchive:
 # F2: Pipeline plan -> execute for non-create must provide target_fingerprint
 # ---------------------------------------------------------------------------
 
+
 class TestF2PlanFingerprint:
     """Repro: plan(update) -> preflight -> execute(update) must not policy_block."""
 
-    def test_plan_returns_target_fingerprint_for_update_via_ticket_id_param(self, tmp_tickets: Path) -> None:
+    def test_plan_returns_target_fingerprint_for_update_via_ticket_id_param(
+        self, tmp_tickets: Path
+    ) -> None:
         """ticket_id passed as top-level param (real entrypoint path)."""
         make_ticket(tmp_tickets, "2026-03-02-fp-test.md", id="T-20260302-01")
         resp = engine_plan(
@@ -445,7 +469,10 @@ class TestF2PlanFingerprint:
             "fields": {"priority": "critical"},
         }
         with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False, dir=str(project_root),
+            mode="w",
+            suffix=".json",
+            delete=False,
+            dir=str(project_root),
         ) as f:
             json.dump(payload, f)
             payload_path = f.name
@@ -453,7 +480,10 @@ class TestF2PlanFingerprint:
         user_script = Path(__file__).parent.parent / "scripts" / "ticket_engine_user.py"
         result = subprocess.run(
             [sys.executable, str(user_script), "plan", payload_path],
-            capture_output=True, text=True, timeout=10, cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(project_root),
         )
         Path(payload_path).unlink()
         assert result.returncode == 0, f"CLI failed: {result.stderr}"
@@ -465,6 +495,7 @@ class TestF2PlanFingerprint:
 # ---------------------------------------------------------------------------
 # F3a: Agent create-cap must not count user creates
 # ---------------------------------------------------------------------------
+
 
 class TestF3aOriginFilter:
     """Repro: user create should not consume agent budget."""
@@ -497,13 +528,16 @@ class TestF3aOriginFilter:
 # F3b: Failed result audit write must escalate for agents
 # ---------------------------------------------------------------------------
 
+
 class TestF3bAuditResultFailClose:
     """Repro: agent create succeeds but result audit write fails."""
 
     def test_agent_create_escalates_on_result_audit_failure(self, tmp_tickets: Path) -> None:
         import scripts.ticket_engine_core as core_mod
 
-        write_autonomy_config(tmp_tickets, "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n")
+        write_autonomy_config(
+            tmp_tickets, "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n"
+        )
         config = AutonomyConfig(mode="auto_audit", max_creates=5)
 
         # attempt_started writes to disk, result entry fails.
@@ -541,7 +575,9 @@ class TestF3bAuditResultFailClose:
         """After result-audit failure, attempt_started seals the count."""
         import scripts.ticket_engine_core as core_mod
 
-        write_autonomy_config(tmp_tickets, "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 1\n---\n")
+        write_autonomy_config(
+            tmp_tickets, "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 1\n---\n"
+        )
         config = AutonomyConfig(mode="auto_audit", max_creates=1)
 
         # First create: attempt_started writes to disk, result fails.
@@ -579,6 +615,7 @@ class TestF3bAuditResultFailClose:
 
         # Second create attempt: must be blocked by cap.
         from scripts.ticket_engine_core import engine_preflight
+
         preflight_resp = engine_preflight(
             ticket_id=None,
             action="create",
@@ -649,7 +686,10 @@ class TestF4ProjectRootDiscovery:
 
         result = subprocess.run(
             [sys.executable, str(READ_SCRIPT), "list", str(tmp_tickets)],
-            capture_output=True, text=True, timeout=10, cwd=str(subdir),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(subdir),
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
@@ -662,7 +702,10 @@ class TestF4ProjectRootDiscovery:
 
         result = subprocess.run(
             [sys.executable, str(TRIAGE_SCRIPT), "dashboard", str(tmp_tickets)],
-            capture_output=True, text=True, timeout=10, cwd=str(subdir),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(subdir),
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
@@ -678,7 +721,10 @@ class TestF4ProjectRootDiscovery:
 
         result = subprocess.run(
             [sys.executable, str(READ_SCRIPT), "list", str(tickets)],
-            capture_output=True, text=True, timeout=10, cwd=str(isolated),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(isolated),
         )
         assert result.returncode == 1
         data = json.loads(result.stdout)
@@ -689,6 +735,7 @@ class TestF4ProjectRootDiscovery:
 # ---------------------------------------------------------------------------
 # F5: source dict without "type" key must return validation error, not crash
 # ---------------------------------------------------------------------------
+
 
 class TestF5SourceValidation:
     """Repro: source={"ref":"x"} should fail validation, not KeyError."""

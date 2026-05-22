@@ -8,7 +8,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import scripts.ticket_doctor as ticket_doctor_script
 import scripts.ticket_payloads as ticket_payloads
+import scripts.ticket_runtime_readiness as ticket_runtime_readiness
 from scripts.ticket_triage import (
     DoctorInputError,
     _source_cache_report,
@@ -17,6 +19,11 @@ from scripts.ticket_triage import (
 )
 
 DOCTOR_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "ticket_doctor.py"
+
+
+def _manifest_guard_command(plugin_root: Path) -> str:
+    manifest = json.loads((plugin_root / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+    return manifest["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
 
 
 def test_ticket_doctor_reports_project_and_plugin_paths(tmp_tickets: Path) -> None:
@@ -32,6 +39,108 @@ def test_ticket_doctor_reports_project_and_plugin_paths(tmp_tickets: Path) -> No
     assert report["plugin"]["cache_root"] == str(plugin_root)
     assert report["plugin"]["source_cache_equal"] is True
     assert report["runtime"]["live_hook_probe"] == "not_run"
+    assert report["runtime_proof"]["status"] == "missing"
+
+
+def test_ticket_doctor_reports_invalid_runtime_proof_status(tmp_tickets: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    proof_path = tmp_tickets.parent.parent / ".codex" / "ticket-runtime-proof.json"
+    proof_path.parent.mkdir(parents=True)
+    proof_path.write_text("{not json", encoding="utf-8")
+
+    report = ticket_doctor(
+        tmp_tickets,
+        plugin_root=plugin_root,
+        cache_root=plugin_root,
+    )
+
+    assert report["runtime_proof"]["exists"] is True
+    assert report["runtime_proof"]["status"] == "invalid"
+    assert "Expecting property name" in report["runtime_proof"]["error"]
+
+
+def test_ticket_doctor_reports_activated_runtime_proof_status(tmp_tickets: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    proof_path = tmp_tickets.parent.parent / ".codex" / "ticket-runtime-proof.json"
+    proof_path.parent.mkdir(parents=True)
+    proof_path.write_text(
+        json.dumps(
+            {
+                "status": "activated",
+                "schema_version": "installed_ticket_runtime_readiness-v1",
+                "expires_at": "2099-05-21T23:59:59Z",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = ticket_doctor(
+        tmp_tickets,
+        plugin_root=plugin_root,
+        cache_root=plugin_root,
+    )
+
+    assert report["runtime_proof"]["exists"] is True
+    assert report["runtime_proof"]["status"] == "activated"
+    assert report["runtime_proof"]["schema_version"] == "installed_ticket_runtime_readiness-v1"
+
+
+def test_ticket_doctor_reports_stale_runtime_proof_status(tmp_tickets: Path) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    proof_path = tmp_tickets.parent.parent / ".codex" / "ticket-runtime-proof.json"
+    proof_path.parent.mkdir(parents=True)
+    proof_path.write_text(
+        json.dumps(
+            {
+                "status": "activated",
+                "schema_version": "installed_ticket_runtime_readiness-v1",
+                "expires_at": "2026-05-19T00:00:00Z",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = ticket_doctor(
+        tmp_tickets,
+        plugin_root=plugin_root,
+        cache_root=plugin_root,
+    )
+
+    assert report["runtime_proof"]["status"] == "stale"
+    assert report["runtime_proof"]["raw_status"] == "activated"
+    assert report["runtime_proof"]["error_code"] == "stale_proof"
+
+
+def test_ticket_doctor_reports_naive_runtime_proof_expiry_as_invalid(
+    tmp_tickets: Path,
+) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    proof_path = tmp_tickets.parent.parent / ".codex" / "ticket-runtime-proof.json"
+    proof_path.parent.mkdir(parents=True)
+    proof_path.write_text(
+        json.dumps(
+            {
+                "status": "activated",
+                "schema_version": "installed_ticket_runtime_readiness-v1",
+                "expires_at": "2026-05-21T23:59:59",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = ticket_doctor(
+        tmp_tickets,
+        plugin_root=plugin_root,
+        cache_root=plugin_root,
+    )
+
+    assert report["runtime_proof"]["status"] == "invalid"
+    assert report["runtime_proof"]["raw_status"] == "activated"
+    assert report["runtime_proof"]["error_code"] == "proof_invalid"
+    assert "expires_at" in report["runtime_proof"]["error"]
 
 
 def test_ticket_doctor_reports_stale_ticket_tmp_payloads(
@@ -98,6 +207,339 @@ def test_ticket_doctor_diagnose_response_adds_cleanup_hint_for_stale_payloads(
         "summary": "Old abandoned Ticket preview state can be cleaned up after review.",
         "next_step": "Use ticket-doctor stale cleanup after reviewing the reported items.",
     }
+
+
+def test_activate_runtime_returns_ok_with_activated_proof(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    marketplace_path = tmp_path / ".agents" / "plugins" / "marketplace.json"
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "activate_runtime",
+        lambda **_kwargs: ticket_runtime_readiness.ActivationSuccess(
+            proof={
+                "status": "activated",
+                "activation_scope": {"gated_execute_surfaces": ["direct_execute"]},
+            },
+            message="final proof activated",
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "build_activation_candidate",
+        lambda **_kwargs: ticket_runtime_readiness.ActivationSuccess(
+            proof={
+                "status": "activated",
+                "activation_scope": {"gated_execute_surfaces": ["direct_execute"]},
+            },
+            message="final proof activated",
+        ),
+        raising=False,
+    )
+
+    response, exit_code = ticket_doctor_script.activate_runtime_payload(
+        project_root=tmp_path,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert exit_code == 0
+    assert response["state"] == "ok"
+    assert "error_code" not in response
+    assert response["data"]["mode"] == "activate-runtime"
+    assert response["data"]["proof"]["status"] == "activated"
+
+
+def test_activate_runtime_propagates_host_policy_blocked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    marketplace_path = tmp_path / ".agents" / "plugins" / "marketplace.json"
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    blocked_result = ticket_runtime_readiness.ActivationFailure(
+        error_code="host_policy_blocked",
+        message="contained workspaceWrite turn failed",
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "activate_runtime",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "build_activation_candidate",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
+
+    response, exit_code = ticket_doctor_script.activate_runtime_payload(
+        project_root=tmp_path,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert exit_code == 1
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == "host_policy_blocked"
+
+
+def test_activate_runtime_propagates_deterministic_driver_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    marketplace_path = tmp_path / ".agents" / "plugins" / "marketplace.json"
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    blocked_result = ticket_runtime_readiness.ActivationFailure(
+        error_code="deterministic_driver_unavailable",
+        message="app-server transcript did not capture the command turn",
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "activate_runtime",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "build_activation_candidate",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
+
+    response, exit_code = ticket_doctor_script.activate_runtime_payload(
+        project_root=tmp_path,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert exit_code == 1
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == "deterministic_driver_unavailable"
+
+
+def test_activate_runtime_preserves_late_publication_failure_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    marketplace_path = tmp_path / ".agents" / "plugins" / "marketplace.json"
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    blocked_result = ticket_runtime_readiness.ActivationFailure(
+        error_code="deterministic_driver_unavailable",
+        message=(
+            "Direct execute smoke already succeeded, but final runtime proof publication "
+            "failed: final proof denied. Run evidence remains under "
+            ".codex/ticket-runtime-smoke/run-1"
+        ),
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "activate_runtime",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "build_activation_candidate",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
+
+    response, exit_code = ticket_doctor_script.activate_runtime_payload(
+        project_root=tmp_path,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert exit_code == 1
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == "deterministic_driver_unavailable"
+    assert response["message"] == blocked_result.message
+
+
+def test_activate_runtime_propagates_hook_contract_blocked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    marketplace_path = tmp_path / ".agents" / "plugins" / "marketplace.json"
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    blocked_result = ticket_runtime_readiness.ActivationFailure(
+        error_code="hook_contract_blocked",
+        message="installed hook still emits unsupported output",
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "activate_runtime",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "build_activation_candidate",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
+
+    response, exit_code = ticket_doctor_script.activate_runtime_payload(
+        project_root=tmp_path,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert exit_code == 1
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == "hook_contract_blocked"
+
+
+@pytest.mark.parametrize(
+    ("error_code", "expected_summary"),
+    [
+        ("proof_invalid", "The Ticket runtime proof is invalid or incomplete."),
+        ("stale_proof", "The Ticket runtime proof has expired."),
+    ],
+)
+def test_activate_runtime_has_clean_proof_recovery_hints(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error_code: str,
+    expected_summary: str,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    marketplace_path = tmp_path / ".agents" / "plugins" / "marketplace.json"
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    blocked_result = ticket_runtime_readiness.ActivationFailure(
+        error_code=error_code,
+        message="runtime proof needs activation",
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "activate_runtime",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
+
+    response, exit_code = ticket_doctor_script.activate_runtime_payload(
+        project_root=tmp_path,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert exit_code == 1
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == error_code
+    assert "internal:" not in response["message"]
+    assert response["data"]["recovery_hint"]["code"] == error_code
+    assert response["data"]["recovery_hint"]["summary"] == expected_summary
+
+
+def test_activate_runtime_surfaces_unknown_recovery_hint_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    marketplace_path = tmp_path / ".agents" / "plugins" / "marketplace.json"
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    blocked_result = ticket_runtime_readiness.ActivationFailure(
+        error_code="new_unregistered_code",
+        message="unregistered runtime failure",
+    )
+    monkeypatch.setattr(
+        ticket_doctor_script,
+        "activate_runtime",
+        lambda **_kwargs: blocked_result,
+        raising=False,
+    )
+
+    response, exit_code = ticket_doctor_script.activate_runtime_payload(
+        project_root=tmp_path,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert exit_code == 1
+    assert response["state"] == "policy_blocked"
+    assert response["error_code"] == "new_unregistered_code"
+    assert response["message"] == "unregistered runtime failure"
+    assert response["data"]["recovery_hint_error"] == (
+        "unknown recovery hint code: 'new_unregistered_code'"
+    )
+    assert response["data"]["recovery_hint"]["code"] == "runtime_readiness_required"
+
+
+def test_activate_runtime_cli_parser_reaches_structured_handler(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    outside_tickets_dir = tmp_path.parent / f"{tmp_path.name}-outside" / "tickets"
+    marketplace_path = tmp_path / "missing-marketplace.json"
+    monkeypatch.chdir(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(DOCTOR_SCRIPT),
+            "activate-runtime",
+            str(outside_tickets_dir),
+            "--marketplace-path",
+            str(marketplace_path),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    response = json.loads(completed.stdout)
+    assert response["state"] == "policy_blocked"
+    assert "usage:" not in completed.stdout
+    assert "tickets_dir" in response["message"]
 
 
 def test_ticket_doctor_clean_stale_payloads_requires_confirmation(
@@ -547,39 +989,50 @@ def test_ticket_doctor_reports_generated_residue_separately(
 
 def test_ticket_doctor_classifies_live_hook_probe_output(tmp_tickets: Path, tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
+    guard_command = _manifest_guard_command(plugin_root)
     probe_output = tmp_path / "hook-probe.out"
     probe_output.write_text(
-        "\n".join([
-            json.dumps({
-                "id": 1,
-                "result": {
-                    "plugin": {
-                        "summary": {
-                            "id": "ticket@turbo-mode",
-                            "enabled": True,
-                            "installed": True,
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "id": 1,
+                        "result": {
+                            "plugin": {
+                                "summary": {
+                                    "id": "ticket@turbo-mode",
+                                    "enabled": True,
+                                    "installed": True,
+                                },
+                                "marketplacePath": "/Users/jp/.agents/plugins/marketplace.json",
+                            },
                         },
-                        "marketplacePath": "/Users/jp/.agents/plugins/marketplace.json",
-                    },
-                },
-            }),
-            json.dumps({
-                "id": 2,
-                "result": {
-                    "data": [{
-                        "warnings": [],
-                        "errors": [],
-                        "hooks": [{
-                            "pluginId": "ticket@turbo-mode",
-                            "eventName": "preToolUse",
-                            "matcher": "Bash",
-                            "command": f"python3 {plugin_root}/hooks/ticket_engine_guard.py",
-                            "sourcePath": f"{plugin_root}/hooks/hooks.json",
-                        }],
-                    }],
-                },
-            }),
-        ]),
+                    }
+                ),
+                json.dumps(
+                    {
+                        "id": 2,
+                        "result": {
+                            "data": [
+                                {
+                                    "warnings": [],
+                                    "errors": [],
+                                    "hooks": [
+                                        {
+                                            "pluginId": "ticket@turbo-mode",
+                                            "eventName": "preToolUse",
+                                            "matcher": "Bash",
+                                            "command": guard_command,
+                                            "sourcePath": f"{plugin_root}/hooks/hooks.json",
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                    }
+                ),
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -597,39 +1050,50 @@ def test_ticket_doctor_classifies_live_hook_probe_output(tmp_tickets: Path, tmp_
 
 def test_ticket_doctor_blocks_wrong_hook_event(tmp_tickets: Path, tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
+    guard_command = _manifest_guard_command(plugin_root)
     probe_output = tmp_path / "wrong-event.out"
     probe_output.write_text(
-        "\n".join([
-            json.dumps({
-                "id": 1,
-                "result": {
-                    "plugin": {
-                        "summary": {
-                            "id": "ticket@turbo-mode",
-                            "enabled": True,
-                            "installed": True,
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "id": 1,
+                        "result": {
+                            "plugin": {
+                                "summary": {
+                                    "id": "ticket@turbo-mode",
+                                    "enabled": True,
+                                    "installed": True,
+                                },
+                                "marketplacePath": "/Users/jp/.agents/plugins/marketplace.json",
+                            },
                         },
-                        "marketplacePath": "/Users/jp/.agents/plugins/marketplace.json",
-                    },
-                },
-            }),
-            json.dumps({
-                "id": 2,
-                "result": {
-                    "data": [{
-                        "warnings": [],
-                        "errors": [],
-                        "hooks": [{
-                            "pluginId": "ticket@turbo-mode",
-                            "eventName": "postToolUse",
-                            "matcher": "Bash",
-                            "command": f"python3 {plugin_root}/hooks/ticket_engine_guard.py",
-                            "sourcePath": f"{plugin_root}/hooks/hooks.json",
-                        }],
-                    }],
-                },
-            }),
-        ]),
+                    }
+                ),
+                json.dumps(
+                    {
+                        "id": 2,
+                        "result": {
+                            "data": [
+                                {
+                                    "warnings": [],
+                                    "errors": [],
+                                    "hooks": [
+                                        {
+                                            "pluginId": "ticket@turbo-mode",
+                                            "eventName": "postToolUse",
+                                            "matcher": "Bash",
+                                            "command": guard_command,
+                                            "sourcePath": f"{plugin_root}/hooks/hooks.json",
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                    }
+                ),
+            ]
+        ),
         encoding="utf-8",
     )
 

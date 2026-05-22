@@ -8,6 +8,7 @@ Import direction: this module imports only stdlib. Entrypoints and engine
 import from it. It must not import EngineResponse, AutonomyConfig, or any
 ticket module.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -42,7 +43,9 @@ def _get_str(payload: dict[str, Any], key: str, *, default: str) -> str:
     return value
 
 
-def _get_dict(payload: dict[str, Any], key: str, *, default: dict[str, Any] | None) -> dict[str, Any]:
+def _get_dict(
+    payload: dict[str, Any], key: str, *, default: dict[str, Any] | None
+) -> dict[str, Any]:
     """Get a dict field with a default. Raises PayloadError if present but wrong type."""
     if key not in payload:
         if default is not None:

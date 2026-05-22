@@ -1,8 +1,8 @@
 """Tests for ticket_render.py — markdown ticket rendering."""
+
 from __future__ import annotations
 
 import pytest
-
 from scripts.ticket_parse import extract_fenced_yaml
 from scripts.ticket_render import render_ticket
 
@@ -28,7 +28,7 @@ class TestRenderTicket:
         )
         assert "# T-20260302-01: Fix authentication timeout" in result
         assert "id: T-20260302-01" in result
-        assert 'status: open' in result
+        assert "status: open" in result
         assert "## Problem" in result
         assert "## Approach" in result
         assert "## Acceptance Criteria" in result

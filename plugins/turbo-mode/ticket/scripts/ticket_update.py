@@ -163,25 +163,40 @@ def _load_update_context(
         )
     path_error = _validate_payload_path(payload_path, project_root)
     if path_error is not None:
-        return None, None, None, _response(
-            "policy_blocked",
-            path_error,
-            error_code="policy_blocked",
+        return (
+            None,
+            None,
+            None,
+            _response(
+                "policy_blocked",
+                path_error,
+                error_code="policy_blocked",
+            ),
         )
 
     try:
         payload = json.loads(payload_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        return None, None, None, _response(
-            "escalate",
-            f"Cannot read payload: {exc}",
-            error_code="parse_error",
+        return (
+            None,
+            None,
+            None,
+            _response(
+                "escalate",
+                f"Cannot read payload: {exc}",
+                error_code="parse_error",
+            ),
         )
     if not isinstance(payload, dict):
-        return None, None, None, _response(
-            "escalate",
-            f"Payload is not a JSON object, got {type(payload).__name__}",
-            error_code="parse_error",
+        return (
+            None,
+            None,
+            None,
+            _response(
+                "escalate",
+                f"Payload is not a JSON object, got {type(payload).__name__}",
+                error_code="parse_error",
+            ),
         )
 
     tickets_dir, tickets_error = resolve_tickets_dir(
@@ -189,10 +204,15 @@ def _load_update_context(
         project_root=project_root,
     )
     if tickets_error is not None or tickets_dir is None:
-        return None, None, None, _response(
-            "policy_blocked",
-            tickets_error or "tickets_dir validation failed",
-            error_code="policy_blocked",
+        return (
+            None,
+            None,
+            None,
+            _response(
+                "policy_blocked",
+                tickets_error or "tickets_dir validation failed",
+                error_code="policy_blocked",
+            ),
         )
 
     if subcommand == "execute":
@@ -205,10 +225,15 @@ def _load_update_context(
 
     request_origin = payload.get("hook_request_origin") or payload.get("request_origin") or "user"
     if not isinstance(request_origin, str) or not request_origin:
-        return None, None, None, _response(
-            "escalate",
-            f"Invalid request origin. Got: {request_origin!r:.100}",
-            error_code="parse_error",
+        return (
+            None,
+            None,
+            None,
+            _response(
+                "escalate",
+                f"Invalid request origin. Got: {request_origin!r:.100}",
+                error_code="parse_error",
+            ),
         )
     payload["request_origin"] = request_origin
     payload["tickets_dir"] = str(tickets_dir)

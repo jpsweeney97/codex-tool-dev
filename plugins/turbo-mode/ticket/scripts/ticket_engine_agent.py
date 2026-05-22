@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Agent entrypoint for the ticket engine.
 
-Hardcodes request_origin="agent". Called by ticket-autocreate agent.
-Usage: python3 ticket_engine_agent.py <subcommand> <payload_file>
+Hardcodes request_origin="agent" for guarded direct-execute Ticket operations.
+Launcher: uv run python -B <PLUGIN_ROOT>/scripts/ticket_engine_agent.py <subcommand> <payload_file>
 """
+
 from __future__ import annotations
 
 import sys
@@ -14,7 +15,7 @@ sys.dont_write_bytecode = True
 # Add parent to path for imports.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.ticket_engine_runner import run
+from scripts.ticket_engine_runner import run  # noqa: E402
 
 if __name__ == "__main__":
     raise SystemExit(run("agent", prog="ticket_engine_agent.py"))

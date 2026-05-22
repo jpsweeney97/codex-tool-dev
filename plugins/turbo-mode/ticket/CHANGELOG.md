@@ -30,10 +30,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `ingest` subcommand in engine runner: read-validate-map-plan-preflight-execute-move pipeline for consuming deferred work envelopes (T-04b, #70)
 - `ingest` added to guard hook `VALID_SUBCOMMANDS` allowlist (T-04b, #70)
 - `defer` field passed through `_execute_create` to `render_ticket` for envelope-originated tickets (T-04a, #69)
+- `ticket_doctor.py activate-runtime` explicit direct-execute runtime activation subcommand.
 
 ### Changed
 
 - Audit repair default flipped to dry-run; `--fix` flag required for actual file mutations, closing safety bug where `repair_audit_logs` modified files without explicit opt-in (T-03, #69)
+- Ticket runtime readiness verification now fails closed on missing inventory
+  responses, missing plugin version metadata, unreadable proof evidence, and
+  pre-activation direct-execute proof drift.
+- Workflow and hook canonical path comparison now resolves plugin roots before
+  exact allowlist matching, preventing `/tmp` versus `/private/tmp` launcher
+  drift on macOS.
 
 ### Fixed
 
@@ -45,6 +52,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Envelope `move_to_processed` rejects overwrite of existing processed file, preventing silent data loss (code review I-1, #69)
 - Envelope move exception catch widened from `FileExistsError` to `OSError` for filesystem robustness (T-04b, #70)
 - `envelope_path` containment check and input type validation added to ingest pipeline, preventing path traversal (T-04b, #70)
+- Runtime activation now preserves direct-execute smoke evidence when proof
+  verification or final proof publication fails after the smoke already
+  succeeded.
+- Build-candidate verification and direct-execute execute-path tests now
+  exercise the real installed runtime verifier.
+- Ticket plugin pytest configuration no longer pins a shared global temp root.
 
 ## 1.4.0 — 2026-03-09
 

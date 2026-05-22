@@ -1,4 +1,5 @@
 """Shared helpers for execute-stage trust validation."""
+
 from __future__ import annotations
 
 

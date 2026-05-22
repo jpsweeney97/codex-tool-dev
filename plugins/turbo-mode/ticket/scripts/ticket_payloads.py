@@ -1,4 +1,5 @@
 """Lifecycle helpers for project-local Ticket prepare payloads."""
+
 from __future__ import annotations
 
 import os

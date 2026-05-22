@@ -1,4 +1,5 @@
 """Tests for the ingest subcommand."""
+
 from __future__ import annotations
 
 import json
@@ -7,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from scripts.ticket_engine_runner import run
+from scripts.ticket_runtime_readiness import RUNTIME_PROOF_PATH_ENV
 from scripts.ticket_ux import INTERNAL_RECOVERY_PATH_PATTERNS, INTERNAL_RECOVERY_TERMS
 
 
@@ -121,6 +123,39 @@ class TestIngestSubcommand:
         # Ticket created
         ticket_files = list(tickets_dir.glob("*.md"))
         assert len(ticket_files) == 1
+
+    def test_ingest_ignores_runtime_proof_override_env(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _ensure_project_root(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv(RUNTIME_PROOF_PATH_ENV, str(tmp_path / "missing-runtime-proof.json"))
+
+        tickets_dir = tmp_path / "tickets"
+        tickets_dir.mkdir()
+        envelopes_dir = tickets_dir / ".envelopes"
+        envelope_path = _write_envelope(_valid_envelope(), envelopes_dir)
+
+        payload = {
+            "envelope_path": str(envelope_path),
+            "tickets_dir": str(tickets_dir),
+            "session_id": "test-session",
+            "hook_injected": True,
+            "hook_request_origin": "user",
+        }
+
+        payload_file = tmp_path / "payload.json"
+        payload_file.write_text(json.dumps(payload))
+
+        exit_code = run(
+            "user",
+            argv=["ingest", str(payload_file)],
+            prog="test",
+        )
+
+        assert exit_code == 0
 
     def test_invalid_envelope_returns_error(
         self,
@@ -811,7 +846,7 @@ class TestIngestSubcommand:
         _assert_ingest_transcript_projection_safe(response)
         assert second_envelope.exists()
 
-    def test_created_envelope_move_failed_reports_created_outcome(
+    def test_created_envelope_move_failed_escalates_for_io_error(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -846,8 +881,9 @@ class TestIngestSubcommand:
         exit_code = run("user", argv=["ingest", str(payload_file)], prog="test")
         response = json.loads(capsys.readouterr().out)
 
-        assert exit_code == 0
-        assert response["state"] == "ok_create"
+        assert exit_code == 1
+        assert response["state"] == "escalate"
+        assert response["error_code"] == "io_error"
         assert response["data"]["ingest_outcome"] == "created_envelope_move_failed"
         assert response["data"]["ticket_created"] is True
         assert response["data"]["envelope_id"] == envelope_path.name
@@ -857,7 +893,10 @@ class TestIngestSubcommand:
         assert "recovery_hint" not in response["data"]
         assert (
             response["message"]
-            == "Ticket was created, but Ticket could not finish ingest cleanup."
+            == (
+                "Ticket was created, but Ticket could not finish ingest cleanup; manual "
+                "cleanup is required before replay."
+            )
         )
         projection = _ingest_transcript_projection(response)
         assert (
@@ -869,6 +908,49 @@ class TestIngestSubcommand:
         _assert_ingest_transcript_projection_safe(response)
         assert envelope_path.exists()
         assert len(list(tickets_dir.glob("*.md"))) == 1
+
+    def test_created_envelope_move_failed_file_exists_remains_nonfatal(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        import scripts.ticket_envelope as ticket_envelope
+
+        _ensure_project_root(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        tickets_dir = tmp_path / "tickets"
+        tickets_dir.mkdir()
+        envelopes_dir = tickets_dir / ".envelopes"
+        envelope_path = _write_envelope(_valid_envelope(), envelopes_dir)
+
+        def fail_move(envelope_path: Path) -> Path:
+            raise FileExistsError(f"already processed: {envelope_path}")
+
+        monkeypatch.setattr(ticket_envelope, "move_to_processed", fail_move)
+
+        payload = {
+            "envelope_path": str(envelope_path),
+            "tickets_dir": str(tickets_dir),
+            "session_id": "test-session",
+            "hook_injected": True,
+            "hook_request_origin": "user",
+        }
+        payload_file = tmp_path / "payload.json"
+        payload_file.write_text(json.dumps(payload), encoding="utf-8")
+
+        exit_code = run("user", argv=["ingest", str(payload_file)], prog="test")
+        response = json.loads(capsys.readouterr().out)
+
+        assert exit_code == 0
+        assert response["state"] == "ok_create"
+        assert response["data"]["ingest_outcome"] == "created_envelope_move_failed"
+        assert response["data"]["ticket_created"] is True
+        assert response["data"]["envelope_move_error"].startswith("already processed")
+        assert (
+            response["message"] == "Ticket was created, but Ticket could not finish ingest cleanup."
+        )
 
     def test_ingest_with_effort(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Envelope with effort field creates ticket with effort in frontmatter."""

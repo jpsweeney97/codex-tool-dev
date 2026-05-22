@@ -7,15 +7,15 @@ that payload and runs the engine, which writes an audit trail.
 Both the hook and entrypoint are invoked via subprocess.run with
 sys.executable, matching how Codex invokes them in production.
 """
+
 from __future__ import annotations
 
 import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
 
 PLUGIN_ROOT = str(Path(__file__).parent.parent)
 HOOK_SCRIPT = str(Path(__file__).parent.parent / "hooks" / "ticket_engine_guard.py")
@@ -30,6 +30,7 @@ def run_hook(
     *,
     agent_id: str | None = None,
     agent_type: str | None = None,
+    normalize: bool = True,
 ) -> dict:
     """Run the hook with a Bash command and return parsed output."""
     hook_input = {
@@ -50,16 +51,64 @@ def run_hook(
     result = subprocess.run(
         [sys.executable, HOOK_SCRIPT],
         input=json.dumps(hook_input),
-        capture_output=True, text=True, env=env, timeout=10,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=10,
     )
     assert result.returncode == 0, f"Hook crashed: {result.stderr}"
     if not result.stdout.strip():
+        raw: dict = {}
+    else:
+        raw = json.loads(result.stdout)
+    return _normalize_hook_output(raw) if normalize else raw
+
+
+def _normalize_hook_output(raw: dict) -> dict:
+    if "hookSpecificOutput" in raw:
+        return raw
+    if raw == {}:
         return {}
-    return json.loads(result.stdout)
+    entries = raw.get("entries", [])
+    if not entries:
+        return {}
+    first = entries[0]
+    kind = first.get("kind", "")
+    text = first.get("text", "")
+    decision = "allow" if kind in {"feedback", "context"} else "deny"
+    return {
+        "hookSpecificOutput": {
+            "permissionDecision": decision,
+            "permissionDecisionReason": text,
+        },
+        "_raw": raw,
+    }
 
 
 class TestFullCreateFlow:
     """Full flow: hook → user entrypoint → create → audit trail."""
+
+    def test_hook_raw_allow_contract_uses_feedback_entries(self, tmp_path: Path) -> None:
+        payload_file = tmp_path / "payload.json"
+        payload_file.write_text(json.dumps({"action": "create"}), encoding="utf-8")
+
+        command = f"python3 {PLUGIN_ROOT}/scripts/ticket_engine_user.py plan {payload_file}"
+        hook_output = run_hook(command, cwd=str(tmp_path), normalize=False)
+
+        assert hook_output["entries"][0]["kind"] == "feedback"
+        assert "validated" in hook_output["entries"][0]["text"]
+
+    def test_hook_raw_deny_contract_uses_stop_entries(self, tmp_path: Path) -> None:
+        payload_file = tmp_path / "payload.json"
+        payload_file.write_text(json.dumps({"action": "create"}), encoding="utf-8")
+
+        command = f"python3 {PLUGIN_ROOT}/scripts/ticket_engine_user.py plan {payload_file} | cat"
+        hook_output = run_hook(command, cwd=str(tmp_path), normalize=False)
+
+        assert hook_output["entries"][0]["kind"] == "stop"
+        assert {entry["kind"] for entry in hook_output["entries"]} == {"stop"}
+        assert not any(entry["kind"] == "feedback" for entry in hook_output["entries"])
+        assert "metacharacters" in hook_output["entries"][0]["text"].lower()
 
     def test_full_create_flow(self, tmp_path: Path) -> None:
         from scripts.ticket_dedup import dedup_fingerprint as compute_fp
@@ -102,14 +151,17 @@ class TestFullCreateFlow:
         # Step 2: Run user entrypoint subprocess — verify ok_create.
         result = subprocess.run(
             [sys.executable, USER_ENTRYPOINT, "execute", str(payload_file)],
-            capture_output=True, text=True, cwd=str(tmp_path), timeout=10,
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+            timeout=10,
         )
         assert result.returncode == 0, f"Entrypoint failed: {result.stderr}"
         resp = json.loads(result.stdout)
         assert resp["state"] == "ok_create"
 
         # Step 3: Read audit file — verify 2 entries (attempt_started + ok_create).
-        date_dir = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_file = tickets_dir / ".audit" / date_dir / "integration-sess.jsonl"
         assert audit_file.exists(), f"Audit file not found at {audit_file}"
 
@@ -134,8 +186,7 @@ class TestHookDenyPreventsExecution:
 
         # Command with extra args after payload path triggers deny.
         command = (
-            f"python3 {PLUGIN_ROOT}/scripts/ticket_engine_user.py execute "
-            f"{payload_file} --verbose"
+            f"python3 {PLUGIN_ROOT}/scripts/ticket_engine_user.py execute {payload_file} --verbose"
         )
         hook_output = run_hook(command, cwd=str(tmp_path))
 
@@ -184,12 +235,15 @@ class TestHookSessionIdPropagatesToAudit:
         # Step 2: Run entrypoint.
         result = subprocess.run(
             [sys.executable, USER_ENTRYPOINT, "execute", str(payload_file)],
-            capture_output=True, text=True, cwd=str(tmp_path), timeout=10,
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+            timeout=10,
         )
         assert result.returncode == 0, f"Entrypoint failed: {result.stderr}"
 
         # Step 3: Verify audit file exists at path with that session_id.
-        date_dir = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_file = tickets_dir / ".audit" / date_dir / f"{unique_session}.jsonl"
         assert audit_file.exists(), f"Audit file not found at {audit_file}"
 
@@ -262,11 +316,16 @@ class TestOriginMismatchIntegration:
         tickets_dir = tmp_path / "tickets"
         tickets_dir.mkdir()
         payload_file = tmp_path / "payload.json"
-        payload_file.write_text(json.dumps({
-            "action": "create",
-            "fields": {"title": "Mismatch", "problem": "Mismatch", "priority": "low"},
-            "tickets_dir": str(tickets_dir),
-        }), encoding="utf-8")
+        payload_file.write_text(
+            json.dumps(
+                {
+                    "action": "create",
+                    "fields": {"title": "Mismatch", "problem": "Mismatch", "priority": "low"},
+                    "tickets_dir": str(tickets_dir),
+                }
+            ),
+            encoding="utf-8",
+        )
 
         command = f"python3 {PLUGIN_ROOT}/scripts/ticket_engine_user.py execute {payload_file}"
         hook_output = run_hook(
@@ -279,7 +338,10 @@ class TestOriginMismatchIntegration:
 
         result = subprocess.run(
             [sys.executable, USER_ENTRYPOINT, "execute", str(payload_file)],
-            capture_output=True, text=True, cwd=str(tmp_path), timeout=10,
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+            timeout=10,
         )
         assert result.returncode == 1
         resp = json.loads(result.stdout)
@@ -291,11 +353,16 @@ class TestOriginMismatchIntegration:
         tickets_dir = tmp_path / "tickets"
         tickets_dir.mkdir()
         payload_file = tmp_path / "payload.json"
-        payload_file.write_text(json.dumps({
-            "action": "create",
-            "fields": {"title": "Mismatch", "problem": "Mismatch", "priority": "low"},
-            "tickets_dir": str(tickets_dir),
-        }), encoding="utf-8")
+        payload_file.write_text(
+            json.dumps(
+                {
+                    "action": "create",
+                    "fields": {"title": "Mismatch", "problem": "Mismatch", "priority": "low"},
+                    "tickets_dir": str(tickets_dir),
+                }
+            ),
+            encoding="utf-8",
+        )
 
         command = f"python3 {PLUGIN_ROOT}/scripts/ticket_engine_agent.py execute {payload_file}"
         hook_output = run_hook(command, cwd=str(tmp_path))
@@ -303,8 +370,12 @@ class TestOriginMismatchIntegration:
 
         result = subprocess.run(
             [sys.executable, AGENT_ENTRYPOINT, "execute", str(payload_file)],
-            capture_output=True, text=True, cwd=str(tmp_path), timeout=10,
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+            timeout=10,
         )
         assert result.returncode == 1
         resp = json.loads(result.stdout)
-        assert resp["error_code"] == "origin_mismatch"
+        assert resp["state"] == "policy_blocked"
+        assert "classify_intent" in resp["message"]
