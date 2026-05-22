@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import scripts.ticket_workflow as ticket_workflow_script
+
 from tests.support.builders import make_ticket
 from tests.support.workflow import (
     PLUGIN_ROOT,
@@ -130,3 +132,45 @@ def test_cli_other_errors_return_1(tmp_tickets: Path, tmp_path: Path) -> None:
     assert completed.returncode == 1, completed.stdout + completed.stderr
     output = json.loads(completed.stdout)
     assert output["state"] == "escalate"
+
+
+def test_main_wraps_top_level_oserror_without_traceback(
+    capsys,
+    monkeypatch,
+) -> None:
+    def _raise(_argv: list[str] | None = None) -> int:
+        raise OSError("payload directory locked")
+
+    monkeypatch.setattr(ticket_workflow_script, "_run_main", _raise)
+
+    exit_code = ticket_workflow_script.main(["prepare", "payload.json"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.err == ""
+    assert "Traceback" not in captured.out
+    output = json.loads(captured.out)
+    assert output["state"] == "escalate"
+    assert output["error_code"] == "io_error"
+    assert "payload directory locked" in output["message"]
+
+
+def test_main_wraps_top_level_exception_without_traceback(
+    capsys,
+    monkeypatch,
+) -> None:
+    def _raise(_argv: list[str] | None = None) -> int:
+        raise RuntimeError("unexpected recovery failure")
+
+    monkeypatch.setattr(ticket_workflow_script, "_run_main", _raise)
+
+    exit_code = ticket_workflow_script.main(["recover", "payload.json", "retry"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.err == ""
+    assert "Traceback" not in captured.out
+    output = json.loads(captured.out)
+    assert output["state"] == "escalate"
+    assert output["error_code"] == "internal_error"
+    assert "unexpected recovery failure" in output["message"]

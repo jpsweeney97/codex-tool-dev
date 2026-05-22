@@ -860,7 +860,7 @@ def _exit_code(state: str) -> int:
     return 1
 
 
-def main(argv: list[str] | None = None) -> int:
+def _run_main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) < 2:
         print(
@@ -950,6 +950,33 @@ def main(argv: list[str] | None = None) -> int:
 
     print(json.dumps(response))
     return _exit_code(str(response.get("state", "")))
+
+
+def main(argv: list[str] | None = None) -> int:
+    try:
+        return _run_main(argv)
+    except OSError as exc:
+        print(
+            json.dumps(
+                _response(
+                    "escalate",
+                    f"ticket workflow failed: {type(exc).__name__}: {exc}",
+                    error_code="io_error",
+                )
+            )
+        )
+        return 1
+    except Exception as exc:
+        print(
+            json.dumps(
+                _response(
+                    "escalate",
+                    f"ticket workflow failed: {type(exc).__name__}: {exc}",
+                    error_code="internal_error",
+                )
+            )
+        )
+        return 1
 
 
 if __name__ == "__main__":

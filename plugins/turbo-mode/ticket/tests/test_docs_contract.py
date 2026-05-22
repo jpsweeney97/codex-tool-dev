@@ -676,6 +676,15 @@ def test_handbook_documents_runtime_activation_operator_flow() -> None:
     assert "ticket_triage.py doctor" in handbook
     assert "backend/diagnostic path" in handbook
     assert "not the preferred user-facing doctor entrypoint" in handbook
+    assert (
+        "`ticket_doctor.py diagnose` reports source/cache parity, runtime-proof status"
+        in normalized
+    )
+    assert (
+        "`activate-runtime` is the only path in this surface that exercises live "
+        "direct-execute runtime certification"
+        in normalized
+    )
     assert "`in_progress`" in normalized
     assert (
         "`done` requires an Acceptance Criteria section; close flow remains separate"
@@ -683,6 +692,16 @@ def test_handbook_documents_runtime_activation_operator_flow() -> None:
     )
     assert "open`, `in_progress`, or `blocked`" not in normalized
     assert "The engine gates it with `policy_blocked`" in handbook
+
+
+def test_handbook_documents_ticket_triage_doctor_runtime_probe_output() -> None:
+    handbook = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
+    normalized = _normalize_whitespace(handbook)
+
+    assert (
+        "uv run python -B <PLUGIN_ROOT>/scripts/ticket_triage.py doctor <tickets_dir> "
+        "--plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT> [--runtime-probe-output <path>]"
+    ) in handbook
     assert "undefined behavior" not in handbook
     assert "`ticket_engine_activation_smoke.py`" in handbook
     assert "private activation-smoke entrypoint" in normalized
@@ -726,6 +745,8 @@ def test_claude_instructions_reference_current_turbo_mode_source_roots() -> None
     assert "plugins/turbo-mode/handoff/1.6.0" not in text
     assert "`plugins/turbo-mode/ticket/` - Ticket plugin source." in text
     assert "`plugins/turbo-mode/handoff/` - Handoff plugin source." in text
+    assert "uv run python -B <PLUGIN_ROOT>/scripts/<script>.py ..." in text
+    assert "python3 -B <PLUGIN_ROOT>/scripts/<script>.py ..." not in text
     assert "uv run --directory plugins/turbo-mode/ticket pytest -q" in text
     assert "uv run --directory plugins/turbo-mode/handoff pytest -q" in text
 
@@ -830,11 +851,29 @@ def test_readme_documents_ticket_ux_commands() -> None:
         "ticket_doctor.py` | `activate-runtime <tickets_dir> --marketplace-path <marketplace_path>`"
     ) in text
     assert "ticket_doctor.py` | `repair-audit <tickets_dir> [--confirm-repair]`" in text
+    assert (
+        "ticket_triage.py` | `doctor <tickets_dir> --plugin-root <plugin_root> "
+        "--cache-root <cache_root> [--runtime-probe-output <path>]`"
+    ) in text
+    assert "ticket_audit.py` | `repair <tickets_dir> [--fix | --dry-run]`" in text
     assert "ticket_workflow.py" in text
     assert "Internal/debugging legacy workflow runner" in text
     assert "ticket_read.py` | `check" in text
     assert "| doctor/repair | explicit maintenance request | `ticket_doctor.py diagnose`" in text
+    assert "**Maintenance entrypoints:**" in text
     assert "skills/ticket/references/pipeline-guide.md" not in text
+
+
+def test_readme_classifies_activate_runtime_as_maintenance_not_read_only() -> None:
+    text = _read_text(PLUGIN_ROOT / "README.md")
+    read_only = text.split("**Read-only entrypoints:**", maxsplit=1)[1].split(
+        "**Maintenance entrypoints:**",
+        maxsplit=1,
+    )[0]
+    maintenance = text.split("**Maintenance entrypoints:**", maxsplit=1)[1]
+
+    assert "activate-runtime <tickets_dir> --marketplace-path <marketplace_path>" not in read_only
+    assert "activate-runtime <tickets_dir> --marketplace-path <marketplace_path>" in maintenance
 
 
 def test_readme_and_handbook_use_source_authority_installed_boundary() -> None:

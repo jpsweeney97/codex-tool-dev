@@ -1321,6 +1321,14 @@ def build_activation_candidate(
             error_code=exc.error_code,
             message=exc.message,
         )
+    except OSError as exc:
+        return ActivationFailure(
+            error_code="deterministic_driver_unavailable",
+            message=(
+                "runtime activation candidate build failed: "
+                f"{exc}. Got: {str(run_dir)!r:.100}"
+            ),
+        )
 
     proof: ActivationProof = {
         "schema_version": "installed_ticket_runtime_readiness-v1",

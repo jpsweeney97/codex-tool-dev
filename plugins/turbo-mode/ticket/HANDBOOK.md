@@ -356,9 +356,9 @@ suggest `ticket-capture` prompts but must not write tickets.
 ### `ticket-doctor` skill
 
 **When to use**
-Explicit maintenance only: diagnose ticket storage, validate plugin health, or
-repair corrupt audit logs. Casual audit, triage, or review language belongs to
-`ticket-review`.
+Explicit maintenance only: diagnose ticket storage, validate plugin health,
+activate the installed direct-execute runtime, or repair corrupt audit logs.
+Casual audit, triage, or review language belongs to `ticket-review`.
 
 **Flow**
 1. Resolve plugin root
@@ -387,6 +387,11 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKET
 The guard also accepts `ticket_engine_activation_smoke.py` as a private
 activation-smoke entrypoint for contained proof bootstrap. It is not a normal
 operator command and must not be used outside the explicit activation flow.
+
+**Diagnostics:** `ticket_doctor.py diagnose` reports source/cache parity,
+runtime-proof status, stale payload state, and optional runtime-probe output.
+`activate-runtime` is the only path in this surface that exercises live
+direct-execute runtime certification.
 
 **Stale payload cleanup:** `ticket_doctor.py diagnose` reports stale
 `.codex/ticket-tmp/` payloads older than 24 hours without mutating them.
@@ -464,7 +469,7 @@ Lower-level health check backend; called by `ticket_review.py`. Produces dashboa
 ```bash
 uv run python -B <PLUGIN_ROOT>/scripts/ticket_triage.py dashboard <tickets_dir>
 uv run python -B <PLUGIN_ROOT>/scripts/ticket_triage.py audit <tickets_dir> [--days <N>]
-uv run python -B <PLUGIN_ROOT>/scripts/ticket_triage.py doctor <tickets_dir> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_triage.py doctor <tickets_dir> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT> [--runtime-probe-output <path>]
 ```
 
 `ticket_triage.py doctor` is a backend/diagnostic path used by the doctor
@@ -486,8 +491,11 @@ Direct use is for debugging. User-facing repair should go through
 
 **Inputs**
 ```bash
-uv run python -B <PLUGIN_ROOT>/scripts/ticket_audit.py repair <tickets_dir> [--dry-run]
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_audit.py repair <tickets_dir> [--fix | --dry-run]
 ```
+
+Default is dry-run. Pass `--fix` to rewrite files; `--dry-run` remains accepted
+but is redundant.
 
 **Behavior:** Reads all `.audit/YYYY-MM-DD/*.jsonl` files, validates each line as parseable JSON. In repair mode: rewrites files with corrupt lines replaced, backs up originals with ISO8601 timestamp suffix.
 
@@ -585,7 +593,7 @@ At preflight, the engine takes a fingerprint snapshot of any existing ticket bei
 | `session_cap_exceeded` | Agent created ≥ `max_creates_per_session` tickets this session | Check `max_creates_per_session` in `.codex/ticket.local.md` | Raise cap or start a new session |
 | `audit_write_failed` blocks agent mutation | Disk full, permission error, or `.audit/` not writable | Check disk space and permissions on `docs/tickets/.audit/` | Fix underlying issue; mutation will proceed once audit write succeeds |
 | `stale_plan` on update | Concurrent write between preflight and execute | Inspect ticket file mtime | Re-run update after verifying current state |
-| `runtime_readiness_required` on direct execute | Runtime proof is missing, stale, invalid, or mismatched | Run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <tickets_dir> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>` | Run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>` only when explicit installed-runtime activation is intended |
+| `runtime_readiness_required` on direct execute | Runtime proof is missing, stale, invalid, or mismatched | Run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <tickets_dir> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>` to inspect source/cache parity, runtime-proof status, and optional runtime-probe output | Run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>` only when explicit installed-runtime activation is intended; this is the live direct-execute certification path |
 | Corrupt audit JSONL lines | Interrupted write (crash during mutation) | Run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir>` | After explicit approval, run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir> --confirm-repair` |
 | Stale `.codex/ticket-tmp/` payloads | Interrupted or abandoned prepare/execute flow | Run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <tickets_dir> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>` | After explicit approval, run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads` |
 | Stale tickets not surfaced by triage | Missing `updated` field in old ticket YAML | Inspect ticket frontmatter | Triage falls back to file mtime; results are approximate for legacy tickets |

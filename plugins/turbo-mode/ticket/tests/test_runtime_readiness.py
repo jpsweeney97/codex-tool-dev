@@ -1065,6 +1065,39 @@ def test_build_activation_candidate_propagates_hook_contract_blocker(
     assert result.error_code == "hook_contract_blocked"
 
 
+def test_build_activation_candidate_wraps_oserror_as_deterministic_driver_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    tickets_dir = project_root / "docs" / "tickets"
+    marketplace_path = project_root / ".agents" / "plugins" / "marketplace.json"
+    (project_root / ".git").mkdir(parents=True)
+    tickets_dir.mkdir(parents=True)
+    marketplace_path.parent.mkdir(parents=True, exist_ok=True)
+    marketplace_path.write_text("{}", encoding="utf-8")
+
+    def _raise_oserror(**_kwargs):
+        raise OSError("inventory transcript unreadable")
+
+    monkeypatch.setattr(
+        ticket_runtime_readiness,
+        "collect_installed_runtime_inventory",
+        _raise_oserror,
+    )
+
+    result = ticket_runtime_readiness.build_activation_candidate(
+        project_root=project_root,
+        tickets_dir=tickets_dir,
+        marketplace_path=marketplace_path,
+    )
+
+    assert result.proof is None
+    assert result.error_code == "deterministic_driver_unavailable"
+    assert "runtime activation candidate build failed" in result.message
+    assert "inventory transcript unreadable" in result.message
+
+
 def test_activate_runtime_writes_final_proof_after_direct_execute_smoke(
     tmp_path: Path,
     monkeypatch,

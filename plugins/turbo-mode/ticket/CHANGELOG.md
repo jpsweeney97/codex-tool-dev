@@ -55,8 +55,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Runtime activation now preserves direct-execute smoke evidence when proof
   verification or final proof publication fails after the smoke already
   succeeded.
-- Direct-execute success-path tests now exercise the real installed runtime
-  verifier instead of a stubbed success result.
+- Build-candidate verification and direct-execute execute-path tests now
+  exercise the real installed runtime verifier.
 - Ticket plugin pytest configuration no longer pins a shared global temp root.
 
 ## 1.4.0 — 2026-03-09
