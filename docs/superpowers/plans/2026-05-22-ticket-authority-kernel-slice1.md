@@ -257,6 +257,8 @@ class MutationRequest:
 
 It must not include `origin`, `request_origin`, hook fields, provenance fields, grants, approvals, apply consent, context source, snapshot fingerprint, delta values, or before values.
 
+Ordinary `MutationRequest.value=None` means the caller omitted a local value unless the selected subject explicitly declares a value policy that accepts `None`. Slice 1 has no active exported subject that accepts `None` as an ordinary local value. Raw JSON `status: null` remains represented by `RawShapeDiscriminator.raw_keys` containing `status` plus `raw_status_value=None`; raw status-key presence is not inferred from `raw_status_value is None`.
+
 `MutationContext` carries the classifier state:
 
 ```python
@@ -694,7 +696,6 @@ Wildcard subject handling is allowed only for unsupported shape families. `subje
 
 | value_policy_id | kind | vocabulary/shape | invalid_rule_id | anchors |
 | --- | --- | --- | --- | --- |
-| `value.none` | `NONE` | no value validation | none | plan-authored |
 | `value.overwritten_input_any` | `OVERWRITTEN_INPUT_ANY` | source-indicated accepted raw input of any JSON-compatible shape; wrapper overwrites before lower validation | none | `capture.mapping`; wrapper behavior test required |
 | `value.any_string` | `ANY_STRING` | string when present | `invalid.shared.any_string` | `validate.constants`, `envelope.schema` |
 | `value.non_empty_string` | `NON_EMPTY_STRING` | non-empty string | `invalid.shared.non_empty_string` | `capture.mapping`, `envelope.schema`, `engine.reopen` |
@@ -720,6 +721,7 @@ Wildcard subject handling is allowed only for unsupported shape families. `subje
 | value_flow_id | meaning | typical owners | anchors |
 | --- | --- | --- | --- |
 | `flow.caller_preserved` | caller-supplied value is preserved when present | `PROJECT`, `WRAPPER` | `capture.mapping`, `update.mapping` |
+| `flow.caller_preserved_or_wrapper_reinjects_refinement_tag` | caller-supplied tag list is accepted, but update wrapper re-injects `needs-refinement` when current refinement remains active and the requested list omits the marker | `WRAPPER` | `update.refinement`, `update.tests` |
 | `flow.caller_preserved_or_wrapper_defaulted_if_missing` | caller-supplied value is preserved; wrapper supplies default only when missing | `WRAPPER` | `capture.mapping`, `capture.tests` |
 | `flow.caller_preserved_or_wrapper_inferred_if_missing` | caller-supplied value is preserved; wrapper infers fallback only when missing | `WRAPPER` | `capture.mapping`, `capture.tests` |
 | `flow.wrapper_overwrites_constant_conversation` | wrapper accepts an input value and always writes output value `"conversation"` before engine create | `WRAPPER` | `capture.mapping`, `capture.tests` |
@@ -749,7 +751,8 @@ Authored row and derivation value-flow assignments:
 | `derive.ingest.create.defer` | `flow.wrapper_synthesizes_defer_object` |
 | `derive.ingest.create.priority_default` | `flow.wrapper_defaults_ingest_priority_if_missing` |
 | `derive.ingest.create.tags_default` | `flow.wrapper_defaults_ingest_tags_if_missing` |
-| `supported.update.frontmatter.priority`, `supported.update.frontmatter.component`, `supported.update.frontmatter.related_paths`, `supported.update.frontmatter.blocked_by`, `supported.update.frontmatter.blocks`, `supported.update.frontmatter.tags`, `supported.update.focused.problem`, `supported.update.focused.next_action`, `supported.update.focused.acceptance_criteria` | `flow.caller_preserved` |
+| `supported.update.frontmatter.priority`, `supported.update.frontmatter.component`, `supported.update.frontmatter.related_paths`, `supported.update.frontmatter.blocked_by`, `supported.update.frontmatter.blocks`, `supported.update.frontmatter.tags.caller_preserved`, `supported.update.focused.problem`, `supported.update.focused.next_action`, `supported.update.focused.acceptance_criteria` | `flow.caller_preserved` |
+| `supported.update.frontmatter.tags.refinement_tag_reinjected` | `flow.caller_preserved_or_wrapper_reinjects_refinement_tag` |
 | `supported.update.lifecycle.status.open_to_in_progress`, `supported.update.lifecycle.status.in_progress_to_open`, `precondition.update.lifecycle.status.to_blocked`, `precondition.update.lifecycle.status.blocked_to_open`, `precondition.update.lifecycle.status.blocked_to_in_progress`, `precondition.update.close.status.done`, `precondition.update.close.status.wontfix`, `precondition.update.reopen.status.open`, `precondition.update.reopen.reopen_reason` | `flow.lifecycle_transition` |
 | `noop.candidate.update.lifecycle.status.same_open`, `noop.candidate.update.lifecycle.status.same_in_progress`, `noop.candidate.update.lifecycle.status.same_blocked` | `flow.no_op_candidate` |
 
@@ -776,11 +779,12 @@ PRECONDITION_REQUIRED
 SPECIFIC_UNSUPPORTED
 NO_OP
 SUPPORTED
+SUBJECT_FAMILY_FALLBACK_UNSUPPORTED
 ```
 
-Invalid payload repair comes before snapshot repair. Classifier context repair comes before lifecycle precondition deferral. Precondition-required outcomes come before specific denials where readiness must be resolved first. Specific denial carve-outs come before `NO_OP` and broad support. `SUPPORTED` is terminal inside a subject family. At most one outcome may match within the first applicable stage; same-stage overlap raises `AuthorityEvaluationError`.
+Invalid payload repair comes before snapshot repair. Classifier context repair comes before lifecycle precondition deferral. Precondition-required outcomes come before specific denials where readiness must be resolved first. Specific denial carve-outs come before `NO_OP` and broad support. `SUPPORTED` is terminal for non-fallback rows inside a subject family. `SUBJECT_FAMILY_FALLBACK_UNSUPPORTED` rows are evaluated only after no non-fallback row in the selected subject family matches. At most one outcome may match within the first applicable stage; same-stage overlap raises `AuthorityEvaluationError`.
 
-Lifecycle subject-family fallback is a named exception to the simple stage-order reading. `unsupported.update.lifecycle.status.unmatched` has `SPECIFIC_UNSUPPORTED` disposition, but it is the fallback for `subject.update.lifecycle.status`, not a carve-out that preempts later active lifecycle rows. Evaluate it only after invalid, context-required, precondition-required, and any active `NO_OP` or `SUPPORTED` row for the same lifecycle request have failed to match.
+Lifecycle subject-family fallback is represented explicitly by `SUBJECT_FAMILY_FALLBACK_UNSUPPORTED`. `unsupported.update.lifecycle.status.unmatched` is the fallback for `subject.update.lifecycle.status`, not a carve-out that preempts later active lifecycle rows. Evaluate it only after invalid, context-required, precondition-required, specific unsupported carve-outs, and any active `NO_OP` or `SUPPORTED` row for the same lifecycle request have failed to match.
 
 Current Slice 1 behavior is pre-promotion: the same-status rows `open -> open`, `in_progress -> in_progress`, and `blocked -> blocked` are authored probe candidates but excluded from `_DEFAULT_REGISTRY`. Because they are not active rows, each same-status request falls through to `unsupported.update.lifecycle.status.unmatched`. For example, before promotion, `subject_path=update.lifecycle.status`, `value="open"`, and `current.status="open"` selects no active no-op row and returns `unsupported.update.lifecycle.status.unmatched`.
 
@@ -790,7 +794,7 @@ Every known subject with a value policy has an explicit invalid-value row. Inval
 
 Every context-required outcome is an authored row with stable `rule_id`. Context rows may be shared only when shape family, subject family or declared context family, required context fields, group shape hint, and diagnostic behavior match.
 
-Known semantic carve-outs that outrank broad support are authored `SPECIFIC_UNSUPPORTED` rows. Generic unknown subjects use fallback unsupported rows.
+Known semantic carve-outs that outrank broad support are authored `SPECIFIC_UNSUPPORTED` rows. Generic unknown subjects and known-family no-match outcomes use `SUBJECT_FAMILY_FALLBACK_UNSUPPORTED` rows.
 
 ### Request-Subject Rows
 
@@ -834,7 +838,8 @@ Wrapper-synthesized create values with no caller/envelope request key are not ac
 | `supported.update.frontmatter.related_paths` | `subject.update.frontmatter` | `update.frontmatter.related_paths` | `related_paths` | `update.ticket.related_paths` | `frontmatter.related_paths` | `SUPPORTED` | `PROJECT` | true | `value.path_list` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `engine.update` |
 | `supported.update.frontmatter.blocked_by` | `subject.update.frontmatter` | `update.frontmatter.blocked_by` | `blocked_by` | `update.ticket.blocked_by` | `frontmatter.blocked_by` | `SUPPORTED` | `PROJECT` | true | `value.string_list` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `engine.update` |
 | `supported.update.frontmatter.blocks` | `subject.update.frontmatter` | `update.frontmatter.blocks` | `blocks` | `update.ticket.blocks` | `frontmatter.blocks` | `SUPPORTED` | `PROJECT` | true | `value.string_list` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `engine.update` |
-| `supported.update.frontmatter.tags` | `subject.update.frontmatter` | `update.frontmatter.tags` | `tags` | `update.ticket.tags` | `frontmatter.tags` | `SUPPORTED` | `PROJECT` | true | `value.string_list` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `update.refinement`, `engine.update` |
+| `supported.update.frontmatter.tags.caller_preserved` | `subject.update.frontmatter` | `update.frontmatter.tags` | `tags` | `update.ticket.tags` | `frontmatter.tags` | `SUPPORTED` | `PROJECT` | true | `value.string_list` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `update.refinement`, `engine.update` |
+| `supported.update.frontmatter.tags.refinement_tag_reinjected` | `subject.update.frontmatter` | `update.frontmatter.tags` | `tags` | `update.ticket.tags` | `frontmatter.tags` | `SUPPORTED` | `WRAPPER` | false | `value.string_list` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `update.refinement`, `update.tests`, `engine.update` |
 | `supported.update.focused.problem` | `subject.update.focused` | `update.focused.problem` | `problem` | `update.ticket.problem` | `section.problem` | `SUPPORTED` | `PROJECT` | true | `value.non_empty_string` | `APPLY_CONSENT` | `UPDATE_FOCUSED_REFINEMENT` | `update.allowed_fields`, `update.refinement`, `engine.update` |
 | `supported.update.focused.next_action` | `subject.update.focused` | `update.focused.next_action` | `next_action` | `update.ticket.next_action` | `section.next_action` | `SUPPORTED` | `PROJECT` | true | `value.non_empty_string` | `APPLY_CONSENT` | `UPDATE_FOCUSED_REFINEMENT` | `update.allowed_fields`, `engine.update` |
 | `supported.update.focused.acceptance_criteria` | `subject.update.focused` | `update.focused.acceptance_criteria` | `acceptance_criteria` | `update.ticket.acceptance_criteria` | `section.acceptance_criteria` | `SUPPORTED` | `PROJECT` | true | `value.acceptance_criteria` | `APPLY_CONSENT` | `UPDATE_FOCUSED_REFINEMENT` | `update.allowed_fields`, `update.refinement`, `engine.update` |
@@ -855,6 +860,15 @@ Every active request-subject row has `request_raw_key`. Rows with the same surfa
 
 `request_raw_key` is the raw payload key used by `RawShapeDiscriminator.raw_keys`; `subject_path` is the normalized policy subject. The registry may derive private lookup tables from these authored columns, but a separate subject-to-raw-key table is not a second source of truth.
 
+Update tag rows use these non-overlap predicates:
+
+| rule_id | match predicate | value_flow_id |
+| --- | --- | --- |
+| `supported.update.frontmatter.tags.caller_preserved` | requested tags is a valid list and not (`current.refinement_status == "needs_refinement"` and `"needs-refinement"` not in requested tags) | `flow.caller_preserved` |
+| `supported.update.frontmatter.tags.refinement_tag_reinjected` | requested tags is a valid list, `current.refinement_status == "needs_refinement"`, and `"needs-refinement"` not in requested tags | `flow.caller_preserved_or_wrapper_reinjects_refinement_tag` |
+
+When current refinement state is active and the caller omits `needs-refinement`, current wrapper behavior accepts the tag write and re-injects the marker. This is wrapper-coerced support, not standalone tag-removal denial.
+
 Lifecycle rows use these current-state and value predicates:
 
 | rule_id | raw_group_shape_hint | current_status_condition | value_condition |
@@ -869,6 +883,8 @@ Lifecycle rows use these current-state and value predicates:
 | `noop.candidate.update.lifecycle.status.same_blocked` | `UPDATE_STATUS_LIFECYCLE` | `current.status == "blocked"` | `value == "blocked"` |
 | `precondition.update.close.status.done` | `UPDATE_CLOSE` | `current.status in {"open", "in_progress", "blocked"}` | `value == "done"` |
 | `precondition.update.close.status.wontfix` | `UPDATE_CLOSE` | `current.status in {"open", "in_progress", "blocked"}` | `value == "wontfix"` |
+| `unsupported.update.close.status.same_terminal` | `UPDATE_CLOSE` | `current.status in {"done", "wontfix"}` | `value == current.status` |
+| `unsupported.update.close.status.terminal_to_terminal` | `UPDATE_CLOSE` | `current.status in {"done", "wontfix"}` | `value in {"done", "wontfix"} and value != current.status` |
 | `precondition.update.reopen.status.open` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | `current.status in {"done", "wontfix"}` | `value == "open"` |
 | `precondition.update.reopen.reopen_reason` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | `current.status in {"done", "wontfix"}` | `reopen_reason` is non-empty string |
 
@@ -884,7 +900,7 @@ Lifecycle routing for `update.lifecycle.status` is authority-critical. This tabl
 | `update.lifecycle.status` | `in_progress` or `blocked` | missing | `subject.update.lifecycle.status` | `UNRESOLVED_CONTEXT_REQUIRED` | context split unresolved; return `context.update.lifecycle.status.current_status` |
 | `update.lifecycle.status` | `in_progress` or `blocked` | known | `subject.update.lifecycle.status` | `UPDATE_STATUS_LIFECYCLE` | ordinary lifecycle status; same-current values are unmatched before promotion and no-op only after promotion |
 | `update.lifecycle.status` | `done` or `wontfix` | missing | `subject.update.close.status` | `UNRESOLVED_CONTEXT_REQUIRED` | close-by-status context split; return `context.update.close.status.current_status` |
-| `update.lifecycle.status` | `done` or `wontfix` | known | `subject.update.close.status` | `UPDATE_CLOSE` | close-by-status, including same-terminal unsupported handling |
+| `update.lifecycle.status` | `done` or `wontfix` | known | `subject.update.close.status` | `UPDATE_CLOSE` | close-by-status, including same-terminal and terminal-to-terminal unsupported handling |
 
 ### Authored Invalid, Context, Unsupported, And No-Op Rows
 
@@ -911,21 +927,21 @@ These rows are exported in `policy["rules"]` and referenced by active subject, f
 | `context.update.lifecycle.status.current_status` | `CONTEXT_REQUIRED` | `subject.update.lifecycle.status` | current status missing | `current.status` | `CONTEXT_REQUIRED` | `context_required_current_status` | `UNRESOLVED_CONTEXT_REQUIRED` | `engine.transitions` |
 | `context.update.close.status.current_status` | `CONTEXT_REQUIRED` | `subject.update.close.status` | close status target with current status missing | `current.status` | `CONTEXT_REQUIRED` | `context_required_current_status` | `UNRESOLVED_CONTEXT_REQUIRED` | `engine.close` |
 | `context.update.lifecycle.reopen_reason.current_status` | `CONTEXT_REQUIRED` | `subject.update.lifecycle.reopen` | current status missing | `current.status` | `CONTEXT_REQUIRED` | `context_required_reopen_status` | `UNRESOLVED_CONTEXT_REQUIRED` | `engine.reopen` |
-| `context.update.frontmatter.tags.refinement_state` | `CONTEXT_REQUIRED` | `subject.update.frontmatter` | tags value valid but current refinement/tag state missing | `current.refinement_status`, `current.tags` | `CONTEXT_REQUIRED` | `context_required_refinement_tag_state` | `UNRESOLVED_CONTEXT_REQUIRED` | `update.refinement`, `update.tests` |
-| `unsupported.update.frontmatter.tags.remove_needs_refinement_standalone` | `SPECIFIC_UNSUPPORTED` | `subject.update.frontmatter` | current refinement active, current tags contain `needs-refinement`, requested tags omit it, and no focused-refinement cleanup group applies | none | `UNSUPPORTED` | `standalone_needs_refinement_tag_removal_not_supported` | `UPDATE_FRONTMATTER` | `update.refinement`, `update.tests` |
+| `context.update.frontmatter.tags.refinement_state` | `CONTEXT_REQUIRED` | `subject.update.frontmatter` | tags value valid but current refinement state missing | `current.refinement_status` | `CONTEXT_REQUIRED` | `context_required_refinement_tag_state` | `UNRESOLVED_CONTEXT_REQUIRED` | `update.refinement`, `update.tests` |
 | `unsupported.capture.derived.source.not_requestable` | `SPECIFIC_UNSUPPORTED` | `subject.capture.create` | caller targets exported wrapper-derived `capture.derived.source` | none | `UNSUPPORTED` | `subject_not_requestable_wrapper_derived_value` | `UNSUPPORTED_NO_GROUP_SHAPE` | `capture.mapping`, `engine.create` |
 | `unsupported.capture.derived.acceptance_criteria_default.not_requestable` | `SPECIFIC_UNSUPPORTED` | `subject.capture.create` | caller targets exported wrapper-derived `capture.derived.acceptance_criteria_default` | none | `UNSUPPORTED` | `subject_not_requestable_wrapper_derived_value` | `UNSUPPORTED_NO_GROUP_SHAPE` | `capture.mapping`, `validate.constants` |
 | `unsupported.ingest.derived.defer.not_requestable` | `SPECIFIC_UNSUPPORTED` | `subject.ingest.create` | caller targets exported wrapper-derived `ingest.derived.defer` | none | `UNSUPPORTED` | `subject_not_requestable_wrapper_derived_value` | `UNSUPPORTED_NO_GROUP_SHAPE` | `envelope.mapping`, `contract.envelope` |
 | `unsupported.ingest.derived.priority_default.not_requestable` | `SPECIFIC_UNSUPPORTED` | `subject.ingest.create` | caller targets exported wrapper-derived `ingest.derived.priority_default` | none | `UNSUPPORTED` | `subject_not_requestable_wrapper_derived_value` | `UNSUPPORTED_NO_GROUP_SHAPE` | `envelope.mapping`, `contract.envelope` |
 | `unsupported.ingest.derived.tags_default.not_requestable` | `SPECIFIC_UNSUPPORTED` | `subject.ingest.create` | caller targets exported wrapper-derived `ingest.derived.tags_default` | none | `UNSUPPORTED` | `subject_not_requestable_wrapper_derived_value` | `UNSUPPORTED_NO_GROUP_SHAPE` | `envelope.mapping`, `contract.envelope` |
 | `unsupported.update.close.status.same_terminal` | `SPECIFIC_UNSUPPORTED` | `subject.update.close.status` | current status already equals requested terminal status | none | `UNSUPPORTED` | `status_target_already_current` | `UPDATE_CLOSE` | `engine.close`; behavior test required |
-| `unsupported.capture.create.unregistered_subject` | `SPECIFIC_UNSUPPORTED` | `subject.capture.create` | well-formed unknown capture subject | none | `UNSUPPORTED` | `unregistered_subject` | `UNSUPPORTED_NO_GROUP_SHAPE` | `capture.allowed_fields` |
-| `unsupported.ingest.create.unregistered_subject` | `SPECIFIC_UNSUPPORTED` | `subject.ingest.create` | well-formed unknown ingest subject | none | `UNSUPPORTED` | `unregistered_subject` | `UNSUPPORTED_NO_GROUP_SHAPE` | `envelope.schema` |
-| `unsupported.update.frontmatter.unregistered_subject` | `SPECIFIC_UNSUPPORTED` | `subject.update.frontmatter` | well-formed unknown update frontmatter subject | none | `UNSUPPORTED` | `unregistered_subject` | `UNSUPPORTED_NO_GROUP_SHAPE` | `update.allowed_fields` |
-| `unsupported.update.focused.unregistered_subject` | `SPECIFIC_UNSUPPORTED` | `subject.update.focused` | well-formed unknown focused subject | none | `UNSUPPORTED` | `unregistered_subject` | `UNSUPPORTED_NO_GROUP_SHAPE` | `update.allowed_fields` |
-| `unsupported.update.lifecycle.status.unmatched` | `SPECIFIC_UNSUPPORTED` | `subject.update.lifecycle.status` | known status subject but no transition row matched | none | `UNSUPPORTED` | `status_transition_not_supported` | `UPDATE_STATUS_LIFECYCLE` | `engine.transitions` |
-| `unsupported.update.close.unregistered_subject` | `SPECIFIC_UNSUPPORTED` | `subject.update.close.status` | close shape with non-status subject | none | `UNSUPPORTED` | `unregistered_subject` | `UPDATE_CLOSE` | `update.mapping` |
-| `unsupported.update.reopen.unregistered_subject` | `SPECIFIC_UNSUPPORTED` | `subject.update.lifecycle.reopen` | reopen shape with unsupported subject | none | `UNSUPPORTED` | `unregistered_subject` | `UPDATE_REOPEN` | `update.mapping` |
+| `unsupported.update.close.status.terminal_to_terminal` | `SPECIFIC_UNSUPPORTED` | `subject.update.close.status` | current terminal status differs from requested terminal status | none | `UNSUPPORTED` | `terminal_to_terminal_status_change_not_supported` | `UPDATE_CLOSE` | `engine.close`; behavior test required |
+| `unsupported.capture.create.unregistered_subject` | `SUBJECT_FAMILY_FALLBACK_UNSUPPORTED` | `subject.capture.create` | well-formed unknown capture subject | none | `UNSUPPORTED` | `unregistered_subject` | `UNSUPPORTED_NO_GROUP_SHAPE` | `capture.allowed_fields` |
+| `unsupported.ingest.create.unregistered_subject` | `SUBJECT_FAMILY_FALLBACK_UNSUPPORTED` | `subject.ingest.create` | well-formed unknown ingest subject | none | `UNSUPPORTED` | `unregistered_subject` | `UNSUPPORTED_NO_GROUP_SHAPE` | `envelope.schema` |
+| `unsupported.update.frontmatter.unregistered_subject` | `SUBJECT_FAMILY_FALLBACK_UNSUPPORTED` | `subject.update.frontmatter` | well-formed unknown update frontmatter subject | none | `UNSUPPORTED` | `unregistered_subject` | `UNSUPPORTED_NO_GROUP_SHAPE` | `update.allowed_fields` |
+| `unsupported.update.focused.unregistered_subject` | `SUBJECT_FAMILY_FALLBACK_UNSUPPORTED` | `subject.update.focused` | well-formed unknown focused subject | none | `UNSUPPORTED` | `unregistered_subject` | `UNSUPPORTED_NO_GROUP_SHAPE` | `update.allowed_fields` |
+| `unsupported.update.lifecycle.status.unmatched` | `SUBJECT_FAMILY_FALLBACK_UNSUPPORTED` | `subject.update.lifecycle.status` | known status subject but no transition row matched | none | `UNSUPPORTED` | `status_transition_not_supported` | `UPDATE_STATUS_LIFECYCLE` | `engine.transitions` |
+| `unsupported.update.close.unregistered_subject` | `SUBJECT_FAMILY_FALLBACK_UNSUPPORTED` | `subject.update.close.status` | close shape with non-status subject | none | `UNSUPPORTED` | `unregistered_subject` | `UPDATE_CLOSE` | `update.mapping` |
+| `unsupported.update.reopen.unregistered_subject` | `SUBJECT_FAMILY_FALLBACK_UNSUPPORTED` | `subject.update.lifecycle.reopen` | reopen shape with unsupported subject | none | `UNSUPPORTED` | `unregistered_subject` | `UPDATE_REOPEN` | `update.mapping` |
 | `unsupported.capture.non_create_mutation` | shape stop | none | capture non-create shape | none | `UNSUPPORTED` | `surface_action_operation_not_supported` | `UNSUPPORTED_NO_GROUP_SHAPE` | `capture.allowed_fields` |
 | `unsupported.ingest.non_create_mutation` | shape stop | none | ingest non-create shape | none | `UNSUPPORTED` | `surface_action_operation_not_supported` | `UNSUPPORTED_NO_GROUP_SHAPE` | `envelope.mapping` |
 | `unsupported.update.unsupported_action_operation` | shape stop | none | unsupported update action/operation combination | none | `UNSUPPORTED` | `surface_action_operation_not_supported` | `UNSUPPORTED_NO_GROUP_SHAPE` | `update.mapping` |
@@ -1081,7 +1097,7 @@ Raw-shape to semantic group resolution is fixed by this table. It is the single-
 | `group.unsupported.update.focused_refinement.fallback` | `group.update.focused_refinement` | false | `UNSUPPORTED` | `UNSUPPORTED` | none | none | none | fallback |
 | `group.supported.update.status_lifecycle` | `group.update.status_lifecycle` | true | `UPDATE` | strongest local gate | `TARGET_FINGERPRINT_REVALIDATION`, `PREFLIGHT_REQUIRED` | none unless local row is precondition-required | `UPDATES_FRONTMATTER`, `MAY_AFFECT_CLOSE_READINESS` | non-open status lifecycle group |
 | `group.precondition.update.status.blocked_by_required` | `group.update.status_lifecycle` | true | `UPDATE` | `APPLY_CONSENT` | `TARGET_FINGERPRINT_REVALIDATION`, `PREFLIGHT_REQUIRED` | `BLOCKED_BY_REQUIRED` | `UPDATES_FRONTMATTER`, `MAY_AFFECT_CLOSE_READINESS` | status to `blocked` |
-| `group.precondition.update.status.blockers_resolved_required` | `group.update.status_lifecycle` | true | `UPDATE` | `APPLY_CONSENT` | `TARGET_FINGERPRINT_REVALIDATION`, `PREFLIGHT_REQUIRED` | `BLOCKERS_RESOLVED_REQUIRED` | `UPDATES_FRONTMATTER`, `MAY_AFFECT_CLOSE_READINESS` | blocked to `open` or `in_progress` |
+| `group.precondition.update.status.blockers_resolved_required` | `group.update.status_lifecycle` | true | `UPDATE` | `APPLY_CONSENT` | `TARGET_FINGERPRINT_REVALIDATION`, `PREFLIGHT_REQUIRED` | `BLOCKERS_RESOLVED_REQUIRED` | `UPDATES_FRONTMATTER`, `MAY_AFFECT_CLOSE_READINESS` | blocked to `in_progress` |
 | `group.unsupported.update.status_lifecycle.fallback` | `group.update.status_lifecycle` | false | `UNSUPPORTED` | `UNSUPPORTED` | none | none | none | fallback |
 | `group.context_required.update.status_current` | `group.update.status_context_required` | false | `UNSUPPORTED` | `UNSUPPORTED` | none | none | none | one or more local status/reopen actions require `current.status`; lane lists those action IDs in `context_required_action_ids` |
 | `group.unsupported.update.status_context_required.fallback` | `group.update.status_context_required` | false | `UNSUPPORTED` | `UNSUPPORTED` | none | none | none | fallback for malformed or contradictory status context groups after local invalids preempt |
@@ -1114,9 +1130,10 @@ PRECONDITION_REQUIRED
 SPECIFIC_UNSUPPORTED
 NO_OP
 SUPPORTED
+GROUP_FAMILY_FALLBACK
 ```
 
-If any action has local `INVALID_VALUE`, the planner returns those local invalid action IDs and does not evaluate group invalid rules. If local values are individually valid, evaluate every applicable group invalid rule in stable authored order. Group invalid evaluation is exhaustive within the selected group family. `group_invalid_rule_ids` preserves authored group-invalid rule order. `invalid_action_ids` is the stable union of affected action IDs, preserving input action order.
+If any action has local `INVALID_VALUE`, the planner returns those local invalid action IDs and does not evaluate group invalid rules. If local values are individually valid, evaluate every applicable group invalid rule in stable authored order. Group invalid evaluation is exhaustive within the selected group family. Explicit `*.fallback` group rules use `GROUP_FAMILY_FALLBACK` and are evaluated only after all non-fallback group outcomes in the selected family fail to match. `group_invalid_rule_ids` preserves authored group-invalid rule order. `invalid_action_ids` is the stable union of affected action IDs, preserving input action order.
 
 | group_invalid_rule_id | family | affected_request_subject_paths | derived_subject_paths | repair_subject_paths | invalid_action_mapping | condition | reason_code | anchors/tests |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1168,13 +1185,14 @@ Status transition outcome matrix:
 | `open -> in_progress` | status lifecycle | supported | `supported.update.lifecycle.status.open_to_in_progress` | `group.supported.update.status_lifecycle` |
 | `in_progress -> open` | status-open exclusive | supported | `supported.update.lifecycle.status.in_progress_to_open` | `group.supported.update.status_open_exclusive` |
 | `open -> blocked` or `in_progress -> blocked` | status lifecycle | precondition required | `precondition.update.lifecycle.status.to_blocked` | `group.precondition.update.status.blocked_by_required` |
-| `blocked -> open` | status-open exclusive | precondition required | `precondition.update.lifecycle.status.blocked_to_open` | `group.precondition.update.status.blockers_resolved_required` |
+| `blocked -> open` | status-open exclusive | precondition required | `precondition.update.lifecycle.status.blocked_to_open` | `group.supported.update.status_open_exclusive` with `BLOCKERS_RESOLVED_REQUIRED` |
 | `blocked -> in_progress` | status lifecycle | precondition required | `precondition.update.lifecycle.status.blocked_to_in_progress` | `group.precondition.update.status.blockers_resolved_required` |
 | `open -> open` | status-open exclusive | probe-gated no-op candidate | `noop.candidate.update.lifecycle.status.same_open` | `group.supported.no_op` only after probe; metadata/focused co-actions remain unsupported |
 | `in_progress -> in_progress` | status lifecycle | probe-gated no-op candidate | `noop.candidate.update.lifecycle.status.same_in_progress` | `group.supported.no_op` after probe, or mixed real update lane with `no_op_action_ids` |
 | `blocked -> blocked` | status lifecycle | probe-gated no-op candidate | `noop.candidate.update.lifecycle.status.same_blocked` | `group.supported.no_op` after probe, or mixed real update lane with `no_op_action_ids` |
 | nonterminal current -> `done` or `wontfix` | close | precondition required | `precondition.update.close.status.done` or `precondition.update.close.status.wontfix` | `group.precondition.update.close` |
 | terminal current -> same terminal value | close | specific unsupported | `unsupported.update.close.status.same_terminal` | unsupported close-shaped lane |
+| terminal current -> different terminal value | close | specific unsupported | `unsupported.update.close.status.terminal_to_terminal` | unsupported close-shaped lane |
 | terminal current -> `open` | status-open exclusive, then reopen semantic split | precondition required | `precondition.update.reopen.status.open` plus `precondition.update.reopen.reopen_reason` when reason is present | `group.precondition.update.reopen` |
 | nonterminal current with `reopen_reason` | reopen-exclusive raw compatibility | probe-gated non-authority handling | none unless probes prove wrapper rejection | no active/exported row; before an active raw-shape-only exception exists, raw-key accounting requires a `reopen_reason` action or raises `AuthorityInputError` |
 | terminal current with `reopen_reason` and optional `status="open"` | reopen-exclusive raw compatibility | precondition required | `precondition.update.reopen.reopen_reason`; plus `precondition.update.reopen.status.open` when status is present | `group.precondition.update.reopen` |
@@ -1204,7 +1222,7 @@ These probes prove claims for already-active rows, group rules, value policies, 
 | --- | --- | --- |
 | `probe.focused_metadata_coactions` | focused section plus each compatible metadata subject stays one focused-refinement lane and current wrapper writes the compatible fields | `group.supported.update.focused_refinement`, `effect.update.focused.metadata_coactions` |
 | `probe.capture_source.non_string_overwritten` | capture prepare with non-string raw `capture_source` returns ready state and prepared fields contain `capture_source == "conversation"` | `supported.capture.create.capture_source`, `value.overwritten_input_any` |
-| `probe.same_status.terminal_close_shape` | current `done`, update `{status: "done"}` follows close-shaped terminal rejection, not nonterminal no-op | `unsupported.update.close.status.same_terminal` |
+| `probe.same_status.terminal_close_shape` | all terminal close combinations (`done -> done`, `wontfix -> wontfix`, `done -> wontfix`, `wontfix -> done`) follow close-shaped terminal rejection, not nonterminal no-op or lifecycle fallback | `unsupported.update.close.status.same_terminal`, `unsupported.update.close.status.terminal_to_terminal` |
 
 #### Absence-Preserving Probes
 
@@ -1216,13 +1234,11 @@ These probes preserve non-authority behavior outside classifier/planner policy u
 | `probe.reopen_reason.in_progress_status_reason` | current `in_progress`, update `{status: "in_progress", reopen_reason: "..."}` observed behavior shows whether reason is rejected, ignored, or otherwise visible | no active/exported nonterminal `reopen_reason` row by default |
 | `probe.reopen_reason.blocked_status_reason` | current `blocked`, update `{status: "blocked", reopen_reason: "..."}` observed behavior shows whether reason is rejected, ignored, or otherwise visible | no active/exported nonterminal `reopen_reason` row by default |
 
-Focused source-local probes for the three nonterminal `reopen_reason` cases prepared as `ready_to_execute` and executed as `ok_update`. Wrapper prepare accepted the payload syntax but stripped `reopen_reason` from behavior-participating fields: reason-only prepared `fields={}`, `in_progress` same-status prepared `fields={"status": "in_progress"}`, and `blocked` same-status prepared `fields={"status": "blocked"}`. Status did not semantically change and `Reopen History` was not appended.
+Source-local evidence for the nonterminal `reopen_reason` default is source-anchored, not session-probe-anchored. `ticket_update.py` `_action_and_fields()` treats terminal reopen as behavior-participating and otherwise omits nonterminal `reopen_reason` from the prepared field set; this claim is anchored by `update.mapping`. Committed behavior probes are still required before closeout if the implementation or closeout keeps behavior-result prose for these cases.
 
-Authority classification remains accepted-but-ignored non-authority wrapper syntax. Do not add an active/exported supported, no-op, or unsupported semantic row for nonterminal `reopen_reason`. If Slice 2 needs raw-key accounting coverage, promote only a raw-shape-only exception or non-authority probe note with these behavior anchors. An unsupported row would be incorrect because the wrapper did not reject the field.
+Authority classification remains accepted-but-ignored non-authority wrapper syntax. Do not add an active/exported supported, no-op, or unsupported semantic row for nonterminal `reopen_reason` in Slice 1, and keep it out of the classifier, planner, manifest, and raw-shape-only exception surfaces. If Slice 2 needs raw-key accounting coverage, promote only a raw-shape-only exception or non-authority probe note with committed behavior-test anchors.
 
 The ignored classification is not a no-write guarantee. After stripping `reopen_reason`, execute can still follow the normal update write path and rewrite ticket text through YAML normalization even when no authority-bearing field changes.
-
-Probe harness note: `ticket_update.run_update(...)` discovers the project root from `cwd` and validates payload containment against that root. Ad hoc temp-root probes must `chdir` into the temp project root before calling `run_update(...)`; otherwise payload containment produces unrelated `policy_blocked` results.
 
 ### Direct-Engine Discrepancy Registry
 
@@ -1583,8 +1599,9 @@ Cover:
 - lifecycle/status value with required current status returns `PRECONDITION_REQUIRED`, not `SUPPORTED`, when business readiness must be decided by planner/runtime state
 - `PRECONDITION_REQUIRED` outcomes have `supported=False`, `lane=UNSUPPORTED`, and `required_context_fields=()`
 - `tags="bug"` returns invalid-value rule
-- valid tag value with missing refinement context returns context-required when the family needs current refinement/tag state
-- standalone `needs-refinement` tag removal is denied before broad supported tag update
+- valid tag value with missing refinement context returns context-required when the family needs current refinement state
+- valid tags with `current.refinement_status != "needs_refinement"` select `supported.update.frontmatter.tags.caller_preserved`
+- valid tags with `current.refinement_status == "needs_refinement"` and requested tags omitting `needs-refinement` select `supported.update.frontmatter.tags.refinement_tag_reinjected`, `authority_owner=WRAPPER`, `caller_writable=False`, and `value_flow_id=flow.caller_preserved_or_wrapper_reinjects_refinement_tag`
 - `ingest.envelope.envelope_version` accepts exactly `"1.0"` and rejects other non-empty strings with `invalid.ingest.envelope.envelope_version.value`
 
 - [ ] **Step 4: Add positive local-policy tests**
@@ -1599,6 +1616,7 @@ Cover representative positive rules:
 - ordinary `priority` update: `required_gate=APPLY_CONSENT`
 - lifecycle/status local policy with current status: `local_disposition=PRECONDITION_REQUIRED`, `required_gate=UNSUPPORTED`, `lane=UNSUPPORTED`
 - close local policy: `local_disposition=PRECONDITION_REQUIRED`, `group_shape_hint=UPDATE_CLOSE`
+- terminal close denials cover all four terminal-close combinations: `done -> done` and `wontfix -> wontfix` return `unsupported.update.close.status.same_terminal`; `done -> wontfix` and `wontfix -> done` return `unsupported.update.close.status.terminal_to_terminal`
 - reopen local policy: `local_disposition=PRECONDITION_REQUIRED`, `group_shape_hint=UPDATE_REOPEN`
 - focused refinement section update: `lane=FOCUSED_REFINEMENT` only when supported, otherwise unsupported/context-required uses `lane=UNSUPPORTED`
 
@@ -1617,11 +1635,14 @@ Use malformed test registries to assert:
 - `precondition.update.reopen.status.open` belongs to `subject.update.lifecycle.reopen`, not `subject.update.lifecycle.reopen_reason`
 - `engine_managed=True` with non-engine owner raises `AuthorityRegistryError`
 - same-stage overlapping outcomes discovered during evaluation raise `AuthorityEvaluationError`
-- known subject-family no-match raises `AuthorityEvaluationError`
+- selected subject families must have an active `SUBJECT_FAMILY_FALLBACK_UNSUPPORTED` fallback row; a malformed registry missing that fallback raises `AuthorityRegistryError`
 - `request_raw_key` exists for every active request-subject row
 - repeated `subject_path` rows agree on `request_raw_key` unless covered by a documented lifecycle value-dependent exception
 - probe-gated candidates are absent from `_DEFAULT_REGISTRY` and manifest export
 - candidate raw-shape-only exceptions are not usable for raw-key accounting
+- `_DEFAULT_REGISTRY` is populated at module import when importing `ticket_authority`; registry validation is not deferred until first public API call
+- every exported value policy is referenced by at least one active exported row, derivation, materialization, effect, or explicitly reserved policy list
+- Slice 1 has no reserved value-policy export list, so unused null/no-value policies are not exported
 
 - [ ] **Step 6: Add manifest parity tests**
 
@@ -1645,6 +1666,8 @@ Assert:
 - manifest exports enum values as strings and contains no enum objects, dataclass wrappers, or private ID wrappers
 - manifest exports `raw_group_shape_hints` and no raw-shape-only exception surface in Slice 1
 - manifest output survives `json.dumps(..., sort_keys=True)`
+- calling `export_policy_manifest()` twice returns equal dictionaries, proving deterministic ordering and no mutation through shared references
+- no exported value-policy ID is unreferenced unless it is explicitly reserved; Slice 1 exports no reserved value-policy list
 - tests use hand-written expected ID/content sets and do not parse this Markdown plan as a machine-readable registry source
 - direct-engine discrepancy scope uses `observed_proven_discrepancies_only` and `absence_is_not_equivalence_proof`
 - manifest has no exported wrapper-quirk scope
@@ -1725,7 +1748,15 @@ If direct engine rejects the extra field, do not export the discrepancy row. Rec
 
 Add focused behavior tests for every probe in [Behavior Probe Gates](#behavior-probe-gates) before promoting any candidate row or source-indicated proof-gated value policy into closeout evidence.
 
-At minimum, add capture wrapper coverage proving:
+Active-row guardrail probes are mandatory before closeout, not optional promotion evidence. Add named tests for:
+
+```text
+probe.focused_metadata_coactions
+probe.capture_source.non_string_overwritten
+probe.same_status.terminal_close_shape
+```
+
+At minimum, the capture wrapper guardrail must prove:
 
 ```text
 capture prepare with raw capture_source=123 -> ready_to_execute
@@ -1733,6 +1764,19 @@ prepared payload fields capture_source == "conversation"
 ```
 
 If this capture probe fails, patch `supported.capture.create.capture_source` away from `value.overwritten_input_any` before implementing or exporting the registry.
+
+The terminal-close guardrail must exercise all terminal close combinations:
+
+```text
+done -> done
+wontfix -> wontfix
+done -> wontfix
+wontfix -> done
+```
+
+Expected: each follows close-shaped terminal rejection, not nonterminal no-op or lifecycle fallback.
+
+If closeout keeps behavior-result prose for nonterminal `reopen_reason`, committed absence-preserving probes must cover `probe.reopen_reason.nonterminal_reason_only`, `probe.reopen_reason.in_progress_status_reason`, and `probe.reopen_reason.blocked_status_reason`; session-local probe notes are not evidence.
 
 ### Task 3: Add Pure Authority Kernel
 
@@ -1786,6 +1830,7 @@ Validation must check:
 - context-field invariants
 - precondition-required invariants
 - value-policy serializability
+- value-policy reference coverage: every exported value policy is referenced by at least one active exported row, derivation, materialization, effect, or explicitly reserved policy list
 - value-flow references for every active row
 - active-only registry boundary; probe-gated candidates are absent from `_DEFAULT_REGISTRY`
 - `request_raw_key` on every active request-subject row
@@ -1797,6 +1842,8 @@ Validation must check:
 - direct-engine discrepancy bucket presence
 - no supported `subject=ANY`
 - group families have exactly one fallback unsupported group rule
+- each subject family has exactly one `SUBJECT_FAMILY_FALLBACK_UNSUPPORTED` fallback rule; fallback rows evaluate after non-fallback rows
+- Slice 1 has no reserved value-policy export list; unused null/no-value policies are registry errors, not manifest entries
 
 - [ ] **Step 5: Add classifier evaluator**
 
@@ -1807,10 +1854,11 @@ validate input carrier
 select exactly one ShapeFamily
 if unsupported shape, return shape-level stop policy
 select exactly one SubjectFamily
-evaluate stages in order
+evaluate non-fallback stages in order
 return exactly one matching outcome
+return the subject-family fallback row when no non-fallback outcome matches
 return `PRECONDITION_REQUIRED` only for lifecycle/status outcomes whose business readiness belongs to planner/runtime state
-raise AuthorityEvaluationError for same-stage overlap or known-family no-match
+raise AuthorityEvaluationError for same-stage overlap or impossible evaluation after registry validation
 ```
 
 - [ ] **Step 6: Add group planner evaluator**
@@ -1825,11 +1873,11 @@ validate raw_shape_by_mutation_id coverage and raw-key accounting
 select group shape from RawShapeDiscriminator.raw_group_shape_hint plus local group_shape_hint and current context
 if local invalid actions exist, return invalid_action_ids without evaluating group invalid rules
 evaluate all matching group invalid rules in authored order before context/precondition/support rules
-evaluate ordered group outcomes
+evaluate ordered non-fallback group outcomes
 convert precondition-required local lifecycle/status actions into structurally supported lanes with concrete preconditions
 attach required runtime_checks to every structurally supported mutating lane
 set execution_authorized=False on every lane
-return explicit fallback unsupported lane when no non-fallback outcome matches
+return the explicit `GROUP_FAMILY_FALLBACK` unsupported lane when no non-fallback outcome matches
 raise AuthorityEvaluationError for same-stage overlap
 ```
 
