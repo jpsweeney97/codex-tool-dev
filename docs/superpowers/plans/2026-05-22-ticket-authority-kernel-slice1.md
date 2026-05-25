@@ -757,7 +757,7 @@ Authored row and derivation value-flow assignments:
 | `subject.update.frontmatter` | `shape.update.set_frontmatter` | `update.frontmatter.*` | `unsupported.update.frontmatter.unregistered_subject` | `update.allowed_fields`, `engine.update` |
 | `subject.update.focused` | `shape.update.focused_refinement` | `update.focused.*` | `unsupported.update.focused.unregistered_subject` | `update.allowed_fields`, `update.refinement`, `engine.update` |
 | `subject.update.lifecycle.status` | `shape.update.set_frontmatter` | `update.lifecycle.status` | `unsupported.update.lifecycle.status.unmatched` | `update.mapping`, `engine.transitions` |
-| `subject.update.lifecycle.reopen_reason` | `shape.update.reopen` | `update.lifecycle.reopen_reason` | `unsupported.update.reopen.unregistered_subject` | `update.mapping`, `engine.reopen` |
+| `subject.update.lifecycle.reopen` | `shape.update.reopen` | `update.lifecycle.status` with target `open` and terminal current status; `update.lifecycle.reopen_reason` | `unsupported.update.reopen.unregistered_subject` | `update.mapping`, `engine.reopen` |
 | `subject.update.close.status` | `shape.update.close` | `update.lifecycle.status` with target `done` or `wontfix` | `unsupported.update.close.unregistered_subject` | `update.mapping`, `engine.close` |
 
 ### Local Outcome Stages
@@ -837,10 +837,10 @@ Wrapper-synthesized create values with no caller/envelope request key are not ac
 | `noop.candidate.update.lifecycle.status.same_blocked` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `status` | `update.ticket.status` | none | `NO_OP` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_STATUS_LIFECYCLE` | `engine.update`; probe-gated |
 | `precondition.update.close.status.done` | `subject.update.close.status` | `update.lifecycle.status` | `status` | `update.ticket.close.done` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.close_status_target` | `UNSUPPORTED` | `UPDATE_CLOSE` | `update.mapping`, `engine.close` |
 | `precondition.update.close.status.wontfix` | `subject.update.close.status` | `update.lifecycle.status` | `status` | `update.ticket.close.wontfix` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.close_status_target` | `UNSUPPORTED` | `UPDATE_CLOSE` | `update.mapping`, `engine.close` |
-| `precondition.update.reopen.status.open` | `subject.update.lifecycle.reopen_reason` | `update.lifecycle.status` | `status` | `update.ticket.reopen.status` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_REOPEN` | `update.mapping`, `engine.reopen` |
-| `precondition.update.reopen.reopen_reason` | `subject.update.lifecycle.reopen_reason` | `update.lifecycle.reopen_reason` | `reopen_reason` | `update.ticket.reopen.reason` | none | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.non_empty_string` | `UNSUPPORTED` | `UPDATE_REOPEN` | `update.mapping`, `engine.reopen` |
+| `precondition.update.reopen.status.open` | `subject.update.lifecycle.reopen` | `update.lifecycle.status` | `status` | `update.ticket.reopen.status` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_REOPEN` | `update.mapping`, `engine.reopen` |
+| `precondition.update.reopen.reopen_reason` | `subject.update.lifecycle.reopen` | `update.lifecycle.reopen_reason` | `reopen_reason` | `update.ticket.reopen.reason` | none | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.non_empty_string` | `UNSUPPORTED` | `UPDATE_REOPEN` | `update.mapping`, `engine.reopen` |
 
-Every active request-subject row has `request_raw_key`. Rows with the same surface and `subject_path` must agree on `request_raw_key` unless the row declares an explicit value-dependent exception in the lifecycle match table below. Wrapper-derived rows and create derivations must not claim caller raw keys.
+Every active request-subject row has `request_raw_key`. Rows with the same surface and `subject_path` must agree on `request_raw_key` unless the row declares an explicit value-dependent exception in the lifecycle match table below. Subject-family namespace validation allows only the documented lifecycle split for the shared `update.lifecycle.status` subject: ordinary status lifecycle, close targets, and terminal reopen-by-status. Wrapper-derived rows and create derivations must not claim caller raw keys.
 
 `request_raw_key` is the raw payload key used by `RawShapeDiscriminator.raw_keys`; `subject_path` is the normalized policy subject. The registry may derive private lookup tables from these authored columns, but a separate subject-to-raw-key table is not a second source of truth.
 
@@ -884,7 +884,8 @@ These rows are exported in `policy["rules"]` and referenced by active subject, f
 | `invalid.ingest.derived.defer.value` | `INVALID_VALUE` | `subject.ingest.create` | derived defer does not match expected object shape | none | `UNSUPPORTED` | `invalid_derived_defer` | `INGEST_CREATE` | `envelope.mapping` |
 | `invalid.ingest.envelope.key_files.value` | `INVALID_VALUE` | `subject.ingest.create` | key_files not list of required-key objects | none | `UNSUPPORTED` | `invalid_key_files` | `INGEST_CREATE` | `envelope.schema` |
 | `context.update.lifecycle.status.current_status` | `CONTEXT_REQUIRED` | `subject.update.lifecycle.status` | current status missing | `current.status` | `CONTEXT_REQUIRED` | `context_required_current_status` | `UNRESOLVED_CONTEXT_REQUIRED` | `engine.transitions` |
-| `context.update.lifecycle.reopen_reason.current_status` | `CONTEXT_REQUIRED` | `subject.update.lifecycle.reopen_reason` | current status missing | `current.status` | `CONTEXT_REQUIRED` | `context_required_reopen_status` | `UNRESOLVED_CONTEXT_REQUIRED` | `engine.reopen` |
+| `context.update.close.status.current_status` | `CONTEXT_REQUIRED` | `subject.update.close.status` | close status target with current status missing | `current.status` | `CONTEXT_REQUIRED` | `context_required_current_status` | `UNRESOLVED_CONTEXT_REQUIRED` | `engine.close` |
+| `context.update.lifecycle.reopen_reason.current_status` | `CONTEXT_REQUIRED` | `subject.update.lifecycle.reopen` | current status missing | `current.status` | `CONTEXT_REQUIRED` | `context_required_reopen_status` | `UNRESOLVED_CONTEXT_REQUIRED` | `engine.reopen` |
 | `context.update.frontmatter.tags.refinement_state` | `CONTEXT_REQUIRED` | `subject.update.frontmatter` | tags value valid but current refinement/tag state missing | `current.refinement_status`, `current.tags` | `CONTEXT_REQUIRED` | `context_required_refinement_tag_state` | `UNRESOLVED_CONTEXT_REQUIRED` | `update.refinement`, `update.tests` |
 | `unsupported.update.frontmatter.tags.remove_needs_refinement_standalone` | `SPECIFIC_UNSUPPORTED` | `subject.update.frontmatter` | current refinement active, current tags contain `needs-refinement`, requested tags omit it, and no focused-refinement cleanup group applies | none | `UNSUPPORTED` | `standalone_needs_refinement_tag_removal_not_supported` | `UPDATE_FRONTMATTER` | `update.refinement`, `update.tests` |
 | `unsupported.capture.derived.source.not_requestable` | `SPECIFIC_UNSUPPORTED` | `subject.capture.create` | caller targets exported wrapper-derived `capture.derived.source` | none | `UNSUPPORTED` | `subject_not_requestable_wrapper_derived_value` | `UNSUPPORTED_NO_GROUP_SHAPE` | `capture.mapping`, `engine.create` |
@@ -899,7 +900,7 @@ These rows are exported in `policy["rules"]` and referenced by active subject, f
 | `unsupported.update.focused.unregistered_subject` | `SPECIFIC_UNSUPPORTED` | `subject.update.focused` | well-formed unknown focused subject | none | `UNSUPPORTED` | `unregistered_subject` | `UNSUPPORTED_NO_GROUP_SHAPE` | `update.allowed_fields` |
 | `unsupported.update.lifecycle.status.unmatched` | `SPECIFIC_UNSUPPORTED` | `subject.update.lifecycle.status` | known status subject but no transition row matched | none | `UNSUPPORTED` | `status_transition_not_supported` | `UPDATE_STATUS_LIFECYCLE` | `engine.transitions` |
 | `unsupported.update.close.unregistered_subject` | `SPECIFIC_UNSUPPORTED` | `subject.update.close.status` | close shape with non-status subject | none | `UNSUPPORTED` | `unregistered_subject` | `UPDATE_CLOSE` | `update.mapping` |
-| `unsupported.update.reopen.unregistered_subject` | `SPECIFIC_UNSUPPORTED` | `subject.update.lifecycle.reopen_reason` | reopen shape with unsupported subject | none | `UNSUPPORTED` | `unregistered_subject` | `UPDATE_REOPEN` | `update.mapping` |
+| `unsupported.update.reopen.unregistered_subject` | `SPECIFIC_UNSUPPORTED` | `subject.update.lifecycle.reopen` | reopen shape with unsupported subject | none | `UNSUPPORTED` | `unregistered_subject` | `UPDATE_REOPEN` | `update.mapping` |
 | `unsupported.capture.non_create_mutation` | shape stop | none | capture non-create shape | none | `UNSUPPORTED` | `surface_action_operation_not_supported` | `UNSUPPORTED_NO_GROUP_SHAPE` | `capture.allowed_fields` |
 | `unsupported.ingest.non_create_mutation` | shape stop | none | ingest non-create shape | none | `UNSUPPORTED` | `surface_action_operation_not_supported` | `UNSUPPORTED_NO_GROUP_SHAPE` | `envelope.mapping` |
 | `unsupported.update.unsupported_action_operation` | shape stop | none | unsupported update action/operation combination | none | `UNSUPPORTED` | `surface_action_operation_not_supported` | `UNSUPPORTED_NO_GROUP_SHAPE` | `update.mapping` |
@@ -1006,15 +1007,18 @@ Probe-gated candidate exceptions live only in this plan until promoted by a late
 
 Group selection uses `RawShapeDiscriminator.raw_group_shape_hint` plus local action rules and `MutationContext.current`. The raw shape chooses wrapper compatibility; semantic lifecycle/reopen splitting happens afterward.
 
+Context-required local outcomes do not fall through to generic unsupported fallbacks when the raw shape is coherent. If a valid lifecycle, close, or reopen-exclusive raw shape needs `current.status` before selecting a terminal/nonterminal semantic group, the planner emits `group.context_required.update.status_current` with the affected action IDs in `context_required_action_ids`.
+
 | group_family_id | selection basis | selection rule | fallback_group_rule_id |
 | --- | --- | --- | --- |
 | `group.capture.create` | `RawGroupShapeHint.CAPTURE_CREATE` | all actions surface `CAPTURE`, action/operation `CREATE`, and local hints `CAPTURE_CREATE` | `group.unsupported.capture.create.fallback` |
 | `group.ingest.create` | `RawGroupShapeHint.INGEST_CREATE` | all actions surface `INGEST`, action/operation `CREATE`, and local hints `INGEST_CREATE` | `group.unsupported.ingest.create.fallback` |
 | `group.update.frontmatter` | `RawGroupShapeHint.UPDATE_FRONTMATTER` | update metadata subjects only; no focused or lifecycle subjects | `group.unsupported.update.frontmatter.fallback` |
 | `group.update.focused_refinement` | `RawGroupShapeHint.UPDATE_FOCUSED_REFINEMENT` | at least one focused subject plus optional compatible metadata co-actions | `group.unsupported.update.focused_refinement.fallback` |
-| `group.update.status_lifecycle` | `RawGroupShapeHint.UPDATE_STATUS_LIFECYCLE` | lifecycle status subject not raw-open exclusive, close, or reopen | `group.unsupported.update.status_lifecycle.fallback` |
+| `group.update.status_lifecycle` | `RawGroupShapeHint.UPDATE_STATUS_LIFECYCLE` plus known current status | lifecycle status subject not raw-open exclusive, close, or reopen | `group.unsupported.update.status_lifecycle.fallback` |
+| `group.update.status_context_required` | `RawGroupShapeHint.UPDATE_STATUS_LIFECYCLE`, `UPDATE_STATUS_OPEN_EXCLUSIVE`, or `UPDATE_CLOSE` plus missing `current.status` | valid lifecycle/close/reopen raw shape whose local status or reopen action is `CONTEXT_REQUIRED`; selected before semantic terminal/nonterminal split or fallback | `group.unsupported.update.status_context_required.fallback` |
 | `group.update.status_open_exclusive` | `RawGroupShapeHint.UPDATE_STATUS_OPEN_EXCLUSIVE` plus nonterminal current status | requested `status="open"` or `reopen_reason` present at raw wrapper shape | `group.unsupported.update.status_open_exclusive.fallback` |
-| `group.update.close` | `RawGroupShapeHint.UPDATE_CLOSE` | wrapper close status target `done` or `wontfix` | `group.unsupported.update.close.fallback` |
+| `group.update.close` | `RawGroupShapeHint.UPDATE_CLOSE` plus known current status | wrapper close status target `done` or `wontfix` | `group.unsupported.update.close.fallback` |
 | `group.update.reopen` | `RawGroupShapeHint.UPDATE_STATUS_OPEN_EXCLUSIVE` plus terminal current status | terminal reopen semantic group after current status is known | `group.unsupported.update.reopen.fallback` |
 | `group.no_op` | local no-op outcomes | all local actions are `NO_OP` after probes pass | `group.unsupported.no_op.fallback` |
 | `group.unsupported.raw_shape` | `RawGroupShapeHint.UNSUPPORTED_RAW_SHAPE` | well-formed wrapper input with no supported raw group family | `group.unsupported.raw_shape.fallback` |
@@ -1037,6 +1041,8 @@ Group selection uses `RawShapeDiscriminator.raw_group_shape_hint` plus local act
 | `group.precondition.update.status.blocked_by_required` | `group.update.status_lifecycle` | true | `UPDATE` | `APPLY_CONSENT` | `TARGET_FINGERPRINT_REVALIDATION`, `PREFLIGHT_REQUIRED` | `BLOCKED_BY_REQUIRED` | `UPDATES_FRONTMATTER`, `MAY_AFFECT_CLOSE_READINESS` | status to `blocked` |
 | `group.precondition.update.status.blockers_resolved_required` | `group.update.status_lifecycle` | true | `UPDATE` | `APPLY_CONSENT` | `TARGET_FINGERPRINT_REVALIDATION`, `PREFLIGHT_REQUIRED` | `BLOCKERS_RESOLVED_REQUIRED` | `UPDATES_FRONTMATTER`, `MAY_AFFECT_CLOSE_READINESS` | blocked to `open` or `in_progress` |
 | `group.unsupported.update.status_lifecycle.fallback` | `group.update.status_lifecycle` | false | `UNSUPPORTED` | `UNSUPPORTED` | none | none | none | fallback |
+| `group.context_required.update.status_current` | `group.update.status_context_required` | false | `UNSUPPORTED` | `UNSUPPORTED` | none | none | none | one or more local status/reopen actions require `current.status`; lane lists those action IDs in `context_required_action_ids` |
+| `group.unsupported.update.status_context_required.fallback` | `group.update.status_context_required` | false | `UNSUPPORTED` | `UNSUPPORTED` | none | none | none | fallback for malformed or contradictory status context groups after local invalids preempt |
 | `group.supported.update.status_open_exclusive` | `group.update.status_open_exclusive` | true | `UPDATE` | `APPLY_CONSENT` | `TARGET_FINGERPRINT_REVALIDATION`, `PREFLIGHT_REQUIRED` | none or `BLOCKERS_RESOLVED_REQUIRED` depending current status | `UPDATES_FRONTMATTER`, `MAY_AFFECT_CLOSE_READINESS` | raw payload contains `status="open"`; compatible raw subjects are only status and reopen_reason |
 | `group.unsupported.update.status_open_exclusive.metadata_mixed` | `group.update.status_open_exclusive` | false | `UNSUPPORTED` | `UNSUPPORTED` | none | none | none | `status="open"` plus metadata/focused/direct-engine/unknown subject |
 | `group.unsupported.update.status_open_exclusive.fallback` | `group.update.status_open_exclusive` | false | `UNSUPPORTED` | `UNSUPPORTED` | none | none | none | fallback |
@@ -1095,6 +1101,7 @@ Raw wrapper compatibility and semantic lane selection are distinct:
 ```text
 raw compatibility: RawGroupShapeHint.UPDATE_STATUS_OPEN_EXCLUSIVE when status="open" or raw reopen_reason is present
 semantic lane split: after current.status is known, terminal current statuses become UPDATE_REOPEN; nonterminal current statuses become UPDATE_STATUS_LIFECYCLE or NO_OP
+missing current.status: context-required group before terminal/nonterminal semantic split
 ```
 
 `status="open"` never unlocks metadata or focused co-actions in Slice 1. Current-state splitting changes only lane semantics; it does not change raw wrapper payload compatibility.
@@ -1110,7 +1117,8 @@ Status transition outcome matrix:
 | requested value/current state | raw compatibility family | local outcome | rule_id | planner lane/group rule |
 | --- | --- | --- | --- | --- |
 | malformed status value, any current | caller row hint | invalid value | `invalid.update.lifecycle.status.value` or `invalid.update.close.status.value` | unsupported |
-| valid status value, missing `current.status` | unresolved | context required | `context.update.lifecycle.status.current_status` | unsupported/context lane |
+| valid status value, missing `current.status` | raw lifecycle/open/close shape, semantic split unresolved | context required | `context.update.lifecycle.status.current_status` or `context.update.close.status.current_status` | `group.context_required.update.status_current` |
+| raw `reopen_reason`, missing `current.status` | status-open exclusive shape, semantic split unresolved | context required | `context.update.lifecycle.reopen_reason.current_status` | `group.context_required.update.status_current` |
 | `open -> in_progress` | status lifecycle | supported | `supported.update.lifecycle.status.open_to_in_progress` | `group.supported.update.status_lifecycle` |
 | `in_progress -> open` | status-open exclusive | supported | `supported.update.lifecycle.status.in_progress_to_open` | `group.supported.update.status_open_exclusive` |
 | `open -> blocked` or `in_progress -> blocked` | status lifecycle | precondition required | `precondition.update.lifecycle.status.to_blocked` | `group.precondition.update.status.blocked_by_required` |
@@ -1500,6 +1508,9 @@ Cover:
 
 - `status=123` with `current=None` returns invalid-value rule, not context-required rule
 - `status="open"` with `current=None` returns context-required with `required_context_fields=["current.status"]`
+- `status="done"` with `current=None` returns `context.update.close.status.current_status`
+- `reopen_reason` with `current=None` returns `context.update.lifecycle.reopen_reason.current_status`
+- planner input for `status="open"` with `RawGroupShapeHint.UPDATE_STATUS_OPEN_EXCLUSIVE` and missing `current.status` returns `group.context_required.update.status_current`, `lane=UNSUPPORTED`, and the status action in `context_required_action_ids`
 - lifecycle/status value with required current status returns `PRECONDITION_REQUIRED`, not `SUPPORTED`, when business readiness must be decided by planner/runtime state
 - `PRECONDITION_REQUIRED` outcomes have `supported=False`, `lane=UNSUPPORTED`, and `required_context_fields=()`
 - `tags="bug"` returns invalid-value rule
@@ -1533,6 +1544,8 @@ Use malformed test registries to assert:
 - unsupported/context-required row with `caller_writable=True` raises `AuthorityRegistryError`
 - `precondition_required` row with non-empty `required_context_fields` raises `AuthorityRegistryError`
 - `precondition_required` row outside lifecycle/status families raises `AuthorityRegistryError`
+- subject-family namespace validation accepts only documented lifecycle value-dependent sharing of `update.lifecycle.status` across ordinary status, close, and terminal reopen-by-status rows
+- `precondition.update.reopen.status.open` belongs to `subject.update.lifecycle.reopen`, not `subject.update.lifecycle.reopen_reason`
 - `engine_managed=True` with non-engine owner raises `AuthorityRegistryError`
 - same-stage overlapping outcomes discovered during evaluation raise `AuthorityEvaluationError`
 - known subject-family no-match raises `AuthorityEvaluationError`
