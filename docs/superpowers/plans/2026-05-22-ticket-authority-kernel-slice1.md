@@ -18,7 +18,7 @@ These decisions are frozen for Slice 1. If live source behavior contradicts them
 | --- | --- |
 | Proof class | This slice proves `source` only. It does not prove installed runtime behavior, cache state, personal plugin sync, hook inventory, or activation readiness. |
 | Runtime behavior | Existing Ticket runtime scripts must not import or enforce `ticket_authority.py` in Slice 1. Runtime behavior stays unchanged. |
-| Public APIs | The only public callable authority APIs are `classify_mutation(request, context)`, `plan_manifest_lanes(actions, context_by_mutation_id)`, and `export_policy_manifest()`. The public importable contract also includes the carrier, result, enum, value, and exception types required to call those functions and interpret results. |
+| Public APIs | The only public callable authority APIs are `classify_mutation(request, context)`, `plan_manifest_lanes(actions, context_by_mutation_id, raw_shape_by_mutation_id)`, and `export_policy_manifest()`. The public importable contract also includes the carrier, result, enum, value, and exception types required to call those functions and interpret results. |
 | CLI and artifact | No CLI, no direct-execution helper, and no checked-in generated manifest artifact are added in Slice 1. |
 | Module location | `ticket_authority.py` lives under `plugins/turbo-mode/ticket/scripts/` to match local plugin layout, but it is library-only. |
 | Runtime imports | `ticket_authority.py` must not import runtime-heavy Ticket modules such as `ticket_engine_core.py`, `ticket_update.py`, `ticket_capture.py`, `ticket_workflow.py`, `ticket_validate.py`, `ticket_parse.py`, `ticket_read.py`, or `ticket_envelope.py`. It cites runtime source through anchors; it does not import it. |
@@ -44,17 +44,21 @@ These decisions are frozen for Slice 1. If live source behavior contradicts them
 | Direct-engine discrepancies | Exported discrepancy rows are behavior-proven only. Source-inferred suspected mismatches remain plan/test probes, not manifest rows. Absence of a row is not equivalence proof. |
 | Versioning | Manifest exports both `schema_version` and `policy_version`; tests assert exact Slice 1 values. Automatic bump enforcement and manifest snapshots are deferred. |
 | Registry authorship | The authority registry is hand-authored from the committed tables in this plan. It must not derive rows from live runtime constants at import time. Tests may compare hand-written expected IDs/content against the registry and manifest, but must not parse this Markdown file as a machine-readable registry source. |
+| Active registry boundary | `_DEFAULT_REGISTRY` contains active current-behavior rows only. Probe-gated candidates must not live in `_DEFAULT_REGISTRY`, must not affect classifier/planner/export paths, and must not appear in `export_policy_manifest()` until a later plan patch promotes them after behavior proof. |
 | Wrapper surface | Active subject rows are wrapper-surface exact, not lower-engine-capability exact. Wrapper create derivations, engine-rendered outputs, and derived lane effects are separate registry surfaces and never create standalone classifier support. |
 | Same-status no-op | Slice 1 `NO_OP` is limited to lifecycle/status same-current candidates decidable from `CurrentTicketState.status`. Same-value metadata or section writes remain ordinary supported wrapper subjects. Candidate no-op rows require behavior probes before they may be exported as current behavior. |
+| Raw wrapper shape | `plan_manifest_lanes()` is wrapper-shape-aware by construction. Every planner call requires a per-`mutation_id` `RawShapeDiscriminator`; Slice 1 has no implicit authority-action-only planner mode. |
 
 ## Plan Artifact Lifecycle
 
 This file is a durable control artifact. Update and commit it before source implementation. Keep docs/control and implementation as separate semantic commits.
 
-Plan-control commit:
+Plan-control commits:
 
 ```text
 docs(superpowers): revise ticket authority kernel slice 1 plan
+docs(superpowers): fix ticket authority slice 1 control rows
+docs(superpowers): patch ticket authority raw-shape control
 ```
 
 Implementation commit:
@@ -63,9 +67,9 @@ Implementation commit:
 chore(ticket): add passive authority policy kernel
 ```
 
-Before implementation starts, the plan-control file must be committed. If this plan remains untracked, implementation must not begin.
+Before implementation starts, the plan-control file and any plan-control fixups must be committed. If this plan remains untracked or modified, implementation must not begin.
 
-Commit 1 must include only this file. Contract prose, source, and test changes start after the plan-control commit and belong to the implementation lane.
+Plan-control commits must include only this file. Contract prose, source, and test changes start after the plan-control commits and belong to the implementation lane.
 
 ## Branch And Worktree Gate
 
@@ -168,6 +172,7 @@ def classify_mutation(request: MutationRequest, context: MutationContext) -> Mut
 def plan_manifest_lanes(
     actions: Sequence[ManifestAction],
     context_by_mutation_id: Mapping[str, MutationContext],
+    raw_shape_by_mutation_id: Mapping[str, RawShapeDiscriminator],
 ) -> ManifestLanePlan:
     ...
 
@@ -188,6 +193,7 @@ __all__ = (
     "SubjectPath",
     "CurrentTicketState",
     "MutationContext",
+    "RawShapeDiscriminator",
     "MutationRequest",
     "ManifestAction",
     "MutationPolicy",
@@ -202,6 +208,7 @@ __all__ = (
     "AuthorityOwner",
     "LocalDisposition",
     "ContextField",
+    "RawGroupShapeHint",
     "GroupShapeHint",
     "GroupPrecondition",
     "GroupEffect",
@@ -213,7 +220,7 @@ __all__ = (
 )
 ```
 
-Do not export public helpers for direct-engine classification, grant evaluation, query projection, CLI export, manifest artifact generation, registry construction, registry rows, source-anchor support types, value-policy support types, private ID wrappers, or discrepancy implementation helpers.
+Do not export public helpers for direct-engine classification, wrapper-payload parsing, grant evaluation, query projection, CLI export, manifest artifact generation, registry construction, registry rows, source-anchor support types, value-policy support types, private ID wrappers, or discrepancy implementation helpers.
 
 ### Public Shape Rules
 
@@ -315,7 +322,39 @@ class ManifestAction:
     request: MutationRequest
 ```
 
-It must not carry `origin`, context, provenance, grants, approval, fingerprint, or runtime envelope data. `plan_manifest_lanes()` accepts `context_by_mutation_id: Mapping[str, MutationContext]` separately. Missing context-map keys are malformed planner input and raise `AuthorityInputError`.
+It must not carry `origin`, context, provenance, grants, approval, fingerprint, or runtime envelope data. `plan_manifest_lanes()` accepts `context_by_mutation_id: Mapping[str, MutationContext]` and `raw_shape_by_mutation_id: Mapping[str, RawShapeDiscriminator]` separately. Missing or unused context-map keys are malformed planner input and raise `AuthorityInputError`.
+
+`RawShapeDiscriminator` is the planner-only non-authority carrier for exact raw wrapper payload shape:
+
+```python
+@dataclass(frozen=True)
+class RawShapeDiscriminator:
+    mutation_id: str
+    surface: MutationSurface
+    raw_keys: frozenset[str]
+    raw_status_value: object | None
+    raw_group_shape_hint: RawGroupShapeHint
+```
+
+`RawShapeDiscriminator` is public because planner callers must provide it. It is not an authority action, not a classifier input, and not an exported manifest row. Slice 1 must not expose a public `from_wrapper_payload()` helper; wrapper-payload conversion helpers may exist only as private/test-only helpers.
+
+`raw_keys` are exact wrapper/envelope payload keys, such as `priority`, `reopen_reason`, or `suggested_priority`. They are not `SubjectPath` values and must not contain dotted normalized policy paths. `raw_keys` must be a non-empty `frozenset[str]`; each key must be non-empty and contain no blanks, slashes, dots, or uppercase characters. Carrier validation checks syntax and raw-shape consistency, not active wrapper allowlist membership. Unknown, excluded, or unsupported raw keys are policy-evaluated by the planner so they can produce unsupported lanes.
+
+For each planner mutation group, `raw_keys` is the full raw payload key set. Every raw key must either map to exactly one `ManifestAction` for the same `mutation_id` through a row's `request_raw_key`, or be covered by an active authored raw-shape-only exception. Any unaccounted raw key is malformed planner input and raises `AuthorityInputError`. Every `ManifestAction` whose matched row has `request_raw_key` must have that key present in `raw_keys`.
+
+`raw_status_value` records the raw `status` value when `status` is in `raw_keys`; it must be `None` when `status` is absent. `None` is also allowed as the raw malformed value when the payload explicitly includes `status: null`, so implementation must track status-key presence from `raw_keys`, not from `raw_status_value is None`. The value may be any object so malformed status values can still be planned as policy invalids instead of carrier errors.
+
+`raw_group_shape_hint` is the normalized raw wrapper-compatibility shape. It is derived from raw facts but carried explicitly for deterministic tests. The constructor validates it against `surface`, `raw_keys`, and `raw_status_value`; contradictions raise `AuthorityInputError`. For update payloads, current source-order compatibility is:
+
+```text
+raw_status_value in {"done", "wontfix"} -> UPDATE_CLOSE
+raw_status_value == "open" or "reopen_reason" in raw_keys -> UPDATE_STATUS_OPEN_EXCLUSIVE
+"status" in raw_keys -> UPDATE_STATUS_LIFECYCLE
+metadata/focused keys only -> UPDATE_FRONTMATTER or UPDATE_FOCUSED_REFINEMENT
+well-formed but unsupported wrapper shape -> UNSUPPORTED_RAW_SHAPE
+```
+
+Terminal reopen is not a raw-shape hint. It is selected later from `RawGroupShapeHint.UPDATE_STATUS_OPEN_EXCLUSIVE` plus `MutationContext.current.status`.
 
 `MutationPolicy` includes final local outcome and trace fields:
 
@@ -381,7 +420,7 @@ class ManifestLane:
 
 `invalid_action_ids`, `context_required_action_ids`, `precondition_required_action_ids`, `unsupported_action_ids`, and `no_op_action_ids` are pairwise disjoint. `invalid_action_ids` contains actions rejected by local `INVALID_VALUE` or group `INVALID_VALUE`. Local invalids are identified by `action_rule_ids[action_id]` pointing to an invalid local rule. Group invalids are identified by `group_invalid_rule_ids`.
 
-`unsupported_action_ids` is only for locally unsupported subjects, unsupported semantic targets, and incompatible policy carve-outs. It must never contain action IDs already present in `invalid_action_ids`.
+`unsupported_action_ids` contains action IDs denied by local unsupported policy, unsupported semantic-target policy, or group/raw-shape compatibility policy. An action can have a locally supported `action_rule_ids[action_id]` and still appear in `unsupported_action_ids` when the selected group rule rejects it in context. `unsupported_action_ids` must never contain action IDs already present in `invalid_action_ids`.
 
 Any lane with `invalid_action_ids` is `supported=False`, `lane=UNSUPPORTED`, `required_gate=UNSUPPORTED`, `execution_authorized=False`, and `tracked_write_allowed=False`.
 
@@ -395,7 +434,7 @@ class ManifestLanePlan:
 
 `ManifestLanePlan` has no `policy_version`, `schema_version`, generated timestamp, registry hash, or global diagnostics in Slice 1. Version and registry metadata live only in `export_policy_manifest()`.
 
-`plan_manifest_lanes(actions=(), context_by_mutation_id={})` raises `AuthorityInputError`; an empty action sequence is not a wrapper mutation shape. Duplicate `ManifestAction.action_id` values raise `AuthorityInputError`. Missing `context_by_mutation_id` entries for any input `mutation_id` raise `AuthorityInputError`. Unused extra `context_by_mutation_id` entries are malformed and raise `AuthorityInputError`.
+`plan_manifest_lanes(actions=(), context_by_mutation_id={}, raw_shape_by_mutation_id={})` raises `AuthorityInputError`; an empty action sequence is not a wrapper mutation shape. Duplicate `ManifestAction.action_id` values raise `AuthorityInputError`. Missing or unused extra `context_by_mutation_id` entries for any input `mutation_id` are malformed and raise `AuthorityInputError`. Missing or unused extra `raw_shape_by_mutation_id` entries are malformed and raise `AuthorityInputError`.
 
 Lane order is deterministic by first occurrence of `mutation_id` in the input action sequence. Within each lane, `action_ids` preserve input order for that `mutation_id`. Public APIs never expose mutable lane lists.
 
@@ -468,6 +507,17 @@ class ContextField(StrEnum):
     CURRENT_TAGS = "current.tags"
 
 
+class RawGroupShapeHint(StrEnum):
+    CAPTURE_CREATE = "capture_create"
+    INGEST_CREATE = "ingest_create"
+    UPDATE_FRONTMATTER = "update_frontmatter"
+    UPDATE_FOCUSED_REFINEMENT = "update_focused_refinement"
+    UPDATE_STATUS_LIFECYCLE = "update_status_lifecycle"
+    UPDATE_STATUS_OPEN_EXCLUSIVE = "update_status_open_exclusive"
+    UPDATE_CLOSE = "update_close"
+    UNSUPPORTED_RAW_SHAPE = "unsupported_raw_shape"
+
+
 class GroupShapeHint(StrEnum):
     CAPTURE_CREATE = "capture_create"
     INGEST_CREATE = "ingest_create"
@@ -509,7 +559,7 @@ class RuntimeCheck(StrEnum):
     INGEST_IDEMPOTENCY_CHECK_REQUIRED = "ingest_idempotency_check_required"
 ```
 
-Do not define `MutationSurface.DIRECT_ENGINE`, `AuthorityOwner.CALLER`, `AuthorityOwner.UNKNOWN`, or current provenance/grant enums.
+Do not define `MutationSurface.DIRECT_ENGINE`, `AuthorityOwner.CALLER`, `AuthorityOwner.UNKNOWN`, or current provenance/grant enums. Do not add `UPDATE_REOPEN`, `UNRESOLVED_CONTEXT_REQUIRED`, or `UNSUPPORTED_NO_GROUP_SHAPE` to `RawGroupShapeHint`; those are semantic planner/classifier states, not raw wrapper shapes.
 
 Derived projections:
 
@@ -538,6 +588,8 @@ class _GroupFamilyId(_RegistryId): ...
 class _GroupRuleId(_RegistryId): ...
 class _VocabularyId(_RegistryId): ...
 class _ValuePolicyId(_RegistryId): ...
+class _ValueFlowId(_RegistryId): ...
+class _RawShapeExceptionId(_RegistryId): ...
 class _MaterializationId(_RegistryId): ...
 class _EffectId(_RegistryId): ...
 class _DiscrepancyId(_RegistryId): ...
@@ -572,7 +624,9 @@ class AuthorityEvaluationError(AuthorityRegistryError): ...
 
 ## Authored Registry Tables
 
-These tables are the implementation control surface for `_DEFAULT_REGISTRY`. If a row, ID, vocabulary, mapping, or effect appears in exported manifest data or changes classifier/planner output, it must be tabled here.
+These tables are the implementation control surface for `_DEFAULT_REGISTRY` and for plan-authored probe candidates. If a row, ID, vocabulary, mapping, or effect appears in exported manifest data or changes classifier/planner output, it must be tabled here.
+
+`_DEFAULT_REGISTRY` is active-only. Probe-gated candidates may be tabled in this plan, but they must live outside `_DEFAULT_REGISTRY` and outside all classifier/planner/export paths until a later plan patch promotes them after behavior proof.
 
 The implementation may use helpers to build rows from these authored entries, but it must not invent anonymous invalid-value, context-required, unsupported, or no-op rows.
 
@@ -636,6 +690,7 @@ Wildcard subject handling is allowed only for unsupported shape families. `subje
 | value_policy_id | kind | vocabulary/shape | invalid_rule_id | anchors |
 | --- | --- | --- | --- | --- |
 | `value.none` | `NONE` | no value validation | none | plan-authored |
+| `value.overwritten_input_any` | `OVERWRITTEN_INPUT_ANY` | source-indicated accepted raw input of any JSON-compatible shape; wrapper overwrites before lower validation | none | `capture.mapping`; wrapper behavior test required |
 | `value.any_string` | `ANY_STRING` | string when present | `invalid.shared.any_string` | `validate.constants`, `envelope.schema` |
 | `value.non_empty_string` | `NON_EMPTY_STRING` | non-empty string | `invalid.shared.non_empty_string` | `capture.mapping`, `envelope.schema`, `engine.reopen` |
 | `value.envelope_version_1_0` | `EXACT_VALUE` | `vocab.envelope_version` | `invalid.ingest.envelope.envelope_version.value` | `envelope.schema`, `contract.envelope` |
@@ -662,7 +717,7 @@ Wildcard subject handling is allowed only for unsupported shape families. `subje
 | `flow.caller_preserved` | caller-supplied value is preserved when present | `PROJECT`, `WRAPPER` | `capture.mapping`, `update.mapping` |
 | `flow.caller_preserved_or_wrapper_defaulted_if_missing` | caller-supplied value is preserved; wrapper supplies default only when missing | `WRAPPER` | `capture.mapping`, `capture.tests` |
 | `flow.caller_preserved_or_wrapper_inferred_if_missing` | caller-supplied value is preserved; wrapper infers fallback only when missing | `WRAPPER` | `capture.mapping`, `capture.tests` |
-| `flow.wrapper_overwrites_constant_conversation` | wrapper accepts an input value but always writes output value `"conversation"` | `WRAPPER` | `capture.mapping`, `capture.tests` |
+| `flow.wrapper_overwrites_constant_conversation` | wrapper accepts an input value and always writes output value `"conversation"` before engine create | `WRAPPER` | `capture.mapping`, `capture.tests` |
 | `flow.wrapper_synthesizes_source_object` | wrapper supplies source object from capture session payload before engine create | `WRAPPER` | `capture.mapping` |
 | `flow.wrapper_defaults_capture_acceptance_criteria_if_missing` | wrapper supplies default acceptance criteria when capture input omits them | `WRAPPER` | `capture.mapping`, `validate.constants` |
 | `flow.wrapper_synthesizes_defer_object` | ingest wrapper supplies defer object from envelope emission data before engine create | `WRAPPER` | `envelope.mapping`, `contract.envelope` |
@@ -682,7 +737,7 @@ Authored row and derivation value-flow assignments:
 | `supported.capture.create.capture_confidence` | `flow.caller_preserved_or_wrapper_defaulted_if_missing` |
 | `supported.capture.create.priority` | `flow.caller_preserved_or_wrapper_inferred_if_missing` |
 | `supported.capture.create.tags` | `flow.caller_preserved` |
-| `supported.capture.create.capture_source` | `flow.wrapper_overwrites_constant_conversation` |
+| `supported.capture.create.capture_source` | `flow.wrapper_overwrites_constant_conversation`; source-indicated `value.overwritten_input_any`; wrapper behavior proof gate required |
 | `derive.capture.create.source` | `flow.wrapper_synthesizes_source_object` |
 | `derive.capture.create.acceptance_criteria_default` | `flow.wrapper_defaults_capture_acceptance_criteria_if_missing` |
 | `supported.ingest.create.envelope_version`, `supported.ingest.create.title`, `supported.ingest.create.problem`, `supported.ingest.create.source`, `supported.ingest.create.emitted_at`, `supported.ingest.create.context`, `supported.ingest.create.prior_investigation`, `supported.ingest.create.approach`, `supported.ingest.create.acceptance_criteria`, `supported.ingest.create.verification`, `supported.ingest.create.key_files`, `supported.ingest.create.key_file_paths`, `supported.ingest.create.suggested_priority`, `supported.ingest.create.suggested_tags`, `supported.ingest.create.effort` | `flow.envelope_supplied` |
@@ -726,62 +781,85 @@ Every context-required outcome is an authored row with stable `rule_id`. Context
 
 Known semantic carve-outs that outrank broad support are authored `SPECIFIC_UNSUPPORTED` rows. Generic unknown subjects use fallback unsupported rows.
 
-### Active Subject Rows
+### Request-Subject Rows
 
-These are the only active current-behavior request-subject rows that may feed `classify_mutation()` as supported local subjects, plus the invalid/context/specific/no-op rows they reference. Active positive rows are caller/envelope request subjects accepted by wrapper syntax, accepted-but-overwritten request subjects, and caller-visible mutation subjects that can be grouped/planned.
+These are the only current-behavior request-subject rows that may feed `classify_mutation()` as supported local subjects, plus the invalid/context/specific rows they reference. Active positive rows are caller/envelope request subjects accepted by wrapper syntax, accepted-but-overwritten request subjects, and caller-visible mutation subjects that can be grouped/planned.
+
+Rows with `rule_id` prefix `noop.candidate.` are probe-gated candidates, not active behavior. They are tabled here only to freeze planned IDs and predicates. They must not be included in `_DEFAULT_REGISTRY`, manifest export, classifier output, or planner output until behavior probes pass and a later plan patch promotes them.
 
 Wrapper-synthesized create values with no caller/envelope request key are not active positive rows. They are exported under [Wrapper Create Derivation Registry](#wrapper-create-derivation-registry) and may have matching non-requestable diagnostic denial rows.
 
-| rule_id | subject_family_id | subject_path | policy_path | output_paths | disposition | owner | caller_writable | value_policy_id | gate | group_shape_hint | refs |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `supported.capture.create.title` | `subject.capture.create` | `capture.input.title` | `capture.ticket.title` | `frontmatter.title`, `filename.slug` | `SUPPORTED` | `PROJECT` | true | `value.non_empty_string` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.allowed_fields`, `capture.mapping` |
-| `supported.capture.create.captured_request` | `subject.capture.create` | `capture.input.captured_request` | `capture.ticket.captured_request` | `section.captured_request` | `SUPPORTED` | `PROJECT` | true | `value.non_empty_string` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.mapping`, `contract.schema` |
-| `supported.capture.create.problem` | `subject.capture.create` | `capture.input.problem` | `capture.ticket.problem` | `section.problem` | `SUPPORTED` | `PROJECT` | true | `value.non_empty_string` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.mapping`, `engine.create` |
-| `supported.capture.create.next_action` | `subject.capture.create` | `capture.input.next_action` | `capture.ticket.next_action` | `section.next_action` | `SUPPORTED` | `PROJECT` | true | `value.non_empty_string` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.mapping` |
-| `supported.capture.create.capture_confidence` | `subject.capture.create` | `capture.input.capture_confidence` | `capture.ticket.capture_confidence` | `frontmatter.capture_confidence` | `SUPPORTED` | `WRAPPER` | true | `value.capture_confidence` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `validate.constants`, `capture.mapping`, `capture.tests` |
-| `supported.capture.create.priority` | `subject.capture.create` | `capture.input.priority` | `capture.ticket.priority` | `frontmatter.priority` | `SUPPORTED` | `WRAPPER` | true | `value.priority` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.mapping`, `capture.tests` |
-| `supported.capture.create.tags` | `subject.capture.create` | `capture.input.tags` | `capture.ticket.tags` | `frontmatter.tags` | `SUPPORTED` | `WRAPPER` | true | `value.capture_tags` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `validate.constants`, `capture.mapping` |
-| `supported.capture.create.component` | `subject.capture.create` | `capture.input.component` | `capture.ticket.component` | `frontmatter.component` | `SUPPORTED` | `PROJECT` | true | `value.any_string` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.mapping`, `contract.schema` |
-| `supported.capture.create.related_paths` | `subject.capture.create` | `capture.input.related_paths` | `capture.ticket.related_paths` | `frontmatter.related_paths` | `SUPPORTED` | `PROJECT` | true | `value.path_list` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.mapping`, `contract.schema` |
-| `supported.capture.create.acceptance_criteria` | `subject.capture.create` | `capture.input.acceptance_criteria` | `capture.ticket.acceptance_criteria` | `section.acceptance_criteria` | `SUPPORTED` | `PROJECT` | true | `value.acceptance_criteria` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.mapping`, `contract.schema` |
-| `supported.capture.create.refinement_status` | `subject.capture.create` | `capture.input.refinement_status` | `capture.ticket.refinement_status` | `frontmatter.refinement_status` | `SUPPORTED` | `WRAPPER` | true | `value.refinement_status` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `validate.constants`, `capture.mapping` |
-| `supported.capture.create.capture_source` | `subject.capture.create` | `capture.input.capture_source` | `capture.ticket.capture_source` | `frontmatter.capture_source` | `SUPPORTED` | `WRAPPER` | false | `value.any_string` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.allowed_fields`, `capture.mapping`, `capture.tests` |
-| `supported.ingest.create.envelope_version` | `subject.ingest.create` | `ingest.envelope.envelope_version` | `ingest.envelope.version` | none | `SUPPORTED` | `ENVELOPE` | true | `value.envelope_version_1_0` | `APPLY_CONSENT` | `INGEST_CREATE` | `contract.envelope`, `envelope.schema` |
-| `supported.ingest.create.title` | `subject.ingest.create` | `ingest.envelope.title` | `ingest.ticket.title` | `frontmatter.title`, `filename.slug` | `SUPPORTED` | `ENVELOPE` | true | `value.non_empty_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
-| `supported.ingest.create.problem` | `subject.ingest.create` | `ingest.envelope.problem` | `ingest.ticket.problem` | `section.problem` | `SUPPORTED` | `ENVELOPE` | true | `value.non_empty_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
-| `supported.ingest.create.source` | `subject.ingest.create` | `ingest.envelope.source` | `ingest.ticket.source` | `frontmatter.source` | `SUPPORTED` | `ENVELOPE` | true | `value.source_object` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
-| `supported.ingest.create.emitted_at` | `subject.ingest.create` | `ingest.envelope.emitted_at` | `ingest.defer.deferred_at` | `frontmatter.defer.deferred_at` | `SUPPORTED` | `ENVELOPE` | true | `value.non_empty_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
-| `supported.ingest.create.context` | `subject.ingest.create` | `ingest.envelope.context` | `ingest.ticket.context` | `section.context` | `SUPPORTED` | `ENVELOPE` | true | `value.any_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
-| `supported.ingest.create.prior_investigation` | `subject.ingest.create` | `ingest.envelope.prior_investigation` | `ingest.ticket.prior_investigation` | `section.prior_investigation` | `SUPPORTED` | `ENVELOPE` | true | `value.any_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
-| `supported.ingest.create.approach` | `subject.ingest.create` | `ingest.envelope.approach` | `ingest.ticket.approach` | `section.approach` | `SUPPORTED` | `ENVELOPE` | true | `value.any_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
-| `supported.ingest.create.acceptance_criteria` | `subject.ingest.create` | `ingest.envelope.acceptance_criteria` | `ingest.ticket.acceptance_criteria` | `section.acceptance_criteria` | `SUPPORTED` | `ENVELOPE` | true | `value.acceptance_criteria` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
-| `supported.ingest.create.verification` | `subject.ingest.create` | `ingest.envelope.verification` | `ingest.ticket.verification` | `section.verification` | `SUPPORTED` | `ENVELOPE` | true | `value.any_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
-| `supported.ingest.create.key_files` | `subject.ingest.create` | `ingest.envelope.key_files` | `ingest.ticket.key_files` | `section.key_files` | `SUPPORTED` | `ENVELOPE` | true | `value.key_files` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
-| `supported.ingest.create.key_file_paths` | `subject.ingest.create` | `ingest.envelope.key_file_paths` | `ingest.ticket.key_file_paths` | `frontmatter.key_file_paths` | `SUPPORTED` | `ENVELOPE` | true | `value.path_list` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
-| `supported.ingest.create.suggested_priority` | `subject.ingest.create` | `ingest.envelope.suggested_priority` | `ingest.ticket.priority` | `frontmatter.priority` | `SUPPORTED` | `ENVELOPE` | true | `value.priority` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
-| `supported.ingest.create.suggested_tags` | `subject.ingest.create` | `ingest.envelope.suggested_tags` | `ingest.ticket.tags` | `frontmatter.tags` | `SUPPORTED` | `ENVELOPE` | true | `value.string_list` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
-| `supported.ingest.create.effort` | `subject.ingest.create` | `ingest.envelope.effort` | `ingest.ticket.effort` | `frontmatter.effort` | `SUPPORTED` | `ENVELOPE` | true | `value.any_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
-| `supported.update.frontmatter.priority` | `subject.update.frontmatter` | `update.frontmatter.priority` | `update.ticket.priority` | `frontmatter.priority` | `SUPPORTED` | `PROJECT` | true | `value.priority` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `engine.update` |
-| `supported.update.frontmatter.component` | `subject.update.frontmatter` | `update.frontmatter.component` | `update.ticket.component` | `frontmatter.component` | `SUPPORTED` | `PROJECT` | true | `value.any_string` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `engine.update` |
-| `supported.update.frontmatter.related_paths` | `subject.update.frontmatter` | `update.frontmatter.related_paths` | `update.ticket.related_paths` | `frontmatter.related_paths` | `SUPPORTED` | `PROJECT` | true | `value.path_list` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `engine.update` |
-| `supported.update.frontmatter.blocked_by` | `subject.update.frontmatter` | `update.frontmatter.blocked_by` | `update.ticket.blocked_by` | `frontmatter.blocked_by` | `SUPPORTED` | `PROJECT` | true | `value.string_list` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `engine.update` |
-| `supported.update.frontmatter.blocks` | `subject.update.frontmatter` | `update.frontmatter.blocks` | `update.ticket.blocks` | `frontmatter.blocks` | `SUPPORTED` | `PROJECT` | true | `value.string_list` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `engine.update` |
-| `supported.update.frontmatter.tags` | `subject.update.frontmatter` | `update.frontmatter.tags` | `update.ticket.tags` | `frontmatter.tags` | `SUPPORTED` | `PROJECT` | true | `value.string_list` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `update.refinement`, `engine.update` |
-| `supported.update.focused.problem` | `subject.update.focused` | `update.focused.problem` | `update.ticket.problem` | `section.problem` | `SUPPORTED` | `PROJECT` | true | `value.non_empty_string` | `APPLY_CONSENT` | `UPDATE_FOCUSED_REFINEMENT` | `update.allowed_fields`, `update.refinement`, `engine.update` |
-| `supported.update.focused.next_action` | `subject.update.focused` | `update.focused.next_action` | `update.ticket.next_action` | `section.next_action` | `SUPPORTED` | `PROJECT` | true | `value.non_empty_string` | `APPLY_CONSENT` | `UPDATE_FOCUSED_REFINEMENT` | `update.allowed_fields`, `engine.update` |
-| `supported.update.focused.acceptance_criteria` | `subject.update.focused` | `update.focused.acceptance_criteria` | `update.ticket.acceptance_criteria` | `section.acceptance_criteria` | `SUPPORTED` | `PROJECT` | true | `value.acceptance_criteria` | `APPLY_CONSENT` | `UPDATE_FOCUSED_REFINEMENT` | `update.allowed_fields`, `update.refinement`, `engine.update` |
-| `supported.update.lifecycle.status.open_to_in_progress` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `update.ticket.status` | `frontmatter.status` | `SUPPORTED` | `PROJECT` | true | `value.status_target` | `APPLY_CONSENT` | `UPDATE_STATUS_LIFECYCLE` | `engine.transitions` |
-| `supported.update.lifecycle.status.in_progress_to_open` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `update.ticket.status` | `frontmatter.status` | `SUPPORTED` | `PROJECT` | true | `value.status_target` | `APPLY_CONSENT` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | `update.mapping`, `engine.transitions` |
-| `precondition.update.lifecycle.status.to_blocked` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `update.ticket.status` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_STATUS_LIFECYCLE` | `engine.transitions` |
-| `precondition.update.lifecycle.status.blocked_to_open` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `update.ticket.status` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | `update.mapping`, `engine.transitions` |
-| `precondition.update.lifecycle.status.blocked_to_in_progress` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `update.ticket.status` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_STATUS_LIFECYCLE` | `engine.transitions` |
-| `noop.candidate.update.lifecycle.status.same_open` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `update.ticket.status` | none | `NO_OP` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | `update.mapping`, `engine.update`; probe-gated |
-| `noop.candidate.update.lifecycle.status.same_in_progress` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `update.ticket.status` | none | `NO_OP` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_STATUS_LIFECYCLE` | `engine.update`; probe-gated |
-| `noop.candidate.update.lifecycle.status.same_blocked` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `update.ticket.status` | none | `NO_OP` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_STATUS_LIFECYCLE` | `engine.update`; probe-gated |
-| `precondition.update.close.status.done` | `subject.update.close.status` | `update.lifecycle.status` | `update.ticket.close.done` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.close_status_target` | `UNSUPPORTED` | `UPDATE_CLOSE` | `update.mapping`, `engine.close` |
-| `precondition.update.close.status.wontfix` | `subject.update.close.status` | `update.lifecycle.status` | `update.ticket.close.wontfix` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.close_status_target` | `UNSUPPORTED` | `UPDATE_CLOSE` | `update.mapping`, `engine.close` |
-| `precondition.update.reopen.status.open` | `subject.update.lifecycle.reopen_reason` | `update.lifecycle.status` | `update.ticket.reopen.status` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_REOPEN` | `update.mapping`, `engine.reopen` |
-| `precondition.update.reopen.reopen_reason` | `subject.update.lifecycle.reopen_reason` | `update.lifecycle.reopen_reason` | `update.ticket.reopen.reason` | none | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.non_empty_string` | `UNSUPPORTED` | `UPDATE_REOPEN` | `update.mapping`, `engine.reopen` |
+| rule_id | subject_family_id | subject_path | request_raw_key | policy_path | output_paths | disposition | owner | caller_writable | value_policy_id | gate | group_shape_hint | refs |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `supported.capture.create.title` | `subject.capture.create` | `capture.input.title` | `title` | `capture.ticket.title` | `frontmatter.title`, `filename.slug` | `SUPPORTED` | `PROJECT` | true | `value.non_empty_string` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.allowed_fields`, `capture.mapping` |
+| `supported.capture.create.captured_request` | `subject.capture.create` | `capture.input.captured_request` | `captured_request` | `capture.ticket.captured_request` | `section.captured_request` | `SUPPORTED` | `PROJECT` | true | `value.non_empty_string` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.mapping`, `contract.schema` |
+| `supported.capture.create.problem` | `subject.capture.create` | `capture.input.problem` | `problem` | `capture.ticket.problem` | `section.problem` | `SUPPORTED` | `PROJECT` | true | `value.non_empty_string` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.mapping`, `engine.create` |
+| `supported.capture.create.next_action` | `subject.capture.create` | `capture.input.next_action` | `next_action` | `capture.ticket.next_action` | `section.next_action` | `SUPPORTED` | `PROJECT` | true | `value.non_empty_string` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.mapping` |
+| `supported.capture.create.capture_confidence` | `subject.capture.create` | `capture.input.capture_confidence` | `capture_confidence` | `capture.ticket.capture_confidence` | `frontmatter.capture_confidence` | `SUPPORTED` | `WRAPPER` | true | `value.capture_confidence` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `validate.constants`, `capture.mapping`, `capture.tests` |
+| `supported.capture.create.priority` | `subject.capture.create` | `capture.input.priority` | `priority` | `capture.ticket.priority` | `frontmatter.priority` | `SUPPORTED` | `WRAPPER` | true | `value.priority` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.mapping`, `capture.tests` |
+| `supported.capture.create.tags` | `subject.capture.create` | `capture.input.tags` | `tags` | `capture.ticket.tags` | `frontmatter.tags` | `SUPPORTED` | `WRAPPER` | true | `value.capture_tags` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `validate.constants`, `capture.mapping` |
+| `supported.capture.create.component` | `subject.capture.create` | `capture.input.component` | `component` | `capture.ticket.component` | `frontmatter.component` | `SUPPORTED` | `PROJECT` | true | `value.any_string` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.mapping`, `contract.schema` |
+| `supported.capture.create.related_paths` | `subject.capture.create` | `capture.input.related_paths` | `related_paths` | `capture.ticket.related_paths` | `frontmatter.related_paths` | `SUPPORTED` | `PROJECT` | true | `value.path_list` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.mapping`, `contract.schema` |
+| `supported.capture.create.acceptance_criteria` | `subject.capture.create` | `capture.input.acceptance_criteria` | `acceptance_criteria` | `capture.ticket.acceptance_criteria` | `section.acceptance_criteria` | `SUPPORTED` | `PROJECT` | true | `value.acceptance_criteria` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.mapping`, `contract.schema` |
+| `supported.capture.create.refinement_status` | `subject.capture.create` | `capture.input.refinement_status` | `refinement_status` | `capture.ticket.refinement_status` | `frontmatter.refinement_status` | `SUPPORTED` | `WRAPPER` | true | `value.refinement_status` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `validate.constants`, `capture.mapping` |
+| `supported.capture.create.capture_source` | `subject.capture.create` | `capture.input.capture_source` | `capture_source` | `capture.ticket.capture_source` | `frontmatter.capture_source` | `SUPPORTED` | `WRAPPER` | false | `value.overwritten_input_any` | `APPLY_CONSENT` | `CAPTURE_CREATE` | `capture.allowed_fields`, `capture.mapping`, `capture.tests`; wrapper behavior proof gate required |
+| `supported.ingest.create.envelope_version` | `subject.ingest.create` | `ingest.envelope.envelope_version` | `envelope_version` | `ingest.envelope.version` | none | `SUPPORTED` | `ENVELOPE` | true | `value.envelope_version_1_0` | `APPLY_CONSENT` | `INGEST_CREATE` | `contract.envelope`, `envelope.schema` |
+| `supported.ingest.create.title` | `subject.ingest.create` | `ingest.envelope.title` | `title` | `ingest.ticket.title` | `frontmatter.title`, `filename.slug` | `SUPPORTED` | `ENVELOPE` | true | `value.non_empty_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
+| `supported.ingest.create.problem` | `subject.ingest.create` | `ingest.envelope.problem` | `problem` | `ingest.ticket.problem` | `section.problem` | `SUPPORTED` | `ENVELOPE` | true | `value.non_empty_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
+| `supported.ingest.create.source` | `subject.ingest.create` | `ingest.envelope.source` | `source` | `ingest.ticket.source` | `frontmatter.source` | `SUPPORTED` | `ENVELOPE` | true | `value.source_object` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
+| `supported.ingest.create.emitted_at` | `subject.ingest.create` | `ingest.envelope.emitted_at` | `emitted_at` | `ingest.defer.deferred_at` | `frontmatter.defer.deferred_at` | `SUPPORTED` | `ENVELOPE` | true | `value.non_empty_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
+| `supported.ingest.create.context` | `subject.ingest.create` | `ingest.envelope.context` | `context` | `ingest.ticket.context` | `section.context` | `SUPPORTED` | `ENVELOPE` | true | `value.any_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
+| `supported.ingest.create.prior_investigation` | `subject.ingest.create` | `ingest.envelope.prior_investigation` | `prior_investigation` | `ingest.ticket.prior_investigation` | `section.prior_investigation` | `SUPPORTED` | `ENVELOPE` | true | `value.any_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
+| `supported.ingest.create.approach` | `subject.ingest.create` | `ingest.envelope.approach` | `approach` | `ingest.ticket.approach` | `section.approach` | `SUPPORTED` | `ENVELOPE` | true | `value.any_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
+| `supported.ingest.create.acceptance_criteria` | `subject.ingest.create` | `ingest.envelope.acceptance_criteria` | `acceptance_criteria` | `ingest.ticket.acceptance_criteria` | `section.acceptance_criteria` | `SUPPORTED` | `ENVELOPE` | true | `value.acceptance_criteria` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
+| `supported.ingest.create.verification` | `subject.ingest.create` | `ingest.envelope.verification` | `verification` | `ingest.ticket.verification` | `section.verification` | `SUPPORTED` | `ENVELOPE` | true | `value.any_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
+| `supported.ingest.create.key_files` | `subject.ingest.create` | `ingest.envelope.key_files` | `key_files` | `ingest.ticket.key_files` | `section.key_files` | `SUPPORTED` | `ENVELOPE` | true | `value.key_files` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
+| `supported.ingest.create.key_file_paths` | `subject.ingest.create` | `ingest.envelope.key_file_paths` | `key_file_paths` | `ingest.ticket.key_file_paths` | `frontmatter.key_file_paths` | `SUPPORTED` | `ENVELOPE` | true | `value.path_list` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
+| `supported.ingest.create.suggested_priority` | `subject.ingest.create` | `ingest.envelope.suggested_priority` | `suggested_priority` | `ingest.ticket.priority` | `frontmatter.priority` | `SUPPORTED` | `ENVELOPE` | true | `value.priority` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
+| `supported.ingest.create.suggested_tags` | `subject.ingest.create` | `ingest.envelope.suggested_tags` | `suggested_tags` | `ingest.ticket.tags` | `frontmatter.tags` | `SUPPORTED` | `ENVELOPE` | true | `value.string_list` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
+| `supported.ingest.create.effort` | `subject.ingest.create` | `ingest.envelope.effort` | `effort` | `ingest.ticket.effort` | `frontmatter.effort` | `SUPPORTED` | `ENVELOPE` | true | `value.any_string` | `APPLY_CONSENT` | `INGEST_CREATE` | `envelope.schema`, `envelope.mapping` |
+| `supported.update.frontmatter.priority` | `subject.update.frontmatter` | `update.frontmatter.priority` | `priority` | `update.ticket.priority` | `frontmatter.priority` | `SUPPORTED` | `PROJECT` | true | `value.priority` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `engine.update` |
+| `supported.update.frontmatter.component` | `subject.update.frontmatter` | `update.frontmatter.component` | `component` | `update.ticket.component` | `frontmatter.component` | `SUPPORTED` | `PROJECT` | true | `value.any_string` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `engine.update` |
+| `supported.update.frontmatter.related_paths` | `subject.update.frontmatter` | `update.frontmatter.related_paths` | `related_paths` | `update.ticket.related_paths` | `frontmatter.related_paths` | `SUPPORTED` | `PROJECT` | true | `value.path_list` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `engine.update` |
+| `supported.update.frontmatter.blocked_by` | `subject.update.frontmatter` | `update.frontmatter.blocked_by` | `blocked_by` | `update.ticket.blocked_by` | `frontmatter.blocked_by` | `SUPPORTED` | `PROJECT` | true | `value.string_list` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `engine.update` |
+| `supported.update.frontmatter.blocks` | `subject.update.frontmatter` | `update.frontmatter.blocks` | `blocks` | `update.ticket.blocks` | `frontmatter.blocks` | `SUPPORTED` | `PROJECT` | true | `value.string_list` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `engine.update` |
+| `supported.update.frontmatter.tags` | `subject.update.frontmatter` | `update.frontmatter.tags` | `tags` | `update.ticket.tags` | `frontmatter.tags` | `SUPPORTED` | `PROJECT` | true | `value.string_list` | `APPLY_CONSENT` | `UPDATE_FRONTMATTER` | `update.allowed_fields`, `update.refinement`, `engine.update` |
+| `supported.update.focused.problem` | `subject.update.focused` | `update.focused.problem` | `problem` | `update.ticket.problem` | `section.problem` | `SUPPORTED` | `PROJECT` | true | `value.non_empty_string` | `APPLY_CONSENT` | `UPDATE_FOCUSED_REFINEMENT` | `update.allowed_fields`, `update.refinement`, `engine.update` |
+| `supported.update.focused.next_action` | `subject.update.focused` | `update.focused.next_action` | `next_action` | `update.ticket.next_action` | `section.next_action` | `SUPPORTED` | `PROJECT` | true | `value.non_empty_string` | `APPLY_CONSENT` | `UPDATE_FOCUSED_REFINEMENT` | `update.allowed_fields`, `engine.update` |
+| `supported.update.focused.acceptance_criteria` | `subject.update.focused` | `update.focused.acceptance_criteria` | `acceptance_criteria` | `update.ticket.acceptance_criteria` | `section.acceptance_criteria` | `SUPPORTED` | `PROJECT` | true | `value.acceptance_criteria` | `APPLY_CONSENT` | `UPDATE_FOCUSED_REFINEMENT` | `update.allowed_fields`, `update.refinement`, `engine.update` |
+| `supported.update.lifecycle.status.open_to_in_progress` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `status` | `update.ticket.status` | `frontmatter.status` | `SUPPORTED` | `PROJECT` | true | `value.status_target` | `APPLY_CONSENT` | `UPDATE_STATUS_LIFECYCLE` | `engine.transitions` |
+| `supported.update.lifecycle.status.in_progress_to_open` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `status` | `update.ticket.status` | `frontmatter.status` | `SUPPORTED` | `PROJECT` | true | `value.status_target` | `APPLY_CONSENT` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | `update.mapping`, `engine.transitions` |
+| `precondition.update.lifecycle.status.to_blocked` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `status` | `update.ticket.status` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_STATUS_LIFECYCLE` | `engine.transitions` |
+| `precondition.update.lifecycle.status.blocked_to_open` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `status` | `update.ticket.status` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | `update.mapping`, `engine.transitions` |
+| `precondition.update.lifecycle.status.blocked_to_in_progress` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `status` | `update.ticket.status` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_STATUS_LIFECYCLE` | `engine.transitions` |
+| `noop.candidate.update.lifecycle.status.same_open` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `status` | `update.ticket.status` | none | `NO_OP` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | `update.mapping`, `engine.update`; probe-gated |
+| `noop.candidate.update.lifecycle.status.same_in_progress` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `status` | `update.ticket.status` | none | `NO_OP` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_STATUS_LIFECYCLE` | `engine.update`; probe-gated |
+| `noop.candidate.update.lifecycle.status.same_blocked` | `subject.update.lifecycle.status` | `update.lifecycle.status` | `status` | `update.ticket.status` | none | `NO_OP` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_STATUS_LIFECYCLE` | `engine.update`; probe-gated |
+| `precondition.update.close.status.done` | `subject.update.close.status` | `update.lifecycle.status` | `status` | `update.ticket.close.done` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.close_status_target` | `UNSUPPORTED` | `UPDATE_CLOSE` | `update.mapping`, `engine.close` |
+| `precondition.update.close.status.wontfix` | `subject.update.close.status` | `update.lifecycle.status` | `status` | `update.ticket.close.wontfix` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.close_status_target` | `UNSUPPORTED` | `UPDATE_CLOSE` | `update.mapping`, `engine.close` |
+| `precondition.update.reopen.status.open` | `subject.update.lifecycle.reopen_reason` | `update.lifecycle.status` | `status` | `update.ticket.reopen.status` | `frontmatter.status` | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.status_target` | `UNSUPPORTED` | `UPDATE_REOPEN` | `update.mapping`, `engine.reopen` |
+| `precondition.update.reopen.reopen_reason` | `subject.update.lifecycle.reopen_reason` | `update.lifecycle.reopen_reason` | `reopen_reason` | `update.ticket.reopen.reason` | none | `PRECONDITION_REQUIRED` | `PROJECT` | false | `value.non_empty_string` | `UNSUPPORTED` | `UPDATE_REOPEN` | `update.mapping`, `engine.reopen` |
+
+Every active request-subject row has `request_raw_key`. Rows with the same surface and `subject_path` must agree on `request_raw_key` unless the row declares an explicit value-dependent exception in the lifecycle match table below. Wrapper-derived rows and create derivations must not claim caller raw keys.
+
+`request_raw_key` is the raw payload key used by `RawShapeDiscriminator.raw_keys`; `subject_path` is the normalized policy subject. The registry may derive private lookup tables from these authored columns, but a separate subject-to-raw-key table is not a second source of truth.
+
+Lifecycle rows use these current-state and value predicates:
+
+| rule_id | raw_group_shape_hint | current_status_condition | value_condition |
+| --- | --- | --- | --- |
+| `supported.update.lifecycle.status.open_to_in_progress` | `UPDATE_STATUS_LIFECYCLE` | `current.status == "open"` | `value == "in_progress"` |
+| `supported.update.lifecycle.status.in_progress_to_open` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | `current.status == "in_progress"` | `value == "open"` |
+| `precondition.update.lifecycle.status.to_blocked` | `UPDATE_STATUS_LIFECYCLE` | `current.status in {"open", "in_progress"}` | `value == "blocked"` |
+| `precondition.update.lifecycle.status.blocked_to_open` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | `current.status == "blocked"` | `value == "open"` |
+| `precondition.update.lifecycle.status.blocked_to_in_progress` | `UPDATE_STATUS_LIFECYCLE` | `current.status == "blocked"` | `value == "in_progress"` |
+| `noop.candidate.update.lifecycle.status.same_open` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | `current.status == "open"` | `value == "open"` |
+| `noop.candidate.update.lifecycle.status.same_in_progress` | `UPDATE_STATUS_LIFECYCLE` | `current.status == "in_progress"` | `value == "in_progress"` |
+| `noop.candidate.update.lifecycle.status.same_blocked` | `UPDATE_STATUS_LIFECYCLE` | `current.status == "blocked"` | `value == "blocked"` |
+| `precondition.update.close.status.done` | `UPDATE_CLOSE` | `current.status in {"open", "in_progress", "blocked"}` | `value == "done"` |
+| `precondition.update.close.status.wontfix` | `UPDATE_CLOSE` | `current.status in {"open", "in_progress", "blocked"}` | `value == "wontfix"` |
+| `precondition.update.reopen.status.open` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | `current.status in {"done", "wontfix"}` | `value == "open"` |
+| `precondition.update.reopen.reopen_reason` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | `current.status in {"done", "wontfix"}` | `reopen_reason` is non-empty string |
 
 ### Authored Invalid, Context, Unsupported, And No-Op Rows
 
@@ -826,7 +904,7 @@ These rows are exported in `policy["rules"]` and referenced by active subject, f
 | `unsupported.ingest.non_create_mutation` | shape stop | none | ingest non-create shape | none | `UNSUPPORTED` | `surface_action_operation_not_supported` | `UNSUPPORTED_NO_GROUP_SHAPE` | `envelope.mapping` |
 | `unsupported.update.unsupported_action_operation` | shape stop | none | unsupported update action/operation combination | none | `UNSUPPORTED` | `surface_action_operation_not_supported` | `UNSUPPORTED_NO_GROUP_SHAPE` | `update.mapping` |
 
-NO_OP candidate rules are authored rows but may not appear in exported current-behavior manifest rows until the behavior probes listed in [Behavior Probe Gates](#behavior-probe-gates) pass. If a probe fails, patch this table to the observed unsupported or effect behavior before implementation continues.
+NO_OP candidate rules are authored plan rows but may not appear in `_DEFAULT_REGISTRY` or exported current-behavior manifest rows until the behavior probes listed in [Behavior Probe Gates](#behavior-probe-gates) pass. If a probe fails, patch this table to the observed unsupported or effect behavior before implementation continues.
 
 ### Explicit Out-Of-Surface Exclusions
 
@@ -896,21 +974,50 @@ Derived writes that happen because a grouped lane executes are lane effects, not
 | `effect.update.reopen.appends_reopen_history` | `UPDATE_REOPEN` | `APPENDS_REOPEN_HISTORY` | `section.reopen_history` | false | `ENGINE` | `ENGINE` | append timestamped reopen reason with request origin | `ManifestLane.effects` | `engine.reopen`; behavior test `test_reopen_appends_reopen_history_for_terminal_reopen` |
 | `effect.update.reopen.may_move_from_closed_tickets` | `UPDATE_REOPEN` | `MAY_MOVE_FROM_CLOSED_TICKETS` | ticket file path | false | `ENGINE` | `ENGINE` | unarchive before status write | `ManifestLane.effects` | `engine.reopen`; behavior test `test_reopen_can_move_terminal_ticket_from_closed_location` |
 
+### Raw Shape Accounting
+
+`RawShapeDiscriminator.raw_keys` is the full wrapper/envelope payload key set for the `mutation_id`. It uses raw payload keys, not `SubjectPath` strings. The planner validates full accounting before lane evaluation:
+
+```text
+for each raw key in raw_keys:
+  raw key maps to exactly one ManifestAction through request_raw_key
+  OR raw key is covered by an active raw-shape-only exception
+otherwise:
+  AuthorityInputError
+```
+
+The inverse is also required: every action whose matched rule has `request_raw_key` must have that raw key in the matching `RawShapeDiscriminator.raw_keys`. This prevents action-only planning from silently dropping raw wrapper syntax.
+
+Allowlist and exclusion checks are planner policy, not `RawShapeDiscriminator` constructor policy. A raw key such as `archive`, `resolution`, or `unknown_field` may be syntactically valid carrier input and then produce an unsupported lane when represented by a `ManifestAction`.
+
+If a raw key is the thing being denied, it must have a `ManifestAction` and appear in `unsupported_action_ids` or `invalid_action_ids` as appropriate. Raw-shape-only exceptions are only for raw keys that discriminate wrapper shape but are not themselves authority-bearing or denyable after behavior proof.
+
+Active raw-shape-only exceptions in Slice 1: none.
+
+Probe-gated candidate exceptions live only in this plan until promoted by a later plan patch. They are not active, not exported, not stored in `_DEFAULT_REGISTRY`, and not usable for full raw-key accounting.
+
+| candidate_exception_id | raw_key | surface | raw_group_shape_hint | condition | promotion requirement | if probe rejects |
+| --- | --- | --- | --- | --- | --- | --- |
+| `raw_shape_exception.candidate.update.nonterminal_reopen_reason_ignored` | `reopen_reason` | `update` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | current status is nonterminal and wrapper accepts but ignores raw `reopen_reason` | behavior probes prove accepted/ignored behavior; later plan patch promotes to active exception | add denyable unsupported `ManifestAction`/rule for `reopen_reason` instead |
+
 ### Group Planning Families And Rules
 
 `mutation_id` is the atomicity boundary. Unsupported or incompatible local actions poison a group except `NO_OP` local actions. If at least one non-no-op action in a group is supported, plan the supported lane and list no-op actions in `no_op_action_ids`. If every action in the group is no-op, emit `lane=NO_OP`.
 
-| group_family_id | raw group shape | selection rule | fallback_group_rule_id |
+Group selection uses `RawShapeDiscriminator.raw_group_shape_hint` plus local action rules and `MutationContext.current`. The raw shape chooses wrapper compatibility; semantic lifecycle/reopen splitting happens afterward.
+
+| group_family_id | selection basis | selection rule | fallback_group_rule_id |
 | --- | --- | --- | --- |
-| `group.capture.create` | `CAPTURE_CREATE` | all actions surface `CAPTURE`, action/operation `CREATE`, hints `CAPTURE_CREATE` | `group.unsupported.capture.create.fallback` |
-| `group.ingest.create` | `INGEST_CREATE` | all actions surface `INGEST`, action/operation `CREATE`, hints `INGEST_CREATE` | `group.unsupported.ingest.create.fallback` |
-| `group.update.frontmatter` | `UPDATE_FRONTMATTER` | update metadata subjects only; no focused or lifecycle subjects | `group.unsupported.update.frontmatter.fallback` |
-| `group.update.focused_refinement` | `UPDATE_FOCUSED_REFINEMENT` | at least one focused subject plus optional compatible metadata co-actions | `group.unsupported.update.focused_refinement.fallback` |
-| `group.update.status_lifecycle` | `UPDATE_STATUS_LIFECYCLE` | lifecycle status subject not raw-open exclusive, close, or reopen | `group.unsupported.update.status_lifecycle.fallback` |
-| `group.update.status_open_exclusive` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | requested `status="open"` or `reopen_reason` present at raw wrapper shape | `group.unsupported.update.status_open_exclusive.fallback` |
-| `group.update.close` | `UPDATE_CLOSE` | wrapper close status target `done` or `wontfix` | `group.unsupported.update.close.fallback` |
-| `group.update.reopen` | `UPDATE_REOPEN` | terminal reopen semantic group after current status is known | `group.unsupported.update.reopen.fallback` |
-| `group.no_op` | `NO_OP` | all local actions are `NO_OP` | `group.unsupported.no_op.fallback` |
+| `group.capture.create` | `RawGroupShapeHint.CAPTURE_CREATE` | all actions surface `CAPTURE`, action/operation `CREATE`, and local hints `CAPTURE_CREATE` | `group.unsupported.capture.create.fallback` |
+| `group.ingest.create` | `RawGroupShapeHint.INGEST_CREATE` | all actions surface `INGEST`, action/operation `CREATE`, and local hints `INGEST_CREATE` | `group.unsupported.ingest.create.fallback` |
+| `group.update.frontmatter` | `RawGroupShapeHint.UPDATE_FRONTMATTER` | update metadata subjects only; no focused or lifecycle subjects | `group.unsupported.update.frontmatter.fallback` |
+| `group.update.focused_refinement` | `RawGroupShapeHint.UPDATE_FOCUSED_REFINEMENT` | at least one focused subject plus optional compatible metadata co-actions | `group.unsupported.update.focused_refinement.fallback` |
+| `group.update.status_lifecycle` | `RawGroupShapeHint.UPDATE_STATUS_LIFECYCLE` | lifecycle status subject not raw-open exclusive, close, or reopen | `group.unsupported.update.status_lifecycle.fallback` |
+| `group.update.status_open_exclusive` | `RawGroupShapeHint.UPDATE_STATUS_OPEN_EXCLUSIVE` plus nonterminal current status | requested `status="open"` or `reopen_reason` present at raw wrapper shape | `group.unsupported.update.status_open_exclusive.fallback` |
+| `group.update.close` | `RawGroupShapeHint.UPDATE_CLOSE` | wrapper close status target `done` or `wontfix` | `group.unsupported.update.close.fallback` |
+| `group.update.reopen` | `RawGroupShapeHint.UPDATE_STATUS_OPEN_EXCLUSIVE` plus terminal current status | terminal reopen semantic group after current status is known | `group.unsupported.update.reopen.fallback` |
+| `group.no_op` | local no-op outcomes | all local actions are `NO_OP` after probes pass | `group.unsupported.no_op.fallback` |
+| `group.unsupported.raw_shape` | `RawGroupShapeHint.UNSUPPORTED_RAW_SHAPE` | well-formed wrapper input with no supported raw group family | `group.unsupported.raw_shape.fallback` |
 
 | group_rule_id | family | supported | lane | gate | required runtime_checks | preconditions | effects | key conditions |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -941,6 +1048,7 @@ Derived writes that happen because a grouped lane executes are lane effects, not
 | `group.unsupported.update.reopen.fallback` | `group.update.reopen` | false | `UNSUPPORTED` | `UNSUPPORTED` | none | none | none | fallback |
 | `group.supported.no_op` | `group.no_op` | true | `NO_OP` | `UNSUPPORTED` | none | none | none | all action IDs are no-op and probes have proven no semantic write lane |
 | `group.unsupported.no_op.fallback` | `group.no_op` | false | `UNSUPPORTED` | `UNSUPPORTED` | none | none | none | fallback |
+| `group.unsupported.raw_shape.fallback` | `group.unsupported.raw_shape` | false | `UNSUPPORTED` | `UNSUPPORTED` | none | none | none | well-formed raw wrapper shape unsupported by Slice 1 policy; local invalids still preempt first |
 
 #### Group Invalid Rules
 
@@ -962,12 +1070,15 @@ SUPPORTED
 
 If any action has local `INVALID_VALUE`, the planner returns those local invalid action IDs and does not evaluate group invalid rules. If local values are individually valid, evaluate every applicable group invalid rule in stable authored order. Group invalid evaluation is exhaustive within the selected group family. `group_invalid_rule_ids` preserves authored group-invalid rule order. `invalid_action_ids` is the stable union of affected action IDs, preserving input action order.
 
-| group_invalid_rule_id | family | affected_subject_paths | condition | reason_code | anchors/tests |
-| --- | --- | --- | --- | --- | --- |
-| `invalid_group.capture.create.tags.needs_refinement_without_refinement_status` | `group.capture.create` | `capture.input.tags` | assembled capture fields have `tags` containing `"needs-refinement"` and `refinement_status != "needs_refinement"` | `capture_needs_refinement_tag_requires_refinement_status` | `validate.constants`, `capture.mapping`, `capture.tests` |
-| `invalid_group.capture.create.acceptance_criteria.needs_refinement_without_refinement_status` | `group.capture.create` | `capture.input.acceptance_criteria`, `capture.derived.acceptance_criteria_default` | assembled capture fields have `acceptance_criteria` containing `"Needs refinement"` and `refinement_status != "needs_refinement"` | `capture_needs_refinement_ac_requires_refinement_status` | `validate.constants`, `capture.mapping`, `capture.tests` |
+| group_invalid_rule_id | family | affected_request_subject_paths | derived_subject_paths | repair_subject_paths | invalid_action_mapping | condition | reason_code | anchors/tests |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `invalid_group.capture.create.tags.needs_refinement_without_refinement_status` | `group.capture.create` | `capture.input.tags` | none | `capture.input.tags`, `capture.input.refinement_status` | affected `capture.input.tags` action ID | assembled capture fields have `tags` containing `"needs-refinement"` and `refinement_status != "needs_refinement"` | `capture_needs_refinement_tag_requires_refinement_status` | `validate.constants`, `capture.mapping`, `capture.tests` |
+| `invalid_group.capture.create.acceptance_criteria.explicit_needs_refinement_without_refinement_status` | `group.capture.create` | `capture.input.acceptance_criteria` | none | `capture.input.acceptance_criteria`, `capture.input.refinement_status` | affected `capture.input.acceptance_criteria` action ID | explicit `capture.input.acceptance_criteria` contains `"Needs refinement"` and `refinement_status != "needs_refinement"` | `capture_needs_refinement_ac_requires_refinement_status` | `validate.constants`, `capture.mapping`, `capture.tests` |
+| `invalid_group.capture.create.acceptance_criteria.defaulted_needs_refinement_without_refinement_status` | `group.capture.create` | `capture.input.next_action` | `capture.derived.acceptance_criteria_default` | `capture.input.next_action`, `capture.input.acceptance_criteria`, `capture.input.refinement_status` | affected `capture.input.next_action` action ID | `capture.input.acceptance_criteria` is missing, wrapper derives acceptance criteria from `next_action == "Needs refinement"`, and `refinement_status != "needs_refinement"` | `capture_defaulted_ac_needs_refinement_requires_refinement_status` | `validate.constants`, `capture.mapping`, `capture.tests` |
 
-Capture cross-field invalids reflect `validate_fields(fields)` after `ticket_capture.py` has assembled the full fields dict. `capture.input.tags=["needs-refinement"]` classifies locally as supported when its list values are controlled tags; the capture create lane is denied only if the grouped payload lacks `capture.input.refinement_status="needs_refinement"`. The acceptance-criteria rule covers both explicit caller-provided acceptance criteria and `derive.capture.create.acceptance_criteria_default`.
+Capture cross-field invalids reflect `validate_fields(fields)` after `ticket_capture.py` has assembled the full fields dict. `capture.input.tags=["needs-refinement"]` classifies locally as supported when its list values are controlled tags; the capture create lane is denied only if the grouped payload lacks `capture.input.refinement_status="needs_refinement"`.
+
+The two acceptance-criteria rules split caller-owned and wrapper-derived causes. Explicit caller-provided `capture.input.acceptance_criteria=["Needs refinement"]` puts the acceptance-criteria action ID in `invalid_action_ids`. Missing acceptance criteria with `capture.input.next_action == "Needs refinement"` puts the next-action action ID in `invalid_action_ids` and carries `capture.derived.acceptance_criteria_default` only as derivation metadata on the group-invalid rule. Do not invent synthetic action IDs for derivations.
 
 Denial lanes for group invalids keep `group_rule_id` set to the structural group rule, set `group_invalid_rule_ids` to all matching invalid rules, put affected actions in `invalid_action_ids`, leave `unsupported_action_ids=()`, and use `reason_code=group_invalid_payload_composition` when multiple group invalids match.
 
@@ -982,17 +1093,17 @@ All-no-op lanes use `lane=NO_OP`, `supported=True`, all action IDs in `no_op_act
 Raw wrapper compatibility and semantic lane selection are distinct:
 
 ```text
-raw compatibility: status="open" or reopen_reason present => reopen-exclusive raw shape
+raw compatibility: RawGroupShapeHint.UPDATE_STATUS_OPEN_EXCLUSIVE when status="open" or raw reopen_reason is present
 semantic lane split: after current.status is known, terminal current statuses become UPDATE_REOPEN; nonterminal current statuses become UPDATE_STATUS_LIFECYCLE or NO_OP
 ```
 
 `status="open"` never unlocks metadata or focused co-actions in Slice 1. Current-state splitting changes only lane semantics; it does not change raw wrapper payload compatibility.
 
-`reopen_reason` is a raw wrapper shape discriminator whenever present. It is semantically active only for terminal reopen. Nonterminal `reopen_reason` behavior is probe-gated and has no active `_DEFAULT_REGISTRY` row or exported manifest rule until behavior probes prove whether the wrapper rejects it, accepts and ignores it, or produces another visible outcome.
+`reopen_reason` is a raw wrapper shape discriminator whenever present. It is semantically active only for terminal reopen. Nonterminal `reopen_reason` behavior is probe-gated and has no active `_DEFAULT_REGISTRY` row, active raw-shape-only exception, or exported manifest rule until behavior probes prove whether the wrapper rejects it, accepts and ignores it, or produces another visible outcome.
 
 If probes show nonterminal `reopen_reason` is accepted but ignored, Slice 1 must not model it as supported, unsupported, or no-op authority. The planner classifies/plans only the behavior-participating status action. The behavior may be documented only as a non-authority probe note with behavior-test anchors.
 
-Until probes resolve the case, implementation must not emit a `ManifestAction` for nonterminal `reopen_reason` when converting wrapper payloads into authority actions, and `_DEFAULT_REGISTRY` must not contain a nonterminal `reopen_reason` rule. Direct classifier calls for `update.lifecycle.reopen_reason` remain terminal-reopen or missing-current-context questions only; nonterminal semantics are not frozen in Slice 1.
+Until probes resolve the case, `_DEFAULT_REGISTRY` must not contain a nonterminal `reopen_reason` rule or raw-shape-only exception. Full raw-key accounting uses active raw-shape-only exceptions only. Therefore a planner call with nonterminal raw `reopen_reason` and no matching `ManifestAction` is malformed until a probe passes and a later plan patch promotes the candidate exception. Direct classifier calls for `update.lifecycle.reopen_reason` remain terminal-reopen or missing-current-context questions only; nonterminal semantics are not frozen in Slice 1.
 
 Status transition outcome matrix:
 
@@ -1011,7 +1122,7 @@ Status transition outcome matrix:
 | nonterminal current -> `done` or `wontfix` | close | precondition required | `precondition.update.close.status.done` or `precondition.update.close.status.wontfix` | `group.precondition.update.close` |
 | terminal current -> same terminal value | close | specific unsupported | `unsupported.update.close.status.same_terminal` | unsupported close-shaped lane |
 | terminal current -> `open` | status-open exclusive, then reopen semantic split | precondition required | `precondition.update.reopen.status.open` plus `precondition.update.reopen.reopen_reason` when reason is present | `group.precondition.update.reopen` |
-| nonterminal current with `reopen_reason` | reopen-exclusive raw compatibility | probe-gated non-authority handling | none unless probes prove wrapper rejection | no active/exported row; classify/plan only behavior-participating status action if wrapper accepts/ignores reason |
+| nonterminal current with `reopen_reason` | reopen-exclusive raw compatibility | probe-gated non-authority handling | none unless probes prove wrapper rejection | no active/exported row; before an active raw-shape-only exception exists, raw-key accounting requires a `reopen_reason` action or raises `AuthorityInputError` |
 | terminal current with `reopen_reason` and optional `status="open"` | reopen-exclusive raw compatibility | precondition required | `precondition.update.reopen.reopen_reason`; plus `precondition.update.reopen.status.open` when status is present | `group.precondition.update.reopen` |
 | any status transition not listed above | matched lifecycle subject but unsupported transition | specific unsupported | `unsupported.update.lifecycle.status.unmatched` | unsupported |
 
@@ -1028,13 +1139,14 @@ The following probes are required before source implementation may export the ca
 | `probe.same_status.open_exclusive` | current `open`, update `{status: "open", priority: "high"}` is rejected by raw exclusive status-open compatibility | `group.unsupported.update.status_open_exclusive.metadata_mixed` |
 | `probe.same_status.terminal_close_shape` | current `done`, update `{status: "done"}` follows close-shaped terminal rejection, not nonterminal no-op | `unsupported.update.close.status.same_terminal` |
 | `probe.focused_metadata_coactions` | focused section plus each compatible metadata subject stays one focused-refinement lane and current wrapper writes the compatible fields | `group.supported.update.focused_refinement`, `effect.update.focused.metadata_coactions` |
+| `probe.capture_source.non_string_overwritten` | capture prepare with non-string raw `capture_source` returns ready state and prepared fields contain `capture_source == "conversation"` | `supported.capture.create.capture_source`, `value.overwritten_input_any` |
 | `probe.reopen_reason.nonterminal_reason_only` | current nonterminal ticket, update `{reopen_reason: "..."}` observed prepare/execute behavior is documented before any authority row is exported | nonterminal `reopen_reason` remains absent from active/exported rows unless probe proves wrapper rejection |
 | `probe.reopen_reason.in_progress_status_reason` | current `in_progress`, update `{status: "in_progress", reopen_reason: "..."}` observed behavior shows whether reason is rejected, ignored, or otherwise visible | no active/exported nonterminal `reopen_reason` row by default |
 | `probe.reopen_reason.blocked_status_reason` | current `blocked`, update `{status: "blocked", reopen_reason: "..."}` observed behavior shows whether reason is rejected, ignored, or otherwise visible | no active/exported nonterminal `reopen_reason` row by default |
 
 If a probe contradicts a candidate row, patch the plan-control artifact before source implementation/export continues.
 
-Nonterminal `reopen_reason` probes are not candidate-row admission by default. They are absence-preserving probes: if probes show accepted-but-ignored behavior, keep `reopen_reason` invisible to active classifier/manifest policy and document only a non-authority probe note. If probes show rejection, patch this plan to add a concrete unsupported row with behavior-test anchors before exporting it.
+Nonterminal `reopen_reason` probes are not candidate-row admission by default. They are absence-preserving probes: if probes show accepted-but-ignored behavior, keep `reopen_reason` invisible to active classifier/manifest policy and promote only the raw-shape-only exception through a later plan patch. If probes show rejection, patch this plan to add a concrete unsupported action row with behavior-test anchors before exporting it.
 
 ### Direct-Engine Discrepancy Registry
 
@@ -1084,7 +1196,7 @@ Version tests assert exact values. Do not add automatic policy-version bump enfo
 - excluded surfaces: `direct_engine`
 - public APIs: `classify_mutation`, `plan_manifest_lanes`, `export_policy_manifest`
 - classifier is diagnostic/local only
-- planner is the authoritative passive group policy API
+- planner is the authoritative passive group policy API and requires raw wrapper shape facts for every mutation group
 - no grants, provenance, origin, context source, or snapshot fingerprint inputs
 - no CLI
 - no generated artifact
@@ -1107,6 +1219,7 @@ Version tests assert exact values. Do not add automatic policy-version bump enfo
     "required_gates": ["apply_consent", "user_approval", "unsupported"],
     "mutation_classes": ["preview_required", "approval_required", "unsupported"],
     "lane_kinds": ["create", "update", "focused_refinement", "close", "reopen", "no_op", "unsupported"],
+    "raw_group_shape_hints": ["capture_create", "ingest_create", "update_frontmatter", "update_focused_refinement", "update_status_lifecycle", "update_status_open_exclusive", "update_close", "unsupported_raw_shape"],
     "runtime_checks": [...],
     "vocabularies": {
         "<vocabulary_id>": {...}
@@ -1166,8 +1279,10 @@ Rules:
 - Every `rules` row has exactly one `shape_family_id`.
 - Every non-shape-stop `rules` row has a `subject_family_id`.
 - Every active subject `rules` row with a value policy has `value_policy_id` and `value_flow_id`.
+- Every active request-subject `rules` row has `request_raw_key`.
 - Every exported wrapper create derivation has a matching non-requestable diagnostic rule unless its path is intentionally not a public `SubjectPath`.
 - Shape-level denial rules have `subject_family_id=null`.
+- `_DEFAULT_REGISTRY` and manifest export contain active behavior only. Probe-gated candidates, including candidate no-op rows and candidate raw-shape-only exceptions, must not appear in `policy["rules"]`, `policy["group_planning"]`, `policy["group_invalid_rules"]`, `policy["out_of_surface_exclusions"]`, `policy["create_derivations"]`, `policy["materialization"]`, `policy["effects"]`, or any classifier/planner output until promoted by a later plan patch after behavior proof.
 
 ### Source Anchors
 
@@ -1353,10 +1468,15 @@ In `tests/test_authority_contract.py`, add tests for:
 - `SubjectPath("capture.derived.source")` constructs and classifies through non-requestable denial
 - `SubjectPath("capture.output.source")`, `SubjectPath("capture.input")`, and uppercase/blanks/slashes raise `AuthorityInputError`
 - partial `CurrentTicketState` raises `AuthorityInputError`
+- malformed `RawShapeDiscriminator` raises `AuthorityInputError`
+- `RawShapeDiscriminator.raw_keys` uses wrapper keys, not dotted `SubjectPath` values
+- contradictory raw shape facts, such as raw `reopen_reason` with `UPDATE_FRONTMATTER`, raise `AuthorityInputError`
+- unsupported raw keys can be syntactically valid carrier input and are policy-evaluated by the planner
 - malformed `ManifestAction` duplicates raise `AuthorityInputError`
 - missing `context_by_mutation_id` entry raises `AuthorityInputError`
+- missing `raw_shape_by_mutation_id` entry raises `AuthorityInputError`
 - empty planner action input raises `AuthorityInputError`
-- unused extra `context_by_mutation_id` entries raise `AuthorityInputError`
+- unused extra `context_by_mutation_id` or `raw_shape_by_mutation_id` entries raise `AuthorityInputError`
 - `ManifestLanePlan.lanes` is a tuple and public APIs never expose mutable lane lists
 - well-typed unsupported surface/action/operation returns unsupported policy, not an exception
 - `__all__` exports only the public callable entrypoints plus carrier, result, enum, value, and exception types
@@ -1392,7 +1512,7 @@ Cover:
 Cover representative positive rules:
 
 - capture confidence: classifier returns `supported=True`, `caller_writable=True`, `authority_owner=WRAPPER`; manifest rule row has `value_flow_id=flow.caller_preserved_or_wrapper_defaulted_if_missing`
-- capture `capture_source`: classifier returns `supported=True`, `caller_writable=False`, `authority_owner=WRAPPER`, `engine_managed=False`; manifest rule row has `subject_path=capture.input.capture_source` and `value_flow_id=flow.wrapper_overwrites_constant_conversation`
+- capture `capture_source`: classifier returns `supported=True`, `caller_writable=False`, `authority_owner=WRAPPER`, `engine_managed=False`; manifest rule row has `subject_path=capture.input.capture_source`, `request_raw_key=capture_source`, `value_policy_id=value.overwritten_input_any`, and `value_flow_id=flow.wrapper_overwrites_constant_conversation`
 - capture `source` and capture acceptance-criteria default: classifier returns non-requestable diagnostic denial for `capture.derived.source` and `capture.derived.acceptance_criteria_default`; manifest exports matching `create_derivations` rows
 - ingest envelope-supplied field: `supported=True`, `caller_writable=True`, `authority_owner=ENVELOPE`, `engine_managed=False`
 - ingest derived `defer` and default fields: classifier returns non-requestable diagnostic denial; manifest exports matching `create_derivations` rows
@@ -1416,6 +1536,10 @@ Use malformed test registries to assert:
 - `engine_managed=True` with non-engine owner raises `AuthorityRegistryError`
 - same-stage overlapping outcomes discovered during evaluation raise `AuthorityEvaluationError`
 - known subject-family no-match raises `AuthorityEvaluationError`
+- `request_raw_key` exists for every active request-subject row
+- repeated `subject_path` rows agree on `request_raw_key` unless covered by a documented lifecycle value-dependent exception
+- probe-gated candidates are absent from `_DEFAULT_REGISTRY` and manifest export
+- candidate raw-shape-only exceptions are not usable for raw-key accounting
 
 - [ ] **Step 6: Add manifest parity tests**
 
@@ -1435,6 +1559,7 @@ Assert:
 - every non-null `subject_family_id` resolves to exactly one parent `shape_family_id`
 - manifest exports `runtime_checks` and `execution_authorized`
 - manifest exports enum values as strings and contains no enum objects, dataclass wrappers, or private ID wrappers
+- manifest exports `raw_group_shape_hints` and no raw-shape-only exception surface in Slice 1
 - manifest output survives `json.dumps(..., sort_keys=True)`
 - tests use hand-written expected ID/content sets and do not parse this Markdown plan as a machine-readable registry source
 - direct-engine discrepancy scope uses `observed_proven_discrepancies_only` and `absence_is_not_equivalence_proof`
@@ -1447,16 +1572,21 @@ Cover:
 - `mutation_id` groups create atomic lanes
 - capture create fields collapse into one `CREATE` lane
 - capture `tags=["needs-refinement"]` classifies locally supported but capture create planning without refinement status returns a lane with `invalid_action_ids`, `group_invalid_rule_ids=("invalid_group.capture.create.tags.needs_refinement_without_refinement_status",)`, and no `unsupported_action_ids`
-- capture `acceptance_criteria=["Needs refinement"]` classifies locally supported but capture create planning without refinement status returns the matching group invalid rule
-- capture payloads that match both group invalid rules report both `group_invalid_rule_ids` in authored order and the union of affected `invalid_action_ids` in input order
+- capture `acceptance_criteria=["Needs refinement"]` classifies locally supported but capture create planning without refinement status returns `invalid_group.capture.create.acceptance_criteria.explicit_needs_refinement_without_refinement_status`
+- capture missing `acceptance_criteria` with `next_action="Needs refinement"` and no refinement status returns `invalid_group.capture.create.acceptance_criteria.defaulted_needs_refinement_without_refinement_status`, puts the next-action action ID in `invalid_action_ids`, and exposes `capture.derived.acceptance_criteria_default` only through group-invalid rule metadata
+- capture payloads that match multiple group invalid rules report every matching `group_invalid_rule_id` in authored order and the union of affected `invalid_action_ids` in input order
 - local invalid values outrank group invalids; group invalid rules are not evaluated when any action has local `INVALID_VALUE`
+- raw shape discriminators are required for every planner group; missing, extra, contradictory, or partially accounted raw shape entries raise `AuthorityInputError`
+- every raw key is represented by one action or an active raw-shape-only exception; unrepresented ordinary keys raise `AuthorityInputError`
+- a locally supported action can appear in `unsupported_action_ids` when a raw-shape group rule rejects it, such as update priority mixed with raw `reopen_reason`
+- well-formed `UNSUPPORTED_RAW_SHAPE` produces `group.unsupported.raw_shape.fallback`, not `AuthorityInputError`
 - ingest create fields collapse into one `CREATE` lane
 - ordinary frontmatter updates collapse into one `UPDATE` lane
 - focused refinement plus allowed metadata co-update stays one `FOCUSED_REFINEMENT` lane
 - status same-current no-op candidates produce `lane=NO_OP` only after behavior probes pass
 - status same-current plus supported metadata produces the real update lane with the status action listed in `no_op_action_ids`
 - `status="open"` plus metadata or focused fields is unsupported even when current status is nonterminal
-- nonterminal `reopen_reason` has no active/exported authority row by default; behavior probes determine whether to add a later unsupported row or only a non-authority probe note
+- nonterminal `reopen_reason` has no active/exported authority row or active raw-shape-only exception by default; behavior probes determine whether to add a later unsupported row or promote only a non-authority raw-shape exception
 - structurally valid lifecycle/status groups can produce supported lanes with `precondition_required_action_ids`, concrete `preconditions`, `runtime_checks`, `requires_revalidation=True`, and `execution_authorized=False`
 - capture/create lanes expose `DEDUP_SCAN_REQUIRED` and `PREFLIGHT_REQUIRED`
 - ingest/create lanes expose envelope containment, idempotency, dedup, and preflight runtime checks
@@ -1507,6 +1637,19 @@ direct engine close with archive=True -> observed current behavior
 
 If direct engine rejects the extra field, do not export the discrepancy row. Record the suspected discrepancy as tested away only in test/plan notes, not in the manifest ledger. If direct engine accepts `archive`, export it only as `documented_not_wrapper_policy`.
 
+- [ ] **Step 10: Add wrapper behavior probe tests**
+
+Add focused behavior tests for every probe in [Behavior Probe Gates](#behavior-probe-gates) before promoting any candidate row or source-indicated proof-gated value policy into closeout evidence.
+
+At minimum, add capture wrapper coverage proving:
+
+```text
+capture prepare with raw capture_source=123 -> ready_to_execute
+prepared payload fields capture_source == "conversation"
+```
+
+If this capture probe fails, patch `supported.capture.create.capture_source` away from `value.overwritten_input_any` before implementing or exporting the registry.
+
 ### Task 3: Add Pure Authority Kernel
 
 **Files:**
@@ -1535,6 +1678,7 @@ Implement frozen dataclasses for:
 - `SubjectPath`
 - `CurrentTicketState`
 - `MutationContext`
+- `RawShapeDiscriminator`
 - `MutationRequest`
 - `MutationPolicy`
 - `ManifestAction`
@@ -1559,6 +1703,9 @@ Validation must check:
 - precondition-required invariants
 - value-policy serializability
 - value-flow references for every active row
+- active-only registry boundary; probe-gated candidates are absent from `_DEFAULT_REGISTRY`
+- `request_raw_key` on every active request-subject row
+- raw-shape-only candidate exceptions are unreachable from `_DEFAULT_REGISTRY`
 - wrapper-derivation, materialization, and effect row reference resolution
 - every exported wrapper derivation with a public subject path has a matching non-requestable diagnostic denial
 - group-invalid rule reference resolution
@@ -1590,7 +1737,8 @@ Implement:
 validate all planner inputs before producing lanes
 classify local actions with context_by_mutation_id
 group by mutation_id
-select group shape from local group_shape_hint and raw surface
+validate raw_shape_by_mutation_id coverage and raw-key accounting
+select group shape from RawShapeDiscriminator.raw_group_shape_hint plus local group_shape_hint and current context
 if local invalid actions exist, return invalid_action_ids without evaluating group invalid rules
 evaluate all matching group invalid rules in authored order before context/precondition/support rules
 evaluate ordered group outcomes
@@ -1610,6 +1758,7 @@ Implement deterministic export with:
 - vocabularies mapping
 - value policies mapping
 - value flows mapping
+- raw group shape hints
 - shape families list
 - subject families list
 - flat `rules` mapping
