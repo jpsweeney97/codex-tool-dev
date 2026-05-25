@@ -53,6 +53,8 @@ These decisions are frozen for Slice 1. If live source behavior contradicts them
 
 This file is a durable control artifact. Update and commit it before source implementation. Keep docs/control and implementation as separate semantic commits.
 
+If a live source refactor intentionally changes an anchored constant, ID, or policy claim during implementation, update this control doc, registry code, and parity tests in the same implementation lane. Do not add a machine-readable parser for this Markdown plan; tests should keep using hand-written expected IDs and content.
+
 Plan-control commits:
 
 ```text
@@ -300,15 +302,18 @@ Each prefix must have at least one segment after it. Segments are dot-separated 
 
 `SubjectPath` equality and hashing use frozen dataclass value semantics. The public contract promises no ordering and no implicit equality with raw strings.
 
-`SubjectPath` identifies the policy subject, not a persisted ticket path.
+`SubjectPath` identifies the classifier lookup subject, not a persisted ticket path.
 
 ```text
 subject_path = classifier lookup address for the wrapper/envelope policy subject
+policy_path = canonical policy namespace for manifest/trace identity of the governed semantic target
 output_paths = persisted/materialized ticket paths affected by that subject
 effect_paths = derived paths affected only through a lane effect
 ```
 
-Classifier lookup uses only `subject_path`. `output_paths` and `effect_paths` never create standalone subject support.
+`policy_path` is a registry/result/export identity string, not a public input field. It is distinct from the classifier lookup address (`subject_path`) and distinct from persisted ticket paths (`output_paths`). Use it when multiple wrapper syntaxes share a classifier subject but govern different semantic targets, such as lifecycle status, close-by-status, and terminal reopen-by-status.
+
+Classifier lookup uses only `subject_path` plus the authored row predicates. `policy_path`, `output_paths`, and `effect_paths` never create standalone subject support.
 
 Subject-specific invalid payloads, such as malformed tag lists or invalid status targets, are policy denials, not `AuthorityInputError`.
 
@@ -775,6 +780,12 @@ SUPPORTED
 
 Invalid payload repair comes before snapshot repair. Classifier context repair comes before lifecycle precondition deferral. Precondition-required outcomes come before specific denials where readiness must be resolved first. Specific denial carve-outs come before `NO_OP` and broad support. `SUPPORTED` is terminal inside a subject family. At most one outcome may match within the first applicable stage; same-stage overlap raises `AuthorityEvaluationError`.
 
+Lifecycle subject-family fallback is a named exception to the simple stage-order reading. `unsupported.update.lifecycle.status.unmatched` has `SPECIFIC_UNSUPPORTED` disposition, but it is the fallback for `subject.update.lifecycle.status`, not a carve-out that preempts later active lifecycle rows. Evaluate it only after invalid, context-required, precondition-required, and any active `NO_OP` or `SUPPORTED` row for the same lifecycle request have failed to match.
+
+Current Slice 1 behavior is pre-promotion: the same-status rows `open -> open`, `in_progress -> in_progress`, and `blocked -> blocked` are authored probe candidates but excluded from `_DEFAULT_REGISTRY`. Because they are not active rows, each same-status request falls through to `unsupported.update.lifecycle.status.unmatched`. For example, before promotion, `subject_path=update.lifecycle.status`, `value="open"`, and `current.status="open"` selects no active no-op row and returns `unsupported.update.lifecycle.status.unmatched`.
+
+Future promoted behavior must preserve the fallback rule. After a later plan patch promotes a same-status candidate into `_DEFAULT_REGISTRY`, `unsupported.update.lifecycle.status.unmatched` is evaluated only if no later active `NO_OP` or `SUPPORTED` lifecycle row matches the same request. For example, after `noop.candidate.update.lifecycle.status.same_open` is promoted, `open -> open` selects the promoted no-op row; it must not be captured by the unmatched fallback.
+
 Every known subject with a value policy has an explicit invalid-value row. Invalid-value rows may be shared only when the same classifier shape, subject family, value policy, and public diagnostic behavior match.
 
 Every context-required outcome is an authored row with stable `rule_id`. Context rows may be shared only when shape family, subject family or declared context family, required context fields, group shape hint, and diagnostic behavior match.
@@ -860,6 +871,20 @@ Lifecycle rows use these current-state and value predicates:
 | `precondition.update.close.status.wontfix` | `UPDATE_CLOSE` | `current.status in {"open", "in_progress", "blocked"}` | `value == "wontfix"` |
 | `precondition.update.reopen.status.open` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | `current.status in {"done", "wontfix"}` | `value == "open"` |
 | `precondition.update.reopen.reopen_reason` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | `current.status in {"done", "wontfix"}` | `reopen_reason` is non-empty string |
+
+Lifecycle routing for `update.lifecycle.status` is authority-critical. This table is the single-read dispatch reference; distributed prose and tests must conform to it.
+
+| subject_path | requested value | current.status | selected subject_family_id | raw/group shape result | notes |
+| --- | --- | --- | --- | --- | --- |
+| `update.lifecycle.status` | invalid non-close status target | any or missing | `subject.update.lifecycle.status` | caller row hint | return `invalid.update.lifecycle.status.value` |
+| `update.lifecycle.status` | invalid close-shaped status target | any or missing | `subject.update.close.status` | caller row hint | return `invalid.update.close.status.value` |
+| `update.lifecycle.status` | `open` | missing | `subject.update.lifecycle.status` | `UNRESOLVED_CONTEXT_REQUIRED` | context split unresolved; return `context.update.lifecycle.status.current_status` |
+| `update.lifecycle.status` | `open` | `open`, `in_progress`, or `blocked` | `subject.update.lifecycle.status` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | ordinary lifecycle status; same-current `open -> open` is unmatched before promotion and no-op only after promotion |
+| `update.lifecycle.status` | `open` | `done` or `wontfix` | `subject.update.lifecycle.reopen` | `UPDATE_REOPEN` | terminal reopen-by-status |
+| `update.lifecycle.status` | `in_progress` or `blocked` | missing | `subject.update.lifecycle.status` | `UNRESOLVED_CONTEXT_REQUIRED` | context split unresolved; return `context.update.lifecycle.status.current_status` |
+| `update.lifecycle.status` | `in_progress` or `blocked` | known | `subject.update.lifecycle.status` | `UPDATE_STATUS_LIFECYCLE` | ordinary lifecycle status; same-current values are unmatched before promotion and no-op only after promotion |
+| `update.lifecycle.status` | `done` or `wontfix` | missing | `subject.update.close.status` | `UNRESOLVED_CONTEXT_REQUIRED` | close-by-status context split; return `context.update.close.status.current_status` |
+| `update.lifecycle.status` | `done` or `wontfix` | known | `subject.update.close.status` | `UPDATE_CLOSE` | close-by-status, including same-terminal unsupported handling |
 
 ### Authored Invalid, Context, Unsupported, And No-Op Rows
 
@@ -1009,6 +1034,23 @@ Group selection uses `RawShapeDiscriminator.raw_group_shape_hint` plus local act
 
 Context-required local outcomes do not fall through to generic unsupported fallbacks when the raw shape is coherent. If a valid lifecycle, close, or reopen-exclusive raw shape needs `current.status` before selecting a terminal/nonterminal semantic group, the planner emits `group.context_required.update.status_current` with the affected action IDs in `context_required_action_ids`.
 
+Raw-shape to semantic group resolution is fixed by this table. It is the single-read reference for `RawGroupShapeHint -> GroupShapeHint` resolution.
+
+| RawGroupShapeHint | required current/status facts | GroupShapeHint | selection result |
+| --- | --- | --- | --- |
+| `CAPTURE_CREATE` | none | `CAPTURE_CREATE` | capture create family |
+| `INGEST_CREATE` | none | `INGEST_CREATE` | ingest create family |
+| `UPDATE_FRONTMATTER` | no lifecycle/focused subjects | `UPDATE_FRONTMATTER` | ordinary metadata update family |
+| `UPDATE_FOCUSED_REFINEMENT` | focused subject present | `UPDATE_FOCUSED_REFINEMENT` | focused-refinement family, with compatible metadata co-actions only |
+| `UPDATE_STATUS_LIFECYCLE` | `current.status` missing | `UNRESOLVED_CONTEXT_REQUIRED` | context-required status group |
+| `UPDATE_STATUS_LIFECYCLE` | `current.status` known | `UPDATE_STATUS_LIFECYCLE` | ordinary lifecycle status family |
+| `UPDATE_STATUS_OPEN_EXCLUSIVE` | `current.status` missing | `UNRESOLVED_CONTEXT_REQUIRED` | context-required status/reopen group |
+| `UPDATE_STATUS_OPEN_EXCLUSIVE` | `current.status in {"open", "in_progress", "blocked"}` | `UPDATE_STATUS_OPEN_EXCLUSIVE` | nonterminal status-open-exclusive family |
+| `UPDATE_STATUS_OPEN_EXCLUSIVE` | `current.status in {"done", "wontfix"}` | `UPDATE_REOPEN` | terminal reopen family |
+| `UPDATE_CLOSE` | `current.status` missing | `UNRESOLVED_CONTEXT_REQUIRED` | context-required close group |
+| `UPDATE_CLOSE` | `current.status` known | `UPDATE_CLOSE` | close-by-status family |
+| `UNSUPPORTED_RAW_SHAPE` | none | `UNSUPPORTED_NO_GROUP_SHAPE` | raw wrapper shape unsupported by Slice 1 policy |
+
 | group_family_id | selection basis | selection rule | fallback_group_rule_id |
 | --- | --- | --- | --- |
 | `group.capture.create` | `RawGroupShapeHint.CAPTURE_CREATE` | all actions surface `CAPTURE`, action/operation `CREATE`, and local hints `CAPTURE_CREATE` | `group.unsupported.capture.create.fallback` |
@@ -1106,6 +1148,10 @@ missing current.status: context-required group before terminal/nonterminal seman
 
 `status="open"` never unlocks metadata or focused co-actions in Slice 1. Current-state splitting changes only lane semantics; it does not change raw wrapper payload compatibility.
 
+Lifecycle fallback semantics are active-row relative. Pre-promotion, same-status `open -> open`, `in_progress -> in_progress`, and `blocked -> blocked` remain excluded candidate rows, so they fall through to `unsupported.update.lifecycle.status.unmatched`. Post-promotion, `unsupported.update.lifecycle.status.unmatched` is evaluated only when no later active `NO_OP` or `SUPPORTED` lifecycle row matches the same request.
+
+Worked pre-promotion example: `status="open"` with `current.status="open"` uses raw `UPDATE_STATUS_OPEN_EXCLUSIVE`, selects `subject.update.lifecycle.status`, finds no active same-open no-op row, and returns `unsupported.update.lifecycle.status.unmatched`. Conceptual post-promotion example: after the same-open candidate is promoted, the same input selects the active `NO_OP` row and the unmatched fallback is not evaluated.
+
 `reopen_reason` is a raw wrapper shape discriminator whenever present. It is semantically active only for terminal reopen. Nonterminal `reopen_reason` behavior is probe-gated and has no active `_DEFAULT_REGISTRY` row, active raw-shape-only exception, or exported manifest rule until behavior probes prove whether the wrapper rejects it, accepts and ignores it, or produces another visible outcome.
 
 If probes show nonterminal `reopen_reason` is accepted but ignored, Slice 1 must not model it as supported, unsupported, or no-op authority. The planner classifies/plans only the behavior-participating status action. The behavior may be documented only as a non-authority probe note with behavior-test anchors.
@@ -1136,7 +1182,11 @@ Status transition outcome matrix:
 
 ### Behavior Probe Gates
 
-The following probes are required before source implementation may export the candidate rows they cover. Add them as focused behavior tests in the implementation lane before implementing the final registry rows.
+Probes have separate roles. Do not treat an absence-preserving probe as candidate admission, and do not treat an active-row guardrail as permission to promote unrelated candidate rows. If a probe contradicts this plan, patch the plan-control artifact before source implementation/export continues.
+
+#### Candidate-Promotion Probes
+
+These probes gate rows that must stay out of `_DEFAULT_REGISTRY`, manifest export, classifier output, and planner output until behavior proof passes and a later plan patch promotes them.
 
 | probe_id | required observed behavior | candidate rows/gates affected |
 | --- | --- | --- |
@@ -1145,16 +1195,34 @@ The following probes are required before source implementation may export the ca
 | `probe.same_status.blocked_only` | current `blocked`, update `{status: "blocked"}` prepares/executes as documented; status remains `blocked` | `noop.candidate.update.lifecycle.status.same_blocked`, `group.supported.no_op` |
 | `probe.same_status.blocked_metadata` | current `blocked`, update `{status: "blocked", component: "ticket"}` writes component if live wrapper accepts it and records status as no-op | mixed no-op aggregation |
 | `probe.same_status.open_exclusive` | current `open`, update `{status: "open", priority: "high"}` is rejected by raw exclusive status-open compatibility | `group.unsupported.update.status_open_exclusive.metadata_mixed` |
-| `probe.same_status.terminal_close_shape` | current `done`, update `{status: "done"}` follows close-shaped terminal rejection, not nonterminal no-op | `unsupported.update.close.status.same_terminal` |
+
+#### Active-Row / Active-Effect Guardrail Probes
+
+These probes prove claims for already-active rows, group rules, value policies, or effects. They are behavior guardrails, not promotion gates for candidate rows.
+
+| probe_id | required observed behavior | active rows/effects guarded |
+| --- | --- | --- |
 | `probe.focused_metadata_coactions` | focused section plus each compatible metadata subject stays one focused-refinement lane and current wrapper writes the compatible fields | `group.supported.update.focused_refinement`, `effect.update.focused.metadata_coactions` |
 | `probe.capture_source.non_string_overwritten` | capture prepare with non-string raw `capture_source` returns ready state and prepared fields contain `capture_source == "conversation"` | `supported.capture.create.capture_source`, `value.overwritten_input_any` |
-| `probe.reopen_reason.nonterminal_reason_only` | current nonterminal ticket, update `{reopen_reason: "..."}` observed prepare/execute behavior is documented before any authority row is exported | nonterminal `reopen_reason` remains absent from active/exported rows unless probe proves wrapper rejection |
+| `probe.same_status.terminal_close_shape` | current `done`, update `{status: "done"}` follows close-shaped terminal rejection, not nonterminal no-op | `unsupported.update.close.status.same_terminal` |
+
+#### Absence-Preserving Probes
+
+These probes preserve non-authority behavior outside classifier/planner policy unless a later plan patch promotes a concrete exception. They do not admit supported, no-op, or unsupported semantic rows by default.
+
+| probe_id | required observed behavior | absence preserved |
+| --- | --- | --- |
+| `probe.reopen_reason.nonterminal_reason_only` | current nonterminal ticket, update `{reopen_reason: "..."}` observed prepare/execute behavior is documented before any authority row is exported | nonterminal `reopen_reason` remains absent from active/exported rows unless a later patch promotes a concrete exception |
 | `probe.reopen_reason.in_progress_status_reason` | current `in_progress`, update `{status: "in_progress", reopen_reason: "..."}` observed behavior shows whether reason is rejected, ignored, or otherwise visible | no active/exported nonterminal `reopen_reason` row by default |
 | `probe.reopen_reason.blocked_status_reason` | current `blocked`, update `{status: "blocked", reopen_reason: "..."}` observed behavior shows whether reason is rejected, ignored, or otherwise visible | no active/exported nonterminal `reopen_reason` row by default |
 
-If a probe contradicts a candidate row, patch the plan-control artifact before source implementation/export continues.
+Focused source-local probes for the three nonterminal `reopen_reason` cases prepared as `ready_to_execute` and executed as `ok_update`. Wrapper prepare accepted the payload syntax but stripped `reopen_reason` from behavior-participating fields: reason-only prepared `fields={}`, `in_progress` same-status prepared `fields={"status": "in_progress"}`, and `blocked` same-status prepared `fields={"status": "blocked"}`. Status did not semantically change and `Reopen History` was not appended.
 
-Nonterminal `reopen_reason` probes are not candidate-row admission by default. They are absence-preserving probes: if probes show accepted-but-ignored behavior, keep `reopen_reason` invisible to active classifier/manifest policy and promote only the raw-shape-only exception through a later plan patch. If probes show rejection, patch this plan to add a concrete unsupported action row with behavior-test anchors before exporting it.
+Authority classification remains accepted-but-ignored non-authority wrapper syntax. Do not add an active/exported supported, no-op, or unsupported semantic row for nonterminal `reopen_reason`. If Slice 2 needs raw-key accounting coverage, promote only a raw-shape-only exception or non-authority probe note with these behavior anchors. An unsupported row would be incorrect because the wrapper did not reject the field.
+
+The ignored classification is not a no-write guarantee. After stripping `reopen_reason`, execute can still follow the normal update write path and rewrite ticket text through YAML normalization even when no authority-bearing field changes.
+
+Probe harness note: `ticket_update.run_update(...)` discovers the project root from `cwd` and validates payload containment against that root. Ad hoc temp-root probes must `chdir` into the temp project root before calling `run_update(...)`; otherwise payload containment produces unrelated `policy_blocked` results.
 
 ### Direct-Engine Discrepancy Registry
 
@@ -1282,6 +1350,7 @@ Rules:
 - `policy["value_policies"]`, `policy["value_flows"]`, `policy["group_invalid_rules"]`, `policy["out_of_surface_exclusions"]`, `policy["create_derivations"]`, `policy["materialization"]`, and `policy["effects"]` are mappings keyed by their authored IDs.
 - `policy["group_planning"]["group_rules"]` is a mapping keyed by `group_rule_id`.
 - Ordered structures remain lists where order is policy.
+- Order-sensitive exported lists are `authority_classes`, `reserved_authority_terms`, `mutation_surfaces`, `local_dispositions`, `required_gates`, `mutation_classes`, `lane_kinds`, `raw_group_shape_hints`, `runtime_checks`, `shape_families`, `subject_families`, `policy["group_planning"]["families"]`, `policy["group_planning"]["gate_order"]`, and every ordered enum/value list nested under a manifest row.
 - Mapping keys are sorted for deterministic export.
 - Every exported reference resolves in the same manifest.
 - Every `rules` row has exactly one `shape_family_id`.
@@ -1560,12 +1629,14 @@ Assert:
 
 - exact `schema_version` and `policy_version`
 - `policy["rules"]` equals the in-memory outcome registry by ID
-- `policy["shape_families"]` equals the in-memory shape registry
-- `policy["subject_families"]` equals the in-memory subject registry
+- `policy["shape_families"]` equals the in-memory shape registry in authored order
+- `policy["subject_families"]` equals the in-memory subject registry in authored order
 - `policy["value_policies"]` and `policy["value_flows"]` equal the in-memory authored mappings by ID
 - `policy["vocabularies"]` resolves every vocabulary reference
+- `policy["group_planning"]["families"]` equals the in-memory group-family registry in authored order
 - `policy["group_planning"]["group_rules"]` equals the in-memory group-rule registry
 - `policy["group_invalid_rules"]` equals the in-memory group-invalid registry
+- every ordered exported list named in the manifest contract preserves exact authored order; mapping-key determinism is tested separately from list order
 - `policy["out_of_surface_exclusions"]`, `policy["create_derivations"]`, `policy["materialization"]`, and `policy["effects"]` equal the in-memory authored mappings by ID
 - every family outcome ID resolves in the flat maps
 - `subject_family_id is None` only for shape-level stop rules
