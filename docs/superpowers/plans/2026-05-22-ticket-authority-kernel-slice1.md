@@ -1,17 +1,12 @@
 > **Superseded - Do Not Implement**
 >
-> This full-surface Slice 1 plan is no longer the implementation authority.
-> It attempted to cover `capture`, `update`, and `ingest` in one passive
-> authority slice. The current proof model and scope reset require a narrower
-> update-only Slice 1A.
+> This full-surface Slice 1 plan is retained as historical context for the
+> abandoned authority-kernel direction. It attempted to cover `capture`,
+> `update`, and `ingest` in one passive authority slice.
 >
-> Implementation must use:
-> `docs/superpowers/plans/2026-05-25-ticket-authority-kernel-slice1a-update-only.md`
->
-> If this file and the Slice 1A control document disagree, the Slice 1A
-> document is authoritative for implementation. Do not copy registry rows,
-> proof gates, manifest sections, or verification commands from this
-> superseded plan into implementation work.
+> There is no active successor authority-kernel plan in this document family.
+> Do not implement from this file or treat later authority-kernel docs as the
+> current build plan.
 
 # Ticket Authority Kernel Slice 1 Implementation Plan
 

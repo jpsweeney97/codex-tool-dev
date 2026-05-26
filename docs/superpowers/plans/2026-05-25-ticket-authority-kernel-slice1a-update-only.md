@@ -1,3 +1,12 @@
+> **Superseded - Do Not Implement**
+>
+> This broad Slice 1A update-only plan overclaims whole-surface Ticket update
+> authority and is retained as historical context only.
+>
+> There is no active successor authority-kernel plan in this document family.
+> Do not copy registry ownership, public callable names, completeness claims,
+> or fixture-first workflows from this file into new work.
+
 # Ticket Update Authority Slice 1A Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
