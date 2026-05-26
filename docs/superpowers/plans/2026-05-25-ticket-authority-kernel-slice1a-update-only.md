@@ -27,7 +27,7 @@ If this plan and its expected-inventory fixture disagree, implementation is bloc
 Revision handshake for plan and proof-control projection:
 
 <!-- slice1a-revision-handshake:start -->
-CONTROL_PLAN_REVISION = "ticket-update-authority-slice1a.v5"
+CONTROL_PLAN_REVISION = "ticket-update-authority-slice1a.v6"
 <!-- slice1a-revision-handshake:end -->
 
 The expected-inventory fixture owns `EXPECTED_INVENTORY_REVISION`. Proof-control audits may parse exactly this sentinel block to extract `CONTROL_PLAN_REVISION` and must reject any broader Markdown parsing. The expected-inventory fixture and proof-control audits must fail if those values diverge.
@@ -43,6 +43,7 @@ These decisions are frozen for Slice 1A. If live source behavior or proof work c
 | Proof class | This slice proves `source` only. It does not prove installed runtime behavior, cache state, personal plugin sync, hook inventory, or activation readiness. |
 | Slice shape | Slice 1A is update-only, post-membrane, passive, and non-integrated. It mirrors current wrapper handling of the decoded inner `payload["update"]` object only after entrypoint/trust/runtime-readiness gates have accepted or normalized the request and after wrapper-envelope extraction has produced the inner update object. |
 | Entrypoint membrane | `request_origin`, trust-triple validation, runtime-readiness, autonomy policy, session caps, hook certification, and installed-runtime behavior are explicitly out of Slice 1A path coverage. If a required update path cannot be described without those membrane facts, stop and split a later membrane slice. |
+| Legacy ticket scope | Slice 1A classifies only current v1.0, non-legacy tickets after the legacy write gate has passed. Legacy-generation write blocking is a ticket-format/write-policy exclusion, not a public Slice 1A path. |
 | Wrapper-envelope exclusions | Slice 1A does not model missing outer `payload["update"]`, missing `ticket_id`, ticket lookup/not-found behavior, payload-path or file-loading checks, saved `update_prepare` artifact presence/shape, stale preview or stale fingerprint drift, or target/dedup fingerprint enforcement. Those are wrapper-envelope or prepare/execute-artifact exclusions, not public Slice 1A paths. |
 | Runtime behavior | Existing Ticket runtime scripts must not import or enforce `ticket_update_authority.py` in Slice 1A. Runtime behavior stays unchanged. |
 | Public module path | Slice 1A implements `plugins/turbo-mode/ticket/scripts/ticket_update_authority.py`. Do not create `ticket_authority.py`, a generic authority facade, or any public generic multi-surface authority shell in this slice. |
@@ -52,7 +53,7 @@ These decisions are frozen for Slice 1A. If live source behavior or proof work c
 | Public planner contract | `plan_update_manifest_for_payload()` returns exactly one public `path_id` and one coarse `outcome` per raw update payload. Public planner output must not expose rule IDs, group-rule IDs, raw-shape IDs, private action IDs, evaluator phase IDs, or internal topology. |
 | Public manifest contract | `export_update_policy_manifest()` is strictly public and path-first, with exact built-in JSON-serializable carriers, row key closure, and canonical exported-list ordering owned by this plan. It exports normative path/proof data separately from informative top-level `source_anchors[probe_id]` audit locators. It must not export internal evaluator topology, candidate paths, quarantined paths, unresolved probe questions, rule IDs, group-rule IDs, raw-shape IDs, dispatch tables, direct-engine discrepancy sections, public `effects` / `materializations` registries, or path-local `source_anchors`. |
 | Public path taxonomy | Public emitted IDs are path-first and scoped to one normalized wrapper-observable behavior path. Public IDs must not begin with mechanism-first terms such as `rule`, `group`, `raw_shape`, or `planner`. |
-| Routing ownership | Path-family ownership follows the wrapper-observable routing order: public input validation, raw carrier validation, key-set validation, recognized field validation, lifecycle field-set validation, wrapper action routing, routed-update subrouting, then exactly one public family/path selection. Named families are post-routing projections, not competing raw-shape claimants. |
+| Routing ownership | Path-family ownership follows the wrapper-observable routing order: public input validation, raw carrier validation, key-set validation, recognized field validation, lifecycle field-set validation, wrapper action routing, routed-update subrouting, then exactly one public family/path selection. Named families are post-routing projections, not competing raw-shape claimants. After close/reopen routing, any routed `update` payload with caller-present `status` stays lifecycle-owned; co-present metadata, `tags`, or focused-refinement section fields may create lifecycle subpaths but do not transfer ownership to frontmatter or focused-refinement families. |
 | Lifecycle completeness unit | Lifecycle completeness is measured by `(current_status, lifecycle_intent_bucket)` for recognized lifecycle field-sets after raw carrier, key-set, recognized-field validation, and wrapper action routing. Named lifecycle families are grouping projections over that matrix, not the sole completeness denominator. |
 | Overlap-sensitive cells | The closed overlap-sensitive cell list in this plan is semantic authority. The fixture owns the machine projection. A source-derived audit that finds an undeclared overlap-sensitive candidate hard-stops until a plan-control patch declares it and bumps `CONTROL_PLAN_REVISION`; the fixture must not absorb it first as a passing private row. |
 | Private proof-control IDs | Unresolved and quarantined items use private IDs such as `probe_question.update.*` and `quarantine.update.*`. Those IDs must not appear in public planner output, public path inventory, or the public manifest. |
@@ -62,19 +63,29 @@ These decisions are frozen for Slice 1A. If live source behavior or proof work c
 | Direct engine | Slice 1A does not export `direct_engine_discrepancy_scope`, `direct_engine_discrepancies`, or direct-engine observations in exported `source_anchors[probe_id]`. Direct-engine observations may appear only in non-public proof-control notes and must not create a second evidence surface. |
 | Public outcome vocabulary | Public `UpdatePathOutcome` is limited to `ACCEPTED`, `NO_OP`, `CONTEXT_REQUIRED`, `PRECONDITION_BLOCKED`, `INVALID_PAYLOAD`, and `UNSUPPORTED_PAYLOAD`. Do not add `ACCEPTED_IGNORED`, `SUPPORTED`, or public `reason_code`. |
 | `ACCEPTED` meaning | `ACCEPTED` means an execution-ready wrapper-admitted update path under the supplied context that is not classified as a proof-backed `NO_OP`. It does not mean merely "recognized by the wrapper," and it does not promise a known ordinary metadata or section diff. |
-| `NO_OP` meaning | `NO_OP` is allowed only for proof-backed wrapper-observable no-effect families. Slice 1A does not classify general same-value metadata or section updates as public `NO_OP`. |
+| `NO_OP` meaning | `NO_OP` is allowed only for proof-backed wrapper-observable no-write families. Any engine-owned write, including `contract_version` stamping or equivalent write-path normalization, disqualifies public `NO_OP`. Slice 1A does not classify general same-value metadata or section updates as public `NO_OP`. |
 | Outcome precedence | Public path classification precedence is: API misuse -> `AuthorityInputError`; JSON-native raw carrier/value/shape error -> `INVALID_PAYLOAD`; unknown key / unsupported namespace / forbidden key combination -> `UNSUPPORTED_PAYLOAD`; recognized family with missing direct facts -> `CONTEXT_REQUIRED`; recognized family with failed current-state preconditions -> `PRECONDITION_BLOCKED`; execution-ready and not proof-backed-no-op path -> `ACCEPTED`; recognized fully decided no-effect path -> `NO_OP`. |
 | Context/precondition boundary | `CONTEXT_REQUIRED` and `PRECONDITION_BLOCKED` are valid only after the payload is JSON-native, the carrier is admissible, the field set is recognized, and recognized fields pass raw type/value validation. Do not soften invalid or unsupported payloads into context or precondition outcomes. |
 | Raw payload boundary | Public raw input is broad and validation-owned, but accepts only exact built-in decoded-JSON carrier shapes: `dict`, `list`, and JSON scalar values. Top-level JSON-native non-mapping values are public invalid payloads. Non-JSON-native Python objects, container subclasses, tuples, mappings, sequences, and custom dict-like objects are API misuse and raise `AuthorityInputError`. Non-finite floats (`NaN`, `Infinity`, `-Infinity`) are API misuse anywhere in `raw_payload`; finite floats and arbitrary-size Python `int` values are carrier-valid and field-invalid when the field rejects them. `bool` is a distinct JSON scalar and must never satisfy numeric expectations. |
 | Context object | `plan_update_manifest_for_payload()` requires `type(context) is UpdateMutationContext` exactly on every call. `UpdateMutationContext()` is the only representation of "no current-ticket facts supplied." `context=None`, subclasses, duck-typed objects, mappings, and raw-string enum values are invalid input. |
 | Missingness invariant | For public collection or mapping facts, `None` means "fact not supplied"; empty tuple or empty mapping means "fact supplied and known empty." Supplied context facts are globally shape-validated but path-sufficient only when the selected path needs them. |
 | Current-ticket facts only | Public context accepts only direct current-ticket facts. It must not accept caller-supplied readiness judgments such as `close_ready`, `current_acceptance_state`, `current_blocker_resolution`, or `blockers_resolved`. All readiness and terminality judgments are derived privately inside `ticket_update_authority.py`. |
-| Blocker facts | `referenced_ticket_statuses` uses a dedicated public enum with exact referenced statuses plus `MISSING`. `current_blocked_by` is order-insensitive in public semantics, must contain unique string IDs when supplied, and duplicates are `AuthorityInputError`. `referenced_ticket_statuses` is valid only when `current_blocked_by` is supplied; when supplied, its key set must exactly equal `set(current_blocked_by)` with no omissions or extras. A missing whole map is `CONTEXT_REQUIRED` only when blocker resolution is needed; a partial or extra-key map is `AuthorityInputError`. `current_blocked_by=()` with `referenced_ticket_statuses={}` is a valid exact empty bundle for any payload. |
+| Blocker facts | `referenced_ticket_statuses` uses a dedicated public enum with exact referenced statuses plus `MISSING`. `current_blocked_by` is order-insensitive and duplicate-insensitive in public semantics; duplicates are accepted as live-state input and collapse to set semantics for public classification. `referenced_ticket_statuses` is valid only when `current_blocked_by` is supplied; extra keys are `AuthorityInputError`, omitted keys mean "status not supplied," and partial maps are allowed only when the supplied subset already fixes the public blocked result. `ReferencedTicketState.MISSING` means a blocker ID is supplied and known absent; omission means the blocker status is not supplied. `current_blocked_by=()` with `referenced_ticket_statuses={}` is a valid exact empty bundle for any payload. |
 | Public planner fields | `UpdateManifestPlan` exposes only `schema_version`, `policy_version`, `path_id`, `outcome`, `ignored_raw_keys`, `invalid_raw_keys`, `unsupported_raw_keys`, `no_op_raw_keys`, `context_required_raw_keys`, `missing_context_fields`, and `precondition_blocked_raw_keys`. Do not add `supported`, `accepted_raw_keys`, `precondition_ids`, or public internal IDs. |
 | Manifest readability | Each public manifest path entry includes one concise public `behavior_claim`. It must be one sentence, behavior-only, and path-level. Do not add public rationale, remediation prose, or implementation detail fields. |
 | Registry authorship | Exact public `path_id` inventory belongs to the expected-inventory fixture, not this Markdown file. This plan is normative on path families, naming grammar, outcome rules, proof rules, and family boundaries. Tests must not parse this Markdown file as a machine-readable registry source, except for the dedicated revision-handshake sentinel block. |
-| Tags refinement marker | Slice 1A must model wrapper-transformed tag updates that keep the `needs-refinement` marker effective when refinement remains active as one collapsed public accepted path, separate from ordinary metadata and focused refinement. `current_refinement_status_is_needs_refinement` is the discriminator. Do not expose `current_has_needs_refinement_tag` in Slice 1A. |
-| Same-status lifecycle paths | Public same-status lifecycle paths must not be pre-authored in the public inventory until pre-kernel probes settle their wrapper-observable outcome. Keep them private as `probe_question.update.lifecycle.same_status.*` or `quarantine.update.lifecycle.same_status.*` items until proof-backed promotion. |
+| Tags refinement marker | Slice 1A must model wrapper-transformed tag updates that keep the `needs-refinement` marker effective when refinement remains active as one collapsed public accepted behavior. When caller-present `status` keeps lifecycle ownership, marker-sensitive tag handling becomes a lifecycle subpath rather than a frontmatter-family transfer. `current_refinement_status_is_needs_refinement` is the discriminator. Do not expose `current_has_needs_refinement_tag` in Slice 1A. |
+| Close-as-done precedence | `close_done` family selection follows live gate order: dependency blockers first, invalid transition second, done-readiness third, accepted close last. Public done-readiness blocking is one collapsed `missing_acceptance_criteria` path; exact human-facing wording such as "ticket still needs refinement" versus "acceptance criteria section missing" is proof-level detail, not public path identity. |
+| Close-as-done sufficiency | `close_done` uses minimal decisive context. If an earlier gate or one supplied readiness fact already fixes the public path/outcome, later or sibling missing facts do not force `CONTEXT_REQUIRED`. Placeholder-only Acceptance Criteria is derived privately from `current_acceptance_criteria_lines` using live normalization semantics. |
+| Same-status lifecycle paths | Same-status lifecycle cells remain mandatory Slice 1A coverage. They stay private only until required prepare+execute probes settle their wrapper-observable outcome, after which they must promote to public coverage rather than remain a permanent exclusion or blocker. |
+
+### Settled Session Decisions
+
+- Pre-kernel expected-inventory scenarios use fixture-local primitive `context_spec` carriers, not real `UpdateMutationContext` instances. Post-kernel contract tests must instantiate `UpdateMutationContext` from every `context_spec` and fail on drift.
+- Legacy-generation write blocking is excluded from Slice 1A. Source-derived audits must track `_check_legacy_gate()` as a proof-backed exclusion.
+- Public `NO_OP` means no write at all. Paths that reach engine-owned writes, including `contract_version` stamping, are `ACCEPTED` unless proof shows no write occurs.
+- Public blocker detail is collapsed. Missing versus unresolved blocker classes remain proof-relevant but not public path identity unless a later plan revision widens the planner surface.
+- Caller-present non-close/non-reopen `status` keeps lifecycle ownership. Marker-sensitive tags and focused-refinement section behavior may require lifecycle subpaths when they change public planner-visible behavior.
 
 ---
 
@@ -239,13 +250,16 @@ Public behavior:
 - `CurrentStatus` and `ReferencedTicketState` fields must be exact enum members. Matching raw strings are invalid.
 - `current_status` may be `None` while other well-formed facts are supplied. Context sufficiency is path-sensitive; `current_status` is required only when routing, ownership, or outcome can change based on current status.
 - `current_refinement_status_is_needs_refinement` may be `None` or exact `bool`.
-- `current_acceptance_criteria_lines` may be `None` or a tuple of non-empty strings. It contains the current Acceptance Criteria section split into lines with line separators removed, omitting blank or whitespace-only lines. For retained lines, preserve observed text exactly, including leading whitespace, bullets, checklist markers, and casing. Blank, whitespace-only, non-string, or non-tuple supplied values raise `AuthorityInputError`, even when the selected payload does not consume close-readiness context. `()` means the planner knows the current Acceptance Criteria content contributes no lines for readiness purposes, whether the section is absent or present but empty/blank.
-- `current_blocked_by` may be `None` or a tuple of unique string blocker IDs. Public classification treats blocker IDs as an unordered set. Duplicate IDs, non-string IDs, and nested `None` raise `AuthorityInputError`.
+- `current_acceptance_criteria_lines` may be `None` or a tuple of non-empty strings. It contains the current Acceptance Criteria section split into lines with line separators removed, omitting blank or whitespace-only lines. For retained lines, preserve observed text exactly, including leading whitespace, bullets, checklist markers, and casing. Blank, whitespace-only, non-string, or non-tuple supplied values raise `AuthorityInputError`, even when the selected payload does not consume close-readiness context. `()` means the planner knows the current Acceptance Criteria content contributes no lines for readiness purposes, whether the section is absent or present but empty/blank. Private close-readiness logic may normalize those preserved lines to detect the placeholder-only `Needs refinement` section, but that derived judgment is not a public context field.
+- `current_blocked_by` may be `None` or a tuple of string blocker IDs. Public classification treats blocker IDs as an unordered, duplicate-insensitive set. Duplicate IDs are allowed and collapse privately for public classification. Non-string IDs and nested `None` raise `AuthorityInputError`.
 - `referenced_ticket_statuses` may be `None` or a mapping whose keys are strings and whose values are exact `ReferencedTicketState` members. It is valid only when `current_blocked_by` is not `None`.
 - If `current_blocked_by is None` and `referenced_ticket_statuses is not None`, raise `AuthorityInputError`.
-- If both blocker facts are supplied, `set(referenced_ticket_statuses.keys())` must exactly equal `set(current_blocked_by)`. Missing or extra keys raise `AuthorityInputError`; partial maps do not become `CONTEXT_REQUIRED`.
+- If both blocker facts are supplied, `set(referenced_ticket_statuses.keys())` must be a subset of `set(current_blocked_by)`. Extra keys raise `AuthorityInputError`.
 - If blocker resolution is required and `current_blocked_by is None`, return `CONTEXT_REQUIRED` for `current_blocked_by`.
 - If blocker resolution is required, `current_blocked_by` is supplied, and `referenced_ticket_statuses is None`, return `CONTEXT_REQUIRED` for `referenced_ticket_statuses`.
+- If blocker resolution is required and any supplied referenced status is `MISSING`, `OPEN`, `IN_PROGRESS`, or `BLOCKED`, the planner may emit the collapsed dependency-blocked public path without requiring omitted blocker statuses.
+- If blocker resolution is required, all supplied referenced statuses are terminal (`DONE` or `WONTFIX`), and some blocker IDs remain unsupplied, return `CONTEXT_REQUIRED` for `referenced_ticket_statuses`.
+- `referenced_ticket_statuses={}` with non-empty `current_blocked_by` is valid but insufficient blocker evidence; when blocker resolution matters it yields `CONTEXT_REQUIRED`.
 - `current_blocked_by=()` with `referenced_ticket_statuses={}` is a valid exact blocker-status bundle for any payload, even when unused.
 
 ---
@@ -312,19 +326,26 @@ Normative routing sequence:
 5. Validate lifecycle field-set gates.
 6. Route to wrapper action: `close`, `reopen`, or `update`.
 7. Within routed `update`, apply update-subrouting:
-   - recognized `tags` accepted ownership requires `current_refinement_status_is_needs_refinement`
+   - caller-present `status` that survives close/reopen routing owns family selection and routes to `status_target.*`
+   - within lifecycle-owned `status_target.*`, ordinary metadata does not transfer ownership and creates distinct lifecycle subpaths only when it changes a public planner field, required context, outcome, raw-key bucket disposition, or path-level behavior claim/proof facet
+   - within lifecycle-owned `status_target.*`, active-refinement `tags` behavior and focused-refinement section behavior may create lifecycle subpaths when they change public planner-visible behavior
+   - when no caller-present `status` remains after close/reopen routing, recognized `tags` accepted ownership requires `current_refinement_status_is_needs_refinement`
    - `None` for that fact is `CONTEXT_REQUIRED` only after proof-backed routing ownership exists
    - `False` routes to ordinary metadata
    - `True` routes to the collapsed marker-sensitive tags family
-   - focused refinement versus ordinary metadata is decided after action routing
+   - focused refinement versus ordinary metadata without caller-present `status` is decided after action routing
 8. Assign exactly one public family and one public `path_id`.
 
 Concrete ownership consequences:
 
+- Any routed `update` payload with caller-present non-close/non-reopen `status` belongs to the target-specific lifecycle family even when ordinary metadata, `tags`, or focused-refinement section fields are co-present.
 - Nonterminal `status + reopen_reason` payloads belong to the routed `status_target.*` lifecycle family, with `reopen_reason` in `ignored_raw_keys` only after probes prove that behavior.
+- Nonterminal `status + ordinary metadata` payloads remain lifecycle-owned and collapse into the same accepted status-target path unless the co-present key changes a public planner field or path-level claim.
+- Lifecycle-owned `status + tags` payloads under active refinement use distinct lifecycle subpaths when marker-sensitive tag behavior changes the public claim or required context.
+- Lifecycle-owned `status +` focused-refinement section payloads remain lifecycle-owned; focused-refinement family ownership is reserved for routed update payloads without caller-present `status`.
 - Pure nonterminal `{"reopen_reason": "..."}` belongs to `family.update.reopen.nonterminal_reason_ignored`.
 - Terminal `{"status": "open"}` belongs to reopen ownership, including the missing-reason rejection path.
-- Accepted `tags` classification requires `current_refinement_status_is_needs_refinement`; Slice 1A does not split preserve versus reinject marker mechanics.
+- Accepted routed `tags` classification without caller-present `status` requires `current_refinement_status_is_needs_refinement`; Slice 1A does not split preserve versus reinject marker mechanics.
 
 The expected-inventory audit must use source-derived routing census to define the required denominator, but source census alone cannot promote public path ownership or public outcome claims. Every public routed path must have executable wrapper proof. Every routing-overlap cell must either have executable proof that settles its routed family/outcome or remain a private proof-control item that blocks Slice 1A completeness when required.
 
@@ -367,11 +388,18 @@ Same-status matrix cells:
 - `(in_progress, status_target.in_progress)`
 - `(blocked, status_target.blocked)`
 
-remain unresolved pre-kernel and live only as private `probe_question.update.lifecycle.same_status.*` items until probes settle them.
+remain required lifecycle cells. They may stay private only until prepare+execute probes settle their wrapper-observable outcome; closeout requires public promotion rather than permanent private blockage.
 
 Named lifecycle families below are public grouping projections over this matrix. They are not the sole completeness denominator.
 
 Within recognized lifecycle families, current-state-invalid combinations are modeled as `PRECONDITION_BLOCKED` unless the raw payload is invalid or unsupported before lifecycle planning. Missing required raw fields after routed ownership, such as terminal `status=open` without `reopen_reason`, are `INVALID_PAYLOAD` unless executable proof shows a different wrapper-observable outcome.
+
+Family-specific precedence and sufficiency rules:
+
+- `close_done` precedence is fixed: dependency-blocked first, invalid transition second, collapsed done-readiness blocked path third, accepted close last.
+- `close_done` uses minimal decisive context. If one supplied readiness fact already fixes the public blocked path, sibling missing facts do not force `CONTEXT_REQUIRED`.
+- Private `close_done` readiness must mirror live Acceptance Criteria placeholder normalization so lines that normalize to exactly `["Needs refinement"]` block the same collapsed public path.
+- Lifecycle blocker resolution may use decisive partial `referenced_ticket_statuses` maps for the collapsed dependency-blocked public path. Full blocker-status coverage is required only when omitted blocker statuses could still change the public outcome away from blocked.
 
 The expected-inventory fixture and path-derivation audit must prove:
 
@@ -398,7 +426,8 @@ Illustrative public path shapes:
 
 - `path.update.frontmatter.priority.accepted`
 - `path.update.focused.concrete_refinement.clears_marker`
-- `path.update.lifecycle.close_done.precondition_blocked.needs_refinement`
+- `path.update.lifecycle.close_done.precondition_blocked.missing_acceptance_criteria`
+- `path.update.lifecycle.status_target_in_progress.accepted.same_status`
 - `path.update.reopen.nonterminal_reason_ignored`
 
 Private proof-control naming:
@@ -545,16 +574,16 @@ This plan is normative at the path-family level. The expected-inventory fixture 
 | `family.update.validation.raw_carrier` | yes | non-object JSON-native update carriers | none | `INVALID_PAYLOAD` | prepare-only | `path.update.validation.raw_carrier.*` |
 | `family.update.validation.unknown_or_forbidden_keys` | yes | unknown keys, unsupported namespaces, lifecycle-forbidden peer fields | none | `UNSUPPORTED_PAYLOAD` | prepare-only | `path.update.validation.unsupported.*` |
 | `family.update.validation.recognized_field_type_or_value` | yes | recognized update fields with wrong JSON-native type or invalid value bucket | none | `INVALID_PAYLOAD` | prepare-only | `path.update.validation.invalid.*` |
-| `family.update.frontmatter.metadata` | yes | routed `update` frontmatter updates excluding wrapper-transformed refinement-marker tag paths | none unless path-specific proof shows otherwise | `ACCEPTED`, `INVALID_PAYLOAD`, `UNSUPPORTED_PAYLOAD` | prepare+execute for accepted | `path.update.frontmatter.*` |
-| `family.update.frontmatter.tags_refinement_marker` | yes | routed `update` `tags` updates whose public behavior under active refinement keeps the `needs-refinement` marker effective | `current_refinement_status_is_needs_refinement` | `ACCEPTED`, `INVALID_PAYLOAD`, `UNSUPPORTED_PAYLOAD`, `CONTEXT_REQUIRED` when proof-backed routing ownership exists and the discriminator is missing | prepare+execute for accepted | `path.update.frontmatter.tags_refinement_marker.*` |
-| `family.update.focused_refinement` | yes | routed `update` focused refinement field families, including marker clear behavior tied to focused refinement updates | `current_refinement_status_is_needs_refinement` when required by the public claim | `ACCEPTED`, `NO_OP`, `INVALID_PAYLOAD`, `UNSUPPORTED_PAYLOAD`, `CONTEXT_REQUIRED` when a proof-backed direct fact is required | prepare+execute for accepted/no-op | `path.update.focused.*` |
-| `family.update.lifecycle.status_target_open` | yes | routed `update` status-update payloads targeting `open`, including accepted, blocked, same-status, nonterminal mixed `status + reopen_reason`, and nonterminal current-state-invalid matrix cells | `current_status`, `current_blocked_by`, `referenced_ticket_statuses` when the matrix cell requires them | `ACCEPTED`, `CONTEXT_REQUIRED`, `PRECONDITION_BLOCKED`, `INVALID_PAYLOAD`, `UNSUPPORTED_PAYLOAD` | prepare+execute for accepted; prepare-only for blocked/error paths | `path.update.lifecycle.status_target_open.*` |
-| `family.update.lifecycle.status_target_in_progress` | yes | routed `update` status-update payloads targeting `in_progress`, including accepted, blocked, same-status, nonterminal mixed `status + reopen_reason`, and current-state-invalid matrix cells | `current_status`, `current_blocked_by`, `referenced_ticket_statuses` when the matrix cell requires them | `ACCEPTED`, `CONTEXT_REQUIRED`, `PRECONDITION_BLOCKED`, `INVALID_PAYLOAD`, `UNSUPPORTED_PAYLOAD` | prepare+execute for accepted; prepare-only for blocked/error paths | `path.update.lifecycle.status_target_in_progress.*` |
-| `family.update.lifecycle.status_target_blocked` | yes | routed `update` status-update payloads targeting `blocked`, including accepted, same-status, nonterminal mixed `status + reopen_reason`, and current-state-invalid matrix cells | `current_status`, `current_blocked_by` when the matrix cell requires it | `ACCEPTED`, `CONTEXT_REQUIRED`, `PRECONDITION_BLOCKED`, `INVALID_PAYLOAD`, `UNSUPPORTED_PAYLOAD` | prepare+execute for accepted; prepare-only for blocked/error paths | `path.update.lifecycle.status_target_blocked.*` |
+| `family.update.frontmatter.metadata` | yes | routed `update` frontmatter updates without caller-present `status`, excluding wrapper-transformed refinement-marker tag paths | none unless path-specific proof shows otherwise | `ACCEPTED`, `INVALID_PAYLOAD`, `UNSUPPORTED_PAYLOAD` | prepare+execute for accepted | `path.update.frontmatter.*` |
+| `family.update.frontmatter.tags_refinement_marker` | yes | routed `update` `tags` updates without caller-present `status` whose public behavior under active refinement keeps the `needs-refinement` marker effective | `current_refinement_status_is_needs_refinement` | `ACCEPTED`, `INVALID_PAYLOAD`, `UNSUPPORTED_PAYLOAD`, `CONTEXT_REQUIRED` when proof-backed routing ownership exists and the discriminator is missing | prepare+execute for accepted | `path.update.frontmatter.tags_refinement_marker.*` |
+| `family.update.focused_refinement` | yes | routed `update` focused refinement field families without caller-present `status`, including marker clear behavior tied to focused refinement updates | `current_refinement_status_is_needs_refinement` when required by the public claim | `ACCEPTED`, `NO_OP`, `INVALID_PAYLOAD`, `UNSUPPORTED_PAYLOAD`, `CONTEXT_REQUIRED` when a proof-backed direct fact is required | prepare+execute for accepted/no-op | `path.update.focused.*` |
+| `family.update.lifecycle.status_target_open` | yes | routed `update` payloads with caller-present `status` targeting `open`, including accepted transitions, blocker-resolved accepted transitions from current `blocked`, same-status accepted paths, nonterminal mixed `status + reopen_reason`, mixed ordinary metadata, active-refinement `tags` lifecycle subpaths, focused-refinement section lifecycle subpaths, and nonterminal current-state-invalid matrix cells | `current_status`, `current_refinement_status_is_needs_refinement`, `current_blocked_by`, `referenced_ticket_statuses` when the matrix cell or lifecycle subpath requires them | `ACCEPTED`, `CONTEXT_REQUIRED`, `PRECONDITION_BLOCKED`, `INVALID_PAYLOAD`, `UNSUPPORTED_PAYLOAD` | prepare+execute for accepted; prepare-only for blocked/error paths | `path.update.lifecycle.status_target_open.*` |
+| `family.update.lifecycle.status_target_in_progress` | yes | routed `update` payloads with caller-present `status` targeting `in_progress`, including accepted transitions, blocker-resolved accepted transitions from current `blocked`, same-status accepted paths, nonterminal mixed `status + reopen_reason`, mixed ordinary metadata, active-refinement `tags` lifecycle subpaths, focused-refinement section lifecycle subpaths, and current-state-invalid matrix cells | `current_status`, `current_refinement_status_is_needs_refinement`, `current_blocked_by`, `referenced_ticket_statuses` when the matrix cell or lifecycle subpath requires them | `ACCEPTED`, `CONTEXT_REQUIRED`, `PRECONDITION_BLOCKED`, `INVALID_PAYLOAD`, `UNSUPPORTED_PAYLOAD` | prepare+execute for accepted; prepare-only for blocked/error paths | `path.update.lifecycle.status_target_in_progress.*` |
+| `family.update.lifecycle.status_target_blocked` | yes | routed `update` payloads with caller-present `status` targeting `blocked`, including accepted transitions from current `open` or `in_progress`, same-status accepted paths, mixed ordinary metadata, active-refinement `tags` lifecycle subpaths, focused-refinement section lifecycle subpaths, nonterminal mixed `status + reopen_reason`, and current-state-invalid matrix cells | `current_status`, `current_refinement_status_is_needs_refinement`, `current_blocked_by` when the matrix cell or lifecycle subpath requires it | `ACCEPTED`, `CONTEXT_REQUIRED`, `PRECONDITION_BLOCKED`, `INVALID_PAYLOAD`, `UNSUPPORTED_PAYLOAD` | prepare+execute for accepted; prepare-only for blocked/error paths | `path.update.lifecycle.status_target_blocked.*` |
 | `family.update.lifecycle.close_done` | yes | recognized close-as-done payloads | `current_status`, `current_refinement_status_is_needs_refinement`, `current_acceptance_criteria_lines`, `current_blocked_by`, `referenced_ticket_statuses` | `ACCEPTED`, `CONTEXT_REQUIRED`, `PRECONDITION_BLOCKED`, `INVALID_PAYLOAD`, `UNSUPPORTED_PAYLOAD` | prepare+execute for accepted; prepare-only for blocked/error paths | `path.update.lifecycle.close_done.*` |
 | `family.update.lifecycle.close_wontfix` | yes | recognized close-as-wontfix payloads | `current_status` | `ACCEPTED`, `CONTEXT_REQUIRED`, `PRECONDITION_BLOCKED`, `INVALID_PAYLOAD`, `UNSUPPORTED_PAYLOAD` | prepare+execute for accepted; prepare-only for blocked/error paths | `path.update.lifecycle.close_wontfix.*` |
 | `family.update.reopen.terminal_by_reason` | yes | routed `reopen` payloads, including terminal `reopen_reason`, terminal `status=open` with reason present, terminal `status=open` with reason missing, and terminal mixed `status + reopen_reason` forms | `current_status` | `ACCEPTED`, `CONTEXT_REQUIRED`, `PRECONDITION_BLOCKED`, `INVALID_PAYLOAD`, `UNSUPPORTED_PAYLOAD` | prepare+execute for accepted; prepare-only for blocked/error paths | `path.update.reopen.terminal_by_reason.*` |
-| `family.update.reopen.nonterminal_reason_ignored` | yes | pure nonterminal `reopen_reason` syntax after routing, blocked by the named overlap cell until behavior proof settles ignored/accepted outcome | `current_status` | `NO_OP` or `ACCEPTED`, depending on proof-settled wrapper behavior | prepare+execute | `path.update.reopen.nonterminal_reason_ignored.*` |
+| `family.update.reopen.nonterminal_reason_ignored` | yes | pure nonterminal `reopen_reason` syntax after routing, blocked by the named overlap cell until behavior proof settles the accepted update-route write path | `current_status` | `ACCEPTED` after proof-backed promotion | prepare+execute | `path.update.reopen.nonterminal_reason_ignored.*` |
 
 The expected-inventory fixture must satisfy:
 
@@ -658,7 +687,7 @@ Audit expectations:
 - no private proof-control ID leaks into public planner output or public manifest
 - no internal topology leaks into public planner output or public manifest
 - lifecycle matrix coverage is complete for every required `(current_status, lifecycle_intent_bucket)` cell or blocked by a named private proof-control item or named closed overlap-sensitive cell
-- same-status unresolved items remain private until promoted by proof
+- same-status private blockers remain temporary only; once required probes settle them, proof-control must promote them to public coverage rather than leave them private
 - source-derived routing census defines the denominator, but executable wrapper probes prove every public routed path and every overlap-sensitive routed ownership claim
 - source-derived audit hard-stops on any undeclared overlap-sensitive candidate; the fixture must not absorb it before a plan-control patch
 - every recognized update field has explicit wrong-type denominator coverage, and every reachable invalid-value validator rule has explicit denominator coverage
@@ -692,7 +721,7 @@ Read these live files before implementation or proof-control work. Historical ha
 Read-only scans before proof-control or implementation:
 
 ```bash
-rg -n "_ALLOWED_UPDATE_FIELDS|_CLOSE_FIELDS|_REOPEN_FIELDS|_action_and_fields|_prepare_fields|_will_clear_refinement|_validate_lifecycle_payload|validate_fields|_check_transition_preconditions_with_detail|_ticket_still_needs_refinement|_classify_blockers|reopen_reason|needs-refinement|unsupported_update_fields|ticket_id|update_prepare|target_fingerprint|execute_fingerprint|stale_plan" \
+rg -n "_ALLOWED_UPDATE_FIELDS|_CLOSE_FIELDS|_REOPEN_FIELDS|_action_and_fields|_prepare_fields|_will_clear_refinement|_validate_lifecycle_payload|validate_fields|_check_legacy_gate|_check_transition_preconditions_with_detail|_normalize_acceptance_criterion|_acceptance_criteria_is_only_needs_refinement|_ticket_still_needs_refinement|_classify_blockers|reopen_reason|needs-refinement|unsupported_update_fields|ticket_id|update_prepare|target_fingerprint|execute_fingerprint|stale_plan" \
   plugins/turbo-mode/ticket/scripts/ticket_update.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_core.py \
   plugins/turbo-mode/ticket/scripts/ticket_validate.py \
@@ -857,10 +886,14 @@ git diff --check
 - Stop if a required family or blocking overlap-sensitive cell remains private at Slice 1A closeout without formal scope narrowing.
 - Stop if an unresolved probe question or unresolved required overlap-sensitive cell blocks a required family. Resume only after proof-backed promotion, an explicit plan-control blocker conversion, or a plan-control scope patch narrows Slice 1A and updates the completeness claim.
 - Stop if source-derived audit detects an undeclared overlap-sensitive candidate. Resume only after plan-control patch declares it, bumps `CONTROL_PLAN_REVISION`, and fixture projection updates.
+- Stop if implementation needs `ticket.generation`, `contract_version`, migration state, or legacy write-policy facts to classify a public path. Resume only after a separate ticket-format/write-policy slice is defined.
 - Stop if implementation needs full current metadata or section-value equality to classify ordinary same-value updates as public `NO_OP`.
+- Stop if implementation emits public `NO_OP` for same-status lifecycle paths, pure nonterminal `reopen_reason`, or any path that still reaches an engine write such as `contract_version` stamping.
+- Stop if implementation transfers caller-present non-close/non-reopen `status` payloads to `family.update.frontmatter.*` or `family.update.focused_refinement` instead of keeping lifecycle ownership.
 - Stop if a public path family cannot be described without membrane facts such as trust, request origin, or runtime readiness.
 - Stop if non-finite floats or non-JSON-native Python objects are being converted into public payload paths instead of `AuthorityInputError`.
-- Stop if `context=None`, context subclasses, duck-typed contexts, raw-string enum context values, duplicate `current_blocked_by` IDs, dangling/partial/extra-key `referenced_ticket_statuses`, or malformed AC-line values are treated as missing context instead of API misuse.
+- Stop if `context=None`, context subclasses, duck-typed contexts, raw-string enum context values, extra-key `referenced_ticket_statuses`, or malformed AC-line values are treated as missing context instead of API misuse.
+- Stop if duplicate `current_blocked_by` IDs are rejected as API misuse, or if decisive partial `referenced_ticket_statuses` maps that already prove the collapsed dependency-blocked public path are rejected as insufficient context.
 
 ---
 
@@ -932,7 +965,7 @@ Encode exact public `path_id` inventory, public proof entries, top-level `source
 Every public `path_id` must have at least one canonical planner scenario that emits it. Each scenario must include:
 
 - raw payload
-- `UpdateMutationContext`
+- fixture-local primitive `context_spec`
 - expected `path_id`
 - expected `outcome`
 - expected `ignored_raw_keys`
@@ -943,6 +976,8 @@ Every public `path_id` must have at least one canonical planner scenario that em
 - expected `missing_context_fields`
 - expected `precondition_blocked_raw_keys`
 - non-empty linked `behavior_proof_ids`
+
+`context_spec` is fixture-owned proof-control data, not a production API object. It must use public context field names and enum/value spellings that post-kernel contract tests can round-trip into real `UpdateMutationContext` instances.
 
 - [ ] **Step 2: Add the path-derivation audit**
 
@@ -964,6 +999,7 @@ The audit must derive the denominator from live update wrapper source, including
 - `_action_and_fields()`
 - `_prepare_fields()`
 - reachable `validate_fields()` rules for admitted update fields
+- `_check_legacy_gate()` as an explicit Slice 1A exclusion boundary rather than a public path source
 
 The audit must hard-stop on undeclared overlap-sensitive candidates. It may report a deterministic failure record, but the fixture must not gain a committed passing private row for that candidate before a plan-control patch declares it.
 
@@ -973,7 +1009,7 @@ Fail if any public path lacks canonical proof coverage, any public path violates
 
 - [ ] **Step 4: Settle required probe questions**
 
-Add or tighten wrapper-facing probes, including same-status lifecycle probes and overlap-sensitive routing probes, before any public path for those cells enters the expected inventory.
+Add or tighten wrapper-facing probes, including same-status lifecycle probes, overlap-sensitive routing probes, mixed `status + reopen_reason` probes, same-status blocked-by probes, and lifecycle-owned `status + tags` / `status + section fields` probes before any public path for those cells enters the expected inventory.
 
 - [ ] **Step 5: Verify proof-control without `ticket_update_authority.py`**
 
@@ -1018,8 +1054,8 @@ Validate:
 - typed context field contracts
 - global context shape validation and path-sensitive context sufficiency
 - `current_acceptance_criteria_lines` non-empty logical line contract
-- `current_blocked_by` uniqueness and order-insensitive semantics
-- exact `referenced_ticket_statuses` dependency and key-set rules
+- `current_blocked_by` duplicate-insensitive and order-insensitive semantics
+- `referenced_ticket_statuses` dependency, subset-key, `MISSING`, and decisive-partial-map rules
 
 - [ ] **Step 3: Implement private derivation and public path selection**
 
@@ -1043,6 +1079,7 @@ Phase-gate expectations:
 - every public path is dynamically reachable by at least one fixture-owned planner scenario
 - static parity compares only public contract data and exact exported carrier shapes: top-level manifest fields, public path set, per-path `outcome`, `behavior_claim`, `required_context_fields`, `behavior_proof_ids`, public proof set, normative proof entries, row key closure, and canonical exported list order
 - dynamic conformance compares the full public planner result surface for every fixture scenario
+- contract tests must instantiate real `UpdateMutationContext` values from every fixture `context_spec` and fail on missing keys, extra keys, enum drift, or context-semantics drift
 - source-anchor audit is the fixture-backed parity mechanism for exported `source_anchors[probe_id]` list carrier shape, anchor dict key closure, canonical anchor order, role assignment, proof linkage, required `oracle_test` presence, file existence, resolver resolution, and non-blocking stale-line warnings
 
 ---
@@ -1081,7 +1118,7 @@ Do not claim Slice 1A complete unless:
 
 - every required family is proof-backed and public, or formally removed by a plan-control scope patch
 - every public path has canonical `probe.*` proof coverage
-- same-status lifecycle behavior is either publicly proof-backed or Slice 1A scope has been formally narrowed
+- same-status lifecycle behavior is publicly proof-backed and promoted from its temporary private probes
 - no private proof-control IDs leak into public outputs
 - every public path is dynamically reachable through fixture-owned planner scenarios
 - every public proof has a non-empty `source_anchors[probe_id]` entry with at least one `oracle_test` anchor
