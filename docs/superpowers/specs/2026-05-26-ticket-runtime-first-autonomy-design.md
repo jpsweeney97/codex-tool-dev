@@ -349,6 +349,14 @@ repo-local config for future sessions. Other live threads in the same checkout
 must observe that pause at the engine-owned write gateway even if they cached
 `agent_primary` earlier in their thread-scoped snapshot.
 
+Resuming after a workspace pause is not raw marker deletion. A production resume
+flow must ask for an explicit `Automatic` or `Ask first` choice, remove the pause
+marker, invalidate project-local mode snapshots, and rewrite strict JSON config
+from that choice before a later turn can create a fresh snapshot. A private
+test-only helper may clear the marker for isolated tests, but host-facing runtime
+surfaces must not expose an unqualified `clear pause` action that would revive a
+stale cached `agent_primary` snapshot.
+
 The guided setup prompt should use user-facing choices before internal mode
 names:
 
@@ -791,9 +799,11 @@ UTC timestamps. `thread_id` identifies the mode snapshot's Codex conversation,
 while `turn_id` identifies one end-of-turn batch. `current_mode` uses the same
 `discussion_only`, `preview`, and `agent_primary` enum as `.codex/ticket.local.md`.
 `repo_context` is a strict object built from live repo/worktree state after
-validating the supplied turn-context `git` object. When git metadata is
-available, it must include `repo_root`, `worktree_root`, `repo_fingerprint`,
-`branch`, and `head`. Use `null` for `ticket_id`,
+validating the supplied turn-context `git` object. The runtime carries that
+verified state as a `VerifiedRepoContext` value and gateway-owned events must use
+that verified value, not raw caller-supplied `git` dictionaries or placeholder
+context. When git metadata is available, it must include `repo_root`,
+`worktree_root`, `repo_fingerprint`, `branch`, and `head`. Use `null` for `ticket_id`,
 `mutation_id`, `ticket_state_fingerprint`, `mutation_fingerprint`, or
 `decision` only on workspace-level operational events that do not belong to a
 specific ticket mutation. Require `reason` to be one short sentence with no
@@ -1330,11 +1340,11 @@ adapter call that omits, forges, or reuses an invalid autonomy decision.
 
 `ticket_engine_core.py` or a small engine-owned helper must be the only path
 that can apply autonomous ticket-state mutations. It validates the autonomy
-decision, rechecks the workspace pause marker, enforces idempotency, appends
-durable pending-summary events, updates or creates `## Change History` when
-required, and then delegates to the existing ticket mutation mechanics. Existing
-wrappers may prepare context or payloads, but autonomous writes that bypass this
-gateway are invalid.
+decision, receives the already verified live repo context, rechecks the
+workspace pause marker, enforces idempotency, appends durable pending-summary
+events, updates or creates `## Change History` when required, and then delegates
+to the existing ticket mutation mechanics. Existing wrappers may prepare context
+or payloads, but autonomous writes that bypass this gateway are invalid.
 
 The gateway must also enforce closed field allowlists per automatic action
 before calling the live engine. For lifecycle close actions, `done` and
@@ -1424,6 +1434,12 @@ automation-created audit records it touched and there is no file overlap or
 ambiguity. If there is overlap or ambiguity, defer the automatic commit and
 explain the defer reason briefly.
 
+Same-ticket unstaged overlap is always ambiguous and must defer rather than
+stage over user work. Detached HEAD must defer because branch ownership is
+unknown. Unrelated backlog maintenance may commit only on `main` with a clean
+worktree and safe branch state; if reaching `main` would require switching away
+from dirty or ambiguous work, defer and record the retry condition.
+
 Automation-created durable audit records are part of ticket-owned project
 state. Record them inside the affected ticket file's `## Change History`
 section. Do not create or use a separate global committed audit file in v1.
@@ -1463,6 +1479,9 @@ Failure handling is intentionally narrow:
 - explicit chat request to pause Ticket automation -> write the workspace-local
   pause marker, pause automatic Ticket updates in the current checkout before
   the next autonomous write, and update repo-local config for future sessions
+- explicit chat request to resume Ticket automation -> ask for `Automatic` or
+  `Ask first`, clear the pause marker only as part of that setup-choice flow,
+  invalidate project-local mode snapshots, and write fresh strict JSON config
 - engine-owned write gateway observes the workspace pause marker before
   mutation -> reject the autonomous write with paused output, even if that live
   thread cached `agent_primary` earlier

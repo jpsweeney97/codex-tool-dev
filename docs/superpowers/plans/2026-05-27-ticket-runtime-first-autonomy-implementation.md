@@ -24,8 +24,16 @@ Current source baseline:
 
 Implementation branch:
 
-- Before code work, land or rebase this docs baseline onto `main`, then create
-  the execution branch from `main`:
+- Before code work, land or rebase the latest committed docs baseline onto
+  `main`. From the docs-baseline branch, prove that `main` contains the exact
+  control-doc commit to implement:
+
+```bash
+DOCS_BASELINE="$(git rev-parse HEAD)"
+git merge-base --is-ancestor "$DOCS_BASELINE" main
+```
+
+- Only after that preflight passes, create the execution branch from `main`:
 
 ```bash
 git switch main
@@ -33,13 +41,19 @@ git switch -c feature/ticket-runtime-first-autonomy-v1
 ```
 
 - Do not drop the control-doc commits to satisfy branch policy. If code work
-  must start before the docs baseline lands on `main`, record an explicit
-  user-approved exception in the implementation closeout: `Implementation branch
-  starts from the docs baseline before main contains the control docs.`
+  must start before the docs baseline lands on `main`, branch from the
+  docs-baseline commit instead of switching to stale `main`, and record an
+  explicit user-approved exception in the implementation closeout:
+  `Implementation branch starts from the docs baseline before main contains the
+  control docs.`
 
 Hard stops:
 
-- Stop if the branch is not at or after `9453d18` and the spec file differs materially from this plan.
+- Stop if `git merge-base --is-ancestor "$(git rev-parse HEAD)" main` fails while
+  `HEAD` is the docs baseline to implement, unless the user-approved
+  docs-baseline exception above has already been recorded.
+- Stop if the branch is not at or after the latest docs-baseline commit and the
+  spec file differs materially from this plan.
 - Stop if the implementation branch is not based on `main` and no explicit
   user-approved docs-baseline exception is recorded.
 - Stop if `.codex/handoffs/`, `.codex/ticket-workspace/`, `.codex/ticket.local.md`, or pending-summary files appear in staged changes.
@@ -89,10 +103,13 @@ Default dispositions for known legacy surfaces:
 | README/HANDBOOK/contract guidance for old setup and active audit behavior | Rewrite/remove | Tasks 1, 2, 7, and 15 |
 | Public contract that lists only `capture`, `update`, and `ingest` as high-level mutation surfaces | Rewrite when the host-facing autonomy CLI lands | Task 7 |
 
-Intermediate source commits may remove old `.audit` enforcement before the new
-pending-summary gateway exists. That is acceptable because this source branch
-has no current Ticket plugin users and runtime readiness is not claimed until
-the later gateway, pending-summary, and final closeout gates pass.
+Intermediate source commits must not leave old agent-origin autonomous execution
+with `.audit` writes disabled and no replacement pending-summary/Change History
+gate. Before future `.audit` writes are no-oped, old agent autonomy modes must be
+removed or direct `ticket_engine_agent.py execute` must fail closed for create,
+update, close, and reopen attempts that lack a gateway-approved decision. Runtime
+readiness is still not claimed until the later gateway, pending-summary, and
+final closeout gates pass.
 
 Do not add compatibility shims for old autonomy modes, old YAML config, or
 active `.audit` writes unless this plan is explicitly revised to mark that
@@ -318,10 +335,13 @@ Handled no-op responses are not silent. They use exit `0` and this shape:
 **Files:**
 
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py`
 - Modify: `plugins/turbo-mode/ticket/README.md`
 - Modify: `plugins/turbo-mode/ticket/HANDBOOK.md`
 - Modify: `plugins/turbo-mode/ticket/references/ticket-contract.md`
 - Modify: `plugins/turbo-mode/ticket/tests/test_audit.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_engine_runner.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_docs_contract.py`
 
 - [ ] **Step 1: Inventory and re-baseline legacy audit artifacts**
@@ -350,6 +370,13 @@ Classify every touched audit surface using the re-baseline policy:
 Add focused tests that prove `engine_execute()` no longer creates
 `docs/tickets/.audit/` for user or agent requests. Add tests that prove
 historical audit support remains read/repair-only.
+
+Before disabling `.audit` writes, add runner/agent tests that prove the old
+agent execute path cannot mutate active ticket files without the new gateway
+decision contract. Cover create, update, close, and reopen payloads carrying old
+`auto_audit`, `auto_silent`, or `suggest` authority signals; each case must fail
+closed and leave ticket files unchanged until Task 9 provides the approved
+gateway path.
 
 Before adding new assertions, rewrite or delete the existing assertions in
 `test_audit.py` that expect `engine_execute()` to create `.audit/`, append
@@ -440,11 +467,13 @@ def _audit_append(session_id: str, tickets_dir: Path, entry: dict[str, Any]) -> 
     return True
 ```
 
-Then remove the agent fail-closed dependence on result audit writes from
-`engine_execute()`. This creates an intermediate source-only state where the
-old audit gate is gone before the new gateway lands. That is acceptable for
-this no-current-users re-baseline, but do not claim runtime readiness until the
-pending-summary gateway and final source closeout pass.
+Before removing the agent fail-closed dependence on result audit writes from
+`engine_execute()`, remove the old agent autonomy modes from the direct execute
+path or add an explicit fail-closed guard for direct agent create, update, close,
+and reopen payloads that lack a gateway-approved decision. The audit no-op and
+that replacement guard must land in the same commit. Do not create a source state
+where direct agent execute can mutate ticket files while `.audit`,
+pending-summary, and `## Change History` are all absent for that write.
 
 - [ ] **Step 5: Update docs to match the migration**
 
@@ -461,8 +490,8 @@ Patch README/HANDBOOK/contract so current-facing docs say:
 - [ ] **Step 6: Verify and commit**
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_audit.py tests/test_docs_contract.py -q
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/tests/test_audit.py plugins/turbo-mode/ticket/tests/test_docs_contract.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_audit.py tests/test_engine_runner.py tests/test_docs_contract.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py plugins/turbo-mode/ticket/tests/test_audit.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_docs_contract.py
 git diff --check
 git status --short
 ```
@@ -470,7 +499,7 @@ git status --short
 Commit:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/tests/test_audit.py plugins/turbo-mode/ticket/tests/test_docs_contract.py
+git add plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/tests/test_audit.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_docs_contract.py
 git commit -m "fix(ticket): disable future audit writes"
 ```
 
@@ -585,6 +614,13 @@ Test cases:
 - `pause_workspace_automation(project_root, reason="user_requested")` writes
   the pause marker and rewrites `.codex/ticket.local.md` to strict JSON
   `discussion_only`.
+- Production pause resume is an explicit setup-choice flow, not a raw marker
+  deletion. Resuming from pause requires `resume_workspace_automation(project_root,
+  choice=SetupChoice.AUTOMATIC|ASK_FIRST)`, removes the pause marker, invalidates
+  existing mode snapshots for that project, and rewrites strict JSON config from
+  the user's choice before any later automatic write can run.
+- Raw pause-marker clearing is private/test-only and must not be exposed through
+  `ticket_autonomy.py`.
 - `ticket_engine_agent.py` and `ticket_engine_runner.py` do not treat old
   `auto_audit`, `auto_silent`, or `suggest` payloads as current autonomous
   authority. Any retained direct `agent execute` compatibility path is
@@ -656,7 +692,8 @@ def write_mode_snapshot(project_root: Path, thread_id: str, mode: AutomationMode
 def resolve_thread_mode(project_root: Path, thread_id: str) -> ResolvedMode: ...
 def write_workspace_pause(project_root: Path, *, reason: str) -> Path: ...
 def pause_workspace_automation(project_root: Path, *, reason: str) -> Path: ...
-def clear_workspace_pause(project_root: Path) -> None: ...
+def resume_workspace_automation(project_root: Path, *, choice: SetupChoice) -> Path: ...
+def _clear_workspace_pause_for_tests(project_root: Path) -> None: ...
 def is_workspace_paused(project_root: Path) -> bool: ...
 ```
 
@@ -691,6 +728,11 @@ Implementation requirements:
   affect later turns for the same `(project_root, thread_id)`. A workspace pause
   marker still overrides immediately before any autonomous write.
 - Use `.codex/ticket-workspace/pause.json` as the workspace-wide pause marker.
+- Do not expose raw pause clearing as a production command. A production resume
+  path must require an explicit setup choice, delete the pause marker, invalidate
+  all project-local mode snapshots, and rewrite strict JSON config from that
+  choice. This prevents a stale cached `agent_primary` snapshot from resuming
+  after a repair or pause cleanup.
 - Remove or bypass the old YAML `read_autonomy_config()` path in
   `ticket_engine_core.py` for current runtime-first behavior. Do not leave
   `suggest`, `auto_audit`, or `auto_silent` as accepted current autonomy modes.
@@ -835,6 +877,9 @@ Tests must cover:
 - No unknown top-level fields.
 - Required `repo_context` object with normalized `repo_root`, `worktree_root`,
   `repo_fingerprint`, `branch`, and `head` when git metadata is available.
+- A shared `VerifiedRepoContext` value can be converted to the exact
+  `repo_context` event payload, and callers cannot append gateway-owned events
+  without supplying that verified payload.
 - Missing `repo_context`, missing available branch/HEAD, or mismatched
   worktree identity is invalid.
 - Envelope validation proves shape and required fields only. It must not treat
@@ -862,6 +907,17 @@ PENDING_SUMMARY_SCHEMA = "codex.ticket.pending_summary.v1"
 
 
 @dataclass(frozen=True, slots=True)
+class VerifiedRepoContext:
+    repo_root: Path
+    worktree_root: Path
+    repo_fingerprint: str
+    branch: str | None
+    head: str | None
+
+    def as_event_payload(self) -> Mapping[str, object]: ...
+
+
+@dataclass(frozen=True, slots=True)
 class ValidationResult:
     ok: bool
     error: str | None = None
@@ -880,7 +936,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 - [ ] **Step 3: Implement envelope validation**
 
-Keep validation deterministic and local to `ticket_turn_batch.py`. Do not use a semantic classifier script. This module validates shapes, finite values, repo/worktree identity, branch/HEAD presence when available, and state compatibility only.
+Keep validation deterministic and local to `ticket_turn_batch.py`. Do not use a semantic classifier script. This module validates shapes, finite values, repo/worktree identity, branch/HEAD presence when available, and state compatibility only. `VerifiedRepoContext` is a carrier for already-verified live repo state; Task 10 owns building it from `project_root` and comparing it to the supplied turn-context `git` object.
 
 - [ ] **Step 4: Add representative fixtures**
 
@@ -1123,6 +1179,11 @@ Tests must prove:
 - `apply-turn --setup-choice automatic` writes strict JSON `agent_primary`, writes the `(project_root, thread_id)` mode snapshot for the context thread, verifies the local config and snapshot files are ignored and unstaged, and continues the same turn without a second confirmation.
 - `apply-turn --setup-choice ask_first` writes strict JSON `discussion_only`, writes the `(project_root, thread_id)` mode snapshot for the context thread, verifies the local config and snapshot files are ignored and unstaged, and continues the same turn without a second confirmation.
 - `apply-turn --setup-choice preview` is rejected; `preview` remains manual-only strict JSON config.
+- Host-facing CLI has no raw `clear-pause` command. Any future production resume
+  command must require `automatic` or `ask_first`, invalidate existing
+  project-local mode snapshots, clear the workspace pause marker, rewrite strict
+  JSON config from that choice, verify local files are ignored and unstaged, and
+  then create a fresh mode snapshot on the next automatic turn.
 - Once a mode snapshot exists for `(project_root, thread_id)`, direct edits to
   `.codex/ticket.local.md` do not change later `apply-turn` mode behavior for
   that same thread/project.
@@ -1332,9 +1393,11 @@ git commit -m "feat(ticket): add autonomy runtime decisions"
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py`
 - Create: `plugins/turbo-mode/ticket/tests/test_engine_gateway.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_engine_policy.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_engine_runner.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_turn_batch.py`
 
 - [ ] **Step 1: Write gateway tests**
 
@@ -1356,6 +1419,10 @@ Tests must prove:
 - Maintenance/doctor bypasses are named and not accepted by the autonomous gateway.
 - Gateway-owned pending-summary events record the explicit `thread_id` provided
   by `apply-turn`; the gateway must not invent thread identity from hidden state.
+- Gateway-owned pending-summary events use the `VerifiedRepoContext` supplied by
+  the caller. The gateway must not accept raw caller-supplied `git` data or build
+  a weaker placeholder context for `mutation_attempt`, `approval_consumed`,
+  `ticket_written`, or terminal write events.
 - Approval validation rejects a missing or mismatched approval/thread binding.
 - Gateway dispatch maps Ticket-facing action names to the live engine API before
   mutation:
@@ -1396,6 +1463,7 @@ def apply_autonomous_mutation(
     project_root: Path,
     thread_id: str,
     turn_id: str,
+    repo_context: VerifiedRepoContext,
     mutation: GatewayMutation,
     decision: AutonomyDecision,
     pending_summary: PendingSummaryStore,
@@ -1415,6 +1483,9 @@ Implementation requirements:
 - Validate approval envelope against current inputs.
 - Validate that the approval envelope is bound to the same `thread_id` passed to
   the gateway.
+- Require a `VerifiedRepoContext` and use `repo_context.as_event_payload()` for
+  every gateway-owned pending-summary event. Do not accept unchecked
+  turn-context `git` dictionaries at the gateway boundary.
 - Re-read current ticket fingerprint immediately before write.
 - Recheck workspace pause marker immediately before consuming approval. If the
   marker exists, return a paused response, leave ticket files unchanged, and do
@@ -1464,15 +1535,15 @@ they are inside the named gateway path above. It should flag future autonomous
 - [ ] **Step 5: Verify and commit**
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_engine_gateway.py tests/test_engine_policy.py tests/test_engine_runner.py tests/test_audit.py -q
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_engine_runner.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_engine_gateway.py tests/test_engine_policy.py tests/test_engine_runner.py tests/test_turn_batch.py tests/test_audit.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_turn_batch.py
 git diff --check
 ```
 
 Commit:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_engine_runner.py
+git add plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_turn_batch.py
 git commit -m "feat(ticket): add autonomous write gateway"
 ```
 
@@ -1486,24 +1557,17 @@ git commit -m "feat(ticket): add autonomous write gateway"
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_engine_gateway.py`
 - Create: `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`
 
 - [ ] **Step 0: Define live repo-context verification helpers**
 
-Required source surface inside `ticket_autonomy.py` or a focused helper it owns:
+Required source surface inside `ticket_autonomy.py` or a focused helper it owns.
+It must return the shared `VerifiedRepoContext` from `ticket_turn_batch.py`:
 
 ```python
-@dataclass(frozen=True, slots=True)
-class VerifiedRepoContext:
-    repo_root: Path
-    worktree_root: Path
-    repo_fingerprint: str
-    branch: str | None
-    head: str | None
-    as_event_payload: Mapping[str, object]
-
-
 def build_repo_context(project_root: Path) -> VerifiedRepoContext: ...
 def verify_turn_repo_context(
     *,
@@ -1575,6 +1639,8 @@ Assertions:
 - Every pending-summary event uses the verified live repo context, including
   repo root, worktree root, repo fingerprint, branch, and HEAD, not an unchecked
   copy of the caller-supplied `git` object.
+- `apply-turn` passes the same `VerifiedRepoContext` into
+  `apply_autonomous_mutation()` before any gateway-owned event append.
 - Approved ticket writes do not append terminal `applied` records before
   `apply_autonomous_mutation()` runs.
 - Successful approved writes receive gateway-owned events in order:
@@ -1626,9 +1692,10 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
    `skipped`, preview-mode `status: "skipped"` with
    `decision: "preview_only"`, `discussion_required`, `deferred`, and
    non-gateway `failed`.
-11. Apply approved mutations through `apply_autonomous_mutation()` and let the
-   gateway own `mutation_attempt`, `approval_consumed`, `ticket_written`, and
-   terminal write outcomes including `applied`.
+11. Apply approved mutations through `apply_autonomous_mutation()` with the
+   verified live `repo_context`, and let the gateway own `mutation_attempt`,
+   `approval_consumed`, `ticket_written`, and terminal write outcomes including
+   `applied`.
 12. Render display-ready summary and at most one discussion question.
 13. Append summary receipts.
 
@@ -1636,14 +1703,14 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_integration_v1.py tests/test_autonomy_cli.py tests/test_engine_gateway.py tests/test_turn_batch.py -q
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py
 git diff --check
 ```
 
 Commit:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py
+git add plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py
 git commit -m "feat(ticket): apply autonomous turn updates"
 ```
 
@@ -1764,6 +1831,17 @@ Tests must prove:
 - Unrelated user files are never staged.
 - If the index already contains unrelated staged paths, the coordinator returns
   `commit_deferred` with a one-sentence reason and leaves the index unchanged.
+- Unstaged same-ticket or same-path overlap from non-automation work records
+  `commit_deferred` with a one-sentence reason and leaves the worktree unchanged.
+- Unrelated dirty worktree files do not block a current-branch related
+  ticket-only commit when exact staging is unambiguous, but they do block
+  unrelated backlog maintenance that would need a safe switch to `main`.
+- Detached HEAD records `commit_deferred`; the coordinator does not create
+  ticket-only commits when branch ownership is unknown.
+- Branch disposition follows the spec: ticket changes directly related to the
+  current branch can commit on that branch; unrelated backlog maintenance commits
+  only on `main` with a clean worktree and safe branch state; otherwise it
+  defers.
 - File overlap or ambiguity records `commit_deferred` with one-sentence reason.
 - Ticket-only commit messages use:
   - `tickets: update project state`
@@ -1786,8 +1864,9 @@ def record_ticket_commit_disposition(
     *,
     project_root: Path,
     touched_ticket_paths: tuple[Path, ...],
-    related_commit: str | None = None,
+    ticket_change_scope: Literal["current_branch", "unrelated_backlog"],
     create_ticket_only_commit: bool,
+    related_commit: str | None = None,
 ) -> CommitDispositionRecord: ...
 ```
 
@@ -1805,6 +1884,13 @@ Implementation requirements:
 - Inspect the existing index before staging anything. If any path is already
   staged and is not exactly within the allowed ticket-owned path set for this
   disposition, return `commit_deferred` and do not mutate the index.
+- Inspect unstaged and untracked files before staging anything. If any touched
+  ticket path overlaps user work, return `commit_deferred` and leave both the
+  index and worktree unchanged.
+- Inspect branch state before deciding commit disposition. On detached HEAD,
+  return `commit_deferred`. For `ticket_change_scope="unrelated_backlog"`, create
+  a ticket-only commit only on `main` and only when the worktree is clean enough
+  that no branch switch or unrelated staging ambiguity is required.
 - Run changed-ticket parse/schema validation, pending-summary log validation, and `git diff --check`.
 - Do not push.
 - Do not stage `.codex/ticket-workspace/`.
