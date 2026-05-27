@@ -99,6 +99,9 @@ discussion lane:
   history repair; pause when pending-summary bookkeeping is unhealthy; respect
   the thread-scoped mode snapshot; require a fresh one-use approval for each
   automatic change; and do not guess when correction evidence is gone.
+- The autonomous write gateway is field-authoritative. An automatic action is
+  allowed only with the exact fields that action permits; forbidden fields must
+  route to discussion or fail closed before live engine dispatch.
 - Treat an explicit chat request to pause Ticket automation as workspace-wide
   for the current checkout before the next autonomous write. Thread-scoped mode
   may still be cached for normal config reads, but the engine-owned write
@@ -243,6 +246,13 @@ The v1 autonomy boundary is aggressive:
 - autonomous: create, update, reprioritize, blocker edits, stale cleanup,
   refinement changes, `done`, `wontfix`, and `reopen`
 - discussion-required: delete, archive, and history-repair style actions
+
+Automatic `done` and `wontfix` are close-status changes only. They must not
+archive ticket files as part of the same automatic action. If a candidate or
+gateway payload includes `archive`, `archive: true`, or another non-allowlisted
+close field, it is an archive-shaped or unsupported close request and must route
+to `require_user_discussion` or fail closed before engine dispatch. Do not
+silently strip forbidden fields and proceed.
 
 Autonomy is thread-scoped:
 
@@ -470,12 +480,12 @@ recovery summary data, and returns whether new autonomous writes may proceed.
 The Codex host/thread runtime must call it before new autonomous writes in a
 Ticket-aware turn.
 
-`apply-turn` is the transactional turn gateway. It reads mode/config, discovers
-candidate tickets from the supplied context snapshot, evaluates candidates,
-appends ledger attempt records, validates one-use approvals internally, applies
-approved mutations through the engine-owned write gateway, appends follow-up
-status records, and returns display-ready summary data plus at most one
-discussion question.
+`apply-turn` is the transactional turn gateway. It verifies live repo context,
+reads mode/config, discovers candidate tickets from the supplied context
+snapshot, evaluates candidates, appends ledger attempt records, validates
+one-use approvals internally, applies approved mutations through the
+engine-owned write gateway, appends follow-up status records, and returns
+display-ready summary data plus at most one discussion question.
 
 For runtime-first mode, `thread_id` is the session-like key. Ticket resolves
 mode from a local snapshot keyed by `(project_root, thread_id)`: if the snapshot
@@ -496,9 +506,14 @@ The context file uses strict JSON. It should include:
 - a stable repo/worktree identity such as `git.repo_root` and
   `git.repo_fingerprint`
 
-Ticket copies normalized repo/worktree context into the operational ledger so
-later recovery can distinguish branch-specific work, unrelated backlog
-maintenance, and stale records from a different worktree or checkout state.
+The supplied `git` object is input, not proof. Before candidate discovery or
+write bookkeeping, Ticket must build live repo context from `project_root` and
+compare it with the supplied `git` object. `repo_root`, `worktree_root`,
+`repo_fingerprint`, `branch`, and `head` must match whenever git metadata is
+available. A mismatch fails closed before autonomous writes. Ticket records the
+verified live repo/worktree context in the operational ledger so later recovery
+can distinguish branch-specific work, unrelated backlog maintenance, and stale
+records from a different worktree or checkout state.
 
 CLI responses use strict JSON. A successful or paused command should still
 print a parseable response to stdout. Exit codes are:
@@ -582,6 +597,9 @@ Decision rules:
 
 - `archive`, `delete`, and history-repair style actions always return
   `require_user_discussion`
+- `done` and `wontfix` with `archive`, `archive: true`, or any
+  non-allowlisted close field return `require_user_discussion`; automatic close
+  dispatch may only carry explicitly allowed close-resolution fields
 - ordinary non-destructive create, update, lifecycle, blocker, stale, and
   refinement actions may return `apply_autonomously`
 - ambiguity is not a blocker by itself
@@ -753,9 +771,10 @@ Use `schema: "codex.ticket.pending_summary.v1"` for every line. Use ISO 8601
 UTC timestamps. `thread_id` identifies the mode snapshot's Codex conversation,
 while `turn_id` identifies one end-of-turn batch. `current_mode` uses the same
 `discussion_only`, `preview`, and `agent_primary` enum as `.codex/ticket.local.md`.
-`repo_context` is a strict object copied from normalized host-supplied workspace context. When git
-metadata is available, it must include `repo_root`, `worktree_root`,
-`repo_fingerprint`, `branch`, and `head`. Use `null` for `ticket_id`,
+`repo_context` is a strict object built from live repo/worktree state after
+validating the supplied turn-context `git` object. When git metadata is
+available, it must include `repo_root`, `worktree_root`, `repo_fingerprint`,
+`branch`, and `head`. Use `null` for `ticket_id`,
 `mutation_id`, `ticket_state_fingerprint`, `mutation_fingerprint`, or
 `decision` only on workspace-level operational events that do not belong to a
 specific ticket mutation. Require `reason` to be one short sentence with no
@@ -1296,6 +1315,13 @@ required, and then delegates to the existing ticket mutation mechanics. Existing
 wrappers may prepare context or payloads, but autonomous writes that bypass this
 gateway are invalid.
 
+The gateway must also enforce closed field allowlists per automatic action
+before calling the live engine. For lifecycle close actions, `done` and
+`wontfix` map to engine `close` with their explicit `resolution` and no
+`archive` field. Passing `archive` through the automatic gateway would widen the
+autonomous product boundary and is invalid even though the lower-level engine
+supports archived close for discussion-approved flows.
+
 The gateway is not a general file-writing helper. User-directed ordinary ticket
 writes may continue through the existing engine execution path only when they
 are explicitly non-autonomous and do not consume autonomy approvals. Named
@@ -1412,9 +1438,14 @@ Failure handling is intentionally narrow:
 - engine-owned write gateway observes the workspace pause marker before
   mutation -> reject the autonomous write with paused output, even if that live
   thread cached `agent_primary` earlier
+- supplied turn-context repo/worktree/branch/HEAD does not match live
+  `project_root` state -> fail closed before candidate discovery or autonomous
+  write bookkeeping
 - conflicting evidence for one ticket -> skip that ticket only
 - delete, archive, or history-repair action -> route to discussion required and
   do not write
+- `done` or `wontfix` candidate includes `archive` or another forbidden close
+  field -> route to discussion required or fail closed before engine dispatch
 - `discussion_only` mode -> route autonomous candidates to discussion required
   and do not write
 - `preview` mode -> record preview dispositions and summaries, but do not write
@@ -1553,6 +1584,8 @@ Prove that:
 - ordinary non-destructive mutations route to `apply_autonomously`
 - delete, archive, and history-repair actions route to
   `require_user_discussion`
+- `done` or `wontfix` with `archive`, `archive: true`, or any non-allowlisted
+  close field routes to `require_user_discussion`
 - conflicting candidates route to `skip_due_to_conflict`
 - `discussion_only` mode prevents autonomous writes
 - missing, unreadable, or invalid mode config pauses automation and produces a
@@ -1673,6 +1706,10 @@ Prove that:
 - every pending-summary JSONL entry includes strict `repo_context` with
   normalized repo/worktree identity, branch, and HEAD when git metadata is
   available
+- `apply-turn` builds live repo context from `project_root`, compares it with
+  the supplied turn-context `git` object, fails closed on mismatch before
+  candidate discovery or write bookkeeping, and records only the verified live
+  context in pending-summary events
 - typed `details` validate according to `event_type`, including required
   questions for `discussion_required`, retry conditions for `deferred`, error
   codes for `failed`, and pause reasons for `automation_pause`
@@ -1758,6 +1795,8 @@ Prove that:
 - autonomous writes are the only writes that may consume autonomy approvals, and
   they can apply ticket-state changes only through the engine-owned autonomous
   write gateway
+- the gateway enforces per-action field allowlists before live engine dispatch,
+  including rejection of `archive` on automatic `done`/`wontfix`
 - user-directed ordinary ticket writes are explicitly non-autonomous and may use
   the existing engine execution path without satisfying autonomy approvals
 - maintenance and doctor bypasses are limited to named dry-run-first or

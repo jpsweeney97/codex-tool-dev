@@ -101,7 +101,7 @@ surface as kept.
 
 Create these focused runtime modules:
 
-- `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py` - host-facing JSON-in/JSON-out CLI for `pause`, `recover`, `apply-turn`, `doctor-ledger`, and `migrate-change-history`.
+- `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py` - host-facing JSON-in/JSON-out CLI for `pause`, `recover`, `apply-turn`, `doctor-ledger`, `migrate-change-history`, and live repo-context verification before automatic candidate discovery or write bookkeeping.
 - `plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py` - strict `.codex/ticket.local.md` JSON config, thread-scoped mode snapshots keyed by `(project_root, thread_id)`, workspace pause marker, local setup, ignored-path checks, and local `.codex/ticket-workspace/AGENTS.md` repair.
 - `plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py` - canonical JSON serialization, deterministic `evt_`, `mut_`, and `appr_` IDs, and fingerprint helpers.
 - `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py` - pending-summary envelope types, validation, append-only JSONL writer, lock/temp-file handling, event-derived state, recovery projections that receive live ticket fingerprints from gateway/CLI callers, summaries, and compaction.
@@ -257,6 +257,16 @@ Required dispatch map:
 | `done` | `EngineAction.CLOSE` with `fields["resolution"] == "done"` |
 | `wontfix` | `EngineAction.CLOSE` with `fields["resolution"] == "wontfix"` |
 | `reopen` | `EngineAction.REOPEN` with `fields["reopen_reason"]` and a gateway-authorized reopen path |
+
+Autonomous gateway dispatch is field-authoritative, not only
+action-authoritative. Each automatic action has a closed field allowlist before
+the live engine sees it. In particular, automatic `done` and `wontfix` may only
+dispatch the close fields the gateway explicitly needs for the resolution and
+required autonomous bookkeeping. If candidate input or `GatewayMutation.fields`
+contains `archive`, `archive: true`, or any other close-field not on the
+allowlist, the candidate must route to `require_user_discussion` before dispatch
+or fail closed at the gateway as a defense-in-depth check. Do not silently strip
+forbidden close fields.
 
 The gateway-authorized reopen path must not loosen generic agent-origin
 `reopen`. Direct agent engine calls keep the existing defense-in-depth block;
@@ -805,6 +815,10 @@ Tests must cover:
   `repo_fingerprint`, `branch`, and `head` when git metadata is available.
 - Missing `repo_context`, missing available branch/HEAD, or mismatched
   worktree identity is invalid.
+- Envelope validation proves shape and required fields only. It must not treat
+  caller-supplied `repo_context` as live proof; Task 10 performs the live
+  `project_root` comparison before candidate discovery and before gateway-owned
+  write events.
 - Valid event/status compatibility matrix.
 - Finite action, decision, mode, evidence kind, pause reason, and commit disposition values.
 - Preview-mode records use `status: "skipped"` with
@@ -1185,6 +1199,9 @@ Tests must prove:
 
 - Ordinary update, blocker edit, refinement, done, wontfix, and reopen candidates can route to `apply_autonomously` when mode is `agent_primary`, evidence floor is met, and no conflict exists.
 - Delete, archive, and history repair route to `require_user_discussion`.
+- `done` or `wontfix` candidates with `archive`, `archive: true`, or any
+  non-allowlisted close field route to `require_user_discussion`; archive must
+  not be smuggled through an otherwise automatic close action.
 - `discussion_only` routes autonomous candidates to `require_user_discussion`.
 - `preview` routes decisions to `preview_only` and does not authorize writes.
 - Conflicting candidates route to `skip_due_to_conflict`.
@@ -1193,8 +1210,10 @@ Tests must prove:
 - Approval envelopes bind ticket ID, mutation ID, current mode, decision kind, current ticket-state fingerprint, proposed mutation fingerprint, and evidence fingerprint.
 - Approval expiration is no more than 10 minutes.
 - Ticket-facing actions map to engine dispatch exactly:
-  - `done` becomes engine `close` with `resolution: "done"`.
-  - `wontfix` becomes engine `close` with `resolution: "wontfix"`.
+  - `done` becomes engine `close` with only allowlisted close fields and
+    `resolution: "done"`.
+  - `wontfix` becomes engine `close` with only allowlisted close fields and
+    `resolution: "wontfix"`.
   - metadata, blocker, stale cleanup, refinement, and correction actions become engine `update`.
   - `reopen` remains engine `reopen` and requires `reopen_reason`.
 - Direct generic agent-origin `reopen` remains policy-blocked outside the
@@ -1308,8 +1327,10 @@ Tests must prove:
 - Maintenance/doctor bypasses are named and not accepted by the autonomous gateway.
 - Gateway dispatch maps Ticket-facing action names to the live engine API before
   mutation:
-  - `done` -> `close` plus `resolution: "done"`.
-  - `wontfix` -> `close` plus `resolution: "wontfix"`.
+  - `done` -> `close` plus only allowlisted close fields and
+    `resolution: "done"`.
+  - `wontfix` -> `close` plus only allowlisted close fields and
+    `resolution: "wontfix"`.
   - `reprioritize`, `blocker_edit`, `stale_cleanup`, `refine`, and
     `correction` -> `update`.
   - `reopen` -> `reopen` only through the gateway-authorized path after
@@ -1362,6 +1383,9 @@ Implementation requirements:
 - Build `EngineDispatch` from `GatewayMutation` before calling
   `ticket_engine_core.py`; never pass Ticket-facing actions such as `done` or
   `wontfix` directly to the engine.
+- Enforce a closed field allowlist inside `build_engine_dispatch()`. Automatic
+  close dispatch must reject `archive` and all non-allowlisted close fields
+  instead of passing them through or silently removing them.
 - Apply the existing low-level mutation mechanics through `ticket_engine_core.py`
   using `EngineDispatch.engine_action` and normalized fields.
 - Add the smallest explicit gateway-authorized reopen path needed for approved
@@ -1411,6 +1435,37 @@ git commit -m "feat(ticket): add autonomous write gateway"
 - Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`
 - Create: `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`
 
+- [ ] **Step 0: Define live repo-context verification helpers**
+
+Required source surface inside `ticket_autonomy.py` or a focused helper it owns:
+
+```python
+@dataclass(frozen=True, slots=True)
+class VerifiedRepoContext:
+    repo_root: Path
+    worktree_root: Path
+    repo_fingerprint: str
+    branch: str | None
+    head: str | None
+    as_event_payload: Mapping[str, object]
+
+
+def build_repo_context(project_root: Path) -> VerifiedRepoContext: ...
+def verify_turn_repo_context(
+    *,
+    project_root: Path,
+    supplied_git: Mapping[str, object],
+) -> VerifiedRepoContext: ...
+```
+
+`build_repo_context()` reads live filesystem/git state from `project_root`.
+`verify_turn_repo_context()` compares the strict turn-context `git` object to
+that live state. `repo_root`, `worktree_root`, `repo_fingerprint`, `branch`, and
+`head` must match whenever git metadata is available. A mismatch is a fail-closed
+condition: do not discover candidates, do not append mutation-attempt records,
+do not call the gateway, and return one paused or discussion/recovery-needed JSON
+response naming the repo-context mismatch.
+
 - [ ] **Step 1: Write end-to-end `apply-turn` tests**
 
 Use a strict context file:
@@ -1459,9 +1514,13 @@ Assertions:
   direct edits to `.codex/ticket.local.md` do not change later turns for that
   same thread/project, while a different `thread_id` reads the current strict
   config and receives a separate snapshot.
-- Every pending-summary event copies `repo_context` from the strict turn
-  context `git` object, including repo root, worktree root, repo fingerprint,
-  branch, and HEAD.
+- `verify_turn_repo_context()` compares the strict turn-context `git` object
+  against live repo state from `project_root` before candidate discovery.
+- Supplied branch, HEAD, repo root, worktree root, or repo fingerprint mismatch
+  returns a fail-closed response and performs no autonomous writes.
+- Every pending-summary event uses the verified live repo context, including
+  repo root, worktree root, repo fingerprint, branch, and HEAD, not an unchecked
+  copy of the caller-supplied `git` object.
 - Approved ticket writes do not append terminal `applied` records before
   `apply_autonomous_mutation()` runs.
 - Successful approved writes receive gateway-owned events in order:
@@ -1491,30 +1550,33 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 `apply-turn` order:
 
 1. Validate context JSON.
-2. If context `operation` is `pause_automation`, write the workspace pause
+2. Build live repo context from `project_root` and verify the strict
+   turn-context `git` object against it. Fail closed on mismatch before
+   candidate discovery or pending-summary mutation records.
+3. If context `operation` is `pause_automation`, write the workspace pause
    marker, rewrite `.codex/ticket.local.md` to strict JSON `discussion_only`,
    verify local files are ignored and unstaged, return the explicit pause JSON,
    and stop before candidate discovery.
-3. Ensure local workspace setup.
-4. Resolve thread-scoped mode from the local snapshot keyed by
+4. Ensure local workspace setup.
+5. Resolve thread-scoped mode from the local snapshot keyed by
    `(project_root, thread_id)`. If no snapshot exists, read strict config and
    write the first snapshot for that thread/project.
-5. Check workspace pause marker.
-6. Run the event-derived recovery health check from Task 5 and block new
+6. Check workspace pause marker.
+7. Run the event-derived recovery health check from Task 5 and block new
    writes if bookkeeping is unhealthy. For incomplete write states that require
    live ticket fingerprint comparison, return a paused recovery-needed response
    until the full Task 11 projection is available.
-7. Discover candidates and evidence.
-8. Evaluate candidates.
-9. Append pending-summary records itself only for non-write outcomes:
+8. Discover candidates and evidence.
+9. Evaluate candidates.
+10. Append pending-summary records itself only for non-write outcomes:
    `skipped`, preview-mode `status: "skipped"` with
    `decision: "preview_only"`, `discussion_required`, `deferred`, and
    non-gateway `failed`.
-10. Apply approved mutations through `apply_autonomous_mutation()` and let the
+11. Apply approved mutations through `apply_autonomous_mutation()` and let the
    gateway own `mutation_attempt`, `approval_consumed`, `ticket_written`, and
    terminal write outcomes including `applied`.
-11. Render display-ready summary and at most one discussion question.
-12. Append summary receipts.
+12. Render display-ready summary and at most one discussion question.
+13. Append summary receipts.
 
 - [ ] **Step 4: Verify and commit**
 
@@ -1835,6 +1897,9 @@ Tests must prove:
 - `ticket_autonomy.py` exposes only Ticket-level CLI commands, not raw ledger mutation commands.
 - Pending-summary validation rejects events missing required `repo_context` or
   available branch/HEAD/worktree identity.
+- `ticket_autonomy.py apply-turn` verifies turn-context repo data against live
+  `project_root` repo/worktree/branch/HEAD before candidate discovery and uses
+  the verified live context in pending-summary events.
 - Direct active-ticket write paths outside the gateway or specific named
   maintenance command functions are flagged; whole helper-file allowlists are
   not sufficient proof.
