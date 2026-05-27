@@ -6,7 +6,16 @@ Single source of truth for the ticket plugin. All components (skills, agents, en
 
 - Active tickets: `docs/tickets/`
 - Archived tickets: `docs/tickets/closed-tickets/`
-- Audit trail: `docs/tickets/.audit/YYYY-MM-DD/<session_id>.jsonl`
+- Future autonomous durable history: each affected ticket's
+  `## Change History` section
+- Future autonomous local bookkeeping:
+  `.codex/ticket-workspace/ticket.pending-summary.jsonl`
+- Legacy audit artifacts: `docs/tickets/.audit/YYYY-MM-DD/<session_id>.jsonl`
+  may exist as historical project artifacts. Future `.audit/` writes are
+  disabled; autonomous Ticket durable history must not write there unless a
+  later migration explicitly changes this contract. Read/doctor support for
+  existing historical `.audit/` files remains until a separate migration decides
+  their fate.
 - Path boundary: hook payload files and all CLI `tickets_dir` arguments must resolve inside workspace/project root
 - tickets_dir resolution: CLI entrypoints resolve tickets_dir against a marker-based project root (nearest ancestor containing .codex/ or .git/), not against cwd. Root discovery starts from a resolved path, so symlinked cwd values are canonicalized before marker lookup. Explicit tickets_dir must resolve inside the project root. If no project root is found, the operation is rejected (policy_blocked).
 - Naming: `YYYY-MM-DD-<slug>.md`
@@ -54,7 +63,11 @@ Single source of truth for the ticket plugin. All components (skills, agents, en
 
 Recommended core sections: Problem, Approach, Acceptance Criteria, Verification, Key Files
 
-Runtime note (v1.0): missing sections are advisory warnings/process failures, not hard runtime schema rejections.
+Autonomous runtime requirement: `## Change History` is required for tickets
+created or mutated by the autonomous Ticket flow.
+Runtime note (v1.0): missing sections are advisory warnings/process failures,
+not hard runtime schema rejections, except that autonomous mutation must fail
+closed when `## Change History` cannot carry its required durable fact.
 Runtime note (v1.0): `update` mutates YAML frontmatter only. Section-backed fields are not writable through the `update` action.
 Capture-created tickets support these body sections: Captured Request, Problem, Next Action, Acceptance Criteria.
 Capture metadata never stores a raw user wording field; the rendered Captured Request section is a synthesized ticket section, not schema provenance.
@@ -65,7 +78,62 @@ Captured Request, Next Action, Context, Prior Investigation, Decisions Made, Rel
 
 ### Section Ordering
 
-Captured Request → Problem → Next Action → Context → Prior Investigation → Approach → Decisions Made → Acceptance Criteria → Verification → Key Files → Related → Reopen History
+Captured Request → Problem → Next Action → Context → Prior Investigation → Approach → Decisions Made → Acceptance Criteria → Verification → Key Files → Related → Change History → Reopen History
+
+### Change History
+
+`## Change History` is a required ticket-owned section for durable lightweight
+history facts in the autonomous Ticket contract. Use it for compact entries
+that should remain with the ticket, including automatic Ticket updates and
+approved corrections.
+
+Entry format:
+
+```markdown
+- <timestamp> | <label> | <reason>
+- <timestamp> | <label> | <reason> Prior commit: <short-hash>.
+```
+
+Rules:
+
+- timestamp is ISO 8601 UTC
+- label is one of the controlled labels below
+- reason is one short sentence and must not contain raw `|`
+- no current commit hash in the same entry
+- prior commit hash appears only when referencing an already-created commit is
+  genuinely useful
+- automatic writers must not create labels outside the controlled set
+- unknown labels, compatibility aliases, or ad hoc labels are invalid for new
+  automatic entries
+
+Controlled labels:
+
+- `auto-create`: Codex automatically created this ticket for clear follow-up
+  work.
+- `auto-update`: Codex automatically updated non-lifecycle ticket metadata,
+  refinement text, priority, tags, component, or other ordinary fields.
+- `auto-blocker`: Codex automatically changed blocker or dependency state.
+- `auto-close`: Codex automatically closed the ticket as `done` or `wontfix`.
+- `auto-reopen`: Codex automatically reopened the ticket.
+- `correction`: Codex corrected or reversed a prior automatic Ticket change.
+- `discussion-approved`: Codex applied a change after policy required user
+  discussion, such as delete, archive, or history repair. Do not use this label
+  for ordinary user-requested Ticket changes that fit an action-specific label.
+
+Keep YAML frontmatter for current ticket metadata, not a growing history log.
+Do not store local pending-summary detail or full before/after correction
+payloads in `## Change History`.
+Do not try to write the containing commit's own hash into the same committed
+ticket change. That hash is self-referential and does not exist when the ticket
+file is written. The end-of-turn summary may report the created commit hash,
+and a later `## Change History` entry may reference an earlier commit hash when
+that is genuinely useful.
+
+When an automatic Ticket mutation needs a durable lightweight history fact, the
+`## Change History` entry must be written as part of the same ticket-file
+mutation. If the automatic flow cannot create or update `## Change History`
+cleanly, it must pause or defer the automatic ticket change rather than leave
+durable project history incomplete.
 
 ### Capture Refinement Semantics
 

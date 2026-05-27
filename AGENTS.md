@@ -194,6 +194,14 @@ clean closeout.
 
 - Before edits, check `git status --short --branch`.
 - Before staging or committing, review `git diff --stat` and the relevant diff.
+- For completed file-changing work in this repo, create a local commit by
+  default after focused verification when a coherent commit can be made.
+- Do not create the automatic local commit if the user asked not to commit, the
+  turn was review-only or exploratory, verification is failing or blocked, the
+  work is incomplete, or unrelated/overlapping dirty files make safe staging
+  ambiguous.
+- Keep publishing explicit. Do not push commits, create pull requests, or
+  otherwise publish changes unless the user asks for that.
 - Use branch names that match the user-level branch policy when creating a
   branch from `main`: `feature/*`, `fix/*`, `hotfix/*`, or `chore/*`.
 - Keep commits coherent by surface: docs-only, Handoff source, Ticket source,
