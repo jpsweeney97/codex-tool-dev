@@ -248,8 +248,25 @@ Runtime activation driver failures use:
 
 Runtime-first modes: `discussion_only`, `preview`, and `agent_primary`.
 
-Config: strict local `.codex/ticket.local.md` JSON once the autonomy setup slice
-lands.
+Config is strict local `.codex/ticket.local.md` JSON:
+
+```json
+{"schema":"codex.ticket.local.v1","mode":"agent_primary"}
+```
+
+The config file accepts exactly `schema` and `mode`. Missing config, unknown
+keys, Markdown, YAML frontmatter, comments, and older mode names are
+`setup_required`, not implicit defaults. Guided setup maps `automatic` to
+`agent_primary` and `ask_first` to `discussion_only`; `preview` is manual-only
+config.
+
+Workspace state lives under ignored `.codex/ticket-workspace/`. Mode snapshots
+are scoped to `(project_root, thread_id)`: the first automatic turn in a thread
+reads strict config and writes a local snapshot, and later turns reuse that
+snapshot even if `.codex/ticket.local.md` changes. `.codex/ticket-workspace/pause.json`
+blocks autonomous mode resolution immediately. Production resume requires an
+explicit setup choice, removes the pause marker, invalidates project-local mode
+snapshots, and rewrites strict JSON config before later automatic writes can run.
 
 `request_origin`: "user" (ticket_engine_user.py), "agent" (ticket_engine_agent.py), "unknown" (fail closed)
 

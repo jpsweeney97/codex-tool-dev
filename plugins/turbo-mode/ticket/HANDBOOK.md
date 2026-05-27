@@ -157,6 +157,16 @@ Future autonomous durable history writes to `## Change History` on each affected
 
 Direct `ticket_engine_agent.py execute` is not an autonomous mutation route in this source slice. It fails closed with `gateway_required` until the runtime-first gateway can validate a gateway-approved decision, append pending-summary bookkeeping, and write ticket-local `## Change History`. This is a fail-closed source boundary, not installed-runtime proof.
 
+Local automation setup is strict JSON at `.codex/ticket.local.md`:
+
+```json
+{"schema":"codex.ticket.local.v1","mode":"agent_primary"}
+```
+
+Allowed modes are `discussion_only`, `preview`, and `agent_primary`. Missing, Markdown, YAML frontmatter, old mode names, comments, or unknown keys all require setup instead of falling back to a default. Guided setup choices map `automatic` to `agent_primary` and `ask_first` to `discussion_only`; `preview` is manual-only config.
+
+Local runtime-first workspace state lives under `.codex/ticket-workspace/`, which must stay ignored by git. The workspace owns local mode snapshots and `pause.json`; a pause immediately blocks autonomous mode resolution until resume rewrites strict JSON config from an explicit setup choice and invalidates stale snapshots.
+
 ### Path Resolution
 
 No shell environment variable is required for normal operation. Skills resolve

@@ -227,7 +227,7 @@ class TestExecuteInput:
                 "dedup_override": True,
                 "dependency_override": True,
                 "target_fingerprint": "abc123",
-                "autonomy_config": {"mode": "auto_audit", "max_creates": 5},
+                "autonomy_config": {"mode": "agent_primary", "warnings": []},
                 "hook_injected": True,
                 "hook_request_origin": "user",
                 "classify_intent": "update",
@@ -242,7 +242,7 @@ class TestExecuteInput:
         assert inp.dedup_override is True
         assert inp.dependency_override is True
         assert inp.target_fingerprint == "abc123"
-        assert inp.autonomy_config_data == {"mode": "auto_audit", "max_creates": 5}
+        assert inp.autonomy_config_data == {"mode": "agent_primary", "warnings": []}
         assert inp.hook_injected is True
         assert inp.hook_request_origin == "user"
         assert inp.classify_intent == "update"

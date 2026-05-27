@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
+from scripts.ticket_autonomy_config import AutomationMode, LocalConfigState, read_local_config
 from scripts.ticket_id import allocate_id, build_filename
 from scripts.ticket_parse import (
     ParsedTicket,
@@ -27,7 +28,6 @@ from scripts.ticket_parse import (
 )
 from scripts.ticket_paths import discover_project_root
 from scripts.ticket_render import render_ticket, replace_fenced_yaml
-from scripts.ticket_runtime_readiness import verify_installed_ticket_runtime_readiness_for_execute
 from scripts.ticket_trust import collect_trust_triple_errors
 from scripts.ticket_validate import validate_fields
 
@@ -141,42 +141,31 @@ class EngineResponse:
 # Sentinel for audit read failures.
 AUDIT_UNAVAILABLE = object()
 
-AutonomyMode = Literal["suggest", "auto_audit", "auto_silent"]
-_VALID_AUTONOMY_MODES = frozenset({"suggest", "auto_audit", "auto_silent"})
-
 
 @dataclass(frozen=True)
 class AutonomyConfig:
-    """Autonomy configuration parsed from .codex/ticket.local.md.
+    """Immutable runtime-first automation config snapshot."""
 
-    Frozen and self-validating: invalid mode/max_creates are self-healed
-    to safe defaults in __post_init__. Immutable after construction to
-    prevent TOCTOU mutations between preflight and execute.
-
-    mode: "suggest" (default) | "auto_audit" | "auto_silent"
-    max_creates: per-session create cap (default 5, 0 = disable agent creates)
-    warnings: parsing/validation warnings (empty tuple if clean)
-    """
-
-    mode: AutonomyMode = "suggest"
-    max_creates: int = 5
+    mode: AutomationMode | str = AutomationMode.DISCUSSION_ONLY
     warnings: tuple[str, ...] = ()
+    max_creates: int | None = None
 
     def __post_init__(self) -> None:
         extra_warnings: list[str] = []
-        if self.mode not in _VALID_AUTONOMY_MODES:
-            extra_warnings.append(f"Invalid mode {self.mode!r}, defaulted to 'suggest'")
-            object.__setattr__(self, "mode", "suggest")
-        if not isinstance(self.max_creates, int) or self.max_creates < 0:
-            extra_warnings.append(f"Invalid max_creates {self.max_creates!r}, defaulted to 5")
-            object.__setattr__(self, "max_creates", 5)
+        if not isinstance(self.mode, AutomationMode):
+            try:
+                object.__setattr__(self, "mode", AutomationMode(self.mode))
+            except ValueError:
+                extra_warnings.append(
+                    f"Invalid mode {self.mode!r}, defaulted to 'discussion_only'"
+                )
+                object.__setattr__(self, "mode", AutomationMode.DISCUSSION_ONLY)
         if extra_warnings:
             object.__setattr__(self, "warnings", self.warnings + tuple(extra_warnings))
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "mode": self.mode,
-            "max_creates": self.max_creates,
+            "mode": self.mode.value,
             "warnings": list(self.warnings),
         }
 
@@ -188,9 +177,9 @@ class AutonomyConfig:
         to safe defaults with warnings appended.
         """
         return cls(
-            mode=data.get("mode", "suggest"),
-            max_creates=data.get("max_creates", 5),
+            mode=data.get("mode", AutomationMode.DISCUSSION_ONLY),
             warnings=tuple(data.get("warnings", ())),
+            max_creates=data.get("max_creates"),
         )
 
 
@@ -434,77 +423,33 @@ _ORIGIN_MODIFIER: dict[str, float] = {"user": 0.0, "agent": 0.15}
 _TERMINAL_STATUSES = frozenset({"done", "wontfix"})
 
 
-def read_autonomy_config(tickets_dir: Path) -> AutonomyConfig:
-    """Read autonomy config from .codex/ticket.local.md YAML frontmatter.
-
-    Project root discovery reuses the same marker-based lookup as the
-    entrypoints (.codex/, .git/, or .git worktree file).
-
-    Fail-closed: returns AutonomyConfig(mode="suggest") on any error.
-    Emits warnings to stderr for malformed/unknown values.
-    """
-    warnings: list[str] = []
+def _read_autonomy_config_state(
+    tickets_dir: Path,
+) -> tuple[AutonomyConfig, LocalConfigState, str | None]:
     project_root = discover_project_root(tickets_dir)
     if project_root is None:
-        return AutonomyConfig()
-
-    config_path = project_root / ".codex" / "ticket.local.md"
-    if not config_path.is_file():
-        return AutonomyConfig()
-
-    try:
-        import yaml
-
-        text = config_path.read_text(encoding="utf-8")
-        if not text.startswith("---"):
-            warnings.append(
-                "ticket.local.md: file exists but has no valid frontmatter (missing --- delimiters)"
-            )
-            print(f"WARNING: {warnings[-1]}", file=sys.stderr)
-            return AutonomyConfig(warnings=tuple(warnings))
-        parts = text.split("---", 2)
-        if len(parts) < 3:
-            warnings.append(
-                "ticket.local.md: file exists but has no valid frontmatter "
-                "(incomplete --- delimiters)"
-            )
-            print(f"WARNING: {warnings[-1]}", file=sys.stderr)
-            return AutonomyConfig(warnings=tuple(warnings))
-        data = yaml.safe_load(parts[1])
-        if not isinstance(data, dict):
-            warnings.append("ticket.local.md: frontmatter is not a dict")
-            print(f"WARNING: {warnings[-1]}", file=sys.stderr)
-            return AutonomyConfig(warnings=tuple(warnings))
-    except (OSError, ValueError) as exc:
-        warnings.append(f"ticket.local.md: failed to parse YAML: {exc}")
-        print(f"WARNING: {warnings[-1]}", file=sys.stderr)
-        return AutonomyConfig(warnings=tuple(warnings))
-    except Exception as exc:
-        # yaml.YAMLError doesn't share a base with OSError/ValueError.
-        # Keep unexpected non-YAML exceptions visible.
-        if "yaml" in type(exc).__module__.lower():
-            warnings.append(f"ticket.local.md: failed to parse YAML: {exc}")
-            print(f"WARNING: {warnings[-1]}", file=sys.stderr)
-            return AutonomyConfig(warnings=tuple(warnings))
-        raise
-
-    # Parse mode.
-    mode = data.get("autonomy_mode", "suggest")
-    if mode not in _VALID_AUTONOMY_MODES:
-        warnings.append(f"ticket.local.md: unknown autonomy_mode {mode!r}, defaulting to 'suggest'")
-        print(f"WARNING: {warnings[-1]}", file=sys.stderr)
-        mode = "suggest"
-
-    # Parse max_creates.
-    max_creates = data.get("max_creates_per_session", 5)
-    if not isinstance(max_creates, int) or max_creates < 0:
-        warnings.append(
-            f"ticket.local.md: invalid max_creates_per_session {max_creates!r}, defaulting to 5"
+        return (
+            AutonomyConfig(warnings=("project_root_not_found",)),
+            LocalConfigState.SETUP_REQUIRED,
+            "project_root_not_found",
         )
-        print(f"WARNING: {warnings[-1]}", file=sys.stderr)
-        max_creates = 5
 
-    return AutonomyConfig(mode=mode, max_creates=max_creates, warnings=tuple(warnings))
+    result = read_local_config(project_root)
+    if result.state == LocalConfigState.VALID and result.mode is not None:
+        return AutonomyConfig(mode=result.mode), LocalConfigState.VALID, None
+
+    reason = result.reason or "setup_required"
+    return (
+        AutonomyConfig(mode=AutomationMode.DISCUSSION_ONLY, warnings=(reason,)),
+        LocalConfigState.SETUP_REQUIRED,
+        reason,
+    )
+
+
+def read_autonomy_config(tickets_dir: Path) -> AutonomyConfig:
+    """Read strict local automation config for legacy engine callers."""
+    config, _state, _reason = _read_autonomy_config_state(tickets_dir)
+    return config
 
 
 def engine_preflight(
@@ -560,7 +505,7 @@ def engine_preflight(
     checks_passed.append("action")
 
     # --- Autonomy policy (Codex finding 5: agent checks before confidence) ---
-    config = read_autonomy_config(tickets_dir)
+    config, config_state, config_reason = _read_autonomy_config_state(tickets_dir)
     notification: str | None = None
 
     if request_origin == "agent":
@@ -613,68 +558,33 @@ def engine_preflight(
                 },
             )
 
-        # Autonomy mode enforcement.
-        if config.mode == "suggest":
+        if config_state != LocalConfigState.VALID:
             return EngineResponse(
                 state="policy_blocked",
-                message=f"Autonomy mode 'suggest': agent {action} requires user approval",
-                error_code="policy_blocked",
+                message="Ticket automation setup is required before agent mutations can run.",
+                error_code="setup_required",
                 data={
                     "checks_passed": checks_passed,
                     "checks_failed": [
-                        {"check": "autonomy_mode", "reason": "suggest mode blocks agents"}
+                        {"check": "local_config", "reason": config_reason or "setup_required"}
                     ],
                     "autonomy_config": config.to_dict(),
                 },
             )
 
-        if config.mode == "auto_silent":
-            return EngineResponse(
-                state="policy_blocked",
-                message="Autonomy mode 'auto_silent' is not available in v1.0",
-                error_code="policy_blocked",
-                data={
-                    "checks_passed": checks_passed,
-                    "checks_failed": [
-                        {"check": "autonomy_mode", "reason": "auto_silent gated in v1.0"}
-                    ],
-                    "autonomy_config": config.to_dict(),
-                },
-            )
-
-        # auto_audit: check session cap for create actions.
-        if config.mode == "auto_audit" and action == "create":
-            count = engine_count_session_creates(session_id, tickets_dir)
-            if count is AUDIT_UNAVAILABLE:
-                return EngineResponse(
-                    state="policy_blocked",
-                    message="Cannot verify session create count (audit trail unavailable)",
-                    error_code="policy_blocked",
-                    data={
-                        "checks_passed": checks_passed,
-                        "checks_failed": [{"check": "session_cap", "reason": "audit unavailable"}],
-                        "autonomy_config": config.to_dict(),
-                    },
-                )
-            if count >= config.max_creates:
-                return EngineResponse(
-                    state="policy_blocked",
-                    message=f"Session create cap reached: {count}/{config.max_creates}",
-                    error_code="policy_blocked",
-                    data={
-                        "checks_passed": checks_passed,
-                        "checks_failed": [
-                            {"check": "session_cap", "reason": f"{count}/{config.max_creates}"}
-                        ],
-                        "autonomy_config": config.to_dict(),
-                    },
-                )
-            notification = (
-                f"Auto-audit: agent {action} approved "
-                f"(session creates: {count}/{config.max_creates})"
-            )
-        elif config.mode == "auto_audit":
-            notification = f"Auto-audit: agent {action} approved"
+        return EngineResponse(
+            state="policy_blocked",
+            message=(
+                "Agent mutations require a runtime-first autonomy gateway decision before "
+                "Ticket can write."
+            ),
+            error_code="gateway_required",
+            data={
+                "checks_passed": checks_passed,
+                "checks_failed": [{"check": "runtime_gateway", "reason": "gateway_required"}],
+                "autonomy_config": config.to_dict(),
+            },
+        )
 
     checks_passed.append("autonomy_policy")
 
@@ -1146,9 +1056,9 @@ def _format_blocker_message(
     return " ".join(parts)
 
 
-def _autonomy_policy_fingerprint(config: AutonomyConfig) -> tuple[str, int]:
+def _autonomy_policy_fingerprint(config: AutonomyConfig) -> tuple[str]:
     """Return the policy-relevant autonomy fields."""
-    return (config.mode, config.max_creates)
+    return (config.mode.value,)
 
 
 def _check_transition_preconditions(
@@ -1314,7 +1224,9 @@ def engine_execute(
         )
 
     snapshot_config = autonomy_config
-    if request_origin == "agent":
+    if request_origin == "agent" and runtime_execute_surface == "direct_execute":
+        config = snapshot_config or AutonomyConfig()
+    elif request_origin == "agent":
         config = read_autonomy_config(tickets_dir)
         if snapshot_config is not None and _autonomy_policy_fingerprint(
             snapshot_config
@@ -1434,14 +1346,6 @@ def engine_execute(
             error_code="policy_blocked",
         )
 
-    # autonomy_config: required for agent-origin (snapshot from preflight).
-    if request_origin == "agent" and autonomy_config is None:
-        return EngineResponse(
-            state="policy_blocked",
-            message="Agent execute requires autonomy_config snapshot (rerun from preflight)",
-            error_code="policy_blocked",
-        )
-
     if request_origin == "agent" and runtime_execute_surface == "direct_execute":
         return EngineResponse(
             state="policy_blocked",
@@ -1450,6 +1354,14 @@ def engine_execute(
                 "Use the runtime-first autonomy gateway once it is available."
             ),
             error_code="gateway_required",
+        )
+
+    # autonomy_config: required for agent-origin (snapshot from preflight).
+    if request_origin == "agent" and autonomy_config is None:
+        return EngineResponse(
+            state="policy_blocked",
+            message="Agent execute requires autonomy_config snapshot (rerun from preflight)",
+            error_code="policy_blocked",
         )
 
     # --- Autonomy defense-in-depth (self-contained allowlist) ---
@@ -1472,61 +1384,15 @@ def engine_execute(
                 message="Defense-in-depth: agents cannot use dependency_override",
                 error_code="policy_blocked",
             )
-        if config.mode != "auto_audit":
-            dind_data: dict[str, Any] = {"live_mode": config.mode}
-            if config.warnings:
-                dind_data["live_warnings"] = list(config.warnings)
-            return EngineResponse(
-                state="policy_blocked",
-                message=f"Defense-in-depth: autonomy mode {config.mode!r} blocks agent mutations",
-                error_code="policy_blocked",
-                data=dind_data,
-            )
-        if action == "create":
-            count = engine_count_session_creates(session_id, tickets_dir)
-            if count is AUDIT_UNAVAILABLE or (
-                isinstance(count, int) and count >= config.max_creates
-            ):
-                return EngineResponse(
-                    state="policy_blocked",
-                    message=f"Defense-in-depth: session create cap ({config.max_creates})",
-                    error_code="policy_blocked",
-                )
-        if runtime_execute_surface == "direct_execute":
-            try:
-                project_root = discover_project_root(tickets_dir)
-            except OSError as exc:
-                return EngineResponse(
-                    state="policy_blocked",
-                    message=f"Cannot determine project root: {exc}. Got: {str(tickets_dir)!r:.100}",
-                    error_code="policy_blocked",
-                )
-            if project_root is None:
-                return EngineResponse(
-                    state="policy_blocked",
-                    message=(
-                        "Cannot determine project root: no .codex/ or .git/ marker found "
-                        "for runtime readiness verification"
-                    ),
-                    error_code="policy_blocked",
-                )
-            runtime_verification = verify_installed_ticket_runtime_readiness_for_execute(
-                project_root=project_root,
-                proof_path=runtime_proof_path,
-                allow_activation_bootstrap=allow_activation_bootstrap,
-            )
-            if not runtime_verification.passed:
-                return EngineResponse(
-                    state="policy_blocked",
-                    message=runtime_verification.message,
-                    error_code="runtime_readiness_required",
-                    data={
-                        "runtime_readiness": {
-                            "error_code": runtime_verification.error_code,
-                            "message": runtime_verification.message,
-                        }
-                    },
-                )
+        dind_data: dict[str, Any] = {"live_mode": config.mode.value}
+        if config.warnings:
+            dind_data["live_warnings"] = list(config.warnings)
+        return EngineResponse(
+            state="policy_blocked",
+            message="Defense-in-depth: agent mutations require the runtime-first gateway",
+            error_code="gateway_required",
+            data=dind_data,
+        )
 
     # C-008: dedup_override must be bound to a specific duplicate candidate.
     if action == "create" and dedup_override and not duplicate_of:

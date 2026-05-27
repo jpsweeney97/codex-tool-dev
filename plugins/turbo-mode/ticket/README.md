@@ -163,6 +163,16 @@ Future autonomous durable history writes to `## Change History` on each affected
 
 Direct `ticket_engine_agent.py execute` is not an autonomous mutation route in this source slice. It fails closed with `gateway_required` until the runtime-first gateway can validate a gateway-approved decision, append pending-summary bookkeeping, and write ticket-local `## Change History`.
 
+Local automation setup is strict JSON at `.codex/ticket.local.md`:
+
+```json
+{"schema":"codex.ticket.local.v1","mode":"agent_primary"}
+```
+
+Allowed modes are `discussion_only`, `preview`, and `agent_primary`. Missing or invalid config is `setup_required`; the engine does not fall back to older YAML/frontmatter modes. Guided setup choices map `automatic` to `agent_primary` and `ask_first` to `discussion_only`; `preview` is manual-only config.
+
+Local runtime-first workspace state lives under `.codex/ticket-workspace/`, which must stay ignored by git. The workspace owns local mode snapshots and `pause.json`; a workspace pause immediately blocks autonomous mode resolution until resume rewrites strict JSON config from an explicit setup choice and invalidates stale mode snapshots.
+
 ### Path Resolution
 
 Skills and hooks do not require shell environment setup. Skills derive the plugin root from their installed skill path, and the hook derives it from the parent of `hooks/`.
@@ -344,7 +354,7 @@ The `agents/` directory is a placeholder (`.gitkeep` only) — consuming project
 
 ### Consuming Project Setup
 
-Runtime-first autonomous setup is not enabled by editing YAML mode flags. Use the future host-facing autonomy CLI once it lands; until then, keep agent-origin writes in discussion or user-confirmed flows.
+Runtime-first autonomous setup is not enabled by editing YAML mode flags. Use strict `.codex/ticket.local.md` JSON only, keep `.codex/ticket-workspace/` ignored, and keep agent-origin writes in discussion or user-confirmed flows until the runtime-first gateway lands.
 
 ## Development
 

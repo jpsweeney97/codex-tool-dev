@@ -28,7 +28,7 @@ from typing import Any, Literal, NotRequired, TypeAlias, TypedDict, cast
 REQUEST_TIMEOUT_SECONDS = 30.0
 RUNTIME_PROOF_PATH_ENV = "TICKET_RUNTIME_PROOF_PATH"
 RUNTIME_ACTIVATION_BOOTSTRAP_ENV = "TICKET_RUNTIME_ACTIVATION_BOOTSTRAP"
-_POST_DIRECT_AUTONOMY_CONFIG = "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n"
+_POST_DIRECT_AUTONOMY_CONFIG = '{"schema":"codex.ticket.local.v1","mode":"agent_primary"}\n'
 
 RuntimeReadinessErrorCode: TypeAlias = Literal[
     "proof_missing",
@@ -144,7 +144,7 @@ class ActivationScopeProof(TypedDict):
     certified_entrypoints: list[str]
     certified_policy_lane: str
     excluded_mutation_paths: list[str]
-    autonomy_mode: Literal["auto_audit"]
+    automation_mode: Literal["agent_primary"]
     caller_identity_proven: bool
     hook_request_origin_contract: str
 
@@ -359,7 +359,7 @@ def _write_post_direct_autonomy_config(post_root: Path) -> dict[str, Any]:
         _POST_DIRECT_AUTONOMY_CONFIG,
         encoding="utf-8",
     )
-    return {"mode": "auto_audit", "max_creates": 5, "warnings": []}
+    return {"mode": "agent_primary", "warnings": []}
 
 
 def verify_installed_ticket_runtime_readiness_for_execute(
@@ -1369,7 +1369,7 @@ def build_activation_candidate(
         "activation_scope": {
             "gated_execute_surfaces": ["direct_execute"],
             "certified_entrypoints": ["ticket_engine_agent.py"],
-            "certified_policy_lane": "ticket_engine_agent.py execute + autonomy_mode=auto_audit",
+            "certified_policy_lane": "ticket_engine_agent.py execute + gateway_required",
             "excluded_mutation_paths": [
                 "ingest_dispatch",
                 "activation_smoke_bootstrap",
@@ -1377,7 +1377,7 @@ def build_activation_candidate(
                 "ticket_update.py",
                 "ticket_workflow.py",
             ],
-            "autonomy_mode": "auto_audit",
+            "automation_mode": "agent_primary",
             "caller_identity_proven": False,
             "hook_request_origin_contract": "provenance_metadata_only_currently_user",
         },

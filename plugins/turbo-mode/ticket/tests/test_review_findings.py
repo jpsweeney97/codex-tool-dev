@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+from scripts.ticket_autonomy_config import AutomationMode, write_local_config
 from scripts.ticket_dedup import (
     dedup_fingerprint as compute_dedup_fp,
 )
@@ -27,7 +28,7 @@ from scripts.ticket_engine_core import (
 from scripts.ticket_read import find_ticket_by_id
 from scripts.ticket_validate import validate_fields
 
-from tests.support.builders import make_ticket, write_autonomy_config
+from tests.support.builders import make_ticket
 
 # ---------------------------------------------------------------------------
 # F1: Reopening an archived ticket must move it back to active directory
@@ -493,16 +494,15 @@ class TestF2PlanFingerprint:
 
 
 # ---------------------------------------------------------------------------
-# F3a: Agent create-cap must not count user creates
+# F3a: Future creates must not write active audit counters
 # ---------------------------------------------------------------------------
 
 
 class TestF3aOriginFilter:
-    """Repro: user create should not consume agent budget."""
+    """Historical audit counting remains readable, but future writes do not add entries."""
 
-    def test_user_creates_do_not_count_toward_agent_cap(self, tmp_tickets: Path) -> None:
+    def test_user_create_does_not_write_future_audit_count(self, tmp_tickets: Path) -> None:
         session_id = "f3a-sess"
-        # Create as user.
         engine_execute(
             action="create",
             ticket_id=None,
@@ -518,38 +518,25 @@ class TestF3aOriginFilter:
             classify_confidence=0.95,
             dedup_fingerprint=compute_dedup_fp("User created", []),
         )
-        # Agent count should be 0.
+
         assert engine_count_session_creates(session_id, tmp_tickets, request_origin="agent") == 0
-        # User count should be 1.
-        assert engine_count_session_creates(session_id, tmp_tickets, request_origin="user") == 1
+        assert engine_count_session_creates(session_id, tmp_tickets, request_origin="user") == 0
 
 
 # ---------------------------------------------------------------------------
-# F3b: Failed result audit write must escalate for agents
+# F3b: Agent writes fail before legacy audit paths
 # ---------------------------------------------------------------------------
 
 
 class TestF3bAuditResultFailClose:
-    """Repro: agent create succeeds but result audit write fails."""
+    """Runtime-first gateway blocks agent writes before any legacy audit append."""
 
-    def test_agent_create_escalates_on_result_audit_failure(self, tmp_tickets: Path) -> None:
-        import scripts.ticket_engine_core as core_mod
-
-        write_autonomy_config(
-            tmp_tickets, "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n"
-        )
-        config = AutonomyConfig(mode="auto_audit", max_creates=5)
-
-        # attempt_started writes to disk, result entry fails.
-        real_audit_append = core_mod._audit_append
-        call_count = 0
+    def test_agent_create_requires_gateway_before_audit_append(self, tmp_tickets: Path) -> None:
+        write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
+        config = AutonomyConfig(mode=AutomationMode.AGENT_PRIMARY)
 
         def patched_audit_append(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return real_audit_append(*args, **kwargs)
-            return False  # result entry fails
+            raise AssertionError("_audit_append should not run for future agent writes")
 
         with patch("scripts.ticket_engine_core._audit_append", side_effect=patched_audit_append):
             resp = engine_execute(
@@ -568,52 +555,12 @@ class TestF3bAuditResultFailClose:
                 classify_confidence=0.95,
                 dedup_fingerprint=compute_dedup_fp("Agent issue", []),
             )
-        assert resp.state == "escalate"
-        assert "audit" in resp.message.lower()
+        assert resp.state == "policy_blocked"
+        assert resp.error_code == "gateway_required"
+        assert engine_count_session_creates("f3b-sess", tmp_tickets, request_origin="agent") == 0
 
-    def test_cap_sealed_after_result_audit_failure(self, tmp_tickets: Path) -> None:
-        """After result-audit failure, attempt_started seals the count."""
-        import scripts.ticket_engine_core as core_mod
-
-        write_autonomy_config(
-            tmp_tickets, "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 1\n---\n"
-        )
-        config = AutonomyConfig(mode="auto_audit", max_creates=1)
-
-        # First create: attempt_started writes to disk, result fails.
-        real_audit_append = core_mod._audit_append
-        call_count = 0
-
-        def patched_audit_append(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return real_audit_append(*args, **kwargs)  # attempt_started writes to disk
-            return False  # result entry fails
-
-        with patch("scripts.ticket_engine_core._audit_append", side_effect=patched_audit_append):
-            engine_execute(
-                action="create",
-                ticket_id=None,
-                fields={"title": "First agent ticket", "problem": "First issue"},
-                session_id="f3b-cap-sess",
-                request_origin="agent",
-                dedup_override=False,
-                dependency_override=False,
-                tickets_dir=tmp_tickets,
-                autonomy_config=config,
-                hook_injected=True,
-                hook_request_origin="agent",
-                classify_intent="create",
-                classify_confidence=0.95,
-                dedup_fingerprint=compute_dedup_fp("First issue", []),
-            )
-
-        # Count must be 1 (from attempt_started), sealing the cap.
-        count = engine_count_session_creates("f3b-cap-sess", tmp_tickets, request_origin="agent")
-        assert count == 1
-
-        # Second create attempt: must be blocked by cap.
+    def test_agent_preflight_requires_gateway_not_legacy_cap(self, tmp_tickets: Path) -> None:
+        write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
         from scripts.ticket_engine_core import engine_preflight
 
         preflight_resp = engine_preflight(
@@ -633,7 +580,7 @@ class TestF3bAuditResultFailClose:
             tickets_dir=tmp_tickets,
         )
         assert preflight_resp.state == "policy_blocked"
-        assert "cap" in preflight_resp.message.lower() or "1/1" in preflight_resp.message
+        assert preflight_resp.error_code == "gateway_required"
 
     def test_user_create_succeeds_despite_result_audit_failure(self, tmp_tickets: Path) -> None:
         """User creates should not be blocked by result audit failures."""
@@ -663,6 +610,7 @@ class TestF3bAuditResultFailClose:
                 dedup_fingerprint=compute_dedup_fp("User issue", []),
             )
         assert resp.state == "ok_create"
+        assert call_count == 0
 
 
 # ---------------------------------------------------------------------------

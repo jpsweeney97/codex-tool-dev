@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from scripts.ticket_autonomy_config import AutomationMode, write_local_config
 from scripts.ticket_dedup import dedup_fingerprint as compute_dedup_fp
 from scripts.ticket_dedup import target_fingerprint as compute_target_fp
 from scripts.ticket_engine_runner import run
@@ -35,8 +36,7 @@ def _agent_create_payload(problem: str, hook_origin: str | None = "user") -> dic
         "classify_confidence": 0.95,
         "dedup_fingerprint": compute_dedup_fp(problem, []),
         "autonomy_config": {
-            "mode": "auto_audit",
-            "max_creates": 5,
+            "mode": "agent_primary",
             "warnings": [],
         },
     }
@@ -144,10 +144,7 @@ def test_agent_execute_with_unknown_hook_origin_rejects_before_runtime_gate(
     capsys,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    write_autonomy_config(
-        tmp_tickets,
-        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
-    )
+    write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
     project_root = tmp_tickets.parent.parent
     monkeypatch.chdir(project_root)
     payload_file = _write_payload(
@@ -173,10 +170,7 @@ def test_agent_user_hook_origin_bypass_is_execute_only(
     monkeypatch: pytest.MonkeyPatch,
     subcommand: str,
 ) -> None:
-    write_autonomy_config(
-        tmp_tickets,
-        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
-    )
+    write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
     project_root = tmp_tickets.parent.parent
     monkeypatch.chdir(project_root)
     payload_file = _write_payload(
@@ -196,10 +190,7 @@ def test_agent_execute_with_agent_hook_origin_requires_gateway_before_runtime_ga
     capsys,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    write_autonomy_config(
-        tmp_tickets,
-        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
-    )
+    write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
     project_root = tmp_tickets.parent.parent
     missing_proof = project_root / ".codex" / "agent-hook-runtime-proof.json"
     monkeypatch.chdir(project_root)
@@ -226,10 +217,7 @@ def test_agent_execute_with_missing_runtime_proof_env_still_requires_gateway_fir
     capsys,
     monkeypatch,
 ) -> None:
-    write_autonomy_config(
-        tmp_tickets,
-        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
-    )
+    write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
     project_root = tmp_tickets.parent.parent
     missing_proof = project_root / ".codex" / "missing-runtime-proof.json"
     monkeypatch.chdir(project_root)
@@ -251,8 +239,7 @@ def test_agent_execute_with_missing_runtime_proof_env_still_requires_gateway_fir
             "classify_confidence": 0.95,
             "dedup_fingerprint": compute_dedup_fp(problem, []),
             "autonomy_config": {
-                "mode": "auto_audit",
-                "max_creates": 5,
+                "mode": "agent_primary",
                 "warnings": [],
             },
         },
@@ -309,7 +296,7 @@ def test_runner_passes_activation_bootstrap_only_with_execute_proof_env(
             "classify_intent": "create",
             "classify_confidence": 0.95,
             "dedup_fingerprint": compute_dedup_fp("bootstrap", []),
-            "autonomy_config": {"mode": "auto_audit", "max_creates": 5, "warnings": []},
+            "autonomy_config": {"mode": "agent_primary", "warnings": []},
         },
     )
 

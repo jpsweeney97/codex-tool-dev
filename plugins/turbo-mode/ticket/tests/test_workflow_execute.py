@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from scripts.ticket_autonomy_config import AutomationMode, write_local_config
 from scripts.ticket_workflow import run_recovery, run_workflow
 
-from tests.support.builders import make_ticket, write_autonomy_config
+from tests.support.builders import make_ticket
 from tests.support.workflow import (
     now_iso,
     payload_file,
@@ -117,10 +118,7 @@ def test_agent_create_anyway_recovery_remains_policy_blocked(
         created_at=now_iso(),
         problem="Agent duplicate",
     )
-    write_autonomy_config(
-        tmp_tickets,
-        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
-    )
+    write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
     payload = trusted_payload(
         "create",
         {
