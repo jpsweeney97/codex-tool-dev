@@ -404,7 +404,7 @@ Source lives in `scripts/` rather than a standard Python package directory. Modu
 
 - **Triage detects linear dependency chains only**, not cycles
 - **Guard hook fails closed for Ticket candidates** — malformed hook input and internal guard errors emit stop entries instead of allowing the command through.
-- **Direct agent execute is not the autonomy gateway** — autonomous create, update, close, and reopen require the runtime-first gateway once implemented.
+- **Direct agent execute is not the autonomy gateway** — autonomous create, update, close, and reopen route through `ticket_autonomy.py apply-turn` and the runtime-first gateway; direct `ticket_engine_agent.py execute` fails closed with `gateway_required`.
 
 ## License
 

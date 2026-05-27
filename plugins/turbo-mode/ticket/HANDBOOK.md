@@ -583,7 +583,7 @@ At preflight, the engine takes a fingerprint snapshot of any existing ticket bei
 
 ## Known Limitations
 
-**Direct agent execute is not the autonomy gateway:** autonomous create, update, close, and reopen require the runtime-first gateway once implemented.
+**Direct agent execute is not the autonomy gateway:** autonomous create, update, close, and reopen route through `ticket_autonomy.py apply-turn` and the runtime-first gateway; direct `ticket_engine_agent.py execute` fails closed with `gateway_required`.
 
 **24-hour dedup window only:** Dedup fingerprinting covers a 24-hour same-day window. Tickets created on different calendar days with identical content will not be detected as duplicates, even if created minutes apart around midnight.
 

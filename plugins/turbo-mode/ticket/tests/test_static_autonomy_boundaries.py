@@ -16,6 +16,11 @@ CURRENT_FACING_DOCS = (
     PLUGIN_ROOT / "HANDBOOK.md",
     PLUGIN_ROOT / "references" / "ticket-contract.md",
 )
+ADJACENT_CURRENT_DOCS = (
+    PLUGIN_ROOT / "PRIVACY.md",
+    PLUGIN_ROOT / "TERMS.md",
+    PLUGIN_ROOT / "CHANGELOG.md",
+)
 AUTONOMY_CLI = SCRIPTS_ROOT / "ticket_autonomy.py"
 TURN_BATCH = SCRIPTS_ROOT / "ticket_turn_batch.py"
 ENGINE_AGENT = SCRIPTS_ROOT / "ticket_engine_agent.py"
@@ -43,6 +48,13 @@ FORBIDDEN_CURRENT_DOC_STRINGS = (
     "defaults to `suggest`",
     "created automatically on the first agent mutation",
     "creates `.audit`",
+)
+FORBIDDEN_STALE_GATEWAY_STRINGS = (
+    "runtime-first gateway once implemented",
+    "until the runtime-first gateway",
+    "runtime-first gateway lands",
+    "runtime-first gateway not yet available",
+    "wait for the gateway implementation",
 )
 OLD_MODE_FIXTURE_STRINGS = (
     "auto_audit",
@@ -201,6 +213,35 @@ def test_current_facing_docs_route_future_history_to_ticket_history_and_pending_
         assert "`.codex/ticket-workspace/ticket.pending-summary.jsonl`" in normalized
         assert "Existing `docs/tickets/.audit/` files are historical artifacts" in normalized
         assert "read/repair tools for existing historical `.audit/` files only" in normalized
+
+
+def test_runtime_first_closeout_docs_do_not_describe_gateway_as_future_work() -> None:
+    paths = (*CURRENT_FACING_DOCS, *ADJACENT_CURRENT_DOCS, ENGINE_AGENT, ENGINE_RUNNER)
+    for path in paths:
+        text = _read(path)
+        for forbidden in FORBIDDEN_STALE_GATEWAY_STRINGS:
+            assert forbidden not in text, f"{path} contains stale gateway wording: {forbidden}"
+
+
+def test_adjacent_current_docs_describe_runtime_first_artifacts() -> None:
+    privacy = _read(PLUGIN_ROOT / "PRIVACY.md")
+    normalized_privacy = _normalize(privacy)
+    terms = _read(PLUGIN_ROOT / "TERMS.md")
+    normalized_terms = _normalize(terms)
+    changelog = _read(PLUGIN_ROOT / "CHANGELOG.md").split("## 1.4.0", maxsplit=1)[0]
+    normalized_changelog = _normalize(changelog)
+
+    assert "`.codex/ticket-workspace/ticket.pending-summary.jsonl`" in privacy
+    assert "Existing `docs/tickets/.audit/` files are historical artifacts" in normalized_privacy
+    assert "pending-summary state, processed envelopes, or historical audit logs" in privacy
+    assert (
+        "local Ticket workspace state, processed envelopes, and historical audit logs"
+        in normalized_terms
+    )
+    assert "Runtime-first Ticket autonomy source support" in changelog
+    assert "not installed-runtime proof" in normalized_changelog
+    assert "no longer writes active `docs/tickets/.audit/`" in changelog
+    assert "legacy `suggest`, `auto_audit`, or `auto_silent` modes" in changelog
 
 
 def test_ticket_autonomy_cli_exposes_ticket_level_commands_not_raw_ledger_mutators() -> None:
