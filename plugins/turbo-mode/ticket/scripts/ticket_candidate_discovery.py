@@ -78,14 +78,55 @@ def _candidate_from_mapping(item: Mapping[str, object]) -> CandidateMutation | N
         return None
     if not isinstance(proposed_change, Mapping):
         return None
+    normalized_change = _normalize_candidate_change(action, proposed_change)
     evidence_ref = reason if isinstance(reason, str) and reason else "candidate_mutations"
+    evidence = _evidence_from_mapping(item, default_ref=evidence_ref)
     return CandidateMutation(
         ticket_id=ticket_id,
         action=action,
-        proposed_change=dict(proposed_change),
-        evidence=(EvidenceLink(kind="codex_candidate", ref=evidence_ref),),
+        proposed_change=normalized_change,
+        evidence=evidence,
         conflict_reason=conflict_reason if isinstance(conflict_reason, str) else None,
     )
+
+
+def _normalize_candidate_change(
+    action: str,
+    proposed_change: Mapping[str, object],
+) -> dict[str, object]:
+    data = dict(proposed_change)
+    status = data.get("status")
+    if action == "done" and status == "done":
+        data.pop("status")
+        data.setdefault("resolution", "done")
+    if action == "wontfix" and status == "wontfix":
+        data.pop("status")
+        data.setdefault("resolution", "wontfix")
+    return data
+
+
+def _evidence_from_mapping(
+    item: Mapping[str, object],
+    *,
+    default_ref: str,
+) -> tuple[EvidenceLink, ...]:
+    evidence_items = item.get("evidence")
+    evidence: list[EvidenceLink] = []
+    if isinstance(evidence_items, list):
+        for evidence_item in evidence_items:
+            if not isinstance(evidence_item, Mapping):
+                continue
+            kind = evidence_item.get("kind")
+            ref = evidence_item.get("ref")
+            freshness = evidence_item.get("freshness", "fresh")
+            if not isinstance(kind, str) or not isinstance(ref, str):
+                continue
+            if freshness not in {"fresh", "stale"}:
+                freshness = "fresh"
+            evidence.append(EvidenceLink(kind=kind, ref=ref, freshness=freshness))
+    if evidence:
+        return tuple(evidence)
+    return (EvidenceLink(kind="codex_candidate", ref=default_ref),)
 
 
 def _possible_candidate_from_mapping(item: Mapping[str, object]) -> CandidateMutation | None:

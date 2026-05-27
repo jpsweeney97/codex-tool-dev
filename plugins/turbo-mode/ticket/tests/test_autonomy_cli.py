@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts.ticket_autonomy import build_repo_context
+
 SCRIPT = Path(__file__).parent.parent / "scripts" / "ticket_autonomy.py"
 
 
@@ -40,6 +42,7 @@ def _write_context(project_root: Path, **overrides: object) -> Path:
         "schema": "codex.ticket.turn_context.v1",
         "thread_id": "thread-1",
         "turn_id": "turn-1",
+        "git": dict(build_repo_context(project_root).as_event_payload()),
     }
     context.update(overrides)
     path = project_root / "turn-context.json"
