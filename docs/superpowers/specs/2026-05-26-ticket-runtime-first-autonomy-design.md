@@ -82,9 +82,19 @@ discussion lane:
 - Codex collects candidate Ticket changes during the turn and applies approved
   automatic changes near the end of the turn, using the full turn context before
   writing.
-- The Codex app/thread runtime owns the turn boundary because it knows when a
+- The Codex host/thread runtime owns the turn boundary because it knows when a
   turn is ending. The Ticket plugin owns mutation rules, approval validation,
-  write safety, and ticket-state mutation.
+  write safety, and ticket-state mutation. Avoid the bare term "app" for this
+  boundary because it blurs host/runtime ownership with Ticket ownership.
+- Keep the Codex host/thread runtime thin. It provides a `turn_id`, final turn
+  context, current pause or mode signal, and renders the Ticket summary or
+  question projection returned by Ticket. It must not understand Ticket
+  candidates, approvals, partial failure states, raw ledger records, or ticket
+  mutation internals.
+- Start the host-facing Ticket autonomy API as a lightweight JSON-in/JSON-out
+  CLI with Ticket-level commands such as `recover` and `apply-turn`. Do not
+  expose raw ledger commands such as append, consume approval, or mark
+  summarized as host-facing APIs.
 - Use narrow hard rules for safety and trust: no automatic delete, archive, or
   history repair; pause when pending-summary bookkeeping is unhealthy; respect
   the session mode; require a fresh one-use approval for each automatic change;
@@ -96,11 +106,14 @@ discussion lane:
   quality, summary wording, identifying what deserves a new ticket, deciding
   whether a low-risk correction is obvious, and choosing the highest-priority
   `needs discussion` question.
-- Use one local pending-summary log at
+- Use one Ticket-owned local operational ledger at
   `.codex/ticket-workspace/ticket.pending-summary.jsonl` for unsummarized and
   recent correction-ready records. Keep it, sibling temporary or lock files,
   and a small sibling `.codex/ticket-workspace/AGENTS.md` out of git with
   explicit ignore rules.
+- Codex host/thread runtime may reference Ticket automation state only through
+  Ticket-owned CLI projections. The raw operational ledger is private Ticket
+  state, not a host/runtime contract and not a second ticket database.
 - Use a sibling lock/temp-file flow inside `.codex/ticket-workspace/` for
   pending-summary writes. Codex should wait briefly when another writer is
   active, and pause automatic Ticket updates if it cannot update the log
@@ -123,7 +136,7 @@ discussion lane:
 - `event_id`, `mutation_id`, and `approval_id` are deterministic IDs derived
   from canonical inputs, not random IDs. This makes retries, duplicate
   detection, crash recovery, and one-use approval validation reliable.
-- `turn_id` stays runtime-assigned by the Codex app/thread runtime. It
+- `turn_id` stays runtime-assigned by the Codex host/thread runtime. It
   represents the actual turn boundary; deterministic IDs provide retry and
   write safety inside that turn.
 - Keep full before/after correction detail only on correction-ready entries in
@@ -165,6 +178,12 @@ discussion lane:
   same ticket update whenever possible. If Codex cannot update `## Change
   History` cleanly, pause or defer the automatic ticket change rather than
   leave durable project history incomplete.
+- Do not require repo-wide `## Change History` backfill before `agent_primary`.
+  The first automatic mutation for a ticket may create `## Change History` when
+  it is missing, in the same ticket-file mutation, if the ticket is otherwise
+  parseable and the insertion point is deterministic. Provide an explicit
+  `migrate-change-history --dry-run/--apply` maintenance command for teams that
+  want to normalize existing tickets before automatic mode.
 - If the pending-summary log cannot be written, appended with follow-up status
   events, validated, or compacted under its limits, pause automatic Ticket
   updates and report the concise pause reason. User-directed Ticket work may
@@ -364,13 +383,17 @@ write occurs. The runtime decision layer answers four operational questions:
 4. What must be recorded for the pending-summary log, end-of-turn summary, and
    audit trail?
 
-Ordinary-thread autonomy needs a turn-level owner. The Codex app/thread runtime
-owns that turn boundary. It must collect candidate Ticket changes during the
-turn, wait until enough turn context is available, ask the Ticket plugin for
-mutation decisions and safe writes near the end of the turn, and emit the
-concise `Ticket updates` summary. The Ticket plugin owns mutation rules,
-approval validation, write safety, idempotency, pending-summary bookkeeping,
-and ticket-state mutation.
+Ordinary-thread autonomy needs a turn-level boundary owner. The Codex
+host/thread runtime owns that turn boundary because it knows when the turn is
+ending. It must stay thin: allocate or pass the `turn_id`, provide final turn
+context and the current pause or mode signal, call Ticket's recovery projection
+before new autonomous writes, call Ticket's turn-apply command near the end of
+the turn, and render the returned `Ticket updates` summary or one discussion
+question. The host/runtime must not own candidate discovery, approval
+consumption, raw ledger parsing, idempotency, partial-failure recovery, or
+ticket-state mutation. The Ticket plugin owns mutation rules, approval
+validation, write safety, idempotency, pending-summary bookkeeping, recovery
+detection, summary payload construction, and ticket-state mutation.
 
 This design changes current preview-first behavior for autonomous writes:
 
@@ -387,6 +410,72 @@ mutation unless the engine write path receives an approved autonomy decision.
 `ticket_engine_core.py` or a small engine-owned write gateway must reject
 autonomous writes that lack that decision. Adapter tests and static/text guards
 are defense-in-depth; they are not the primary boundary.
+
+## Host-Facing CLI Contract
+
+The first host-facing autonomy API should be a small JSON-in/JSON-out CLI. It
+exposes Ticket-level operations rather than raw ledger operations:
+
+```bash
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_autonomy.py recover \
+  --project-root <PROJECT_ROOT> \
+  --turn-id <TURN_ID>
+
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_autonomy.py apply-turn \
+  --project-root <PROJECT_ROOT> \
+  --turn-id <TURN_ID> \
+  --context-file <PATH_TO_CONTEXT_JSON>
+```
+
+`recover` is a projection command. It validates the Ticket-owned operational
+ledger, detects unsummarized records from previous turns, returns display-ready
+recovery summary data, and returns whether new autonomous writes may proceed.
+The Codex host/thread runtime must call it before new autonomous writes in a
+Ticket-aware turn.
+
+`apply-turn` is the transactional turn gateway. It reads mode/config, discovers
+candidate tickets from the supplied context snapshot, evaluates candidates,
+appends ledger attempt records, validates one-use approvals internally, applies
+approved mutations through the engine-owned write gateway, appends follow-up
+status records, and returns display-ready summary data plus at most one
+discussion question.
+
+The context file uses strict JSON. It should include:
+
+- `schema: "codex.ticket.turn_context.v1"`
+- `thread_id`
+- `turn_id`
+- current user request and assistant work summary
+- touched files, verification commands and outcomes, and relevant evidence
+- `git.branch`, `git.head`, and `git.worktree_root`
+- a stable repo/worktree identity such as `git.repo_root` and
+  `git.repo_fingerprint`
+
+Ticket copies normalized repo/worktree context into the operational ledger so
+later recovery can distinguish branch-specific work, unrelated backlog
+maintenance, and stale records from a different worktree or checkout state.
+
+CLI responses use strict JSON. A successful or paused command should still
+print a parseable response to stdout. Exit codes are:
+
+- `0`: valid response; host/runtime should parse stdout JSON
+- `1`: operational failure with JSON error when possible
+- `2`: invalid input or contract violation
+- `3`: automation paused or fail-closed condition with JSON pause output
+
+The host-facing CLI must not expose raw ledger mutation commands such as
+`append-event`, `consume-approval`, or `mark-summarized`. Ledger repair belongs
+to explicit maintenance commands such as:
+
+```bash
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_autonomy.py doctor-ledger \
+  --project-root <PROJECT_ROOT> \
+  --dry-run
+
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_autonomy.py doctor-ledger \
+  --project-root <PROJECT_ROOT> \
+  --confirm-repair
+```
 
 ## Decision Model
 
@@ -578,8 +667,8 @@ turn-level fanout must be idempotent: it may resume or complete an existing
 mutation record, but it must not duplicate blocker edits, lifecycle
 transitions, reopen history entries, or audit rows.
 
-`turn_id` itself is runtime-assigned by the Codex app/thread runtime, not
-derived from the Ticket mutation content. It names the actual app/thread turn
+`turn_id` itself is runtime-assigned by the Codex host/thread runtime, not
+derived from the Ticket mutation content. It names the actual host/thread turn
 boundary. The deterministic IDs use that assigned `turn_id` as an input when
 they need turn scoping.
 
@@ -609,13 +698,17 @@ The required envelope fields are:
 - `ticket_state_fingerprint`
 - `mutation_fingerprint`
 - `evidence_fingerprint`
+- `repo_context`
 - `decision`
 - `evidence`
 - `details`
 
 Use `schema: "codex.ticket.pending_summary.v1"` for every line. Use ISO 8601
 UTC timestamps. `current_mode` uses the same `discussion_only`, `preview`, and
-`agent_primary` enum as `.codex/ticket.local.md`. Use `null` for `ticket_id`,
+`agent_primary` enum as `.codex/ticket.local.md`. `repo_context` is a strict
+object copied from normalized host-supplied workspace context. When git
+metadata is available, it must include `repo_root`, `worktree_root`,
+`repo_fingerprint`, `branch`, and `head`. Use `null` for `ticket_id`,
 `mutation_id`, `ticket_state_fingerprint`, `mutation_fingerprint`, or
 `decision` only on workspace-level operational events that do not belong to a
 specific ticket mutation. Require `reason` to be one short sentence with no
@@ -651,7 +744,7 @@ ID format is exact:
 If canonicalization or ID inputs need to change later, bump the pending-summary
 schema version rather than silently changing the meaning of existing IDs.
 
-`turn_id` is intentionally not content-derived. The Codex app/thread runtime
+`turn_id` is intentionally not content-derived. The Codex host/thread runtime
 assigns it at the turn boundary; Ticket automation records it and uses it as a
 scoping input for deterministic IDs inside that turn.
 
@@ -682,6 +775,8 @@ The finite `event_type` values are:
 The finite `status` values are:
 
 - `pending`
+- `approval_consumed`
+- `ticket_written`
 - `applied`
 - `skipped`
 - `discussion_required`
@@ -698,7 +793,7 @@ Valid `event_type` and `status` combinations are:
 | `event_type` | Valid `status` values |
 | --- | --- |
 | `mutation_attempt` | `pending` |
-| `mutation_status` | `applied`, `skipped`, `discussion_required`, `deferred`, `corrected`, `inactive`, `failed` |
+| `mutation_status` | `approval_consumed`, `ticket_written`, `applied`, `skipped`, `discussion_required`, `deferred`, `corrected`, `inactive`, `failed` |
 | `summary_receipt` | `summarized` |
 | `compaction_receipt` | `compacted` |
 | `automation_pause` | `paused` |
@@ -750,9 +845,11 @@ The `details` object is strict and typed by `event_type`:
   `bound_evidence_fingerprint`. `expires_at` must be no more than 10 minutes
   after `created_at`. Include `correction_ready: true` plus `before` and
   `after` when the entry needs correction support.
-- `mutation_status`: include `previous_event_id`. Require `question` when
-  `status` is `discussion_required`; require `retry_condition` when `status` is
-  `deferred`; require `error_code` when `status` is `failed`.
+- `mutation_status`: include `previous_event_id`. Require `approval_id` when
+  `status` is `approval_consumed`; require `post_write_fingerprint` when
+  `status` is `ticket_written`; require `question` when `status` is
+  `discussion_required`; require `retry_condition` when `status` is `deferred`;
+  require `error_code` when `status` is `failed`.
 - `summary_receipt`: include `summary_kind` as `normal` or `recovery`, and
   `bucket` as `applied`, `skipped`, `discussion_required`, or `deferred`.
 - `compaction_receipt`: include `retention_days`, `retention_count`,
@@ -788,6 +885,13 @@ A representative mutation-attempt envelope is:
   "ticket_state_fingerprint": "sha256:...",
   "mutation_fingerprint": "sha256:...",
   "evidence_fingerprint": "sha256:...",
+  "repo_context": {
+    "repo_root": "/workspace/project",
+    "worktree_root": "/workspace/project",
+    "repo_fingerprint": "sha256:...",
+    "branch": "feature/example",
+    "head": "abc123"
+  },
   "decision": "apply_autonomously",
   "evidence": [
     {"kind": "test", "ref": "uv run pytest plugins/turbo-mode/ticket -q"}
@@ -835,13 +939,20 @@ The chat summary is human-facing and terse: counts, ticket IDs, and one short
 reason per changed or pending ticket. Detailed before/after information stays
 out of chat unless the user explicitly asks for it.
 
-The pending-summary log is operational bookkeeping, not project history. It is
-the single local machine-readable file
+The pending-summary log is the Ticket-owned operational ledger, not project
+history. It is the single local machine-readable file
 `.codex/ticket-workspace/ticket.pending-summary.jsonl`, must be added to
 `.gitignore` when its path is introduced, and must not be staged or committed.
 Any temporary or lock files used beside it are also local-only and ignored. It
 stores unsummarized records, pending discussion items, deferred actions, and
 recent compact before/after data for correction support.
+
+The raw ledger schema is private to Ticket. Codex host/thread runtime may
+reference Ticket automation state only through Ticket-owned CLI projections such
+as `recover`, `apply-turn`, `pending-decisions`, and
+`recent-correction-context`. The ledger must not become a second ticket database;
+project truth remains the ticket files plus committed `## Change History`
+entries.
 
 The log format is append-first JSONL. Normal operation appends one JSON object
 per event instead of rewriting the file. Cleanup and compaction may reduce
@@ -914,6 +1025,27 @@ cannot append or update the `## Change History` entry cleanly for an automatic
 change, it must pause or defer that automatic ticket change instead of leaving
 the durable project-history record incomplete.
 
+Do not require a repo-wide backfill before enabling `agent_primary`. Existing
+tickets that lack `## Change History` may receive the section during their first
+automatic mutation, in the same ticket-file write as the automatic change. That
+is allowed only when the ticket is otherwise parseable and the insertion point
+is deterministic: after `## Related` when present, otherwise before
+`## Reopen History` when present, otherwise at the end of the file. If the
+section cannot be inserted cleanly, defer or pause that candidate rather than
+writing a ticket mutation without durable history.
+
+Provide an explicit maintenance command for proactive normalization:
+
+```bash
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_autonomy.py migrate-change-history \
+  --project-root <PROJECT_ROOT> \
+  --dry-run
+
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_autonomy.py migrate-change-history \
+  --project-root <PROJECT_ROOT> \
+  --apply
+```
+
 Full correction detail remains local-only in the pending-summary log for 14
 days, capped at the most recent 500 correction-ready events. Older correction
 detail is compacted away and reduced to lightweight history facts: ticket ID,
@@ -933,13 +1065,59 @@ runtime must use a log-backed pending-summary model:
    mutation.
 5. Fail closed before ticket mutation if the pending-summary attempt record
    cannot be persisted.
-6. Append a follow-up status event for `applied`, `skipped`, or
-   `discussion_required` after the decision or write result. The follow-up event
-   has its own deterministic `event_id` and references the original mutation ID
-   instead of editing the original line.
+6. Append follow-up status events for `approval_consumed`, `ticket_written`,
+   `applied`, `skipped`, or `discussion_required` as each transition occurs. Each
+   follow-up event has its own deterministic `event_id` and references the
+   original mutation ID instead of editing the original line.
 7. Render the end-of-turn summary from durable pending-summary records, then
    append follow-up events that mark the summarized records by referencing their
    original mutation IDs.
+
+Every automatic mutation uses this derived state machine:
+
+```text
+attempt_recorded
+  -> approval_consumed
+  -> ticket_written
+  -> status_recorded
+  -> summary_recorded
+```
+
+The states are derived from append-only ledger events:
+
+- `attempt_recorded`: a `mutation_attempt` line with `status: "pending"` exists.
+- `approval_consumed`: a `mutation_status` line with
+  `status: "approval_consumed"` exists.
+- `ticket_written`: a `mutation_status` line with `status: "ticket_written"`
+  and the expected post-write fingerprint exists.
+- `status_recorded`: a terminal or pending-disposition `mutation_status` line
+  exists, such as `applied`, `skipped`, `discussion_required`, `deferred`,
+  `corrected`, `inactive`, or `failed`.
+- `summary_recorded`: a `summary_receipt` line with `status: "summarized"`
+  exists.
+
+Recovery must be explicit for each gap:
+
+- No `attempt_recorded`: no autonomous write is trusted; evaluate normally.
+- `attempt_recorded` only: no ticket write is trusted yet. Re-read ticket state,
+  revalidate the approval inputs, then retry with the same `mutation_id` or
+  append `failed`.
+- `approval_consumed` but no `ticket_written`: treat the protected write section
+  as interrupted. Retry only when the current ticket fingerprint still matches
+  the approval's bound fingerprint. Otherwise append `failed` with a stale-state
+  reason and re-evaluate from current ticket state.
+- `ticket_written` but no `status_recorded`: inspect the ticket file and compare
+  it to the expected post-write fingerprint. If it matches, append the outcome
+  status without rewriting the ticket. If it does not match, append `failed` with
+  a reconcile-required reason and pause that candidate.
+- `status_recorded` but no `summary_recorded`: do not retry the mutation. Emit a
+  recovery summary on the next Ticket-aware turn and append `summary_receipt`.
+- `summary_recorded`: the mutation is complete. Retries must report the existing
+  completion instead of reapplying the mutation.
+
+`approval_consumed` means Ticket entered the protected write section; it is not
+a permanent rejection of all later retries. A retry may continue only when the
+exact bound ticket state still holds.
 
 Compaction is not part of the ordinary event-write path. It may run later under
 the same lock, write the compacted content to a sibling temporary file, validate
@@ -987,14 +1165,21 @@ safe ticket-only commit or when the user asks for pending Ticket decisions.
 
 The implementation should stay small and runtime-owned.
 
-### Turn coordinator
+### Host/thread runtime coordinator
 
-Codex app/thread-runtime coordinator that collects candidate Ticket changes
-during ordinary work, defers writes until enough turn context is available,
-invokes Ticket plugin candidate discovery and policy evaluation near the end of
-the turn, asks the Ticket plugin to apply approved automatic changes, asks at
-most one highest-priority `needs discussion` question at a time, and renders
-the concise `Ticket updates` mini-section.
+Thin Codex host/thread-runtime coordinator that assigns or passes `turn_id`,
+captures final turn context, calls `ticket_autonomy.py recover` before new
+autonomous writes, calls `ticket_autonomy.py apply-turn` near the end of the
+turn, and renders the concise `Ticket updates` mini-section or one returned
+discussion question. It must not parse raw ledger records, own Ticket
+transaction state, or grant write authority.
+
+### `ticket_autonomy.py`
+
+Host-facing JSON-in/JSON-out CLI for Ticket-level autonomy operations. It owns
+the public CLI commands `recover`, `apply-turn`, `doctor-ledger`, and
+`migrate-change-history`. It is the only host-facing surface for autonomous
+turn application and recovery projections.
 
 ### `ticket_autonomy_runtime.py`
 
@@ -1033,8 +1218,10 @@ adapter call that omits, forges, or reuses an invalid autonomy decision.
 
 `ticket_engine_core.py` or a small engine-owned helper must be the only path
 that can apply autonomous ticket-state mutations. It validates the autonomy
-decision, enforces idempotency, appends durable pending-summary events, and
-then delegates to the existing ticket mutation mechanics.
+decision, enforces idempotency, appends durable pending-summary events, updates
+or creates `## Change History` when required, and then delegates to the existing
+ticket mutation mechanics. Existing wrappers may prepare context or payloads,
+but autonomous writes that bypass this gateway are invalid.
 
 ### `ticket_turn_batch.py`
 
@@ -1177,6 +1364,21 @@ Failure handling is intentionally narrow:
 The default failure posture for v1 is "do not write this candidate," not
 "disable all autonomy for the turn."
 
+Failure scope must be explicit:
+
+| Failure class | Scope | Owner | Recovery trigger | Summary behavior |
+| --- | --- | --- | --- | --- |
+| Candidate conflict or local validation failure | Candidate | Ticket | New evidence or user request | Include skipped item when relevant |
+| Missing `## Change History` insertion point or unknown history label | Candidate | Ticket | Ticket repair or migration command | Defer or pause candidate with reason |
+| Pending-summary ledger unhealthy, duplicate-event conflict, or lock failure | Workspace automation | Ticket | `doctor-ledger` repair or manual cleanup | Report one pause reason; no new automatic writes |
+| Missing or invalid local mode config | Workspace setup | Ticket plus host prompt | Guided setup answer | Ask setup question before automatic writes |
+| Summary emission failure after successful mutation | Turn recovery | Ticket projection rendered by host | Next Ticket-aware `recover` call | Emit recovery summary before new writes |
+| Unrelated backlog maintenance cannot safely commit on `main` | Action | Ticket commit coordinator | Clean worktree and safe branch switch | Defer with retry condition |
+
+Unrelated candidates may continue only when the failure is candidate-scoped and
+does not invalidate shared evidence, mode, ledger health, or write-gateway
+state.
+
 ## Rollout Sequence
 
 Rollout should be incremental:
@@ -1192,19 +1394,26 @@ Rollout should be incremental:
    focused test that fails if future autonomous write code writes to
    `docs/tickets/.audit/`.
 2. Ship repo-local mode config, session-scoped mode loading, explicit chat pause
-   handling, the shared autonomy runtime, and the durable pending-summary log.
-3. Wire update and review-style mutations into `agent_primary` behind the
+   handling, the shared autonomy runtime, the `ticket_autonomy.py recover` and
+   `apply-turn` CLI, and the durable Ticket-owned operational ledger.
+3. Implement the mutation state machine and engine-owned autonomous write
+   gateway so retries recover from gaps between attempt recording, approval
+   consumption, ticket write, status recording, and summary receipt.
+4. Wire update and review-style mutations into `agent_primary` behind the
    session mode gate. When the user chooses automatic mode, apply real
    automatic changes immediately rather than forcing a preview-only phase.
-4. Add concise end-of-turn summaries, pending discussion questions, recovery
+5. Add concise end-of-turn summaries, pending discussion questions, recovery
    summaries, and pending-summary compaction.
-5. Add automatic ticket-only commit support with lightweight verification and
+6. Add automatic `## Change History` insertion on first automatic mutation when
+   existing tickets lack the section, plus explicit
+   `migrate-change-history --dry-run/--apply` maintenance support.
+7. Add automatic ticket-only commit support with lightweight verification and
    local-only pending-summary bookkeeping.
-6. Add capture and agent entrypoint integration next, including automatic
+8. Add capture and agent entrypoint integration next, including automatic
    creation of clear actionable follow-up tickets.
-7. Broaden candidate discovery and hygiene-driven fanout once the runtime layer
+9. Broaden candidate discovery and hygiene-driven fanout once the runtime layer
    is stable.
-8. Keep doctor, delete, archive, and history-repair paths explicitly
+10. Keep doctor, delete, archive, and history-repair paths explicitly
    discussion-gated and last.
 
 This rollout order prioritizes the highest-value autonomous mutation paths
@@ -1264,8 +1473,16 @@ Prove that:
 - `approval_id` is deterministic from its canonical inputs and changes when the
   bound ticket, mutation, ticket-state fingerprint, evidence fingerprint,
   session mode, or decision kind changes
-- `turn_id` is runtime-assigned by the Codex app/thread runtime and is not
+- `turn_id` is runtime-assigned by the Codex host/thread runtime and is not
   content-derived from Ticket mutation inputs
+- the Codex host/thread runtime can call `ticket_autonomy.py recover` before new
+  autonomous writes and `ticket_autonomy.py apply-turn` near end of turn without
+  parsing raw ledger records or understanding Ticket partial-failure states
+- `recover` and `apply-turn` return strict JSON projection payloads with
+  display-ready summary data, at most one discussion question, and a machine
+  pause object when automation is paused
+- invalid CLI input exits with a contract error, and paused automation returns a
+  parseable JSON response instead of raw stderr-only diagnostics
 
 ### 2. Candidate discovery tests
 
@@ -1322,6 +1539,9 @@ Prove that:
 - timestamps are validated as ISO 8601 UTC but are not used as ID inputs
 - `turn_id` is runtime-assigned, recorded in every envelope, and used as a
   scoping input for deterministic IDs inside the turn
+- every pending-summary JSONL entry includes strict `repo_context` with
+  normalized repo/worktree identity, branch, and HEAD when git metadata is
+  available
 - typed `details` validate according to `event_type`, including required
   questions for `discussion_required`, retry conditions for `deferred`, error
   codes for `failed`, and pause reasons for `automation_pause`
@@ -1334,6 +1554,12 @@ Prove that:
   status changes append follow-up events with their own deterministic
   `event_id` that reference the original `mutation_id` instead of editing the
   original line
+- the mutation state machine is recoverable from append-only ledger events:
+  `attempt_recorded -> approval_consumed -> ticket_written -> status_recorded
+  -> summary_recorded`
+- retries at each state-machine gap follow the explicit recovery matrix and do
+  not duplicate ticket writes, blocker edits, lifecycle transitions,
+  `## Change History` entries, or summary receipts
 - `.codex/ticket-workspace/ticket.pending-summary.jsonl`, its sibling temporary
   or lock files, and sibling `.codex/ticket-workspace/AGENTS.md` are
   local-only, gitignored, and not staged
@@ -1356,6 +1582,11 @@ Prove that:
   ticket-file mutation when possible
 - automatic Ticket changes pause or defer when `## Change History` cannot be
   updated cleanly
+- first automatic mutation may create missing `## Change History` in the same
+  ticket-file write when the ticket is parseable and the insertion point is
+  deterministic
+- `migrate-change-history --dry-run/--apply` can normalize existing tickets
+  without being required before `agent_primary`
 - YAML frontmatter remains current metadata and is not used as a growing
   history log
 - no global committed audit log is created or used in v1; automatic Ticket
@@ -1384,6 +1615,8 @@ Prove that:
 
 - supported mutating entrypoints cannot write ticket state without an approved
   autonomy decision when running in autonomous mode
+- `ticket_autonomy.py apply-turn` reaches ticket-state mutation only through the
+  engine-owned write gateway
 - wrappers cannot forge or reuse stale autonomy decisions
 - static or text guards flag new ticket-state write paths outside the
   engine-owned gateway, except explicit maintenance or doctor paths
