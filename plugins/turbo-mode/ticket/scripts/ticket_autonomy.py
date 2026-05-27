@@ -417,6 +417,7 @@ def _summary_payload(
     skipped: list[str],
     discussion: list[str],
     discussion_question: str | None,
+    commit_dispositions: list[dict[str, object]],
 ) -> dict[str, Any]:
     if not applied and not skipped and not discussion and discussion_question is None:
         return _no_change_response()
@@ -433,12 +434,35 @@ def _summary_payload(
         state = "discussion_required"
     else:
         state = "preview"
-    return {
+    payload: dict[str, Any] = {
         "state": state,
         "changed": bool(applied),
         "ticket_updates": ticket_updates,
         "discussion_question": discussion_question,
     }
+    if commit_dispositions:
+        payload["commit_dispositions"] = commit_dispositions
+    return payload
+
+
+def _commit_disposition_summary(
+    ticket_id: str,
+    response_data: Mapping[str, object],
+) -> dict[str, object] | None:
+    disposition = response_data.get("commit_disposition")
+    if not isinstance(disposition, str) or not disposition:
+        return None
+    summary: dict[str, object] = {
+        "ticket_id": ticket_id,
+        "disposition": disposition,
+    }
+    commit_hash = response_data.get("commit_hash")
+    if isinstance(commit_hash, str) and commit_hash:
+        summary["commit_hash"] = commit_hash
+    commit_reason = response_data.get("commit_reason")
+    if isinstance(commit_reason, str) and commit_reason:
+        summary["reason"] = commit_reason
+    return summary
 
 
 def _run_migrate_change_history(args: argparse.Namespace) -> int:
@@ -645,6 +669,7 @@ def _run_apply_turn_with_mode(
     applied: list[str] = []
     skipped: list[str] = []
     discussion: list[str] = []
+    commit_dispositions: list[dict[str, object]] = []
     discussion_question: str | None = None
 
     for decision in decisions:
@@ -672,6 +697,9 @@ def _run_apply_turn_with_mode(
             )
             if response.state.startswith("ok_"):
                 applied.append(ticket_id)
+                commit_summary = _commit_disposition_summary(ticket_id, response.data)
+                if commit_summary is not None:
+                    commit_dispositions.append(commit_summary)
             else:
                 discussion.append(ticket_id)
                 discussion_question = discussion_question or response.message
@@ -707,6 +735,7 @@ def _run_apply_turn_with_mode(
             skipped=skipped,
             discussion=discussion,
             discussion_question=discussion_question,
+            commit_dispositions=commit_dispositions,
         )
     )
     return 0

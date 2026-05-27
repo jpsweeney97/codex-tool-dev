@@ -23,6 +23,10 @@ from scripts.ticket_change_history import (
     ChangeHistoryLabel,
     append_change_history_entry,
 )
+from scripts.ticket_commit_coordinator import (
+    CommitDispositionRecord,
+    record_ticket_commit_disposition,
+)
 from scripts.ticket_dedup import target_fingerprint as compute_target_fingerprint
 from scripts.ticket_engine_core import (
     EngineResponse,
@@ -371,6 +375,32 @@ def _write_change_history_entry(ticket_path: Path, *, action: str) -> None:
     ticket_path.write_text(append_change_history_entry(text, entry), encoding="utf-8")
 
 
+def _record_commit_disposition(
+    project_root: Path,
+    ticket_path_raw: object,
+) -> CommitDispositionRecord:
+    if not isinstance(ticket_path_raw, str):
+        return CommitDispositionRecord(
+            "commit_deferred",
+            reason="Ticket path missing from engine response.",
+        )
+    return record_ticket_commit_disposition(
+        project_root=project_root,
+        touched_ticket_paths=(Path(ticket_path_raw),),
+        ticket_change_scope="current_branch",
+        create_ticket_only_commit=True,
+    )
+
+
+def _commit_disposition_details(record: CommitDispositionRecord) -> dict[str, object]:
+    details: dict[str, object] = {"commit_disposition": record.disposition}
+    if record.commit_hash is not None:
+        details["commit_hash"] = record.commit_hash
+    if record.reason is not None:
+        details["commit_reason"] = record.reason
+    return details
+
+
 def _response_ok(response: EngineResponse) -> bool:
     return response.state in {
         "ok_create",
@@ -499,6 +529,9 @@ def apply_autonomous_mutation(
     if ticket_written_error is not None:
         return ticket_written_error
 
+    commit_record = _record_commit_disposition(project_root, ticket_path_raw)
+    response.data.update(_commit_disposition_details(commit_record))
+
     applied_error = _append_gateway_event(
         pending_summary=pending_summary,
         event_type="mutation_status",
@@ -509,10 +542,7 @@ def apply_autonomous_mutation(
         turn_id=turn_id,
         repo_context=repo_context,
         reason="Autonomous Ticket mutation applied.",
-        details={
-            "commit_disposition": "commit_deferred",
-            "commit_reason": "Commit coordinator not yet run for this source slice.",
-        },
+        details=_commit_disposition_details(commit_record),
     )
     if applied_error is not None:
         return applied_error

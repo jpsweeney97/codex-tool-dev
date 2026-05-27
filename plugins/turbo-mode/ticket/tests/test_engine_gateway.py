@@ -211,6 +211,7 @@ def test_gateway_applies_update_records_events_and_writes_change_history(tmp_tic
     expected_repo_context = _repo_context(project_root).as_event_payload()
     assert all(event["repo_context"] == expected_repo_context for event in events)
     assert events[-1]["details"]["commit_disposition"] == "commit_deferred"
+    assert response.data["commit_disposition"] == "commit_deferred"
 
     reused = apply_autonomous_mutation(
         project_root=project_root,
