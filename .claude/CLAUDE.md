@@ -39,7 +39,7 @@ hypothetical environment.
 - When a future concern is real but not required for the current slice, name it
   as follow-up work instead of folding it into the current patch.
 
-  ## Development Tenet
+## Development Tenet
 
 This repo builds Codex-facing systems (plugins, skills, hooks, agents,
 commands, MCP servers, prompts Codex reads at runtime). For these systems,
