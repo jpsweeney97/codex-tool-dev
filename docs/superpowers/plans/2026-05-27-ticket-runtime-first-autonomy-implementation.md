@@ -223,6 +223,40 @@ OPERATIONAL_ACTIONS = ("summarize", "compact", "pause_automation")
 TURN_CONTEXT_OPERATIONS = ("apply_ticket_mutations", "pause_automation")
 ```
 
+Autonomy-to-engine dispatch is gateway-local deterministic mechanics, not a
+pending-summary field. The pending-summary `action` remains the Ticket-facing
+action above; the gateway maps it before calling the live engine API:
+
+```python
+class EngineAction(StrEnum):
+    CREATE = "create"
+    UPDATE = "update"
+    CLOSE = "close"
+    REOPEN = "reopen"
+
+
+@dataclass(frozen=True, slots=True)
+class EngineDispatch:
+    engine_action: EngineAction
+    fields: Mapping[str, object]
+    gateway_authorized_reopen: bool = False
+```
+
+Required dispatch map:
+
+| Ticket-facing action | Engine dispatch |
+| --- | --- |
+| `create` | `EngineAction.CREATE` with create fields unchanged |
+| `update`, `reprioritize`, `blocker_edit`, `stale_cleanup`, `refine`, `correction` | `EngineAction.UPDATE` with the targeted metadata/body/Change History fields |
+| `done` | `EngineAction.CLOSE` with `fields["resolution"] == "done"` |
+| `wontfix` | `EngineAction.CLOSE` with `fields["resolution"] == "wontfix"` |
+| `reopen` | `EngineAction.REOPEN` with `fields["reopen_reason"]` and a gateway-authorized reopen path |
+
+The gateway-authorized reopen path must not loosen generic agent-origin
+`reopen`. Direct agent engine calls keep the existing defense-in-depth block;
+only a gateway call with a validated approval envelope may dispatch autonomous
+`reopen`.
+
 Commit dispositions:
 
 ```python
@@ -690,6 +724,8 @@ Tests must cover:
   worktree identity is invalid.
 - Valid event/status compatibility matrix.
 - Finite action, decision, mode, evidence kind, pause reason, and commit disposition values.
+- Preview-mode records use `status: "skipped"` with
+  `decision: "preview_only"`; `status: "preview_only"` is invalid.
 - `reason` is one short line with no newline.
 - `details` requirements by event type and status, including:
   - `approval` for `mutation_attempt` with `apply_autonomously`.
@@ -884,10 +920,16 @@ class ChangeHistoryEntry:
     prior_commit: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class PlannedChangeHistoryMigration:
+    ticket_path: Path
+    before_fingerprint: str
+    after_text: str
+
+
 def render_change_history_entry(entry: ChangeHistoryEntry) -> str: ...
 def append_change_history_entry(ticket_text: str, entry: ChangeHistoryEntry) -> str: ...
-def plan_change_history_migration(tickets_dir: Path) -> tuple[Path, ...]: ...
-def apply_change_history_migration(tickets_dir: Path) -> tuple[Path, ...]: ...
+def plan_change_history_migration(tickets_dir: Path) -> tuple[PlannedChangeHistoryMigration, ...]: ...
 ```
 
 - [ ] **Step 2: Run failing Change History tests**
@@ -899,6 +941,13 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 - [ ] **Step 3: Implement helper and CLI command**
 
 Create `ticket_autonomy.py` in this task with only the `migrate-change-history --project-root <PROJECT_ROOT> --dry-run|--apply` subcommand. Task 7 extends the same file with `pause`, `recover`, `apply-turn`, and `doctor-ledger`.
+
+Keep `ticket_change_history.py` pure with respect to ticket-file writes: it may
+parse ticket text, render entries, compute migration plans, and return
+`after_text`, but it must not write active ticket files. The only Task 6 file
+write for this migration is the named, explicit `ticket_autonomy.py
+migrate-change-history --apply` maintenance path, using the planned
+`before_fingerprint` to fail closed if the ticket changed after planning.
 
 CLI stdout examples:
 
@@ -1055,6 +1104,13 @@ Tests must prove:
 - Above-cap candidates get pending-summary records instead of disappearing.
 - Approval envelopes bind ticket ID, mutation ID, current mode, decision kind, current ticket-state fingerprint, proposed mutation fingerprint, and evidence fingerprint.
 - Approval expiration is no more than 10 minutes.
+- Ticket-facing actions map to engine dispatch exactly:
+  - `done` becomes engine `close` with `resolution: "done"`.
+  - `wontfix` becomes engine `close` with `resolution: "wontfix"`.
+  - metadata, blocker, stale cleanup, refinement, and correction actions become engine `update`.
+  - `reopen` remains engine `reopen` and requires `reopen_reason`.
+- Direct generic agent-origin `reopen` remains policy-blocked outside the
+  gateway-approved path.
 
 Required public dataclass shape:
 
@@ -1162,6 +1218,16 @@ Tests must prove:
 - The same automatic mutation writes its `## Change History` entry in the ticket mutation.
 - User-directed ordinary writes stay explicitly non-autonomous and do not consume approval.
 - Maintenance/doctor bypasses are named and not accepted by the autonomous gateway.
+- Gateway dispatch maps Ticket-facing action names to the live engine API before
+  mutation:
+  - `done` -> `close` plus `resolution: "done"`.
+  - `wontfix` -> `close` plus `resolution: "wontfix"`.
+  - `reprioritize`, `blocker_edit`, `stale_cleanup`, `refine`, and
+    `correction` -> `update`.
+  - `reopen` -> `reopen` only through the gateway-authorized path after
+    approval validation.
+- Direct generic agent-origin `reopen` remains policy-blocked outside the
+  gateway-authorized path.
 
 Required public surface:
 
@@ -1173,6 +1239,9 @@ class GatewayMutation:
     fields: Mapping[str, object]
     tickets_dir: Path
     target_fingerprint: str | None
+
+
+def build_engine_dispatch(mutation: GatewayMutation) -> EngineDispatch: ...
 
 
 def apply_autonomous_mutation(
@@ -1202,7 +1271,13 @@ Implementation requirements:
   not append `approval_consumed` or `ticket_written`.
 - Append `mutation_attempt` before write and fail closed if it cannot persist.
 - Append `approval_consumed` before entering protected write section.
-- Apply the existing low-level mutation mechanics through `ticket_engine_core.py`.
+- Build `EngineDispatch` from `GatewayMutation` before calling
+  `ticket_engine_core.py`; never pass Ticket-facing actions such as `done` or
+  `wontfix` directly to the engine.
+- Apply the existing low-level mutation mechanics through `ticket_engine_core.py`
+  using `EngineDispatch.engine_action` and normalized fields.
+- Add the smallest explicit gateway-authorized reopen path needed for approved
+  autonomous `reopen`; keep direct generic agent-origin `reopen` blocked.
 - Append `ticket_written` with expected post-write fingerprint.
 - Append terminal `applied`, `skipped`, `discussion_required`, `deferred`, or `failed`.
 - For ticket-file writes, include `commit_disposition` details. Until Task 12 lands, use `commit_deferred` with reason `Commit coordinator not yet run for this source slice.`
@@ -1213,8 +1288,10 @@ Add tests that scan Ticket scripts for direct active-ticket writes outside allow
 
 - `ticket_engine_core.py`
 - `ticket_engine_gateway.py`
-- `ticket_change_history.py`
-- explicit maintenance/doctor files when the tested command is dry-run-first or confirm-gated
+- specific pure text transformation functions in `ticket_change_history.py`
+- specific named maintenance/doctor command functions when the tested command is
+  dry-run-first or confirm-gated, including only the
+  `migrate-change-history --apply` file-write path for Change History migration
 
 The guard should flag future autonomous `.audit` writes while allowing historical `.audit` read/doctor support.
 
@@ -1282,7 +1359,9 @@ Use a strict context file:
 Assertions:
 
 - `agent_primary` applies one approved non-destructive mutation.
-- `preview` records preview-only outcome and leaves ticket state unchanged.
+- `preview` records `decision: "preview_only"` with an allowed pending-summary
+  status, leaves ticket state unchanged, and never emits
+  `status: "preview_only"`.
 - `discussion_only` returns one discussion question and leaves ticket state unchanged.
 - Conflicting candidate is skipped without blocking unrelated plausible candidate.
 - Every pending-summary event copies `repo_context` from the strict turn
@@ -1331,7 +1410,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 7. Discover candidates and evidence.
 8. Evaluate candidates.
 9. Append pending-summary records itself only for non-write outcomes:
-   `skipped`, `preview_only`, `discussion_required`, `deferred`, and
+   `skipped`, preview-mode `status: "skipped"` with
+   `decision: "preview_only"`, `discussion_required`, `deferred`, and
    non-gateway `failed`.
 10. Apply approved mutations through `apply_autonomous_mutation()` and let the
    gateway own `mutation_attempt`, `approval_consumed`, `ticket_written`, and
@@ -1658,7 +1738,9 @@ Tests must prove:
 - `ticket_autonomy.py` exposes only Ticket-level CLI commands, not raw ledger mutation commands.
 - Pending-summary validation rejects events missing required `repo_context` or
   available branch/HEAD/worktree identity.
-- Direct active-ticket write paths outside the gateway or named maintenance exceptions are flagged.
+- Direct active-ticket write paths outside the gateway or specific named
+  maintenance command functions are flagged; whole helper-file allowlists are
+  not sufficient proof.
 - No source file writes to `docs/tickets/.audit/` for future autonomous behavior.
 - Legacy tests no longer assert active `.audit` writes, YAML autonomy config,
   missing-config fallback to `suggest`, valid `auto_audit`, or valid
@@ -1670,7 +1752,25 @@ Tests must prove:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_docs_contract.py tests/test_static_autonomy_boundaries.py tests/test_engine_gateway.py tests/test_autonomy_cli.py -q
-! rg -n "autonomy_mode: auto_audit|autonomy_mode: auto_silent|autonomy_mode: suggest|defaults to `suggest`|creates `.audit`|created automatically on the first agent mutation" plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py plugins/turbo-mode/ticket/tests
+rg -n \
+  -e 'autonomy_mode: auto_audit' \
+  -e 'autonomy_mode: auto_silent' \
+  -e 'autonomy_mode: suggest' \
+  -e 'defaults to `suggest`' \
+  -e 'creates `.audit`' \
+  -e 'created automatically on the first agent mutation' \
+  plugins/turbo-mode/ticket/README.md \
+  plugins/turbo-mode/ticket/HANDBOOK.md \
+  plugins/turbo-mode/ticket/references/ticket-contract.md \
+  plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py \
+  plugins/turbo-mode/ticket/tests
+rg_status=$?
+if [ "$rg_status" -eq 0 ]; then
+  exit 1
+fi
+if [ "$rg_status" -gt 1 ]; then
+  exit "$rg_status"
+fi
 ```
 
 - [ ] **Step 3: Run full Ticket source verification**
