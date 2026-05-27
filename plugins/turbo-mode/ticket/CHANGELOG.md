@@ -31,6 +31,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `ingest` added to guard hook `VALID_SUBCOMMANDS` allowlist (T-04b, #70)
 - `defer` field passed through `_execute_create` to `render_ticket` for envelope-originated tickets (T-04a, #69)
 - `ticket_doctor.py activate-runtime` explicit direct-execute runtime activation subcommand.
+- Runtime-first Ticket autonomy source support: strict local JSON setup,
+  project-local pending-summary bookkeeping, ticket-local `## Change History`,
+  deterministic mutation IDs, `ticket_autonomy.py apply-turn`, engine-owned
+  gateway writes, correction handling, recovery projections, and ticket commit
+  disposition recording. This is source behavior only, not installed-runtime
+  proof.
 
 ### Changed
 
@@ -41,6 +47,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Workflow and hook canonical path comparison now resolves plugin roots before
   exact allowlist matching, preventing `/tmp` versus `/private/tmp` launcher
   drift on macOS.
+- Future autonomous behavior no longer writes active `docs/tickets/.audit/`
+  records or accepts legacy `suggest`, `auto_audit`, or `auto_silent` modes as
+  current automation configuration.
 
 ### Fixed
 

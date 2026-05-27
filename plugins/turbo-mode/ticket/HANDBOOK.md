@@ -255,7 +255,7 @@ creation surface.
 | `error: trust_triple_invalid` | Hook not running or trust fields absent | Verify `hooks/ticket_engine_guard.py` is registered in `settings.json` |
 | `error: path_traversal` | `tickets_dir` resolves outside project root | Confirm project has `.git/` or `.codex/` at expected root |
 | `error: dedup_collision` | Same problem+files created within 24 hours | Review existing open tickets with `ticket-find`; update the duplicate instead |
-| Direct agent mutation rejected | Runtime-first gateway not yet available | Use a user-confirmed mutation path or wait for the gateway implementation |
+| Direct agent mutation rejected | Direct agent execute is not an autonomous mutation route | Use a user-confirmed mutation path or route automation through `ticket_autonomy.py apply-turn` |
 
 ---
 
@@ -420,7 +420,7 @@ Success responses omit `error_code`; error responses include it at the top level
 | Symptom | Cause | Recovery |
 |---------|-------|---------|
 | `error_code: origin_mismatch` | Origin in payload doesn't match entrypoint | Do not call agent entrypoint with user-origin payload, or vice versa |
-| `error_code: gateway_required` | Direct agent execute attempted before the runtime-first gateway exists | Use a user-confirmed mutation path or wait for the gateway implementation |
+| `error_code: gateway_required` | Direct agent execute attempted outside the runtime-first gateway | Use a user-confirmed mutation path or route automation through `ticket_autonomy.py apply-turn` |
 | `state: duplicate_candidate` | Matching ticket exists within 24 hours | Use the returned `ticket_id` to update the existing ticket instead |
 
 ---
@@ -569,7 +569,7 @@ At preflight, the engine takes a fingerprint snapshot of any existing ticket bei
 
 | Symptom | Likely Cause | Diagnosis | Recovery |
 |---------|-------------|-----------|---------|
-| All direct agent mutations rejected | Runtime-first gateway not yet available | Inspect the JSON response for `gateway_required` | Use a user-confirmed mutation path or wait for the gateway implementation |
+| All direct agent mutations rejected | Direct agent execute is not an autonomous mutation route | Inspect the JSON response for `gateway_required` | Use a user-confirmed mutation path or route automation through `ticket_autonomy.py apply-turn` |
 | `trust_triple_invalid` error | Hook not running | Check `settings.json` for hook registration | Register `hooks/ticket_engine_guard.py` as PreToolUse hook |
 | `trust_triple_mismatch` error | Agent entrypoint called with user payload | Inspect `request_origin` in payload vs entrypoint | Ensure skill routes mutations to correct entrypoint |
 | `dedup_collision` on first create | Another ticket with same problem exists within 24 hours | Run `ticket_read.py list` and look for near-duplicate | Update existing ticket; or override dedup if content is genuinely distinct |
