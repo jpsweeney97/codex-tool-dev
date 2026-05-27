@@ -2,7 +2,8 @@
 """Agent entrypoint for the ticket engine.
 
 Hardcodes request_origin="agent" for guarded Ticket engine operations. Direct
-execute is not an autonomous write route until the runtime-first gateway lands.
+execute is not an autonomous write route; source autonomous writes enter through
+ticket_autonomy.py apply-turn and the runtime-first gateway.
 Launcher: uv run python -B <PLUGIN_ROOT>/scripts/ticket_engine_agent.py <subcommand> <payload_file>
 """
 

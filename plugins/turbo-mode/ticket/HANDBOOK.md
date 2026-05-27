@@ -37,7 +37,7 @@ Low-confidence captures are allowed when a next action exists; they should carry
 | Script | Origin | Purpose |
 |--------|--------|---------|
 | `scripts/ticket_engine_user.py` | User | Mutation pipeline with `request_origin="user"` |
-| `scripts/ticket_engine_agent.py` | Agent | Direct execute fails closed until the runtime-first gateway supplies approved autonomous decisions |
+| `scripts/ticket_engine_agent.py` | Agent | Direct execute fails closed; autonomous writes use `ticket_autonomy.py apply-turn` and the runtime-first gateway |
 | `scripts/ticket_capture.py` | User | Capture-first prepare/execute workflow for new tickets |
 | `scripts/ticket_update.py` | User | Preview-first prepare/execute workflow for existing tickets |
 | `scripts/ticket_review.py` | Any | User-facing read-only review and historical audit wrapper |
@@ -102,7 +102,7 @@ fields.
 
 | File | Responsibility | Key Dependencies |
 |------|----------------|-----------------|
-| `scripts/ticket_engine_core.py` | Orchestrates 4 stages, preserves historical audit readers, and blocks direct agent execute until the runtime-first gateway is available | `ticket_parse`, `ticket_render`, `ticket_validate`, `ticket_id`, `ticket_dedup`, `ticket_paths`, `ticket_trust` |
+| `scripts/ticket_engine_core.py` | Orchestrates 4 stages, preserves historical audit readers, and blocks direct agent execute outside the runtime-first gateway | `ticket_parse`, `ticket_render`, `ticket_validate`, `ticket_id`, `ticket_dedup`, `ticket_paths`, `ticket_trust` |
 | `scripts/ticket_engine_runner.py` | CLI dispatcher: parses args, reads JSON payload, calls stage function, prints response | `ticket_engine_core` |
 
 ### Pipeline Inputs
@@ -155,7 +155,7 @@ fields.
 
 Future autonomous durable history writes to `## Change History` on each affected ticket. Future local operational state writes to `.codex/ticket-workspace/ticket.pending-summary.jsonl`. Existing `docs/tickets/.audit/` files are historical artifacts; `ticket_audit.py` and `ticket_doctor.py repair-audit` are read/repair tools for existing historical `.audit/` files only.
 
-Direct `ticket_engine_agent.py execute` is not an autonomous mutation route in this source slice. It fails closed with `gateway_required` until the runtime-first gateway can validate a gateway-approved decision, append pending-summary bookkeeping, and write ticket-local `## Change History`. This is a fail-closed source boundary, not installed-runtime proof.
+Direct `ticket_engine_agent.py execute` is not an autonomous mutation route in this source slice. It fails closed with `gateway_required`. Source autonomous writes enter through `ticket_autonomy.py apply-turn`, where the runtime-first gateway validates a gateway-approved decision, appends pending-summary bookkeeping, and writes ticket-local `## Change History`. This is a fail-closed source boundary, not installed-runtime proof.
 
 Local automation setup is strict JSON at `.codex/ticket.local.md`:
 
@@ -213,14 +213,14 @@ pipeline re-validates the triple.
 
 Agent mutations face additional gating that user mutations do not:
 
-1. **Direct execute fails closed** until the runtime-first gateway supplies a gateway-approved decision.
-2. **The future gateway owns approval validation** and must write ticket-local `## Change History` plus pending-summary bookkeeping.
+1. **Direct execute fails closed** unless a write enters through `ticket_autonomy.py apply-turn` and the runtime-first gateway.
+2. **The gateway owns approval validation** and must write ticket-local `## Change History` plus pending-summary bookkeeping.
 3. **User-directed mutations remain explicit** and continue through the supported user-facing prepare/execute or ingest paths.
 
 User-directed mutations continue through the explicit user-facing paths and do
 not become autonomous writes.
 
-Installed runtime activation remains a separate proof lane and does not enable source-local autonomous writes. Normal agent direct execute fails with `gateway_required` until the runtime-first gateway source slice lands.
+Installed runtime activation remains a separate proof lane and does not enable source-local autonomous writes. Normal agent direct execute fails with `gateway_required`; autonomous writes use `ticket_autonomy.py apply-turn` and the runtime-first gateway.
 
 ### Historical Audit Files
 
@@ -542,7 +542,7 @@ Input payload (JSON)
  ┌─────────────┐
  │   EXECUTE   │  Re-checks TOCTOU snapshot and dispatches file writes
  │             │  for supported user-directed paths. Direct agent
- └─────────────┘  execute fails closed until the runtime-first gateway lands.
+ └─────────────┘  execute fails closed outside the runtime-first gateway.
 ```
 
 ### Status Transitions

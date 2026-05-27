@@ -312,9 +312,11 @@ Stage-specific missing-confidence behavior: preflight entrypoints coerce absent 
 Agent execute re-reads live `.codex/ticket.local.md` policy and blocks if it diverges from the preflight snapshot.
 
 Direct `ticket_engine_agent.py execute` is not an autonomous mutation route in
-the runtime-first design. It fails closed with `gateway_required` until the
-runtime-first gateway can validate approval, write ticket-local
-`## Change History`, and append pending-summary bookkeeping.
+the runtime-first design. It fails closed with `gateway_required`. Source
+autonomous writes enter through `ticket_autonomy.py apply-turn`, where the
+runtime-first gateway validates a gateway-approved decision, writes
+ticket-local `## Change History`, and appends pending-summary bookkeeping. This
+is a fail-closed source boundary, not installed-runtime proof.
 
 Field validation: title, problem, reopen_reason, captured_request, next_action, capture_source, and component must be strings when present. priority, status, resolution, capture_confidence, and refinement_status are validated against contract enums before writes. key_file_paths, related_paths, tags, blocked_by, blocks, and acceptance_criteria must be lists of strings. source must be a dict with string values. key_files must be a list of dicts. defer must be a dict. Invalid inputs are rejected (need_fields), not silently coerced.
 

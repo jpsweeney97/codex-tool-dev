@@ -748,7 +748,8 @@ def test_handbook_documents_direct_agent_execute_gateway_requirement() -> None:
         "Direct `ticket_engine_agent.py execute` is not an autonomous mutation route"
         in normalized
     )
-    assert "fails closed until the runtime-first gateway" in normalized
+    assert "fails closed with `gateway_required`" in normalized
+    assert "Source autonomous writes enter through `ticket_autonomy.py apply-turn`" in normalized
     assert "`gateway_required`" in normalized
 
 

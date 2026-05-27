@@ -161,7 +161,7 @@ personal plugin copy as staging only, not the proof target.
 
 Future autonomous durable history writes to `## Change History` on each affected ticket. Future local operational state writes to `.codex/ticket-workspace/ticket.pending-summary.jsonl`. Existing `docs/tickets/.audit/` files are historical artifacts; `ticket_audit.py` and `ticket_doctor.py repair-audit` are read/repair tools for existing historical `.audit/` files only.
 
-Direct `ticket_engine_agent.py execute` is not an autonomous mutation route in this source slice. It fails closed with `gateway_required` until the runtime-first gateway can validate a gateway-approved decision, append pending-summary bookkeeping, and write ticket-local `## Change History`.
+Direct `ticket_engine_agent.py execute` is not an autonomous mutation route in this source slice. It fails closed with `gateway_required`. Source autonomous writes enter through `ticket_autonomy.py apply-turn`, where the runtime-first gateway validates a gateway-approved decision, appends pending-summary bookkeeping, and writes ticket-local `## Change History`. This is a fail-closed source boundary, not installed-runtime proof.
 
 Local automation setup is strict JSON at `.codex/ticket.local.md`:
 
@@ -348,13 +348,13 @@ Security checks are duplicated across pipeline stages:
 
 ### Agent Integration
 
-External autonomous Ticket writes must enter through the runtime-first gateway once that source slice lands. The gateway is responsible for validating approval, checking pause/config state, writing ticket-local `## Change History`, and appending pending-summary bookkeeping. Direct `ticket_engine_agent.py execute` remains a low-level compatibility path and fails closed for create, update, close, and reopen without that gateway-approved decision contract.
+External autonomous Ticket writes must enter through the runtime-first gateway. The gateway is responsible for validating approval, checking pause/config state, writing ticket-local `## Change History`, and appending pending-summary bookkeeping. Direct `ticket_engine_agent.py execute` remains a low-level compatibility path and fails closed for create, update, close, and reopen without that gateway-approved decision contract.
 
 The `agents/` directory is a placeholder (`.gitkeep` only) — consuming projects define their own agent definitions that invoke the agent entrypoint.
 
 ### Consuming Project Setup
 
-Runtime-first autonomous setup is not enabled by editing YAML mode flags. Use strict `.codex/ticket.local.md` JSON only, keep `.codex/ticket-workspace/` ignored, and keep agent-origin writes in discussion or user-confirmed flows until the runtime-first gateway lands.
+Runtime-first autonomous setup is not enabled by editing YAML mode flags. Use strict `.codex/ticket.local.md` JSON only, keep `.codex/ticket-workspace/` ignored, and route autonomous writes through `ticket_autonomy.py apply-turn` and the runtime-first gateway.
 
 ## Development
 

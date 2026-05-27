@@ -1,8 +1,8 @@
-"""Integration tests — hook subprocess → engine subprocess → audit trail.
+"""Integration tests for hook subprocess to engine subprocess flow.
 
 Exercises the full production flow: the PreToolUse hook validates and injects
 trust fields into a payload file, then the user entrypoint subprocess reads
-that payload and runs the engine, which writes an audit trail.
+that payload and runs the engine.
 
 Both the hook and entrypoint are invoked via subprocess.run with
 sys.executable, matching how Codex invokes them in production.
@@ -14,7 +14,6 @@ import json
 import os
 import subprocess
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 
 PLUGIN_ROOT = str(Path(__file__).parent.parent)
@@ -86,7 +85,7 @@ def _normalize_hook_output(raw: dict) -> dict:
 
 
 class TestFullCreateFlow:
-    """Full flow: hook → user entrypoint → create → audit trail."""
+    """Full flow: hook to user entrypoint to create without future audit writes."""
 
     def test_hook_raw_allow_contract_uses_feedback_entries(self, tmp_path: Path) -> None:
         payload_file = tmp_path / "payload.json"
@@ -118,7 +117,7 @@ class TestFullCreateFlow:
         tickets_dir = tmp_path / "tickets"
         tickets_dir.mkdir()
 
-        problem = "Testing the full hook-engine-audit flow."
+        problem = "Testing the full hook-engine flow."
         # Create payload file with create action and required fields.
         payload = {
             "action": "create",
@@ -160,20 +159,10 @@ class TestFullCreateFlow:
         resp = json.loads(result.stdout)
         assert resp["state"] == "ok_create"
 
-        # Step 3: Read audit file — verify 2 entries (attempt_started + ok_create).
-        date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
-        audit_file = tickets_dir / ".audit" / date_dir / "integration-sess.jsonl"
-        assert audit_file.exists(), f"Audit file not found at {audit_file}"
-
-        lines = [json.loads(line) for line in audit_file.read_text().strip().split("\n")]
-        assert len(lines) == 2
-        assert lines[0]["action"] == "attempt_started"
-        assert lines[1]["action"] == "create"
-        assert lines[1]["result"] == "ok_create"
-
-        # Step 4: Verify session_id in audit matches what hook injected.
-        assert lines[0]["session_id"] == "integration-sess"
-        assert lines[1]["session_id"] == "integration-sess"
+        # Step 3: Verify the ticket exists and future runtime does not create `.audit`.
+        ticket_path = Path(resp["data"]["ticket_path"])
+        assert ticket_path.exists()
+        assert not (tickets_dir / ".audit").exists()
 
 
 class TestHookDenyPreventsExecution:
@@ -199,10 +188,12 @@ class TestHookDenyPreventsExecution:
         assert "hook_injected" not in raw
 
 
-class TestHookSessionIdPropagatesToAudit:
-    """Session ID propagates end-to-end: hook → payload → engine → audit."""
+class TestHookSessionIdPropagatesToPayload:
+    """Session ID propagates from hook into the engine payload."""
 
-    def test_hook_session_id_propagates_to_audit(self, tmp_path: Path) -> None:
+    def test_hook_session_id_propagates_to_payload_without_audit_write(
+        self, tmp_path: Path
+    ) -> None:
         from scripts.ticket_dedup import dedup_fingerprint as compute_fp
 
         # Marker needed for discover_project_root() in entrypoint.
@@ -242,16 +233,10 @@ class TestHookSessionIdPropagatesToAudit:
         )
         assert result.returncode == 0, f"Entrypoint failed: {result.stderr}"
 
-        # Step 3: Verify audit file exists at path with that session_id.
-        date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
-        audit_file = tickets_dir / ".audit" / date_dir / f"{unique_session}.jsonl"
-        assert audit_file.exists(), f"Audit file not found at {audit_file}"
-
-        # Step 4: Verify session_id in audit entries matches.
-        lines = [json.loads(line) for line in audit_file.read_text().strip().split("\n")]
-        assert len(lines) >= 2
-        for entry in lines:
-            assert entry["session_id"] == unique_session
+        # Step 3: Verify session_id remains in the payload and no future audit file is written.
+        injected = json.loads(payload_file.read_text(encoding="utf-8"))
+        assert injected["session_id"] == unique_session
+        assert not (tickets_dir / ".audit").exists()
 
 
 class TestPatch1Integration:
