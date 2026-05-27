@@ -103,6 +103,25 @@ def test_contract_states_supported_high_level_mutation_surfaces() -> None:
     assert "must not be documented as the preferred way to create or mutate tickets" in text
 
 
+def test_contract_names_host_facing_autonomy_cli_surface() -> None:
+    text = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
+    normalized = _normalize_whitespace(text)
+
+    assert "`ticket_autonomy.py pause`" in normalized
+    assert "`recover`" in normalized
+    assert "`apply-turn`" in normalized
+    assert "`doctor-ledger`" in normalized
+    assert "`migrate-change-history`" in normalized
+    assert "does not expose raw ledger mutation commands" in normalized
+    assert "`append-event`" in normalized
+    assert "`consume-approval`" in normalized
+    assert "`mark-summarized`" in normalized
+    assert (
+        "Ordinary high-level user mutation wrappers remain `capture`, `update`, and `ingest`."
+        in normalized
+    )
+
+
 def test_engine_docs_state_runner_is_not_public_mutation_surface() -> None:
     text = _read_text(ENGINE_RUNNER)
 

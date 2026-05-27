@@ -164,6 +164,15 @@ Exit codes: 0 (success), 1 (engine error), 2 (validation failure)
 
 Ticket has exactly three supported high-level mutation surfaces: `capture`, `update`, and `ingest`. `capture` and `update` use their preview-first prepare/execute wrappers. `ingest` uses the guarded engine entrypoints to consume a DeferredWorkEnvelope from `docs/tickets/.envelopes/<filename>.json`. Direct engine `classify`/`plan`/`preflight`/`execute` and `ticket_workflow.py prepare`/`execute` remain low-level compatibility, debug, and agent-internal paths. They are not normal user-facing mutation interfaces and must not be documented as the preferred way to create or mutate tickets.
 
+### Host-Facing Autonomy Surface
+
+`ticket_autonomy.py pause`, `recover`, `apply-turn`, `doctor-ledger`, and
+`migrate-change-history` are the host-facing Ticket autonomy CLI commands.
+Ordinary high-level user mutation wrappers remain `capture`, `update`, and
+`ingest`. The autonomy CLI does not expose raw ledger mutation commands such as
+`append-event`, `consume-approval`, or `mark-summarized`; ledger repair is only
+available through `doctor-ledger --confirm-repair`.
+
 ### Recovery Hints
 
 User-facing mutation and recovery surfaces may include `data.recovery_hint`.

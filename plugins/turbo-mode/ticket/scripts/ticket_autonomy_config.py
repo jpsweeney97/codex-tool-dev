@@ -79,6 +79,15 @@ class ResolvedMode:
     reason: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class LocalStateVerification:
+    """Git safety result for local-only Ticket automation state paths."""
+
+    ok: bool
+    reason: str | None = None
+    path: Path | None = None
+
+
 def _local_config_path(project_root: Path) -> Path:
     return project_root / LOCAL_CONFIG_RELATIVE_PATH
 
@@ -178,23 +187,30 @@ def write_local_config_from_setup_choice(project_root: Path, choice: SetupChoice
     raise ValueError(f"write setup choice failed: unknown setup choice. Got: {choice!r:.100}")
 
 
-def _workspace_ignore_is_declared(project_root: Path) -> bool:
-    relative = WORKSPACE_RELATIVE_PATH.as_posix() + "/"
+def _git_check_ignored(project_root: Path, relative_path: str) -> bool | None:
     try:
         result = subprocess.run(
-            ["git", "check-ignore", "-q", "--", relative],
+            ["git", "check-ignore", "-q", "--", relative_path],
             cwd=project_root,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
         )
     except (OSError, ValueError):
-        result = None
-    if result is not None and result.returncode == 0:
+        return None
+    if result.returncode == 0:
         return True
-    if result is not None and result.returncode == 1:
+    if result.returncode == 1:
         return False
+    return None
 
+
+def _path_ignore_is_declared(project_root: Path, relative_path: Path) -> bool:
+    relative = relative_path.as_posix()
+    check_path = f"{relative}/" if relative_path == WORKSPACE_RELATIVE_PATH else relative
+    git_ignored = _git_check_ignored(project_root, check_path)
+    if git_ignored is not None:
+        return git_ignored
     gitignore = project_root / ".gitignore"
     if not gitignore.is_file():
         return False
@@ -202,12 +218,47 @@ def _workspace_ignore_is_declared(project_root: Path) -> bool:
         lines = gitignore.read_text(encoding="utf-8").splitlines()
     except OSError:
         return False
-    accepted = {
-        ".codex/ticket-workspace",
-        ".codex/ticket-workspace/",
-        ".codex/ticket-workspace/**",
-    }
+    accepted = {relative, f"{relative}/", f"{relative}/**"}
     return any(line.strip() in accepted for line in lines if not line.strip().startswith("#"))
+
+
+def _workspace_ignore_is_declared(project_root: Path) -> bool:
+    return _path_ignore_is_declared(project_root, WORKSPACE_RELATIVE_PATH)
+
+
+def _git_status_is_clean_for(project_root: Path, relative_path: Path) -> bool:
+    if not (project_root / ".git").exists():
+        return True
+    try:
+        result = subprocess.run(
+            ["git", "status", "--short", "--", relative_path.as_posix()],
+            cwd=project_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+    except (OSError, ValueError):
+        return False
+    return result.returncode == 0 and result.stdout == ""
+
+
+def verify_local_state_paths(project_root: Path) -> LocalStateVerification:
+    """Verify local Ticket automation state is ignored and unstaged.
+
+    Args:
+        project_root: Project root that owns `.codex/ticket.local.md` and
+            `.codex/ticket-workspace/`.
+
+    Returns:
+        Verification result for the local state boundary.
+    """
+    for relative_path in (LOCAL_CONFIG_RELATIVE_PATH, WORKSPACE_RELATIVE_PATH):
+        if not _path_ignore_is_declared(project_root, relative_path):
+            return LocalStateVerification(False, "not_ignored", project_root / relative_path)
+        if not _git_status_is_clean_for(project_root, relative_path):
+            return LocalStateVerification(False, "staged_or_tracked", project_root / relative_path)
+    return LocalStateVerification(True)
 
 
 def ensure_ticket_workspace(project_root: Path) -> Path:
