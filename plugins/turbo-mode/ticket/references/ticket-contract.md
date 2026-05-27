@@ -6,16 +6,15 @@ Single source of truth for the ticket plugin. All components (skills, agents, en
 
 - Active tickets: `docs/tickets/`
 - Archived tickets: `docs/tickets/closed-tickets/`
-- Future autonomous durable history: each affected ticket's
-  `## Change History` section
-- Future autonomous local bookkeeping:
-  `.codex/ticket-workspace/ticket.pending-summary.jsonl`
-- Legacy audit artifacts: `docs/tickets/.audit/YYYY-MM-DD/<session_id>.jsonl`
-  may exist as historical project artifacts. Future `.audit/` writes are
-  disabled; autonomous Ticket durable history must not write there unless a
-  later migration explicitly changes this contract. Read/doctor support for
-  existing historical `.audit/` files remains until a separate migration decides
-  their fate.
+- Future autonomous durable history writes to `## Change History` on each
+  affected ticket.
+- Future local operational state writes to
+  `.codex/ticket-workspace/ticket.pending-summary.jsonl`.
+- Existing `docs/tickets/.audit/` files are historical artifacts. Future
+  `.audit/` writes are disabled; autonomous Ticket durable history must not
+  write there unless a later migration explicitly changes this contract.
+  `ticket_audit.py` and `ticket_doctor.py repair-audit` are read/repair tools
+  for existing historical `.audit/` files only.
 - Path boundary: hook payload files and all CLI `tickets_dir` arguments must resolve inside workspace/project root
 - tickets_dir resolution: CLI entrypoints resolve tickets_dir against a marker-based project root (nearest ancestor containing .codex/ or .git/), not against cwd. Root discovery starts from a resolved path, so symlinked cwd values are canonicalized before marker lookup. Explicit tickets_dir must resolve inside the project root. If no project root is found, the operation is rejected (policy_blocked).
 - Naming: `YYYY-MM-DD-<slug>.md`
@@ -247,9 +246,10 @@ Runtime activation driver failures use:
 
 ## 5. Autonomy Model
 
-Modes: suggest (default), auto_audit, auto_silent (v1.1 only)
+Runtime-first modes: `discussion_only`, `preview`, and `agent_primary`.
 
-Config: `.codex/ticket.local.md` YAML frontmatter
+Config: strict local `.codex/ticket.local.md` JSON once the autonomy setup slice
+lands.
 
 `request_origin`: "user" (ticket_engine_user.py), "agent" (ticket_engine_agent.py), "unknown" (fail closed)
 
@@ -280,24 +280,19 @@ Stage-specific missing-confidence behavior: preflight entrypoints coerce absent 
 
 Agent execute re-reads live `.codex/ticket.local.md` policy and blocks if it diverges from the preflight snapshot.
 
-Activation V1 certifies only `ticket_engine_agent.py execute`. Activation V1
-proves installed hook-mediated direct-execute wiring, not host-owned or
-spawned-agent identity. `hook_request_origin` is hook-observed provenance
-metadata on the current host and may still be reported as `"user"` for the
-certified direct-execute lane. `capture`, `update`, and `ticket_workflow.py`
-remain outside the activation proof scope alongside `ingest_dispatch` and
-`activation_smoke_bootstrap`, and require a separate follow-up before widening
-certification. Privileged host diagnostic runs and prompt-driven smokes are
-diagnostics only. AgentControl child smoke, when captured, is same-membrane
-corroboration only and not identity proof. Normal agent direct execute fails
-with `runtime_readiness_required` when the runtime proof is missing, stale, or
-mismatched.
+Direct `ticket_engine_agent.py execute` is not an autonomous mutation route in
+the runtime-first design. It fails closed with `gateway_required` until the
+runtime-first gateway can validate approval, write ticket-local
+`## Change History`, and append pending-summary bookkeeping.
 
 Field validation: title, problem, reopen_reason, captured_request, next_action, capture_source, and component must be strings when present. priority, status, resolution, capture_confidence, and refinement_status are validated against contract enums before writes. key_file_paths, related_paths, tags, blocked_by, blocks, and acceptance_criteria must be lists of strings. source must be a dict with string values. key_files must be a list of dicts. defer must be a dict. Invalid inputs are rejected (need_fields), not silently coerced.
 
 Renderer invariant: `acceptance_criteria` is create-time `list[string]` input only. Bare strings are rejected before rendering and are not coerced into a single checklist item.
 
-Known limitation (v1.3): create now uses exclusive file creation with bounded retry to prevent same-path silent overwrite, but concurrent autonomous creates are still not fully serialized. Session create cap enforcement and ID allocation are not lock-based, so parallel subagent execution is not a hard safety boundary.
+Known limitation (v1.3): create now uses exclusive file creation with bounded
+retry to prevent same-path silent overwrite. Runtime-first autonomous
+serialization belongs to the gateway/pending-summary implementation, not to
+legacy direct execute.
 
 ## 6. Dedup Policy
 

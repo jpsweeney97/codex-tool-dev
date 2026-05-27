@@ -117,44 +117,24 @@ def test_engine_docs_state_runner_is_not_public_mutation_surface() -> None:
     assert "not normal user-facing mutation interfaces" in text
 
 
-def test_docs_describe_direct_execute_activation_v1_boundary() -> None:
+def test_docs_describe_direct_agent_execute_gateway_boundary() -> None:
     readme = _read_text(PLUGIN_ROOT / "README.md")
     handbook = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
     contract = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
-    certified_lane = "Activation V1 certifies only `ticket_engine_agent.py execute`."
-    trust_boundary = (
-        "Activation V1 proves installed hook-mediated direct-execute wiring, "
-        "not host-owned or spawned-agent identity."
+    direct_agent_boundary = (
+        "Direct `ticket_engine_agent.py execute` is not an autonomous mutation route"
     )
-    metadata_boundary = (
-        "`hook_request_origin` is hook-observed provenance metadata on the current host "
-        'and may still be reported as `"user"` for the certified direct-execute lane.'
-    )
-    scope_boundary = (
-        "`capture`, `update`, and `ticket_workflow.py` remain outside the activation proof "
-        "scope alongside `ingest_dispatch` and `activation_smoke_bootstrap`, and require "
-        "a separate follow-up before widening certification."
-    )
-    diagnostics_boundary = (
-        "Privileged host diagnostic runs and prompt-driven smokes are diagnostics only."
-    )
-    corroboration_boundary = (
-        "AgentControl child smoke, when captured, is same-membrane corroboration only "
-        "and not identity proof."
-    )
-    gate_boundary = (
-        "Normal agent direct execute fails with `runtime_readiness_required` when the "
-        "runtime proof is missing, stale, or mismatched."
-    )
+    gate_boundary = "fails closed with `gateway_required`"
+    gateway_boundary = "runtime-first gateway"
+    history_boundary = "ticket-local `## Change History`"
+    pending_boundary = "pending-summary bookkeeping"
     for text in [readme, handbook, contract]:
         normalized = _normalize_whitespace(text)
-        assert certified_lane in normalized
-        assert trust_boundary in normalized
-        assert metadata_boundary in normalized
-        assert scope_boundary in normalized
-        assert diagnostics_boundary in normalized
-        assert corroboration_boundary in normalized
+        assert direct_agent_boundary in normalized
         assert gate_boundary in normalized
+        assert gateway_boundary in normalized
+        assert history_boundary in normalized
+        assert pending_boundary in normalized
         assert "dangerFullAccess" not in text
 
 
@@ -672,7 +652,7 @@ def test_handbook_documents_runtime_activation_operator_flow() -> None:
         "uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime "
         "<TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>"
     ) in handbook
-    assert "`runtime_readiness_required` on direct execute" in handbook
+    assert "`gateway_required`" in handbook
     assert "ticket_triage.py doctor" in handbook
     assert "backend/diagnostic path" in handbook
     assert "not the preferred user-facing doctor entrypoint" in handbook
@@ -680,18 +660,13 @@ def test_handbook_documents_runtime_activation_operator_flow() -> None:
         "`ticket_doctor.py diagnose` reports source/cache parity, runtime-proof status"
         in normalized
     )
-    assert (
-        "`activate-runtime` is the only path in this surface that exercises live "
-        "direct-execute runtime certification"
-        in normalized
-    )
+    assert "installed Ticket runtime" in normalized
     assert "`in_progress`" in normalized
     assert (
         "`done` requires an Acceptance Criteria section; close flow remains separate"
         in normalized
     )
     assert "open`, `in_progress`, or `blocked`" not in normalized
-    assert "The engine gates it with `policy_blocked`" in handbook
 
 
 def test_handbook_documents_ticket_triage_doctor_runtime_probe_output() -> None:
@@ -715,20 +690,47 @@ def test_readme_and_handbook_do_not_describe_guard_as_fail_open() -> None:
         assert "fail closed" in normalized or "fail-closed" in normalized
 
 
-def test_handbook_autonomy_table_lists_auto_silent_as_gated() -> None:
-    text = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
-    autonomy_row = next(line for line in text.splitlines() if line.startswith("| `autonomy_mode`"))
-    cells = [cell.strip() for cell in autonomy_row.strip("|").split("|")]
+def test_current_docs_describe_audit_as_historical_only() -> None:
+    docs = (
+        PLUGIN_ROOT / "README.md",
+        PLUGIN_ROOT / "HANDBOOK.md",
+        PLUGIN_ROOT / "references" / "ticket-contract.md",
+    )
+    forbidden_current_guidance = (
+        "autonomy_mode: auto_audit",
+        "Set `autonomy_mode: auto_audit`",
+        "requires auto_audit",
+        "requires `auto_audit`",
+        "created automatically on the first agent mutation",
+        "Append-only audit trail",
+        "full audit trail",
+        "After a successful agent mutation (requires auto_audit mode)",
+    )
 
-    assert cells[0] == "`autonomy_mode`"
-    assert cells[1] == "`suggest`"
-    assert {value.strip() for value in cells[2].split(",")} == {
-        "`suggest`",
-        "`auto_audit`",
-        "`auto_silent`",
-    }
-    assert "`auto_silent`" in cells[3]
-    assert "`policy_blocked`" in cells[3]
+    for path in docs:
+        text = _read_text(path)
+        normalized = _normalize_whitespace(text)
+        assert "Future autonomous durable history writes to `## Change History`" in normalized
+        assert (
+            "Future local operational state writes to "
+            "`.codex/ticket-workspace/ticket.pending-summary.jsonl`"
+        ) in normalized
+        assert "Existing `docs/tickets/.audit/` files are historical artifacts" in normalized
+        assert "read/repair tools for existing historical `.audit/` files only" in normalized
+        for phrase in forbidden_current_guidance:
+            assert phrase not in text, f"{path} still contains active audit guidance: {phrase}"
+
+
+def test_handbook_documents_direct_agent_execute_gateway_requirement() -> None:
+    text = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
+    normalized = _normalize_whitespace(text)
+
+    assert (
+        "Direct `ticket_engine_agent.py execute` is not an autonomous mutation route"
+        in normalized
+    )
+    assert "fails closed until the runtime-first gateway" in normalized
+    assert "`gateway_required`" in normalized
 
 
 def test_changelog_announces_activate_runtime_subcommand() -> None:

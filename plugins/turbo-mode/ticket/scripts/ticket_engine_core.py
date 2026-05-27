@@ -1182,25 +1182,14 @@ def _sanitize_session_id(session_id: str) -> str:
 
 
 def _audit_append(session_id: str, tickets_dir: Path, entry: dict[str, Any]) -> bool:
-    """Append a JSONL audit entry for the given session.
+    """Historical no-op for future engine writes.
 
-    Location: <tickets_dir>/.audit/YYYY-MM-DD/<session_id>.jsonl
-    Returns True on success, False on failure. Logs failures to stderr.
+    Existing `.audit` readers and repair tools remain available for historical
+    files, but runtime writes moved to Change History plus pending-summary
+    bookkeeping.
     """
-    try:
-        safe_id = _sanitize_session_id(session_id)
-        date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
-        audit_dir = tickets_dir / ".audit" / date_dir
-        audit_dir.mkdir(parents=True, exist_ok=True)
-        audit_file = audit_dir / f"{safe_id}.jsonl"
-        with open(audit_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
-            f.flush()
-            os.fsync(f.fileno())
-        return True
-    except Exception as exc:
-        print(f"AUDIT WRITE FAILED: {exc}", file=sys.stderr)
-        return False
+    del session_id, tickets_dir, entry
+    return True
 
 
 def engine_count_session_creates(
@@ -1453,6 +1442,16 @@ def engine_execute(
             error_code="policy_blocked",
         )
 
+    if request_origin == "agent" and runtime_execute_surface == "direct_execute":
+        return EngineResponse(
+            state="policy_blocked",
+            message=(
+                "Direct agent execute requires a gateway-approved decision. "
+                "Use the runtime-first autonomy gateway once it is available."
+            ),
+            error_code="gateway_required",
+        )
+
     # --- Autonomy defense-in-depth (self-contained allowlist) ---
     if request_origin == "agent":
         if action == "reopen":
@@ -1595,92 +1594,27 @@ def engine_execute(
                 error_code="stale_plan",
             )
 
-    # Audit: attempt_started (fail-closed for agents — audit is a security gate).
-    # "intent" records the action being attempted so counting can use attempt_started
-    # entries when result writes fail (seals the create cap).
-    base_entry = {
-        "ts": datetime.now(UTC).isoformat(),
-        "action": "attempt_started",
-        "intent": action,
-        "ticket_id": ticket_id,
-        "session_id": session_id,
-        "request_origin": request_origin,
-        "autonomy_mode": config.mode,
-        "result": None,
-        "changes": None,
-    }
-    if not _audit_append(session_id, tickets_dir, base_entry) and request_origin == "agent":
-        return EngineResponse(
-            state="policy_blocked",
-            message="Audit trail write failed — agent mutation blocked (fail-closed)",
-            error_code="policy_blocked",
-        )
-
     # Dispatch
-    try:
-        if action == "create":
-            resp = _execute_create(fields, session_id, request_origin, tickets_dir)
-        elif action == "update":
-            resp = _execute_update(ticket_id, fields, session_id, request_origin, tickets_dir)
-        elif action == "close":
-            resp = _execute_close(
-                ticket_id,
-                fields,
-                session_id,
-                request_origin,
-                tickets_dir,
-                dependency_override=dependency_override,
-            )
-        elif action == "reopen":
-            resp = _execute_reopen(ticket_id, fields, session_id, request_origin, tickets_dir)
-        else:
-            resp = EngineResponse(
-                state="escalate",
-                message=f"Unknown action: {action!r}",
-                error_code="intent_mismatch",
-            )
-    except Exception as exc:
-        # Audit: error entry
-        error_entry = {
-            "ts": datetime.now(UTC).isoformat(),
-            "action": action,
-            "ticket_id": ticket_id,
-            "session_id": session_id,
-            "request_origin": request_origin,
-            "autonomy_mode": config.mode,
-            "result": f"error:{type(exc).__name__}",
-            "changes": None,
-        }
-        _audit_append(session_id, tickets_dir, error_entry)
-        raise
-
-    # Audit: attempt_result. The create cap is sealed by attempt_started (which
-    # carries intent), so a failed result write doesn't bypass the cap. But we
-    # still escalate for agents because a missing result entry means the non-ok
-    # subtraction won't work if this create failed — conservatively over-counting.
-    result_entry = {
-        "ts": datetime.now(UTC).isoformat(),
-        "action": action,
-        "ticket_id": resp.ticket_id if resp.ticket_id else ticket_id,
-        "session_id": session_id,
-        "request_origin": request_origin,
-        "autonomy_mode": config.mode,
-        "result": resp.state,
-        "changes": resp.data.get("changes") if resp.data else None,
-    }
-    if not _audit_append(session_id, tickets_dir, result_entry) and request_origin == "agent":
-        succeeded = isinstance(resp.state, str) and resp.state.startswith("ok_")
-        outcome = "succeeded" if succeeded else f"returned {resp.state}"
-        return EngineResponse(
-            state="escalate",
-            message=f"Audit result write failed — agent {action} {outcome} but result entry "
-            "is missing. Cap is sealed via attempt_started; manual audit review recommended.",
-            ticket_id=resp.ticket_id if resp.ticket_id else ticket_id,
-            error_code="io_error",
-            data=resp.data,
+    if action == "create":
+        return _execute_create(fields, session_id, request_origin, tickets_dir)
+    if action == "update":
+        return _execute_update(ticket_id, fields, session_id, request_origin, tickets_dir)
+    if action == "close":
+        return _execute_close(
+            ticket_id,
+            fields,
+            session_id,
+            request_origin,
+            tickets_dir,
+            dependency_override=dependency_override,
         )
-
-    return resp
+    if action == "reopen":
+        return _execute_reopen(ticket_id, fields, session_id, request_origin, tickets_dir)
+    return EngineResponse(
+        state="escalate",
+        message=f"Unknown action: {action!r}",
+        error_code="intent_mismatch",
+    )
 
 
 # --- Execute sub-functions ---

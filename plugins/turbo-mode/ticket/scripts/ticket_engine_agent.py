@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Agent entrypoint for the ticket engine.
 
-Hardcodes request_origin="agent" for guarded direct-execute Ticket operations.
+Hardcodes request_origin="agent" for guarded Ticket engine operations. Direct
+execute is not an autonomous write route until the runtime-first gateway lands.
 Launcher: uv run python -B <PLUGIN_ROOT>/scripts/ticket_engine_agent.py <subcommand> <payload_file>
 """
 
