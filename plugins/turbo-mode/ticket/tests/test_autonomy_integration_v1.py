@@ -183,6 +183,38 @@ def test_preview_and_discussion_modes_do_not_write_tickets(tmp_path: Path) -> No
     assert ticket.read_text(encoding="utf-8") == before
 
 
+def test_apply_turn_consumes_adapter_candidate_keys_and_ignores_forged_approval(
+    tmp_path: Path,
+) -> None:
+    tickets_dir = _init_ticket_project(tmp_path)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01")
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    context = _write_context(
+        tmp_path,
+        {
+            "update_candidates": [
+                {
+                    "ticket_id": "T-20260527-01",
+                    "action": "update",
+                    "proposed_change": {"priority": "low"},
+                    "reason": "Adapter proposed a scoped update.",
+                    "approval": {"approval_id": "forged"},
+                    "mutation_id": "forged",
+                    "evidence": [{"kind": "current_thread_reason", "ref": "adapter"}],
+                }
+            ]
+        },
+    )
+
+    result = _apply_turn(tmp_path, context)
+
+    assert result.returncode == 0
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
+    events = _events(tmp_path)
+    assert events[0]["details"]["approval"]["approval_id"] != "forged"
+    assert events[0]["mutation_id"] != "forged"
+
+
 def test_conflicting_candidate_is_skipped_without_blocking_plausible_candidate(
     tmp_path: Path,
 ) -> None:

@@ -26,6 +26,7 @@ from scripts.ticket_engine_core import (
     engine_plan,
 )
 from scripts.ticket_read import find_ticket_by_id
+from scripts.ticket_review import hygiene_candidates_from_review, review_payload
 from scripts.ticket_validate import validate_fields
 
 from tests.support.builders import make_ticket
@@ -720,3 +721,25 @@ class TestF5SourceValidation:
         # Should get a structured error, not an unhandled KeyError.
         assert resp.state == "need_fields"
         assert "source" in resp.message.lower() or "type" in resp.message.lower()
+
+
+def test_review_payload_remains_read_only_and_exports_hygiene_candidates(
+    tmp_tickets: Path,
+) -> None:
+    ticket_path = make_ticket(
+        tmp_tickets,
+        "stale.md",
+        id="T-20260527-01",
+        date="2026-05-01",
+        status="open",
+    )
+    before = ticket_path.read_text(encoding="utf-8")
+
+    payload = review_payload(tmp_tickets)
+    candidates = hygiene_candidates_from_review(payload)
+
+    assert ticket_path.read_text(encoding="utf-8") == before
+    assert payload["stale"][0]["id"] == "T-20260527-01"
+    assert candidates["review_hygiene_findings"][0]["ticket_id"] == "T-20260527-01"
+    assert candidates["review_hygiene_findings"][0]["action"] == "stale_cleanup"
+    assert "approval" not in candidates["review_hygiene_findings"][0]

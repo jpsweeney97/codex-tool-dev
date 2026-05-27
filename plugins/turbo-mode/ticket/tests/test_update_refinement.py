@@ -8,7 +8,7 @@ import pytest
 import scripts.ticket_update as ticket_update
 from scripts.ticket_parse import extract_fenced_yaml, parse_ticket, parse_yaml_block
 from scripts.ticket_render import render_ticket
-from scripts.ticket_update import run_update
+from scripts.ticket_update import autonomy_candidate_from_update_payload, run_update
 from scripts.ticket_ux import INTERNAL_RECOVERY_PATH_PATTERNS, INTERNAL_RECOVERY_TERMS
 
 
@@ -639,3 +639,44 @@ def test_metadata_dependency_update_writes_scoped_frontmatter(
     assert data["related_paths"] == ["plugins/turbo-mode/ticket/scripts/ticket_update.py"]
     assert data["blocked_by"] == ["T-20260518-02"]
     assert data["blocks"] == ["T-20260518-03"]
+
+
+def test_update_adapter_builds_refinement_and_lifecycle_candidates_without_writing(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    ticket_path = _make_refinement_ticket(tmp_tickets, status="in_progress")
+    before = ticket_path.read_text(encoding="utf-8")
+    payload_dir = project_root / ".codex"
+    payload_dir.mkdir(exist_ok=True)
+    refine_payload = payload_dir / "ticket-update-refine.json"
+    lifecycle_payload = payload_dir / "ticket-update-lifecycle.json"
+    _write_payload(
+        refine_payload,
+        _payload(
+            tmp_tickets,
+            {
+                "problem": "The wrapper should emit a candidate only.",
+                "next_action": "Route the refinement through apply-turn.",
+                "acceptance_criteria": ["Candidate output is structured."],
+            },
+        ),
+    )
+    _write_payload(
+        lifecycle_payload,
+        _payload(tmp_tickets, {"status": "done"}),
+    )
+
+    refine = autonomy_candidate_from_update_payload(refine_payload)
+    lifecycle = autonomy_candidate_from_update_payload(lifecycle_payload)
+
+    assert refine["state"] == "ok"
+    assert refine["update_candidates"][0]["action"] == "refine"
+    assert refine["update_candidates"][0]["ticket_id"] == "T-20260518-01"
+    assert "approval" not in refine["update_candidates"][0]
+    assert "mutation_id" not in refine["update_candidates"][0]
+    assert lifecycle["state"] == "ok"
+    assert lifecycle["update_candidates"][0]["action"] == "done"
+    assert ticket_path.read_text(encoding="utf-8") == before

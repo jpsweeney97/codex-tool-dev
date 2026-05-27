@@ -152,12 +152,18 @@ def _append_structured_candidates(
     seen: set[tuple[str | None, str, str, str]],
     turn_context: Mapping[str, object],
 ) -> None:
-    for item in turn_context.get("candidate_mutations", []):
+    for key in ("candidate_mutations", "update_candidates", "capture_candidates"):
+        for item in turn_context.get(key, []):
+            if isinstance(item, Mapping):
+                candidate = _candidate_from_mapping(item)
+                if candidate is not None:
+                    _append_candidate(candidates, seen, candidate)
+    for item in turn_context.get("possible_candidates", []):
         if isinstance(item, Mapping):
-            candidate = _candidate_from_mapping(item)
+            candidate = _possible_candidate_from_mapping(item)
             if candidate is not None:
                 _append_candidate(candidates, seen, candidate)
-    for item in turn_context.get("possible_candidates", []):
+    for item in turn_context.get("review_hygiene_findings", []):
         if isinstance(item, Mapping):
             candidate = _possible_candidate_from_mapping(item)
             if candidate is not None:

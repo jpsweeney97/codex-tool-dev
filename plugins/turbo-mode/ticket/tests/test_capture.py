@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 import scripts.ticket_capture as ticket_capture
-from scripts.ticket_capture import run_capture
+from scripts.ticket_capture import autonomy_candidate_from_capture_payload, run_capture
 from scripts.ticket_parse import parse_ticket
 from scripts.ticket_ux import INTERNAL_RECOVERY_PATH_PATTERNS, INTERNAL_RECOVERY_TERMS
 
@@ -820,6 +820,40 @@ def test_unapplied_edit_returns_need_fields_without_history(
     payload = json.loads(payload_path.read_text(encoding="utf-8"))
     assert "edit_history" not in payload
     assert payload["capture"]["title"] == "Capture follow-up for hook guard preview"
+    assert list(tmp_tickets.glob("*.md")) == []
+
+
+def test_capture_adapter_builds_clear_candidate_and_routes_vague_ideas_to_discussion(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    clear_path = _payload_file(project_root, _payload(tmp_tickets))
+    vague_path = project_root / ".codex" / "ticket-capture-vague.json"
+    _write_payload(
+        vague_path,
+        _payload(
+            tmp_tickets,
+            title="Maybe later cleanup",
+            captured_request="Maybe later, remember a possible cleanup idea.",
+            problem="Maybe later cleanup needs more detail.",
+            next_action="Maybe later.",
+            capture_confidence="low",
+        ),
+    )
+
+    clear = autonomy_candidate_from_capture_payload(clear_path)
+    vague = autonomy_candidate_from_capture_payload(vague_path)
+
+    assert clear["state"] == "ok"
+    assert clear["capture_candidates"][0]["action"] == "create"
+    assert clear["capture_candidates"][0]["proposed_change"]["title"] == (
+        "Capture follow-up for hook guard preview"
+    )
+    assert "approval" not in clear["capture_candidates"][0]
+    assert vague["state"] == "discussion_required"
+    assert vague["possible_candidates"][0]["action"] == "create"
     assert list(tmp_tickets.glob("*.md")) == []
 
 
