@@ -407,6 +407,8 @@ Autonomy must be enforced at the real Ticket mutation choke points:
 - `plugins/turbo-mode/ticket/scripts/ticket_review.py` for backlog and hygiene
   mutations
 - `plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py`
+- `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py` when reached by
+  `ticket_engine_agent.py`
 - other low-level mutating engine entrypoints that can write Ticket state
 
 `ticket_doctor.py` is explicitly outside normal autonomous mutation. Any
@@ -449,6 +451,13 @@ mutation unless the engine write path receives an approved autonomy decision.
 `ticket_engine_core.py` or a small engine-owned write gateway must reject
 autonomous writes that lack that decision. Adapter tests and static/text guards
 are defense-in-depth; they are not the primary boundary.
+
+`ticket_engine_agent.py` and the shared `ticket_engine_runner.py` are not a
+second autonomous gateway. A direct agent execute path may remain only as
+explicitly non-autonomous compatibility or as a fail-closed legacy path. Any
+supported autonomous agent write must enter the engine-owned gateway with
+explicit `thread_id`, approval validation, pending-summary bookkeeping, and the
+same Change History contract as `apply-turn`.
 
 The write-authority inventory is positive:
 

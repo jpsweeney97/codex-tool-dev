@@ -118,7 +118,7 @@ Modify these existing source surfaces:
 
 - `.gitignore` - add local-only `.codex/ticket-workspace/` rules when the workspace state path is introduced.
 - `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py` - disable future `.audit/` writes, remove legacy autonomy-mode behavior that is not part of the runtime-first system, expose existing low-level mutation dispatch to the autonomous gateway, and keep user-directed ordinary writes explicitly non-autonomous.
-- `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py` - preserve low-level compatibility while passing explicit non-autonomous intent for user-directed execute paths.
+- `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py` and `plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py` - preserve low-level compatibility while passing explicit non-autonomous intent for user-directed execute paths, and prevent the agent entrypoint from becoming an independent autonomous mutation route outside the gateway.
 - `plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py` - remove or rewrite old `auto_audit` readiness staging so source readiness evidence cannot preserve removed modes by accident.
 - `plugins/turbo-mode/ticket/scripts/ticket_capture.py` - later adapter integration for automatic creation of clear follow-up tickets.
 - `plugins/turbo-mode/ticket/scripts/ticket_update.py` - adapter integration for update/lifecycle/refinement mutation candidates.
@@ -483,10 +483,13 @@ git commit -m "fix(ticket): disable future audit writes"
 - Create: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py`
 - Create: `plugins/turbo-mode/ticket/tests/test_autonomy_config.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_autonomy.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_integration.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_runtime_readiness.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_engine_runner.py`
 - Modify: `.gitignore`
 - Modify: `plugins/turbo-mode/ticket/references/ticket-contract.md`
 - Modify: `plugins/turbo-mode/ticket/README.md`
@@ -582,6 +585,11 @@ Test cases:
 - `pause_workspace_automation(project_root, reason="user_requested")` writes
   the pause marker and rewrites `.codex/ticket.local.md` to strict JSON
   `discussion_only`.
+- `ticket_engine_agent.py` and `ticket_engine_runner.py` do not treat old
+  `auto_audit`, `auto_silent`, or `suggest` payloads as current autonomous
+  authority. Any retained direct `agent execute` compatibility path is
+  explicitly non-autonomous and cannot perform create, update, close, or reopen
+  as an autonomous write before the gateway owns the approved mutation path.
 - Mode snapshots are keyed by `(project_root, thread_id)`: the first automatic
   turn for a thread/project reads strict config and writes a local snapshot;
   later turns for the same thread/project use the snapshot even if
@@ -689,6 +697,12 @@ Implementation requirements:
   If a low-level direct-engine compatibility path must remain temporarily,
   mark it explicitly non-autonomous and keep it out of host-facing autonomy
   setup, docs, and final runtime-readiness claims.
+- Update `ticket_engine_runner.py` and `ticket_engine_agent.py` in the same
+  slice as the old-mode removal. Direct `run("agent") execute` must either
+  remain a user-directed/non-autonomous compatibility path or fail closed for
+  attempted autonomous create, update, close, and reopen payloads until Task 9
+  provides a gateway-approved write path. It must not call low-level
+  `engine_execute()` as a supported autonomous route.
 - Rewrite `ticket_runtime_readiness.py` so any retained source readiness helper
   stages strict JSON mode config or no autonomy config at all. A retained
   readiness helper must not write `autonomy_mode: auto_audit`,
@@ -723,7 +737,7 @@ Update README/HANDBOOK/contract to document strict JSON local config and workspa
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_config.py tests/test_autonomy.py tests/test_autonomy_integration.py tests/test_runtime_readiness.py tests/test_execute.py tests/test_engine_runner.py tests/test_workflow_execute.py tests/test_review_findings.py tests/test_docs_contract.py -q
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_integration.py plugins/turbo-mode/ticket/tests/test_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_workflow_execute.py plugins/turbo-mode/ticket/tests/test_review_findings.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_integration.py plugins/turbo-mode/ticket/tests/test_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_workflow_execute.py plugins/turbo-mode/ticket/tests/test_review_findings.py
 git diff --check
 git status --short
 ```
@@ -731,7 +745,7 @@ git status --short
 Commit:
 
 ```bash
-git add .gitignore plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_integration.py plugins/turbo-mode/ticket/tests/test_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_workflow_execute.py plugins/turbo-mode/ticket/tests/test_review_findings.py plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md
+git add .gitignore plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_integration.py plugins/turbo-mode/ticket/tests/test_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_workflow_execute.py plugins/turbo-mode/ticket/tests/test_review_findings.py plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md
 git commit -m "feat(ticket): add strict autonomy workspace config"
 ```
 
@@ -1316,8 +1330,11 @@ git commit -m "feat(ticket): add autonomy runtime decisions"
 
 - Create: `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py`
 - Create: `plugins/turbo-mode/ticket/tests/test_engine_gateway.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_engine_policy.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_engine_runner.py`
 
 - [ ] **Step 1: Write gateway tests**
 
@@ -1352,6 +1369,12 @@ Tests must prove:
     approval validation.
 - Direct generic agent-origin `reopen` remains policy-blocked outside the
   gateway-authorized path.
+- Direct `ticket_engine_agent.py execute` through `ticket_engine_runner.py` is
+  not an independent autonomous write path. Create, update, close, and reopen
+  attempts that do not carry a gateway-approved decision fail closed and leave
+  ticket files unchanged; any future supported autonomous agent entrypoint must
+  route through `apply_autonomous_mutation()` with explicit `thread_id`,
+  approval validation, and pending-summary bookkeeping.
 
 Required public surface:
 
@@ -1408,6 +1431,11 @@ Implementation requirements:
   using `EngineDispatch.engine_action` and normalized fields.
 - Add the smallest explicit gateway-authorized reopen path needed for approved
   autonomous `reopen`; keep direct generic agent-origin `reopen` blocked.
+- Update `ticket_engine_runner.py` and `ticket_engine_agent.py` so their direct
+  agent execute path cannot bypass the gateway. Retained direct execute
+  compatibility must be explicitly non-autonomous; supported autonomous writes
+  must enter through `apply_autonomous_mutation()` rather than calling
+  `engine_execute()` directly.
 - Append `ticket_written` with expected post-write fingerprint.
 - Append terminal `applied`, `skipped`, `discussion_required`, `deferred`, or `failed`.
 - For ticket-file writes, include `commit_disposition` details. Until Task 12 lands, use `commit_deferred` with reason `Commit coordinator not yet run for this source slice.`
@@ -1436,15 +1464,15 @@ they are inside the named gateway path above. It should flag future autonomous
 - [ ] **Step 5: Verify and commit**
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_engine_gateway.py tests/test_engine_policy.py tests/test_audit.py -q
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_engine_gateway.py tests/test_engine_policy.py tests/test_engine_runner.py tests/test_audit.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_engine_runner.py
 git diff --check
 ```
 
 Commit:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_engine_policy.py
+git add plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py plugins/turbo-mode/ticket/scripts/ticket_engine_agent.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_engine_runner.py
 git commit -m "feat(ticket): add autonomous write gateway"
 ```
 
@@ -1932,6 +1960,11 @@ Tests must prove:
 - Direct active-ticket write paths outside the gateway or specific named
   maintenance command functions are flagged; whole helper-file allowlists are
   not sufficient proof.
+- `ticket_engine_agent.py` and `ticket_engine_runner.py` cannot provide a
+  second autonomous mutation route. Direct agent create, update, close, or reopen
+  execution without the gateway-approved decision contract must fail closed, and
+  any supported autonomous agent path must be statically tied to the named
+  gateway call path.
 - No source file writes to `docs/tickets/.audit/` for future autonomous behavior.
   Named historical read/doctor maintenance commands may still repair existing
   `.audit/` files, and the static proof must keep that exception explicit.
