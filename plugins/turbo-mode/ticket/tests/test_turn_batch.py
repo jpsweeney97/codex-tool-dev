@@ -8,6 +8,7 @@ import pytest
 from scripts.ticket_autonomy_ids import sha256_fingerprint
 from scripts.ticket_turn_batch import (
     PENDING_SUMMARY_SCHEMA,
+    PendingSummaryStore,
     VerifiedRepoContext,
     event_payload_fingerprint,
     validate_pending_summary_event,
@@ -63,13 +64,36 @@ def valid_status_event(status: str, **detail_overrides: object) -> dict[str, obj
         "deferred": {"retry_condition": "branch is clean"},
         "failed": {"error_code": "policy_blocked"},
     }
+    event_overrides: dict[str, object] = {}
+    for key in (
+        "event_id",
+        "timestamp",
+        "thread_id",
+        "turn_id",
+        "ticket_id",
+        "mutation_id",
+        "repo_context",
+        "reason",
+        "action",
+    ):
+        if key in detail_overrides:
+            event_overrides[key] = detail_overrides.pop(key)
     details = details_by_status.get(status, {}).copy()
     details.update(detail_overrides)
     return valid_attempt_event(
         event_type="mutation_status",
         status=status,
         details=details,
+        **event_overrides,
     )
+
+
+def project_root_with_ignored_workspace(tmp_path: Path) -> Path:
+    (tmp_path / ".gitignore").write_text(
+        ".codex/ticket-workspace/\n.codex/ticket.local.md\n",
+        encoding="utf-8",
+    )
+    return tmp_path
 
 
 def assert_invalid(event: dict[str, object], expected: str) -> None:
@@ -271,3 +295,77 @@ def test_event_payload_fingerprint_excludes_event_id_and_timestamp() -> None:
 
     with pytest.raises(ValueError, match="event payload fingerprint failed"):
         event_payload_fingerprint(event)
+
+
+def test_pending_summary_jsonl_receives_one_json_object_per_line(tmp_path: Path) -> None:
+    project_root = project_root_with_ignored_workspace(tmp_path)
+    store = PendingSummaryStore(project_root)
+    first = valid_attempt_event(event_id="evt_1", mutation_id="mut_1")
+    second = valid_attempt_event(event_id="evt_2", mutation_id="mut_2")
+
+    first_result = store.append_event(first)
+    second_result = store.append_event(second)
+
+    assert first_result.state == "appended"
+    assert second_result.state == "appended"
+    log_path = project_root / ".codex" / "ticket-workspace" / "ticket.pending-summary.jsonl"
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    assert [line.startswith('{"') for line in lines] == [True, True]
+    assert [event["event_id"] for event in store.read_events()] == ["evt_1", "evt_2"]
+
+
+def test_append_event_returns_already_recorded_for_same_non_timestamp_content(
+    tmp_path: Path,
+) -> None:
+    project_root = project_root_with_ignored_workspace(tmp_path)
+    store = PendingSummaryStore(project_root)
+    first = valid_attempt_event(event_id="evt_same", timestamp="2026-05-27T12:00:00Z")
+    duplicate = valid_attempt_event(event_id="evt_same", timestamp="2026-05-27T12:05:00Z")
+
+    assert store.append_event(first).state == "appended"
+    result = store.append_event(duplicate)
+
+    assert result.state == "already_recorded"
+    assert len(store.read_events()) == 1
+
+
+def test_append_event_pauses_for_conflicting_event_id(tmp_path: Path) -> None:
+    project_root = project_root_with_ignored_workspace(tmp_path)
+    store = PendingSummaryStore(project_root)
+    first = valid_attempt_event(event_id="evt_conflict", mutation_id="mut_1")
+    conflicting = valid_attempt_event(event_id="evt_conflict", mutation_id="mut_2")
+
+    assert store.append_event(first).state == "appended"
+    result = store.append_event(conflicting)
+
+    assert result.state == "paused"
+    assert result.pause_reason == "conflicting_event"
+    assert len(store.read_events()) == 1
+
+
+def test_append_event_lock_timeout_pauses_without_writing(tmp_path: Path) -> None:
+    project_root = project_root_with_ignored_workspace(tmp_path)
+    store = PendingSummaryStore(project_root, lock_timeout_seconds=0)
+    lock_path = project_root / ".codex" / "ticket-workspace" / "ticket.pending-summary.lock"
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text("held\n", encoding="utf-8")
+
+    result = store.append_event(valid_attempt_event())
+
+    assert result.state == "paused"
+    assert result.pause_reason == "lock_timeout"
+    assert store.read_events() == ()
+
+
+def test_append_event_pauses_when_existing_jsonl_is_unhealthy(tmp_path: Path) -> None:
+    project_root = project_root_with_ignored_workspace(tmp_path)
+    log_path = project_root / ".codex" / "ticket-workspace" / "ticket.pending-summary.jsonl"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text("{not json}\n", encoding="utf-8")
+    store = PendingSummaryStore(project_root)
+
+    result = store.append_event(valid_attempt_event())
+
+    assert result.state == "paused"
+    assert result.pause_reason == "pending_summary_unhealthy"

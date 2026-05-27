@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import os
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
-from scripts.ticket_autonomy_ids import sha256_fingerprint
+from scripts.ticket_autonomy_config import ensure_ticket_workspace
+from scripts.ticket_autonomy_ids import canonical_json, sha256_fingerprint
 
 PENDING_SUMMARY_SCHEMA = "codex.ticket.pending_summary.v1"
 
@@ -141,6 +146,15 @@ class ValidationResult:
 
     ok: bool
     error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AppendResult:
+    """Result from append-only pending-summary bookkeeping."""
+
+    state: Literal["appended", "already_recorded", "paused"]
+    event_id: str
+    pause_reason: str | None = None
 
 
 def _path_text(path: Path) -> str:
@@ -361,3 +375,154 @@ def event_payload_fingerprint(
             f"Got: {field!r:.100}"
         )
     return sha256_fingerprint(event_without_event_id_and_timestamp)
+
+
+def _event_id(event: Mapping[str, object]) -> str:
+    value = event.get("event_id")
+    return value if isinstance(value, str) else ""
+
+
+def _event_signature(event: Mapping[str, object]) -> str:
+    comparable = {key: value for key, value in event.items() if key != "timestamp"}
+    return canonical_json(comparable)
+
+
+class PendingSummaryStore:
+    """Append-only local pending-summary event store."""
+
+    def __init__(self, project_root: Path, *, lock_timeout_seconds: float = 2.0) -> None:
+        """Create a project-local pending-summary store.
+
+        Args:
+            project_root: Project root that owns `.codex/ticket-workspace/`.
+            lock_timeout_seconds: Maximum time to wait for the append lock.
+        """
+        self.project_root = project_root
+        self.lock_timeout_seconds = lock_timeout_seconds
+        self.workspace = project_root / ".codex" / "ticket-workspace"
+        self.log_path = self.workspace / "ticket.pending-summary.jsonl"
+        self.lock_path = self.workspace / "ticket.pending-summary.lock"
+
+    def append_event(self, event: Mapping[str, object]) -> AppendResult:
+        """Append one valid event, preserving idempotency by `event_id`.
+
+        Args:
+            event: Pending-summary event to append.
+
+        Returns:
+            Append result. Expected bookkeeping failures return `paused`.
+        """
+        event_id = _event_id(event)
+        validation = validate_pending_summary_event(event)
+        if not validation.ok:
+            return AppendResult("paused", event_id, "invalid_event")
+
+        ensure_ticket_workspace(self.project_root)
+        if not self._acquire_lock():
+            return AppendResult("paused", event_id, "lock_timeout")
+
+        try:
+            existing = self._read_events_or_none()
+            if existing is None:
+                return AppendResult("paused", event_id, "pending_summary_unhealthy")
+
+            new_signature = _event_signature(event)
+            for existing_event in existing:
+                if existing_event.get("event_id") != event_id:
+                    continue
+                if _event_signature(existing_event) == new_signature:
+                    return AppendResult("already_recorded", event_id)
+                return AppendResult("paused", event_id, "conflicting_event")
+
+            with self.log_path.open("a", encoding="utf-8") as handle:
+                handle.write(canonical_json(dict(event)) + "\n")
+            return AppendResult("appended", event_id)
+        finally:
+            self._release_lock()
+
+    def read_events(self) -> tuple[dict[str, object], ...]:
+        """Read valid pending-summary events from the local JSONL log."""
+        events = self._read_events_or_none()
+        return events if events is not None else ()
+
+    def derive_mutation_state(self, *, thread_id: str, mutation_id: str) -> str:
+        """Derive recovery state from recorded events only.
+
+        Args:
+            thread_id: Thread that scopes the mutation.
+            mutation_id: Mutation ID to inspect.
+
+        Returns:
+            Display-ready recovery state.
+        """
+        rank = {
+            "no_attempt": 0,
+            "attempt_recorded": 1,
+            "approval_consumed": 2,
+            "ticket_written": 3,
+            "status_recorded": 4,
+            "summary_recorded": 5,
+        }
+        state = "no_attempt"
+        for event in self.read_events():
+            if event.get("thread_id") != thread_id or event.get("mutation_id") != mutation_id:
+                continue
+            event_type = event.get("event_type")
+            status = event.get("status")
+            candidate = None
+            if event_type == "mutation_attempt":
+                candidate = "attempt_recorded"
+            elif status == "approval_consumed":
+                candidate = "approval_consumed"
+            elif status == "ticket_written":
+                candidate = "ticket_written"
+            elif status in {"applied", "failed", "corrected", "inactive"}:
+                candidate = "status_recorded"
+            elif event_type == "summary_receipt" and status == "summarized":
+                candidate = "summary_recorded"
+            if candidate is not None and rank[candidate] > rank[state]:
+                state = candidate
+        return state
+
+    def _acquire_lock(self) -> bool:
+        deadline = time.monotonic() + max(self.lock_timeout_seconds, 0.0)
+        while True:
+            try:
+                fd = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+                try:
+                    os.write(fd, f"{os.getpid()}\n".encode())
+                finally:
+                    os.close(fd)
+                return True
+            except FileExistsError:
+                if self.lock_timeout_seconds <= 0 or time.monotonic() >= deadline:
+                    return False
+                time.sleep(min(0.05, max(deadline - time.monotonic(), 0.0)))
+
+    def _release_lock(self) -> None:
+        try:
+            self.lock_path.unlink()
+        except FileNotFoundError:
+            pass
+
+    def _read_events_or_none(self) -> tuple[dict[str, object], ...] | None:
+        if not self.log_path.is_file():
+            return ()
+        events: list[dict[str, object]] = []
+        try:
+            lines = self.log_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return None
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                return None
+            if not isinstance(parsed, dict):
+                return None
+            if not validate_pending_summary_event(parsed).ok:
+                return None
+            events.append(parsed)
+        return tuple(events)
