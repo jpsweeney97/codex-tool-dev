@@ -5,6 +5,12 @@
 This document is the active design baseline for replacing the superseded
 Ticket authority-kernel plan family.
 
+Source implementation should start only after this design baseline is landed or
+rebased onto `main`, then branch from `main` using the repository's normal
+branch policy. If implementation must begin before `main` contains the baseline,
+record an explicit user-approved docs-baseline exception in the implementation
+closeout.
+
 Superseded historical context:
 
 - `docs/superpowers/plans/2026-05-22-ticket-authority-kernel-slice1.md`
@@ -573,12 +579,13 @@ The shared evaluator returns exactly one runtime decision per candidate ticket:
 for exactly one proposed ticket change. The decision is short-lived and
 single-use. It must be bound to the exact ticket, proposed mutation fingerprint,
 current ticket-state fingerprint, current evidence snapshot, thread-scoped mode,
-and `mutation_id`. The envelope's `approval_id` is deterministic, not random:
-derive it from a versioned canonical tuple containing the ticket ID,
-`mutation_id`, proposed mutation fingerprint, current ticket-state fingerprint,
-evidence fingerprint, thread-scoped mode, and decision kind. A decision cannot
-be reused for another ticket, another mutation, another thread-scoped mode, or a
-ticket that changed after the decision was created.
+`thread_id`, and `mutation_id`. The envelope's `approval_id` is deterministic,
+not random: derive it from a versioned canonical tuple containing `thread_id`,
+the ticket ID, `mutation_id`, proposed mutation fingerprint, current
+ticket-state fingerprint, evidence fingerprint, thread-scoped mode, and decision
+kind. A decision cannot be reused for another ticket, another mutation, another
+thread, another thread-scoped mode, or a ticket that changed after the decision
+was created.
 
 The approval envelope also has a short validity window. It is valid only until
 the first of these events:
@@ -724,16 +731,19 @@ and resurface only when the same ticket becomes relevant again or when the user
 asks for pending Ticket decisions.
 
 Every autonomous mutation must have a deterministic `mutation_id` derived from
-a versioned canonical tuple containing the turn ID, action kind, ticket ID,
-proposed mutation fingerprint, and evidence fingerprint. Retrying the same
-turn-level fanout must be idempotent: it may resume or complete an existing
-mutation record, but it must not duplicate blocker edits, lifecycle
-transitions, reopen history entries, or audit rows.
+a versioned canonical tuple containing the thread ID, turn ID, action kind,
+ticket ID, proposed mutation fingerprint, and evidence fingerprint. Retrying the
+same turn-level fanout must be idempotent: it may resume or complete an existing
+mutation record, but it must not duplicate blocker edits, lifecycle transitions,
+reopen history entries, or audit rows. Identical ticket/action/fingerprint
+inputs in two different `thread_id` values must produce different mutation
+identities and separate recovery state.
 
 `turn_id` itself is runtime-assigned by the Codex host/thread runtime, not
 derived from the Ticket mutation content. It names the actual host/thread turn
-boundary. The deterministic IDs use that assigned `turn_id` as an input when
-they need turn scoping.
+boundary. Ticket must not rely on `turn_id` being globally unique across the
+workspace; deterministic IDs use both `thread_id` and `turn_id` when they need
+thread and turn scoping.
 
 ## Visibility And Audit
 
@@ -811,19 +821,19 @@ If canonicalization or ID inputs need to change later, bump the pending-summary
 schema version rather than silently changing the meaning of existing IDs.
 
 `turn_id` is intentionally not content-derived. The Codex host/thread runtime
-assigns it at the turn boundary; Ticket automation records it and uses it as a
-scoping input for deterministic IDs inside that turn.
+assigns it at the turn boundary; Ticket automation records it and uses it with
+`thread_id` as scoping input for deterministic IDs inside that thread turn.
 
 Canonical ID inputs:
 
-- `mutation_id`: schema version, turn ID, action, ticket ID, proposed mutation
-  fingerprint, and evidence fingerprint.
-- `event_id`: schema version, event type, turn ID, mutation ID, status, action,
-  ticket ID when present, and a fingerprint of the event payload excluding
-  `event_id` and `timestamp`.
-- `approval_id`: schema version, ticket ID, mutation ID, proposed mutation
-  fingerprint, ticket-state fingerprint, evidence fingerprint, current mode,
-  and decision kind.
+- `mutation_id`: schema version, thread ID, turn ID, action, ticket ID, proposed
+  mutation fingerprint, and evidence fingerprint.
+- `event_id`: schema version, event type, thread ID, turn ID, mutation ID,
+  status, action, ticket ID when present, and a fingerprint of the event payload
+  excluding `event_id` and `timestamp`.
+- `approval_id`: schema version, thread ID, ticket ID, mutation ID, proposed
+  mutation fingerprint, ticket-state fingerprint, evidence fingerprint, current
+  mode, and decision kind.
 
 The finite `event_type` values are:
 
@@ -914,8 +924,9 @@ The `details` object is strict and typed by `event_type`:
 
 - `mutation_attempt`: include `proposed_change`. Include `approval` only when
   `decision` is `apply_autonomously`. The `approval` object must include
-  `approval_id`, `one_use: true`, `created_at`, `expires_at`, `bound_ticket_id`,
-  `bound_mutation_id`, `bound_current_mode`, `bound_decision`,
+  `approval_id`, `one_use: true`, `created_at`, `expires_at`,
+  `bound_thread_id`, `bound_ticket_id`, `bound_mutation_id`,
+  `bound_current_mode`, `bound_decision`,
   `bound_mutation_fingerprint`, `bound_ticket_state_fingerprint`, and
   `bound_evidence_fingerprint`. `expires_at` must be no more than 10 minutes
   after `created_at`. Include `correction_ready: true` plus `before` and
@@ -989,6 +1000,7 @@ A representative mutation-attempt envelope is:
       "one_use": true,
       "created_at": "2026-05-27T14:03:22Z",
       "expires_at": "2026-05-27T14:13:22Z",
+      "bound_thread_id": "thread_...",
       "bound_ticket_id": "T-20260527-001",
       "bound_mutation_id": "mut_0123456789abcdef0123456789abcdef",
       "bound_current_mode": "agent_primary",
@@ -1138,8 +1150,8 @@ already-created commit is useful.
 The per-turn pending-summary log must be durable, not only in memory. The
 runtime must use a log-backed pending-summary model:
 
-1. Allocate a `turn_id` and deterministic `mutation_id` before any autonomous
-   write.
+1. Require `thread_id`, allocate a `turn_id`, and derive the deterministic
+   `mutation_id` before any autonomous write.
 2. Acquire the sibling pending-summary lock, waiting briefly if another writer
    is active.
 3. Append each normal pending-summary event as one JSON line with its
@@ -1328,6 +1340,13 @@ are explicitly non-autonomous and do not consume autonomy approvals. Named
 maintenance or doctor commands may bypass the autonomous gateway only for
 dry-run-first or explicitly confirmed repair operations. All other direct
 low-level writes to active tickets are invalid.
+
+Static bypass checks must prove named authorized functions or call paths, not
+whole-file allowlists. Write-heavy modules such as `ticket_engine_core.py` and
+`ticket_engine_gateway.py` are not acceptable as blanket exceptions. The
+autonomous path is the named gateway path; user-directed engine mutations and
+maintenance repairs are exceptions only through explicitly named non-autonomous,
+dry-run-first, or confirm-gated entrypoints.
 
 ### `ticket_turn_batch.py`
 
@@ -1626,14 +1645,15 @@ Prove that:
 - above-cap candidates route to `require_user_discussion`
 - every autonomous write requires a fresh, one-use decision bound to the exact
   ticket, mutation, ticket-state fingerprint, evidence snapshot,
-  thread-scoped mode, and `mutation_id`
+  `thread_id`, thread-scoped mode, and `mutation_id`
 - one-use approvals are valid only within the current turn and for no more than
   10 minutes after creation
-- expired, already-consumed, cross-turn, or stale-ticket-state approvals are
-  rejected before write and force re-evaluation against current ticket state
+- expired, already-consumed, cross-thread, cross-turn, or stale-ticket-state
+  approvals are rejected before write and force re-evaluation against current
+  ticket state
 - `approval_id` is deterministic from its canonical inputs and changes when the
-  bound ticket, mutation, ticket-state fingerprint, evidence fingerprint,
-  thread-scoped mode, or decision kind changes
+  bound thread, ticket, mutation, ticket-state fingerprint, evidence
+  fingerprint, thread-scoped mode, or decision kind changes
 - `turn_id` is runtime-assigned by the Codex host/thread runtime and is not
   content-derived from Ticket mutation inputs
 - the Codex host/thread runtime can call `ticket_autonomy.py recover` before new
@@ -1701,8 +1721,9 @@ Prove that:
   prefix, and the first 32 lowercase hexadecimal characters of the digest;
   retries of the same canonical input reproduce the same IDs
 - timestamps are validated as ISO 8601 UTC but are not used as ID inputs
-- `turn_id` is runtime-assigned, recorded in every envelope, and used as a
-  scoping input for deterministic IDs inside the turn
+- `thread_id` and `turn_id` are recorded in every envelope and used as scoping
+  inputs for deterministic IDs; identical mutation content in different threads
+  produces different IDs and separate recovery state
 - every pending-summary JSONL entry includes strict `repo_context` with
   normalized repo/worktree identity, branch, and HEAD when git metadata is
   available
@@ -1797,12 +1818,16 @@ Prove that:
   write gateway
 - the gateway enforces per-action field allowlists before live engine dispatch,
   including rejection of `archive` on automatic `done`/`wontfix`
+- gateway-owned pending-summary events carry the explicit `thread_id`, and
+  approval validation rejects missing or mismatched thread binding
 - user-directed ordinary ticket writes are explicitly non-autonomous and may use
   the existing engine execution path without satisfying autonomy approvals
 - maintenance and doctor bypasses are limited to named dry-run-first or
   explicitly confirmed repair commands
 - direct low-level file writes to active tickets outside the gateway or named
   exceptions are rejected or flagged by static/text guards
+- static/text guards do not accept whole write-heavy files as proof; they must
+  name the authorized function or call path
 - wrappers cannot forge or reuse stale autonomy decisions
 - static or text guards flag new ticket-state write paths outside the
   engine-owned gateway, except explicit maintenance or doctor paths

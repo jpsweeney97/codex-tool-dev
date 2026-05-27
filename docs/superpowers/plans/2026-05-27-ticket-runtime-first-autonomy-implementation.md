@@ -24,21 +24,24 @@ Current source baseline:
 
 Implementation branch:
 
-- Before code work, create an execution branch from this docs baseline, unless the user gives a different branch:
+- Before code work, land or rebase this docs baseline onto `main`, then create
+  the execution branch from `main`:
 
 ```bash
+git switch main
 git switch -c feature/ticket-runtime-first-autonomy-v1
 ```
 
-- This branch is intentionally created from the docs baseline, not directly
-  from `main`, because the plan/spec commits are not assumed to be on `main`
-  yet. If the execution lane must satisfy a strict "branch from main" policy,
-  stop and first land or rebase the docs baseline instead of dropping these
-  control-doc commits.
+- Do not drop the control-doc commits to satisfy branch policy. If code work
+  must start before the docs baseline lands on `main`, record an explicit
+  user-approved exception in the implementation closeout: `Implementation branch
+  starts from the docs baseline before main contains the control docs.`
 
 Hard stops:
 
 - Stop if the branch is not at or after `9453d18` and the spec file differs materially from this plan.
+- Stop if the implementation branch is not based on `main` and no explicit
+  user-approved docs-baseline exception is recorded.
 - Stop if `.codex/handoffs/`, `.codex/ticket-workspace/`, `.codex/ticket.local.md`, or pending-summary files appear in staged changes.
 - Stop if any task needs to mutate `/Users/jp/.codex/plugins/cache`, personal plugin state, or installed runtime state.
 - Stop before widening autonomous writes to delete, archive, or history repair.
@@ -750,16 +753,21 @@ Tests must prove:
 - `event_id`, `mutation_id`, and `approval_id` use SHA-256, lowercase hex, first 32 hex chars, and prefixes `evt_`, `mut_`, `appr_`.
 - Timestamps are accepted in payload validation elsewhere but are not ID inputs.
 - Same canonical input reproduces the same ID.
-- Changing ticket ID, mutation fingerprint, ticket-state fingerprint, evidence fingerprint, thread-scoped mode, or decision kind changes the relevant ID.
+- Changing `thread_id`, `turn_id`, ticket ID, mutation fingerprint,
+  ticket-state fingerprint, evidence fingerprint, thread-scoped mode, or
+  decision kind changes the relevant ID.
+- Identical mutation inputs in two different `thread_id` values produce
+  different mutation, event, and approval IDs. Ticket must not rely on
+  `turn_id` being globally unique across the workspace.
 
 Required public surface:
 
 ```python
 def canonical_json(value: object) -> str: ...
 def sha256_fingerprint(value: object) -> str: ...
-def make_mutation_id(*, schema: str, turn_id: str, action: str, ticket_id: str | None, mutation_fingerprint: str, evidence_fingerprint: str) -> str: ...
-def make_event_id(*, schema: str, event_type: str, turn_id: str, mutation_id: str | None, status: str, action: str, ticket_id: str | None, payload_fingerprint: str) -> str: ...
-def make_approval_id(*, schema: str, ticket_id: str, mutation_id: str, mutation_fingerprint: str, ticket_state_fingerprint: str, evidence_fingerprint: str, current_mode: str, decision: str) -> str: ...
+def make_mutation_id(*, schema: str, thread_id: str, turn_id: str, action: str, ticket_id: str | None, mutation_fingerprint: str, evidence_fingerprint: str) -> str: ...
+def make_event_id(*, schema: str, event_type: str, thread_id: str, turn_id: str, mutation_id: str | None, status: str, action: str, ticket_id: str | None, payload_fingerprint: str) -> str: ...
+def make_approval_id(*, schema: str, thread_id: str, ticket_id: str, mutation_id: str, mutation_fingerprint: str, ticket_state_fingerprint: str, evidence_fingerprint: str, current_mode: str, decision: str) -> str: ...
 ```
 
 - [ ] **Step 2: Run failing tests**
@@ -906,6 +914,8 @@ Tests must prove:
 - Same `event_id` and same canonical non-timestamp content is treated as already recorded.
 - Same `event_id` and conflicting non-timestamp content returns a paused bookkeeping result.
 - Lock timeout returns a paused bookkeeping result and does not write ticket state.
+- Identical ticket/action/fingerprint inputs in different `thread_id` values
+  create separate mutation identities and separate recovery state.
 - Recovery derives states:
   - no attempt
   - `attempt_recorded`
@@ -932,7 +942,7 @@ class PendingSummaryStore:
     def __init__(self, project_root: Path, *, lock_timeout_seconds: float = 2.0) -> None: ...
     def append_event(self, event: Mapping[str, object]) -> AppendResult: ...
     def read_events(self) -> tuple[dict[str, object], ...]: ...
-    def derive_mutation_state(self, mutation_id: str) -> str: ...
+    def derive_mutation_state(self, *, thread_id: str, mutation_id: str) -> str: ...
 ```
 
 - [ ] **Step 2: Run failing writer tests**
@@ -1207,7 +1217,9 @@ Tests must prove:
 - Conflicting candidates route to `skip_due_to_conflict`.
 - Metadata fanout soft cap is 5, blocker/refinement cap is 3, lifecycle done/reopen hard cap is 1 except explicit linked batch of 2, and wontfix has no fanout without explicit shared decision evidence.
 - Above-cap candidates get pending-summary records instead of disappearing.
-- Approval envelopes bind ticket ID, mutation ID, current mode, decision kind, current ticket-state fingerprint, proposed mutation fingerprint, and evidence fingerprint.
+- Approval envelopes bind `thread_id`, ticket ID, mutation ID, current mode,
+  decision kind, current ticket-state fingerprint, proposed mutation
+  fingerprint, and evidence fingerprint.
 - Approval expiration is no more than 10 minutes.
 - Ticket-facing actions map to engine dispatch exactly:
   - `done` becomes engine `close` with only allowlisted close fields and
@@ -1325,6 +1337,9 @@ Tests must prove:
 - The same automatic mutation writes its `## Change History` entry in the ticket mutation.
 - User-directed ordinary writes stay explicitly non-autonomous and do not consume approval.
 - Maintenance/doctor bypasses are named and not accepted by the autonomous gateway.
+- Gateway-owned pending-summary events record the explicit `thread_id` provided
+  by `apply-turn`; the gateway must not invent thread identity from hidden state.
+- Approval validation rejects a missing or mismatched approval/thread binding.
 - Gateway dispatch maps Ticket-facing action names to the live engine API before
   mutation:
   - `done` -> `close` plus only allowlisted close fields and
@@ -1356,6 +1371,7 @@ def build_engine_dispatch(mutation: GatewayMutation) -> EngineDispatch: ...
 def apply_autonomous_mutation(
     *,
     project_root: Path,
+    thread_id: str,
     turn_id: str,
     mutation: GatewayMutation,
     decision: AutonomyDecision,
@@ -1374,6 +1390,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 Implementation requirements:
 
 - Validate approval envelope against current inputs.
+- Validate that the approval envelope is bound to the same `thread_id` passed to
+  the gateway.
 - Re-read current ticket fingerprint immediately before write.
 - Recheck workspace pause marker immediately before consuming approval. If the
   marker exists, return a paused response, leave ticket files unchanged, and do
@@ -1396,16 +1414,24 @@ Implementation requirements:
 
 - [ ] **Step 4: Add bypass-prevention static guard**
 
-Add tests that scan Ticket scripts for direct active-ticket writes outside allowed files. The first allowlist is:
+Add tests that scan Ticket scripts for direct active-ticket writes outside named
+authorized functions or call paths. Whole-file allowlists are not sufficient,
+including for write-heavy modules such as `ticket_engine_core.py` and
+`ticket_engine_gateway.py`.
 
-- `ticket_engine_core.py`
-- `ticket_engine_gateway.py`
-- specific pure text transformation functions in `ticket_change_history.py`
-- specific named maintenance/doctor command functions when the tested command is
+- autonomous writes through `ticket_engine_gateway.apply_autonomous_mutation()`
+- existing user-directed engine mutation functions only when reached from
+  explicitly non-autonomous command paths
+- specific pure text transformation functions in `ticket_change_history.py`,
+  only when they do not write active ticket files directly
+- specific named maintenance/doctor command functions when the command is
   dry-run-first or confirm-gated, including only the
   `migrate-change-history --apply` file-write path for Change History migration
 
-The guard should flag future autonomous `.audit` writes while allowing historical `.audit` read/doctor support.
+The guard should reject new direct active-ticket `write_text()`, `rename()`,
+`unlink()`, or equivalent filesystem mutation paths from autonomy code unless
+they are inside the named gateway path above. It should flag future autonomous
+`.audit` writes while allowing historical `.audit` read/doctor support.
 
 - [ ] **Step 5: Verify and commit**
 
@@ -1609,7 +1635,8 @@ git commit -m "feat(ticket): apply autonomous turn updates"
 
 Tests must prove:
 
-- `attempt_recorded` only retries with the same `mutation_id` when approval inputs still match.
+- `attempt_recorded` only retries with the same `thread_id` and `mutation_id`
+  when approval inputs still match.
 - `approval_consumed` with current ticket state matching the expected
   post-write fingerprint appends missing `ticket_written` and terminal status
   events without rewriting the ticket.
@@ -1636,6 +1663,7 @@ class RecoveryProjection:
         "summary_ready",
         "pause_for_reconciliation",
     ]
+    thread_id: str
     mutation_id: str
     current_ticket_fingerprint: str | None
     expected_pre_write_fingerprint: str | None
@@ -1647,6 +1675,7 @@ class RecoveryProjection:
 def project_mutation_recovery(
     *,
     store: PendingSummaryStore,
+    thread_id: str,
     mutation_id: str,
     current_ticket_fingerprint: str | None,
 ) -> RecoveryProjection: ...
