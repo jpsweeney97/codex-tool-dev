@@ -99,6 +99,11 @@ discussion lane:
   history repair; pause when pending-summary bookkeeping is unhealthy; respect
   the session mode; require a fresh one-use approval for each automatic change;
   and do not guess when correction evidence is gone.
+- Treat an explicit chat request to pause Ticket automation as workspace-wide
+  for the current checkout before the next autonomous write. Session mode may
+  still be cached for normal config reads, but the engine-owned write gateway
+  must recheck the workspace pause marker immediately before consuming approval
+  and mutating ticket state.
 - One-use approvals expire quickly. They are valid only within the current
   turn, for no more than 10 minutes after creation, and are consumed by the
   first matching write.
@@ -178,6 +183,12 @@ discussion lane:
   same ticket update whenever possible. If Codex cannot update `## Change
   History` cleanly, pause or defer the automatic ticket change rather than
   leave durable project history incomplete.
+- Distinguish ticket-state completion from turn cleanup. A mutation is
+  `applied` when the ticket file, required `## Change History` entry, and
+  pending-summary ledger outcome are written. A turn is cleanly complete only
+  when Ticket records a commit disposition: `commit_recorded`,
+  `commit_bundled_with_work`, or `commit_deferred` with a reason. Any
+  end-of-turn summary for a ticket write must include that commit disposition.
 - Do not require repo-wide `## Change History` backfill before `agent_primary`.
   The first automatic mutation for a ticket may create `## Change History` when
   it is missing, in the same ticket-file mutation, if the ticket is otherwise
@@ -307,8 +318,11 @@ Mid-session config file edits take effect in the next session, not immediately.
 If the config file is missing, unreadable, or invalid, Codex pauses automatic
 Ticket updates, asks the user what mode they want, and repairs the config from
 the user's answer. An explicit chat request such as "pause Ticket automation"
-takes effect immediately for the current session and writes the repo-local
-config for future sessions.
+takes effect immediately for the current checkout before the next autonomous
+write, writes a workspace-local pause marker, and writes the repo-local config
+for future sessions. Other live threads in the same checkout must observe that
+pause at the engine-owned write gateway even if they cached `agent_primary`
+earlier in their session.
 
 The guided setup prompt should use user-facing choices before internal mode
 names:
@@ -410,6 +424,20 @@ mutation unless the engine write path receives an approved autonomy decision.
 `ticket_engine_core.py` or a small engine-owned write gateway must reject
 autonomous writes that lack that decision. Adapter tests and static/text guards
 are defense-in-depth; they are not the primary boundary.
+
+The write-authority inventory is positive:
+
+- Autonomous writes may apply ticket-state changes only through the engine-owned
+  autonomous write gateway.
+- User-directed ordinary ticket writes may use the existing engine execution
+  path, but they must be explicitly non-autonomous and must not consume or
+  satisfy autonomy approvals.
+- Maintenance and doctor writes may bypass the autonomous write gateway only
+  through named commands such as audit repair or
+  `migrate-change-history --apply`, and only when they are dry-run-first or
+  explicitly confirmed.
+- Direct low-level file writes to active tickets outside those paths are
+  invalid.
 
 ## Host-Facing CLI Contract
 
@@ -820,6 +848,15 @@ The finite `decision` values are:
 Use `decision: null` for pure operational events such as `summary_receipt`,
 `compaction_receipt`, and `automation_pause`.
 
+The finite `commit_disposition` values are:
+
+- `commit_recorded`: Ticket created a ticket-only local commit for the automatic
+  ticket write.
+- `commit_bundled_with_work`: Ticket included the ticket write in the same
+  created local commit as related completed and verified code or doc work.
+- `commit_deferred`: Ticket intentionally left the ticket write uncommitted for
+  now and recorded the defer reason.
+
 The `evidence` field is a strict array of objects with `kind` and `ref`. The
 finite `evidence.kind` values are:
 
@@ -849,7 +886,14 @@ The `details` object is strict and typed by `event_type`:
   `status` is `approval_consumed`; require `post_write_fingerprint` when
   `status` is `ticket_written`; require `question` when `status` is
   `discussion_required`; require `retry_condition` when `status` is `deferred`;
-  require `error_code` when `status` is `failed`.
+  require `error_code` when `status` is `failed`; require
+  `commit_disposition` when `status` is `applied` for a ticket-file write. A
+  `commit_recorded` disposition must include `commit_hash`; a
+  `commit_bundled_with_work` disposition must include the related commit hash
+  or commit identifier once the containing commit exists; and a
+  `commit_deferred` disposition must include a one-sentence defer reason. If the
+  containing commit is not yet created, use `commit_deferred` rather than
+  claiming `commit_bundled_with_work`.
 - `summary_receipt`: include `summary_kind` as `normal` or `recovery`, and
   `bucket` as `applied`, `skipped`, `discussion_required`, or `deferred`.
 - `compaction_receipt`: include `retention_days`, `retention_count`,
@@ -1092,9 +1136,13 @@ The states are derived from append-only ledger events:
   and the expected post-write fingerprint exists.
 - `status_recorded`: a terminal or pending-disposition `mutation_status` line
   exists, such as `applied`, `skipped`, `discussion_required`, `deferred`,
-  `corrected`, `inactive`, or `failed`.
+  `corrected`, `inactive`, or `failed`. For a ticket-file write,
+  `status: "applied"` means the ticket file, required `## Change History`
+  entry, and pending-summary ledger outcome were written; it does not by itself
+  mean the local commit was created.
 - `summary_recorded`: a `summary_receipt` line with `status: "summarized"`
-  exists.
+  exists. Summaries for ticket-file writes must include the recorded commit
+  disposition so dirty or deferred commit state is visible.
 
 Recovery must be explicit for each gap:
 
@@ -1103,9 +1151,13 @@ Recovery must be explicit for each gap:
   revalidate the approval inputs, then retry with the same `mutation_id` or
   append `failed`.
 - `approval_consumed` but no `ticket_written`: treat the protected write section
-  as interrupted. Retry only when the current ticket fingerprint still matches
-  the approval's bound fingerprint. Otherwise append `failed` with a stale-state
-  reason and re-evaluate from current ticket state.
+  as interrupted. Compare current ticket state to both the approval's bound
+  pre-write fingerprint and the expected post-write fingerprint. If the
+  post-write fingerprint matches, append the missing `ticket_written` and
+  terminal status events without rewriting the ticket. If the pre-write
+  fingerprint still matches, retry with the same `mutation_id`. If neither
+  fingerprint matches, pause that candidate for reconciliation instead of
+  rewriting or marking the write as cleanly failed.
 - `ticket_written` but no `status_recorded`: inspect the ticket file and compare
   it to the expected post-write fingerprint. If it matches, append the outcome
   status without rewriting the ticket. If it does not match, append `failed` with
@@ -1218,10 +1270,18 @@ adapter call that omits, forges, or reuses an invalid autonomy decision.
 
 `ticket_engine_core.py` or a small engine-owned helper must be the only path
 that can apply autonomous ticket-state mutations. It validates the autonomy
-decision, enforces idempotency, appends durable pending-summary events, updates
-or creates `## Change History` when required, and then delegates to the existing
-ticket mutation mechanics. Existing wrappers may prepare context or payloads,
-but autonomous writes that bypass this gateway are invalid.
+decision, rechecks the workspace pause marker, enforces idempotency, appends
+durable pending-summary events, updates or creates `## Change History` when
+required, and then delegates to the existing ticket mutation mechanics. Existing
+wrappers may prepare context or payloads, but autonomous writes that bypass this
+gateway are invalid.
+
+The gateway is not a general file-writing helper. User-directed ordinary ticket
+writes may continue through the existing engine execution path only when they
+are explicitly non-autonomous and do not consume autonomy approvals. Named
+maintenance or doctor commands may bypass the autonomous gateway only for
+dry-run-first or explicitly confirmed repair operations. All other direct
+low-level writes to active tickets are invalid.
 
 ### `ticket_turn_batch.py`
 
@@ -1229,7 +1289,7 @@ Durable pending-summary-log-backed collector that accumulates per-turn applied,
 skipped, discussion-required, and deferred records; validates and compacts the
 local `.codex/ticket-workspace/ticket.pending-summary.jsonl` log; renders the
 end-of-turn summary and lightweight audit payload; appends follow-up status
-events for summarized, corrected, or inactive records;
+events for summarized, corrected, inactive, and commit-disposition records;
 uses sibling lock/temp-file writes; and emits recovery summaries for
 unsummarized records from earlier turns.
 
@@ -1260,6 +1320,22 @@ Commit behavior:
 - never push automatic Ticket commits unless the user explicitly asks Codex to
   publish
 
+Commit disposition is recorded separately from the ticket-state mutation:
+
+- `commit_recorded`: a ticket-only local commit was created for the automatic
+  ticket write
+- `commit_bundled_with_work`: the automatic ticket write was staged and
+  committed with related completed and verified code or doc work
+- `commit_deferred`: Ticket intentionally left the ticket write uncommitted and
+  recorded a one-sentence reason, such as overlapping user changes, unsafe
+  staging, or an unrelated backlog action waiting for `main`
+
+`Applied` in the Ticket summary means the ticket file and required
+`## Change History` entry were written and the pending-summary ledger recorded
+the outcome. It does not imply the repository is clean. Whenever a ticket write
+happened, the end-of-turn summary must include the commit disposition so a
+dirty, bundled, or deferred commit state is visible.
+
 Ticket-only commit messages are standardized:
 
 - `tickets: update project state` for mixed Ticket updates
@@ -1289,6 +1365,9 @@ branch.
 
 When a ticket-only commit is created, the end-of-turn Ticket summary includes a
 terse breadcrumb such as `Committed: abc123 tickets: update project state`.
+When a ticket write is bundled with related work, the summary names the related
+commit when it exists. When a commit is deferred, the summary names the defer
+reason.
 
 Ticket-only automatic commits use lightweight verification only:
 
@@ -1307,8 +1386,12 @@ Failure handling is intentionally narrow:
 - missing, unreadable, or invalid mode config -> pause automatic Ticket updates,
   ask the user what mode they want, and repair the repo-local config from the
   answer
-- explicit chat request to pause Ticket automation -> pause immediately for the
-  current session and update repo-local config for future sessions
+- explicit chat request to pause Ticket automation -> write the workspace-local
+  pause marker, pause automatic Ticket updates in the current checkout before
+  the next autonomous write, and update repo-local config for future sessions
+- engine-owned write gateway observes the workspace pause marker before
+  mutation -> reject the autonomous write with paused output, even if that live
+  thread cached `agent_primary` earlier
 - conflicting evidence for one ticket -> skip that ticket only
 - delete, archive, or history-repair action -> route to discussion required and
   do not write
@@ -1349,6 +1432,15 @@ Failure handling is intentionally narrow:
 - one-use approval is expired, already consumed, from another turn, or bound to
   stale ticket state -> reject it, do not write, and re-run evaluation against
   current ticket state before any new automatic write
+- crash occurs after approval consumption and ticket write but before
+  `ticket_written` is recorded -> compare current ticket state with the expected
+  post-write fingerprint and, when it matches, append the missing
+  `ticket_written` and terminal status events without rewriting
+- crash recovery sees neither the bound pre-write fingerprint nor expected
+  post-write fingerprint -> pause that candidate for reconciliation
+- ticket file and `## Change History` are written but a local commit cannot be
+  created safely -> record `commit_deferred` with the reason and include that
+  disposition in the end-of-turn summary
 - user says an automatic ordinary Ticket update was wrong -> automatically
   correct or reverse the prior change when correction detail still exists or
   the correction is obvious and low-risk
@@ -1420,11 +1512,15 @@ This rollout order prioritizes the highest-value autonomous mutation paths
 first while keeping the narrow human-discussion lane intact.
 
 Rollback during a session means the user explicitly asks Codex to pause Ticket
-automation. That pause takes effect immediately, writes the repo-local config
-for future sessions, and preserves existing pending-summary records for
-summary, correction, and recovery. Editing the mode config file directly
-mid-session does not change current-session behavior; Codex reads config again
-in the next session.
+automation. That pause is workspace-wide for the current checkout before the
+next autonomous write: Ticket writes a workspace-local pause marker, the
+engine-owned write gateway rechecks it immediately before mutation, and other
+live threads in the same checkout must observe it even if they cached
+`agent_primary` earlier. The same pause writes the repo-local config for future
+sessions and preserves existing pending-summary records for summary,
+correction, and recovery. Editing the mode config file directly mid-session
+does not change current-session behavior; Codex reads config again in the next
+session.
 
 ## Verification
 
@@ -1457,6 +1553,11 @@ Prove that:
 - session mode is read before the first automatic change and held for the rest
   of the session
 - explicit chat pause takes effect immediately and updates repo-local config
+- explicit chat pause writes a workspace-local pause marker and prevents other
+  live threads in the same checkout from making autonomous writes before their
+  next mutation, even when those threads cached `agent_primary` earlier
+- the engine-owned write gateway rechecks the workspace pause marker immediately
+  before consuming approval and mutating ticket state
 - `preview` mode records decisions without ticket-state mutation
 - `agent_primary` mode applies approved non-destructive mutations, including
   lifecycle `done`, `wontfix`, and `reopen`
@@ -1514,6 +1615,9 @@ Prove that:
 
 - the end-of-turn summary exactly reflects applied, skipped, and
   discussion-required outcomes
+- every end-of-turn summary for a ticket write includes commit disposition:
+  `commit_recorded`, `commit_bundled_with_work`, or `commit_deferred` with a
+  reason
 - the summary appears only when Ticket changes happened or discussion is needed
 - the summary stays concise: counts, ticket IDs, and one short reason per item
 - detailed before/after data stays out of chat unless explicitly requested
@@ -1560,6 +1664,13 @@ Prove that:
 - retries at each state-machine gap follow the explicit recovery matrix and do
   not duplicate ticket writes, blocker edits, lifecycle transitions,
   `## Change History` entries, or summary receipts
+- recovery in the `approval_consumed` but no `ticket_written` gap compares
+  current ticket state to both the bound pre-write fingerprint and expected
+  post-write fingerprint
+- matching expected post-write state in that gap appends missing
+  `ticket_written` and terminal status events without rewriting the ticket
+- matching neither pre-write nor post-write state in that gap pauses the
+  candidate for reconciliation
 - `.codex/ticket-workspace/ticket.pending-summary.jsonl`, its sibling temporary
   or lock files, and sibling `.codex/ticket-workspace/AGENTS.md` are
   local-only, gitignored, and not staged
@@ -1617,6 +1728,15 @@ Prove that:
   autonomy decision when running in autonomous mode
 - `ticket_autonomy.py apply-turn` reaches ticket-state mutation only through the
   engine-owned write gateway
+- autonomous writes are the only writes that may consume autonomy approvals, and
+  they can apply ticket-state changes only through the engine-owned autonomous
+  write gateway
+- user-directed ordinary ticket writes are explicitly non-autonomous and may use
+  the existing engine execution path without satisfying autonomy approvals
+- maintenance and doctor bypasses are limited to named dry-run-first or
+  explicitly confirmed repair commands
+- direct low-level file writes to active tickets outside the gateway or named
+  exceptions are rejected or flagged by static/text guards
 - wrappers cannot forge or reuse stale autonomy decisions
 - static or text guards flag new ticket-state write paths outside the
   engine-owned gateway, except explicit maintenance or doctor paths
@@ -1652,6 +1772,12 @@ Prove that:
 - ticket-only automatic commits use the standard commit messages
 - ticket-only automatic commits run changed-ticket schema/parse validation,
   pending-summary log validation, and `git diff --check`
+- ticket writes that are committed immediately record `commit_recorded` with the
+  created commit hash
+- ticket writes bundled with related completed work record
+  `commit_bundled_with_work` and name the related commit hash or identifier
+- ticket writes that cannot be committed safely record `commit_deferred` with a
+  one-sentence reason and surface that reason in the end-of-turn summary
 - unrelated user changes in other files are not staged
 - overlap or ambiguity defers the automatic commit with a brief reason
 - automatic Ticket commits are allowed on `main` without branch creation
