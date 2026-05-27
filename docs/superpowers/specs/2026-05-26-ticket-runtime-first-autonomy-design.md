@@ -86,8 +86,8 @@ discussion lane:
   turn is ending. The Ticket plugin owns mutation rules, approval validation,
   write safety, and ticket-state mutation. Avoid the bare term "app" for this
   boundary because it blurs host/runtime ownership with Ticket ownership.
-- Keep the Codex host/thread runtime thin. It provides a `turn_id`, final turn
-  context, current pause or mode signal, and renders the Ticket summary or
+- Keep the Codex host/thread runtime thin. It provides `thread_id`, `turn_id`,
+  final turn context, current pause or mode signal, and renders the Ticket summary or
   question projection returned by Ticket. It must not understand Ticket
   candidates, approvals, partial failure states, raw ledger records, or ticket
   mutation internals.
@@ -97,13 +97,13 @@ discussion lane:
   summarized as host-facing APIs.
 - Use narrow hard rules for safety and trust: no automatic delete, archive, or
   history repair; pause when pending-summary bookkeeping is unhealthy; respect
-  the session mode; require a fresh one-use approval for each automatic change;
-  and do not guess when correction evidence is gone.
+  the thread-scoped mode snapshot; require a fresh one-use approval for each
+  automatic change; and do not guess when correction evidence is gone.
 - Treat an explicit chat request to pause Ticket automation as workspace-wide
-  for the current checkout before the next autonomous write. Session mode may
-  still be cached for normal config reads, but the engine-owned write gateway
-  must recheck the workspace pause marker immediately before consuming approval
-  and mutating ticket state.
+  for the current checkout before the next autonomous write. Thread-scoped mode
+  may still be cached for normal config reads, but the engine-owned write
+  gateway must recheck the workspace pause marker immediately before consuming
+  approval and mutating ticket state.
 - One-use approvals expire quickly. They are valid only within the current
   turn, for no more than 10 minutes after creation, and are consumed by the
   first matching write.
@@ -144,6 +144,11 @@ discussion lane:
 - `turn_id` stays runtime-assigned by the Codex host/thread runtime. It
   represents the actual turn boundary; deterministic IDs provide retry and
   write safety inside that turn.
+- Runtime-first mode snapshots are keyed by `(project_root, thread_id)`.
+  `thread_id` identifies the ongoing Codex conversation for mode stability,
+  `project_root` scopes it to the checkout, and `turn_id` remains a per-turn
+  evaluation/write boundary. Legacy hook `session_id` remains valid for
+  hook-mediated engine payloads but is not the runtime-first mode-snapshot key.
 - Keep full before/after correction detail only on correction-ready entries in
   the local pending-summary log for 14 days, capped at the most recent 500
   correction-ready events. Older detail compacts into lightweight facts: ticket
@@ -312,17 +317,21 @@ is no required compatibility migration for older `suggest`, `auto_audit`, and
 `.codex/ticket.local.md`; if they appear, treat the config as invalid and use
 the guided setup path.
 
-Codex reads `.codex/ticket.local.md` before the first automatic Ticket change in
-a session and treats that value as the mode for the rest of the session.
-Mid-session config file edits take effect in the next session, not immediately.
-If the config file is missing, unreadable, or invalid, Codex pauses automatic
-Ticket updates, asks the user what mode they want, and repairs the config from
-the user's answer. An explicit chat request such as "pause Ticket automation"
-takes effect immediately for the current checkout before the next autonomous
-write, writes a workspace-local pause marker, and writes the repo-local config
-for future sessions. Other live threads in the same checkout must observe that
-pause at the engine-owned write gateway even if they cached `agent_primary`
-earlier in their session.
+Codex reads `.codex/ticket.local.md` before the first automatic Ticket change
+for a `(project_root, thread_id)` pair and stores that value as a local
+thread-scoped mode snapshot under `.codex/ticket-workspace/`. Later turns for
+the same thread/project use that snapshot instead of rereading config.
+Direct config file edits after snapshot creation take effect only for a new
+mode snapshot, such as a different `thread_id` in the same project or a
+deliberately reset snapshot, not for the current thread/project. If the config
+file is missing, unreadable, or invalid before a snapshot exists, Codex pauses
+automatic Ticket updates, asks the user what mode they want, and repairs the
+config from the user's answer. An explicit chat request such as "pause Ticket
+automation" takes effect immediately for the current checkout before the next
+autonomous write, writes a workspace-local pause marker, and writes the
+repo-local config for future sessions. Other live threads in the same checkout
+must observe that pause at the engine-owned write gateway even if they cached
+`agent_primary` earlier in their thread-scoped snapshot.
 
 The guided setup prompt should use user-facing choices before internal mode
 names:
@@ -399,11 +408,11 @@ write occurs. The runtime decision layer answers four operational questions:
 
 Ordinary-thread autonomy needs a turn-level boundary owner. The Codex
 host/thread runtime owns that turn boundary because it knows when the turn is
-ending. It must stay thin: allocate or pass the `turn_id`, provide final turn
-context and the current pause or mode signal, call Ticket's recovery projection
-before new autonomous writes, call Ticket's turn-apply command near the end of
-the turn, and render the returned `Ticket updates` summary or one discussion
-question. The host/runtime must not own candidate discovery, approval
+ending. It must stay thin: allocate or pass `thread_id` and `turn_id`, provide
+final turn context and the current pause or mode signal, call Ticket's recovery
+projection before new autonomous writes, call Ticket's turn-apply command near
+the end of the turn, and render the returned `Ticket updates` summary or one
+discussion question. The host/runtime must not own candidate discovery, approval
 consumption, raw ledger parsing, idempotency, partial-failure recovery, or
 ticket-state mutation. The Ticket plugin owns mutation rules, approval
 validation, write safety, idempotency, pending-summary bookkeeping, recovery
@@ -468,11 +477,19 @@ approved mutations through the engine-owned write gateway, appends follow-up
 status records, and returns display-ready summary data plus at most one
 discussion question.
 
+For runtime-first mode, `thread_id` is the session-like key. Ticket resolves
+mode from a local snapshot keyed by `(project_root, thread_id)`: if the snapshot
+exists, Ticket uses it; if it does not exist, Ticket reads strict local config
+and writes the first snapshot for that thread/project. `turn_id` scopes the
+current evaluation and approval batch only. `apply-turn` must reject missing
+`thread_id`, missing `turn_id`, or a context `turn_id` that disagrees with the
+CLI `--turn-id`.
+
 The context file uses strict JSON. It should include:
 
 - `schema: "codex.ticket.turn_context.v1"`
-- `thread_id`
-- `turn_id`
+- `thread_id` for the `(project_root, thread_id)` mode snapshot key
+- `turn_id` for the current evaluation/write batch
 - current user request and assistant work summary
 - touched files, verification commands and outcomes, and relevant evidence
 - `git.branch`, `git.head`, and `git.worktree_root`
@@ -540,13 +557,13 @@ The shared evaluator returns exactly one runtime decision per candidate ticket:
 `apply_autonomously` must produce a fresh `AutonomyDecision` approval envelope
 for exactly one proposed ticket change. The decision is short-lived and
 single-use. It must be bound to the exact ticket, proposed mutation fingerprint,
-current ticket-state fingerprint, current evidence snapshot, session mode, and
-`mutation_id`. The envelope's `approval_id` is deterministic, not random: derive
-it from a versioned canonical tuple containing the ticket ID, `mutation_id`,
-proposed mutation fingerprint, current ticket-state fingerprint, evidence
-fingerprint, session mode, and decision kind. A decision cannot be reused for
-another ticket, another mutation, another session mode, or a ticket that
-changed after the decision was created.
+current ticket-state fingerprint, current evidence snapshot, thread-scoped mode,
+and `mutation_id`. The envelope's `approval_id` is deterministic, not random:
+derive it from a versioned canonical tuple containing the ticket ID,
+`mutation_id`, proposed mutation fingerprint, current ticket-state fingerprint,
+evidence fingerprint, thread-scoped mode, and decision kind. A decision cannot
+be reused for another ticket, another mutation, another thread-scoped mode, or a
+ticket that changed after the decision was created.
 
 The approval envelope also has a short validity window. It is valid only until
 the first of these events:
@@ -554,7 +571,7 @@ the first of these events:
 - the matching write consumes it
 - 10 minutes pass after approval creation
 - the current turn ends
-- the session mode changes through an explicit chat pause
+- thread-scoped mode is superseded by an explicit chat pause
 - the ticket-state fingerprint changes
 
 Expired approvals must not be used. If an approval expires before the write,
@@ -716,6 +733,7 @@ The required envelope fields are:
 - `event_id`
 - `event_type`
 - `timestamp`
+- `thread_id`
 - `turn_id`
 - `mutation_id`
 - `ticket_id`
@@ -732,9 +750,10 @@ The required envelope fields are:
 - `details`
 
 Use `schema: "codex.ticket.pending_summary.v1"` for every line. Use ISO 8601
-UTC timestamps. `current_mode` uses the same `discussion_only`, `preview`, and
-`agent_primary` enum as `.codex/ticket.local.md`. `repo_context` is a strict
-object copied from normalized host-supplied workspace context. When git
+UTC timestamps. `thread_id` identifies the mode snapshot's Codex conversation,
+while `turn_id` identifies one end-of-turn batch. `current_mode` uses the same
+`discussion_only`, `preview`, and `agent_primary` enum as `.codex/ticket.local.md`.
+`repo_context` is a strict object copied from normalized host-supplied workspace context. When git
 metadata is available, it must include `repo_root`, `worktree_root`,
 `repo_fingerprint`, `branch`, and `head`. Use `null` for `ticket_id`,
 `mutation_id`, `ticket_state_fingerprint`, `mutation_fingerprint`, or
@@ -919,6 +938,7 @@ A representative mutation-attempt envelope is:
   "event_id": "evt_0123456789abcdef0123456789abcdef",
   "event_type": "mutation_attempt",
   "timestamp": "2026-05-27T14:03:22Z",
+  "thread_id": "thread_...",
   "turn_id": "turn_...",
   "mutation_id": "mut_0123456789abcdef0123456789abcdef",
   "ticket_id": "T-20260527-001",
@@ -1219,11 +1239,11 @@ The implementation should stay small and runtime-owned.
 
 ### Host/thread runtime coordinator
 
-Thin Codex host/thread-runtime coordinator that assigns or passes `turn_id`,
-captures final turn context, calls `ticket_autonomy.py recover` before new
-autonomous writes, calls `ticket_autonomy.py apply-turn` near the end of the
-turn, and renders the concise `Ticket updates` mini-section or one returned
-discussion question. It must not parse raw ledger records, own Ticket
+Thin Codex host/thread-runtime coordinator that assigns or passes `thread_id`
+and `turn_id`, captures final turn context, calls `ticket_autonomy.py recover`
+before new autonomous writes, calls `ticket_autonomy.py apply-turn` near the end
+of the turn, and renders the concise `Ticket updates` mini-section or one
+returned discussion question. It must not parse raw ledger records, own Ticket
 transaction state, or grant write authority.
 
 ### `ticket_autonomy.py`
@@ -1485,14 +1505,14 @@ Rollout should be incremental:
    files until a separate migration decides their fate. Add a static guard or
    focused test that fails if future autonomous write code writes to
    `docs/tickets/.audit/`.
-2. Ship repo-local mode config, session-scoped mode loading, explicit chat pause
-   handling, the shared autonomy runtime, the `ticket_autonomy.py recover` and
-   `apply-turn` CLI, and the durable Ticket-owned operational ledger.
+2. Ship repo-local mode config, thread-scoped mode snapshots, explicit chat
+   pause handling, the shared autonomy runtime, the `ticket_autonomy.py recover`
+   and `apply-turn` CLI, and the durable Ticket-owned operational ledger.
 3. Implement the mutation state machine and engine-owned autonomous write
    gateway so retries recover from gaps between attempt recording, approval
    consumption, ticket write, status recording, and summary receipt.
 4. Wire update and review-style mutations into `agent_primary` behind the
-   session mode gate. When the user chooses automatic mode, apply real
+   thread-scoped mode gate. When the user chooses automatic mode, apply real
    automatic changes immediately rather than forcing a preview-only phase.
 5. Add concise end-of-turn summaries, pending discussion questions, recovery
    summaries, and pending-summary compaction.
@@ -1511,16 +1531,16 @@ Rollout should be incremental:
 This rollout order prioritizes the highest-value autonomous mutation paths
 first while keeping the narrow human-discussion lane intact.
 
-Rollback during a session means the user explicitly asks Codex to pause Ticket
-automation. That pause is workspace-wide for the current checkout before the
-next autonomous write: Ticket writes a workspace-local pause marker, the
-engine-owned write gateway rechecks it immediately before mutation, and other
-live threads in the same checkout must observe it even if they cached
+Rollback during a thread/project mode snapshot means the user explicitly asks
+Codex to pause Ticket automation. That pause is workspace-wide for the current
+checkout before the next autonomous write: Ticket writes a workspace-local pause
+marker, the engine-owned write gateway rechecks it immediately before mutation,
+and other live threads in the same checkout must observe it even if they cached
 `agent_primary` earlier. The same pause writes the repo-local config for future
 sessions and preserves existing pending-summary records for summary,
-correction, and recovery. Editing the mode config file directly mid-session
-does not change current-session behavior; Codex reads config again in the next
-session.
+correction, and recovery. Editing the mode config file directly after a
+`(project_root, thread_id)` snapshot exists does not change that thread/project
+behavior; Ticket reads config again only when creating a new mode snapshot.
 
 ## Verification
 
@@ -1550,8 +1570,15 @@ Prove that:
 - setup ensures `.codex/ticket-workspace/ticket.pending-summary.jsonl`, its
   sibling temporary or lock files, and sibling
   `.codex/ticket-workspace/AGENTS.md` are ignored and local-only
-- session mode is read before the first automatic change and held for the rest
-  of the session
+- `thread_id` and `turn_id` are required in strict turn context; `thread_id`
+  keys the mode snapshot with `project_root`, while `turn_id` scopes one
+  evaluation/write batch
+- thread-scoped mode is read from `.codex/ticket.local.md` before the first
+  automatic change for `(project_root, thread_id)` and held in a local snapshot
+  for later turns in that same thread/project
+- direct config edits after snapshot creation do not affect later turns in the
+  same `(project_root, thread_id)`; a different `thread_id` in the same project
+  reads current strict config and receives its own snapshot
 - explicit chat pause takes effect immediately and updates repo-local config
 - explicit chat pause writes a workspace-local pause marker and prevents other
   live threads in the same checkout from making autonomous writes before their
@@ -1565,15 +1592,15 @@ Prove that:
   lifecycle, and `wontfix` mutations
 - above-cap candidates route to `require_user_discussion`
 - every autonomous write requires a fresh, one-use decision bound to the exact
-  ticket, mutation, ticket-state fingerprint, evidence snapshot, session mode,
-  and `mutation_id`
+  ticket, mutation, ticket-state fingerprint, evidence snapshot,
+  thread-scoped mode, and `mutation_id`
 - one-use approvals are valid only within the current turn and for no more than
   10 minutes after creation
 - expired, already-consumed, cross-turn, or stale-ticket-state approvals are
   rejected before write and force re-evaluation against current ticket state
 - `approval_id` is deterministic from its canonical inputs and changes when the
   bound ticket, mutation, ticket-state fingerprint, evidence fingerprint,
-  session mode, or decision kind changes
+  thread-scoped mode, or decision kind changes
 - `turn_id` is runtime-assigned by the Codex host/thread runtime and is not
   content-derived from Ticket mutation inputs
 - the Codex host/thread runtime can call `ticket_autonomy.py recover` before new

@@ -102,7 +102,7 @@ surface as kept.
 Create these focused runtime modules:
 
 - `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py` - host-facing JSON-in/JSON-out CLI for `pause`, `recover`, `apply-turn`, `doctor-ledger`, and `migrate-change-history`.
-- `plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py` - strict `.codex/ticket.local.md` JSON config, workspace pause marker, local setup, ignored-path checks, and local `.codex/ticket-workspace/AGENTS.md` repair.
+- `plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py` - strict `.codex/ticket.local.md` JSON config, thread-scoped mode snapshots keyed by `(project_root, thread_id)`, workspace pause marker, local setup, ignored-path checks, and local `.codex/ticket-workspace/AGENTS.md` repair.
 - `plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py` - canonical JSON serialization, deterministic `evt_`, `mut_`, and `appr_` IDs, and fingerprint helpers.
 - `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py` - pending-summary envelope types, validation, append-only JSONL writer, lock/temp-file handling, event-derived state, recovery projections that receive live ticket fingerprints from gateway/CLI callers, summaries, and compaction.
 - `plugins/turbo-mode/ticket/scripts/ticket_change_history.py` - `## Change History` parsing, insertion, label validation, and `migrate-change-history` planning/application.
@@ -569,6 +569,14 @@ Test cases:
 - `pause_workspace_automation(project_root, reason="user_requested")` writes
   the pause marker and rewrites `.codex/ticket.local.md` to strict JSON
   `discussion_only`.
+- Mode snapshots are keyed by `(project_root, thread_id)`: the first automatic
+  turn for a thread/project reads strict config and writes a local snapshot;
+  later turns for the same thread/project use the snapshot even if
+  `.codex/ticket.local.md` is edited directly.
+- A different `thread_id` in the same project reads the current strict config
+  and receives its own mode snapshot.
+- Missing or empty `thread_id` is invalid for runtime-first automatic mode
+  resolution.
 - `test_autonomy.py` contains no current-facing assertions that `suggest`,
   `auto_audit`, `auto_silent`, YAML frontmatter config, or missing-config
   defaults are valid runtime-first behavior.
@@ -600,10 +608,31 @@ class LocalConfigResult:
     reason: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ModeSnapshot:
+    project_root: Path
+    thread_id: str
+    mode: AutomationMode
+    path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedMode:
+    state: LocalConfigState
+    mode: AutomationMode | None
+    source: Literal["snapshot", "config", "setup_required"]
+    path: Path | None
+    reason: str | None = None
+
+
 def read_local_config(project_root: Path) -> LocalConfigResult: ...
 def write_local_config(project_root: Path, mode: AutomationMode) -> Path: ...
 def write_local_config_from_setup_choice(project_root: Path, choice: SetupChoice) -> Path: ...
 def ensure_ticket_workspace(project_root: Path) -> Path: ...
+def mode_snapshot_key(project_root: Path, thread_id: str) -> str: ...
+def read_mode_snapshot(project_root: Path, thread_id: str) -> ModeSnapshot | None: ...
+def write_mode_snapshot(project_root: Path, thread_id: str, mode: AutomationMode) -> ModeSnapshot: ...
+def resolve_thread_mode(project_root: Path, thread_id: str) -> ResolvedMode: ...
 def write_workspace_pause(project_root: Path, *, reason: str) -> Path: ...
 def pause_workspace_automation(project_root: Path, *, reason: str) -> Path: ...
 def clear_workspace_pause(project_root: Path) -> None: ...
@@ -628,6 +657,18 @@ Implementation requirements:
 - Accept only setup choices `automatic` and `ask_first`; map them to
   `agent_primary` and `discussion_only` respectively.
 - Write JSON compactly with a trailing newline: `{"schema":"codex.ticket.local.v1","mode":"agent_primary"}\n`.
+- Store mode snapshots under `.codex/ticket-workspace/mode-snapshots/`. The
+  effective key is `(project_root, thread_id)`: the project-local directory
+  scopes the project, and each snapshot records the normalized project root and
+  thread ID so moved or copied state fails validation instead of silently
+  applying to another checkout.
+- `resolve_thread_mode(project_root, thread_id)` must return an existing
+  snapshot before reading `.codex/ticket.local.md`; only when no snapshot exists
+  may it read strict config and write the first snapshot for that
+  thread/project.
+- Direct edits to `.codex/ticket.local.md` after a mode snapshot exists do not
+  affect later turns for the same `(project_root, thread_id)`. A workspace pause
+  marker still overrides immediately before any autonomous write.
 - Use `.codex/ticket-workspace/pause.json` as the workspace-wide pause marker.
 - Remove or bypass the old YAML `read_autonomy_config()` path in
   `ticket_engine_core.py` for current runtime-first behavior. Do not leave
@@ -699,7 +740,7 @@ Tests must prove:
 - `event_id`, `mutation_id`, and `approval_id` use SHA-256, lowercase hex, first 32 hex chars, and prefixes `evt_`, `mut_`, `appr_`.
 - Timestamps are accepted in payload validation elsewhere but are not ID inputs.
 - Same canonical input reproduces the same ID.
-- Changing ticket ID, mutation fingerprint, ticket-state fingerprint, evidence fingerprint, session mode, or decision kind changes the relevant ID.
+- Changing ticket ID, mutation fingerprint, ticket-state fingerprint, evidence fingerprint, thread-scoped mode, or decision kind changes the relevant ID.
 
 Required public surface:
 
@@ -756,6 +797,9 @@ git commit -m "feat(ticket): add deterministic autonomy ids"
 Tests must cover:
 
 - Required envelope fields from the spec.
+- Required `thread_id` copied from strict turn context. `thread_id` identifies
+  the mode snapshot's Codex conversation; `turn_id` still identifies one
+  end-of-turn batch.
 - No unknown top-level fields.
 - Required `repo_context` object with normalized `repo_root`, `worktree_root`,
   `repo_fingerprint`, `branch`, and `head` when git metadata is available.
@@ -1036,11 +1080,14 @@ Tests must prove:
   strict JSON `discussion_only`, verifies the local config file is ignored and
   unstaged, and does not touch ticket files.
 - `recover --project-root <root> --turn-id <id>` returns parseable JSON on stdout.
-- `apply-turn --project-root <root> --turn-id <id> --context-file <path>` rejects invalid context with exit code `2`.
+- `apply-turn --project-root <root> --turn-id <id> --context-file <path>` rejects invalid context with exit code `2`, including missing `thread_id`, missing `turn_id`, or a context `turn_id` that does not match the CLI `--turn-id`.
 - Missing or invalid local config returns exit code `3` with a setup-required JSON object that offers `automatic` and `ask_first` setup choices.
-- `apply-turn --setup-choice automatic` writes strict JSON `agent_primary`, verifies the local config file is ignored and unstaged, and continues the same turn without a second confirmation.
-- `apply-turn --setup-choice ask_first` writes strict JSON `discussion_only`, verifies the local config file is ignored and unstaged, and continues the same turn without a second confirmation.
+- `apply-turn --setup-choice automatic` writes strict JSON `agent_primary`, writes the `(project_root, thread_id)` mode snapshot for the context thread, verifies the local config and snapshot files are ignored and unstaged, and continues the same turn without a second confirmation.
+- `apply-turn --setup-choice ask_first` writes strict JSON `discussion_only`, writes the `(project_root, thread_id)` mode snapshot for the context thread, verifies the local config and snapshot files are ignored and unstaged, and continues the same turn without a second confirmation.
 - `apply-turn --setup-choice preview` is rejected; `preview` remains manual-only strict JSON config.
+- Once a mode snapshot exists for `(project_root, thread_id)`, direct edits to
+  `.codex/ticket.local.md` do not change later `apply-turn` mode behavior for
+  that same thread/project.
 - Workspace pause marker returns exit code `3` with pause output.
 - No-change handled outcomes return exit code `0` and exactly one parseable
   JSON object with `state: "no_change"`, `changed: false`,
@@ -1096,11 +1143,13 @@ Implementation requirements:
   sessions. It must verify that local config/workspace files are ignored and
   unstaged before returning success.
 - `recover` calls `PendingSummaryStore` projections and returns display-ready summaries.
-- `apply-turn` validates strict turn context and local config, then returns
-  `preview`, `discussion_only`, `paused`, or a JSON `no_change` result until
-  gateway integration lands in Task 10. It must never use silent stdout as a
-  handled no-op signal.
-- When config is missing or invalid and `--setup-choice automatic|ask_first` is present, `apply-turn` writes or repairs `.codex/ticket.local.md`, confirms the file is ignored and unstaged, reloads config, and continues the same command without another confirmation.
+- `apply-turn` validates strict turn context, requires `thread_id` and a
+  context `turn_id` matching CLI `--turn-id`, resolves mode from the local
+  `(project_root, thread_id)` snapshot, then returns `preview`,
+  `discussion_only`, `paused`, or a JSON `no_change` result until gateway
+  integration lands in Task 10. It must never use silent stdout as a handled
+  no-op signal.
+- When config is missing or invalid and `--setup-choice automatic|ask_first` is present, `apply-turn` writes or repairs `.codex/ticket.local.md`, confirms the file is ignored and unstaged, writes the first mode snapshot for `(project_root, thread_id)`, and continues the same command without another confirmation.
 - Update `ticket-contract.md` in the same commit. Do not introduce the
   host-facing autonomy CLI in source before the public contract describes it.
 
@@ -1250,7 +1299,7 @@ Tests must prove:
 - Gateway rechecks workspace pause marker immediately before consuming approval.
 - Gateway rejects a cached `agent_primary` approval when another live thread or
   `ticket_autonomy.py pause` has written the workspace pause marker after the
-  session mode was read.
+  thread-scoped mode snapshot was read.
 - Pending-summary attempt event is recorded before ticket mutation.
 - Pending-summary failure prevents ticket mutation.
 - `approval_consumed`, `ticket_written`, and `applied` events are appended in order for a successful automatic update.
@@ -1403,6 +1452,13 @@ Assertions:
   `status: "preview_only"`.
 - `discussion_only` returns one discussion question and leaves ticket state unchanged.
 - Conflicting candidate is skipped without blocking unrelated plausible candidate.
+- `thread_id` is required in strict turn context and every pending-summary event
+  records that same `thread_id`.
+- Runtime-first mode is resolved from a local snapshot keyed by
+  `(project_root, thread_id)`: after one `apply-turn` creates the snapshot,
+  direct edits to `.codex/ticket.local.md` do not change later turns for that
+  same thread/project, while a different `thread_id` reads the current strict
+  config and receives a separate snapshot.
 - Every pending-summary event copies `repo_context` from the strict turn
   context `git` object, including repo root, worktree root, repo fingerprint,
   branch, and HEAD.
@@ -1440,7 +1496,9 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
    verify local files are ignored and unstaged, return the explicit pause JSON,
    and stop before candidate discovery.
 3. Ensure local workspace setup.
-4. Read session mode once.
+4. Resolve thread-scoped mode from the local snapshot keyed by
+   `(project_root, thread_id)`. If no snapshot exists, read strict config and
+   write the first snapshot for that thread/project.
 5. Check workspace pause marker.
 6. Run the event-derived recovery health check from Task 5 and block new
    writes if bookkeeping is unhealthy. For incomplete write states that require
