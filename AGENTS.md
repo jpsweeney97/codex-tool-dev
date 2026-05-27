@@ -2,10 +2,6 @@
 
 Repository-local instructions for `/Users/jp/Projects/active/codex-tool-dev`.
 
-These instructions supplement the user-level rules. If there is a conflict, follow
-safety rules first, then the explicit user request, then user-level instructions,
-then this file.
-
 ## Repository Purpose
 
 This repository is the development workspace for Codex plugins, skills, and
@@ -23,6 +19,26 @@ Primary source surfaces:
   Turbo Mode plugin source tree.
 - `docs/superpowers/` and `docs/tickets/` - durable plans, closeouts, PR
   packages, and tracked tickets.
+
+## Development Tenet
+
+Codex-facing systems in this repo should support Codex's judgment rather than
+replace it with brittle rule machinery. Tools developed in this repo should
+supplement Codex's capabilities without imposing limiting rigidity.
+
+Plugins, skills, hooks, runtimes, and guard tools should give Codex durable
+context, clear boundaries, recoverable state, and structured evidence so it can
+make better decisions. They should avoid over-specified taxonomies, exhaustive
+decision trees, and rigid workflows that force Codex to behave like a narrow
+rules engine when judgment is the right tool.
+
+Use hard rules for safety, user control, data integrity, destructive actions,
+stale state, and recovery guarantees. Use flexible guidance for semantic
+decisions such as relevance, prioritization, summarization, recommendations,
+ticket quality, and low-risk corrections.
+
+A good implementation of this tenet makes Codex more capable and trustworthy
+without making normal work feel heavy.
 
 ## Development Posture
 
@@ -117,8 +133,8 @@ hypothetical environment.
 ## Skills And Instruction Files
 
 - When editing `SKILL.md`, `agents/*.yaml`, `agents/*.md`, `CLAUDE.md`, or
-  instruction-style Markdown, apply the repo-local writing principles from
-  `.codex/skills/writing-principles/`.
+  instruction-style Markdown, apply the writing principles from
+  `/Users/jp/.agents/skills/writing-principles/`.
 - Keep skills behavior-focused. Avoid meta commentary about how the skill was
   authored.
 - If a skill behavior changes, check whether companion files under `agents/`,
