@@ -85,6 +85,7 @@ _ACTIONS = frozenset(
 _DECISIONS = frozenset(
     {
         "apply_autonomously",
+        "apply_correction",
         "require_user_discussion",
         "skip_due_to_conflict",
         "defer_until_retry_condition",

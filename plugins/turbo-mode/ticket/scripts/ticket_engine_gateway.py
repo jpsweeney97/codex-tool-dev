@@ -111,6 +111,16 @@ def _approval_error(
     decision: AutonomyDecision,
 ) -> str | None:
     approval = decision.approval
+    if decision.kind == RuntimeDecisionKind.APPLY_CORRECTION:
+        if decision.mutation_id is None:
+            return "mutation_id_required"
+        if approval is not None:
+            return "approval_unexpected"
+        if mutation.action != "correction" or decision.candidate.action != "correction":
+            return "decision_mismatch"
+        if decision.candidate.ticket_id != mutation.ticket_id:
+            return "ticket_mismatch"
+        return None
     if decision.kind != RuntimeDecisionKind.APPLY_AUTONOMOUSLY or approval is None:
         return "approval_required"
     if decision.mutation_id is None:
@@ -425,8 +435,8 @@ def apply_autonomous_mutation(
     approval_error = _approval_error(thread_id=thread_id, mutation=mutation, decision=decision)
     if approval_error is not None:
         return _policy_blocked(f"Approval validation failed: {approval_error}")
-    if decision.mutation_id is None or decision.approval is None:
-        return _policy_blocked("Approval validation failed: approval_required")
+    if decision.mutation_id is None:
+        return _policy_blocked("Approval validation failed: mutation_id_required")
     existing_state = pending_summary.derive_mutation_state(
         thread_id=thread_id,
         mutation_id=decision.mutation_id,
@@ -454,13 +464,21 @@ def apply_autonomous_mutation(
         thread_id=thread_id,
         turn_id=turn_id,
         repo_context=repo_context,
-        reason="Apply approved autonomous Ticket mutation.",
+        reason=(
+            "Apply approved autonomous Ticket mutation."
+            if decision.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY
+            else "Apply user-triggered autonomous Ticket correction."
+        ),
         details={
-            "decision": RuntimeDecisionKind.APPLY_AUTONOMOUSLY.value,
-            "current_mode": str(decision.approval.get("current_mode", "agent_primary")),
-            "approval": decision.approval,
+            "decision": decision.kind.value,
+            "current_mode": (
+                str(decision.approval.get("current_mode", "agent_primary"))
+                if decision.approval is not None
+                else "agent_primary"
+            ),
             "evidence_kind": "runtime_context",
             **_fingerprint_details(mutation=mutation, decision=decision),
+            **({"approval": decision.approval} if decision.approval is not None else {}),
         },
     )
     if attempt_error is not None:
@@ -472,23 +490,26 @@ def apply_autonomous_mutation(
             data={"pause_reason": _pause_reason(project_root)},
         )
 
-    consumed_error = _append_gateway_event(
-        pending_summary=pending_summary,
-        event_type="mutation_status",
-        status="approval_consumed",
-        mutation=mutation,
-        decision=decision,
-        thread_id=thread_id,
-        turn_id=turn_id,
-        repo_context=repo_context,
-        reason="Autonomous approval consumed.",
-        details={
-            "approval_id": str(decision.approval["approval_id"]),
-            **_fingerprint_details(mutation=mutation, decision=decision),
-        },
-    )
-    if consumed_error is not None:
-        return consumed_error
+    if decision.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY:
+        if decision.approval is None:
+            return _policy_blocked("Approval validation failed: approval_required")
+        consumed_error = _append_gateway_event(
+            pending_summary=pending_summary,
+            event_type="mutation_status",
+            status="approval_consumed",
+            mutation=mutation,
+            decision=decision,
+            thread_id=thread_id,
+            turn_id=turn_id,
+            repo_context=repo_context,
+            reason="Autonomous approval consumed.",
+            details={
+                "approval_id": str(decision.approval["approval_id"]),
+                **_fingerprint_details(mutation=mutation, decision=decision),
+            },
+        )
+        if consumed_error is not None:
+            return consumed_error
 
     dispatch = build_engine_dispatch(mutation)
     response = _execute_dispatch(dispatch=dispatch, mutation=mutation, thread_id=thread_id)

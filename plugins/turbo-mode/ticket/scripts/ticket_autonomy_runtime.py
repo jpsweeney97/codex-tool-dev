@@ -20,6 +20,7 @@ class RuntimeDecisionKind(StrEnum):
     """Runtime-first decision kinds."""
 
     APPLY_AUTONOMOUSLY = "apply_autonomously"
+    APPLY_CORRECTION = "apply_correction"
     REQUIRE_USER_DISCUSSION = "require_user_discussion"
     SKIP_DUE_TO_CONFLICT = "skip_due_to_conflict"
     DEFER_UNTIL_RETRY_CONDITION = "defer_until_retry_condition"
@@ -95,6 +96,16 @@ _UPDATE_ACTIONS = frozenset({"update", "reprioritize", "stale_cleanup", "correct
     _BLOCKER_REFINEMENT_ACTIONS
 )
 _CLOSE_FIELDS = frozenset({"resolution"})
+_UNSAFE_CORRECTION_KEYS = frozenset(
+    {
+        "delete",
+        "archive",
+        "history_repair",
+        "rewrite_change_history",
+        "remove_history_entries",
+        "git_history_edit",
+    }
+)
 
 
 def _iso_z(value: datetime) -> str:
@@ -303,11 +314,41 @@ def map_candidate_to_engine(
         if set(fields) != {"reopen_reason"}:
             return EngineDispatch("policy_blocked", None, {}, "reopen_fields_not_allowlisted")
         return EngineDispatch("ok", EngineAction.REOPEN, {"reopen_reason": reopen_reason})
+    if candidate.action == "correction" and fields.get("resolution") in {"done", "wontfix"}:
+        return EngineDispatch("ok", EngineAction.CLOSE, {"resolution": fields["resolution"]})
     if candidate.action in _UPDATE_ACTIONS:
         return EngineDispatch("ok", EngineAction.UPDATE, fields)
     if candidate.action == "create":
         return EngineDispatch("ok", EngineAction.CREATE, fields)
     return EngineDispatch("policy_blocked", None, {}, "unsupported_action")
+
+
+def _unsafe_correction(candidate: CandidateMutation) -> bool:
+    return bool(_UNSAFE_CORRECTION_KEYS & set(candidate.proposed_change))
+
+
+def _correction_detail_available(candidate: CandidateMutation) -> bool:
+    return _has_evidence_kind(candidate, "correction_detail")
+
+
+def _mutation_id_for_candidate(
+    *,
+    candidate: CandidateMutation,
+    thread_id: str,
+    turn_id: str,
+) -> tuple[str, str, str]:
+    mutation_fingerprint = sha256_fingerprint(_candidate_payload(candidate))
+    evidence_fingerprint = sha256_fingerprint(_evidence_payload(candidate))
+    mutation_id = make_mutation_id(
+        schema="codex.ticket.mutation.v1",
+        thread_id=thread_id,
+        turn_id=turn_id,
+        action=candidate.action,
+        ticket_id=candidate.ticket_id,
+        mutation_fingerprint=mutation_fingerprint,
+        evidence_fingerprint=evidence_fingerprint,
+    )
+    return mutation_id, mutation_fingerprint, evidence_fingerprint
 
 
 def evaluate_autonomy_intent(
@@ -342,6 +383,58 @@ def evaluate_autonomy_intent(
                     RuntimeDecisionKind.SKIP_DUE_TO_CONFLICT,
                     reason=candidate.conflict_reason or "conflicting_evidence",
                     pending_summary_status="skipped",
+                )
+            )
+            continue
+        if candidate.action == "correction":
+            if _unsafe_correction(candidate):
+                decisions.append(
+                    _decision(
+                        candidate,
+                        RuntimeDecisionKind.REQUIRE_USER_DISCUSSION,
+                        reason="unsafe_correction",
+                        pending_summary_status="discussion_required",
+                    )
+                )
+                continue
+            if not _correction_detail_available(candidate):
+                decisions.append(
+                    _decision(
+                        candidate,
+                        RuntimeDecisionKind.REQUIRE_USER_DISCUSSION,
+                        reason="correction_detail_missing",
+                        pending_summary_status="discussion_required",
+                    )
+                )
+                continue
+            dispatch = map_candidate_to_engine(candidate)
+            if dispatch.state != "ok":
+                decisions.append(
+                    _decision(
+                        candidate,
+                        RuntimeDecisionKind.REQUIRE_USER_DISCUSSION,
+                        reason=dispatch.reason or "policy_blocked",
+                        pending_summary_status="discussion_required",
+                        engine_dispatch=dispatch,
+                    )
+                )
+                continue
+            mutation_id, _mutation_fingerprint, _evidence_fingerprint = (
+                _mutation_id_for_candidate(
+                    candidate=candidate,
+                    thread_id=thread_id,
+                    turn_id=turn_id,
+                )
+            )
+            decisions.append(
+                _decision(
+                    candidate,
+                    RuntimeDecisionKind.APPLY_CORRECTION,
+                    reason="correction_detail_retained",
+                    pending_summary_status="pending",
+                    mutation_id=mutation_id,
+                    approval=None,
+                    engine_dispatch=dispatch,
                 )
             )
             continue
@@ -424,18 +517,12 @@ def evaluate_autonomy_intent(
             )
             continue
 
-        mutation_fingerprint = sha256_fingerprint(_candidate_payload(candidate))
-        evidence_fingerprint = sha256_fingerprint(_evidence_payload(candidate))
-        ticket_state_fingerprint = _ticket_state_fingerprint(candidate, intent.source_context)
-        mutation_id = make_mutation_id(
-            schema="codex.ticket.mutation.v1",
+        mutation_id, mutation_fingerprint, evidence_fingerprint = _mutation_id_for_candidate(
+            candidate=candidate,
             thread_id=thread_id,
             turn_id=turn_id,
-            action=candidate.action,
-            ticket_id=candidate.ticket_id,
-            mutation_fingerprint=mutation_fingerprint,
-            evidence_fingerprint=evidence_fingerprint,
         )
+        ticket_state_fingerprint = _ticket_state_fingerprint(candidate, intent.source_context)
         approval = _make_approval(
             candidate=candidate,
             decision_kind=RuntimeDecisionKind.APPLY_AUTONOMOUSLY,
