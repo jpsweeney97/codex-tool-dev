@@ -342,9 +342,14 @@ git commit -m "fix(ticket): disable future audit writes"
 Test cases:
 
 - Missing `.codex/ticket.local.md` returns a setup-required result with no fallback to old modes.
+- Missing or invalid config can be resolved by the guided setup choice contract:
+  `automatic` writes `agent_primary`, `ask_first` writes `discussion_only`,
+  and `preview` remains manual-only.
 - Valid file is exactly `{"schema":"codex.ticket.local.v1","mode":"agent_primary"}` or another allowed mode.
 - Unknown keys, Markdown, fenced JSON, YAML frontmatter, comments, old modes `suggest`, `auto_audit`, and `auto_silent` are invalid.
 - `write_local_config(project_root, AutomationMode.AGENT_PRIMARY)` rewrites the whole file as strict JSON.
+- `write_local_config_from_setup_choice(project_root, SetupChoice.AUTOMATIC)` rewrites the whole file as strict JSON for `agent_primary`.
+- `write_local_config_from_setup_choice(project_root, SetupChoice.ASK_FIRST)` rewrites the whole file as strict JSON for `discussion_only`.
 - `ensure_ticket_workspace(project_root)` creates `.codex/ticket-workspace/AGENTS.md` with local-only staging guidance.
 - `ensure_ticket_workspace(project_root)` verifies `.codex/ticket-workspace/` is ignored.
 - `write_workspace_pause(project_root, reason="user_requested")` writes a local pause marker and `is_workspace_paused(project_root)` returns true.
@@ -357,6 +362,11 @@ class LocalConfigState(StrEnum):
     SETUP_REQUIRED = "setup_required"
 
 
+class SetupChoice(StrEnum):
+    AUTOMATIC = "automatic"
+    ASK_FIRST = "ask_first"
+
+
 @dataclass(frozen=True, slots=True)
 class LocalConfigResult:
     state: LocalConfigState
@@ -367,6 +377,7 @@ class LocalConfigResult:
 
 def read_local_config(project_root: Path) -> LocalConfigResult: ...
 def write_local_config(project_root: Path, mode: AutomationMode) -> Path: ...
+def write_local_config_from_setup_choice(project_root: Path, choice: SetupChoice) -> Path: ...
 def ensure_ticket_workspace(project_root: Path) -> Path: ...
 def write_workspace_pause(project_root: Path, *, reason: str) -> Path: ...
 def clear_workspace_pause(project_root: Path) -> None: ...
@@ -388,6 +399,8 @@ Implementation requirements:
 - Use `json.loads()` on the full file text.
 - Require object type, exact keys `schema` and `mode`, schema `codex.ticket.local.v1`, and mode in `discussion_only`, `preview`, `agent_primary`.
 - Return setup-required instead of silently choosing a default.
+- Accept only setup choices `automatic` and `ask_first`; map them to
+  `agent_primary` and `discussion_only` respectively.
 - Write JSON compactly with a trailing newline: `{"schema":"codex.ticket.local.v1","mode":"agent_primary"}\n`.
 - Use `.codex/ticket-workspace/pause.json` as the workspace-wide pause marker.
 - Create `.codex/ticket-workspace/AGENTS.md` with plain local guidance:
@@ -507,6 +520,10 @@ Tests must cover:
 
 - Required envelope fields from the spec.
 - No unknown top-level fields.
+- Required `repo_context` object with normalized `repo_root`, `worktree_root`,
+  `repo_fingerprint`, `branch`, and `head` when git metadata is available.
+- Missing `repo_context`, missing available branch/HEAD, or mismatched
+  worktree identity is invalid.
 - Valid event/status compatibility matrix.
 - Finite action, decision, mode, evidence kind, pause reason, and commit disposition values.
 - `reason` is one short line with no newline.
@@ -531,6 +548,7 @@ class ValidationResult:
     error: str | None = None
 
 
+def validate_repo_context(repo_context: Mapping[str, object]) -> ValidationResult: ...
 def validate_pending_summary_event(event: Mapping[str, object]) -> ValidationResult: ...
 def event_payload_fingerprint(event_without_event_id_and_timestamp: Mapping[str, object]) -> str: ...
 ```
@@ -543,13 +561,14 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 - [ ] **Step 3: Implement envelope validation**
 
-Keep validation deterministic and local to `ticket_turn_batch.py`. Do not use a semantic classifier script. This module validates shapes, finite values, and state compatibility only.
+Keep validation deterministic and local to `ticket_turn_batch.py`. Do not use a semantic classifier script. This module validates shapes, finite values, repo/worktree identity, branch/HEAD presence when available, and state compatibility only.
 
 - [ ] **Step 4: Add representative fixtures**
 
 Add test helper functions inside `test_turn_batch.py`:
 
 ```python
+def valid_repo_context(**overrides: object) -> dict[str, object]: ...
 def valid_attempt_event(**overrides: object) -> dict[str, object]: ...
 def valid_status_event(status: str, **detail_overrides: object) -> dict[str, object]: ...
 ```
@@ -662,10 +681,10 @@ git commit -m "feat(ticket): add durable pending summary ledger"
 - Create: `plugins/turbo-mode/ticket/scripts/ticket_change_history.py`
 - Create: `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py`
 - Create: `plugins/turbo-mode/ticket/tests/test_change_history.py`
-- Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`
+- Create: `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`
 - Modify: `plugins/turbo-mode/ticket/references/ticket-contract.md`
 
-- [ ] **Step 1: Write Change History tests**
+- [ ] **Step 1: Write Change History helper and migration CLI tests**
 
 Tests must prove:
 
@@ -681,6 +700,10 @@ Tests must prove:
 - The helper does not write the containing commit hash.
 - `migrate-change-history --dry-run` reports candidate files and changes no files.
 - `migrate-change-history --apply` inserts missing sections only after explicit apply.
+
+Place helper-level tests in `test_change_history.py`. Create
+`test_autonomy_cli.py` in this task for `migrate-change-history` argument and
+stdout tests so Task 7 can extend the existing CLI test file.
 
 Required public surface:
 
@@ -702,7 +725,7 @@ def apply_change_history_migration(tickets_dir: Path) -> tuple[Path, ...]: ...
 - [ ] **Step 2: Run failing Change History tests**
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_change_history.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_change_history.py tests/test_autonomy_cli.py -q
 ```
 
 - [ ] **Step 3: Implement helper and CLI command**
@@ -722,8 +745,8 @@ CLI stdout examples:
 - [ ] **Step 4: Verify and commit**
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_change_history.py -q
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_change_history.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/tests/test_change_history.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_change_history.py tests/test_autonomy_cli.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_change_history.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/tests/test_change_history.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py
 git diff --check
 ```
 
@@ -741,7 +764,7 @@ git commit -m "feat(ticket): add change history runtime support"
 **Files:**
 
 - Create or modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py`
-- Create: `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`
 
 - [ ] **Step 1: Write CLI contract tests**
 
@@ -749,7 +772,10 @@ Tests must prove:
 
 - `recover --project-root <root> --turn-id <id>` returns parseable JSON on stdout.
 - `apply-turn --project-root <root> --turn-id <id> --context-file <path>` rejects invalid context with exit code `2`.
-- Missing or invalid local config returns exit code `3` with a setup-required JSON object.
+- Missing or invalid local config returns exit code `3` with a setup-required JSON object that offers `automatic` and `ask_first` setup choices.
+- `apply-turn --setup-choice automatic` writes strict JSON `agent_primary`, verifies the local config file is ignored and unstaged, and continues the same turn without a second confirmation.
+- `apply-turn --setup-choice ask_first` writes strict JSON `discussion_only`, verifies the local config file is ignored and unstaged, and continues the same turn without a second confirmation.
+- `apply-turn --setup-choice preview` is rejected; `preview` remains manual-only strict JSON config.
 - Workspace pause marker returns exit code `3` with pause output.
 - Host-facing CLI never exposes raw ledger append/consume/mark-summarized commands.
 - `doctor-ledger --dry-run` validates ledger health and returns JSON.
@@ -783,6 +809,7 @@ Implementation requirements:
 - Exit `0`, `1`, `2`, or `3` according to the shared contract.
 - `recover` calls `PendingSummaryStore` projections and returns display-ready summaries.
 - `apply-turn` validates strict turn context and local config, then returns `preview`, `discussion_only`, `paused`, or an empty no-change result until gateway integration lands in Task 10.
+- When config is missing or invalid and `--setup-choice automatic|ask_first` is present, `apply-turn` writes or repairs `.codex/ticket.local.md`, confirms the file is ignored and unstaged, reloads config, and continues the same command without another confirmation.
 
 - [ ] **Step 4: Verify and commit**
 
@@ -1047,6 +1074,14 @@ Assertions:
 - `preview` records preview-only outcome and leaves ticket state unchanged.
 - `discussion_only` returns one discussion question and leaves ticket state unchanged.
 - Conflicting candidate is skipped without blocking unrelated plausible candidate.
+- Every pending-summary event copies `repo_context` from the strict turn
+  context `git` object, including repo root, worktree root, repo fingerprint,
+  branch, and HEAD.
+- Approved ticket writes do not append terminal `applied` records before
+  `apply_autonomous_mutation()` runs.
+- Successful approved writes receive gateway-owned events in order:
+  `mutation_attempt`, `approval_consumed`, `ticket_written`, then terminal
+  `applied`.
 - Summary contains `Applied`, `Skipped`, and `Discussion required` buckets only when non-empty.
 - No output appears when no Ticket changes and no discussion are needed.
 
@@ -1067,8 +1102,12 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 5. Run recovery projection and block new writes if recovery says bookkeeping is unhealthy.
 6. Discover candidates and evidence.
 7. Evaluate candidates.
-8. Append pending-summary records for applied, skipped, preview-only, discussion-required, and deferred candidates.
-9. Apply approved mutations through `apply_autonomous_mutation()`.
+8. Append pending-summary records itself only for non-write outcomes:
+   `skipped`, `preview_only`, `discussion_required`, `deferred`, and
+   non-gateway `failed`.
+9. Apply approved mutations through `apply_autonomous_mutation()` and let the
+   gateway own `mutation_attempt`, `approval_consumed`, `ticket_written`, and
+   terminal write outcomes including `applied`.
 10. Render display-ready summary and at most one discussion question.
 11. Append summary receipts.
 
@@ -1338,6 +1377,8 @@ Tests must prove:
 - Future autonomous durable history is `## Change History` plus local pending-summary bookkeeping.
 - Installed runtime success is not claimed.
 - `ticket_autonomy.py` exposes only Ticket-level CLI commands, not raw ledger mutation commands.
+- Pending-summary validation rejects events missing required `repo_context` or
+  available branch/HEAD/worktree identity.
 - Direct active-ticket write paths outside the gateway or named maintenance exceptions are flagged.
 - No source file writes to `docs/tickets/.audit/` for future autonomous behavior.
 
