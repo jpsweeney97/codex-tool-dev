@@ -7,11 +7,12 @@ import os
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
 from scripts.ticket_autonomy_config import ensure_ticket_workspace
-from scripts.ticket_autonomy_ids import canonical_json, sha256_fingerprint
+from scripts.ticket_autonomy_ids import canonical_json, make_event_id, sha256_fingerprint
 
 PENDING_SUMMARY_SCHEMA = "codex.ticket.pending_summary.v1"
 
@@ -155,6 +156,27 @@ class AppendResult:
     state: Literal["appended", "already_recorded", "paused"]
     event_id: str
     pause_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RecoveryProjection:
+    """Display-ready pending-summary recovery projection for one mutation."""
+
+    state: Literal[
+        "healthy",
+        "retry_with_same_mutation",
+        "append_missing_ticket_written",
+        "append_missing_terminal_status",
+        "summary_ready",
+        "pause_for_reconciliation",
+    ]
+    thread_id: str
+    mutation_id: str
+    current_ticket_fingerprint: str | None
+    expected_pre_write_fingerprint: str | None
+    expected_post_write_fingerprint: str | None
+    events_to_append: tuple[Mapping[str, object], ...] = ()
+    reason: str | None = None
 
 
 def _path_text(path: Path) -> str:
@@ -387,6 +409,19 @@ def _event_signature(event: Mapping[str, object]) -> str:
     return canonical_json(comparable)
 
 
+def _now_z() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_z(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+
+
 class PendingSummaryStore:
     """Append-only local pending-summary event store."""
 
@@ -444,6 +479,59 @@ class PendingSummaryStore:
         """Read valid pending-summary events from the local JSONL log."""
         events = self._read_events_or_none()
         return events if events is not None else ()
+
+    def compact_correction_ready_events(
+        self,
+        *,
+        now: datetime | None = None,
+        max_age_days: int = 14,
+        max_events: int = 500,
+    ) -> AppendResult:
+        """Compact old correction-ready detail through a validated temp JSONL.
+
+        Args:
+            now: Wall-clock used for retention decisions. Defaults to current UTC.
+            max_age_days: Maximum age for full correction detail.
+            max_events: Maximum number of correction-ready events retaining detail.
+
+        Returns:
+            Result describing whether compaction rewrote the active log.
+        """
+        ensure_ticket_workspace(self.project_root)
+        if not self._acquire_lock():
+            return AppendResult("paused", "compaction", "lock_timeout")
+
+        try:
+            events = self._read_events_or_none()
+            if events is None:
+                return AppendResult("paused", "compaction", "pending_summary_unhealthy")
+            compacted = self._compact_correction_events(
+                events,
+                now=now or datetime.now(UTC),
+                max_age_days=max_age_days,
+                max_events=max_events,
+            )
+            if compacted == events:
+                return AppendResult("already_recorded", "compaction")
+            if not self._validate_compacted_events(compacted):
+                return AppendResult("paused", "compaction", "invalid_compaction")
+
+            temp_path = self.log_path.with_name(f"{self.log_path.name}.{os.getpid()}.tmp")
+            try:
+                with temp_path.open("w", encoding="utf-8") as handle:
+                    for event in compacted:
+                        handle.write(canonical_json(event) + "\n")
+                if self._read_events_from_path_or_none(temp_path) is None:
+                    return AppendResult("paused", "compaction", "invalid_compaction")
+                temp_path.replace(self.log_path)
+            finally:
+                try:
+                    temp_path.unlink()
+                except FileNotFoundError:
+                    pass
+            return AppendResult("appended", "compaction")
+        finally:
+            self._release_lock()
 
     def derive_mutation_state(self, *, thread_id: str, mutation_id: str) -> str:
         """Derive recovery state from recorded events only.
@@ -506,11 +594,14 @@ class PendingSummaryStore:
             pass
 
     def _read_events_or_none(self) -> tuple[dict[str, object], ...] | None:
-        if not self.log_path.is_file():
+        return self._read_events_from_path_or_none(self.log_path)
+
+    def _read_events_from_path_or_none(self, path: Path) -> tuple[dict[str, object], ...] | None:
+        if not path.is_file():
             return ()
         events: list[dict[str, object]] = []
         try:
-            lines = self.log_path.read_text(encoding="utf-8").splitlines()
+            lines = path.read_text(encoding="utf-8").splitlines()
         except OSError:
             return None
         for line in lines:
@@ -526,3 +617,353 @@ class PendingSummaryStore:
                 return None
             events.append(parsed)
         return tuple(events)
+
+    def _compact_correction_events(
+        self,
+        events: tuple[dict[str, object], ...],
+        *,
+        now: datetime,
+        max_age_days: int,
+        max_events: int,
+    ) -> tuple[dict[str, object], ...]:
+        correction_entries: list[tuple[int, datetime | None]] = []
+        for index, event in enumerate(events):
+            details = event.get("details")
+            if not isinstance(details, Mapping):
+                continue
+            if details.get("correction_ready") is not True or "correction_detail" not in details:
+                continue
+            correction_entries.append((index, _parse_z(event.get("timestamp"))))
+
+        age_floor = now - timedelta(days=max(max_age_days, 0))
+        eligible = [
+            (index, timestamp)
+            for index, timestamp in correction_entries
+            if timestamp is not None and timestamp >= age_floor
+        ]
+        eligible.sort(key=lambda item: (item[1], item[0]), reverse=True)
+        keep = {index for index, _timestamp in eligible[: max(max_events, 0)]}
+
+        compacted: list[dict[str, object]] = []
+        for index, event in enumerate(events):
+            if index in keep:
+                compacted.append(event)
+                continue
+            details = event.get("details")
+            if not isinstance(details, Mapping) or "correction_detail" not in details:
+                compacted.append(event)
+                continue
+            compacted_details = dict(details)
+            compacted_details.pop("correction_detail", None)
+            compacted_details["correction_detail_compacted"] = True
+            compacted.append({**event, "details": compacted_details})
+        return tuple(compacted)
+
+    def _validate_compacted_events(self, events: tuple[dict[str, object], ...]) -> bool:
+        return all(validate_pending_summary_event(event).ok for event in events)
+
+
+def _matching_mutation_events(
+    store: PendingSummaryStore,
+    *,
+    thread_id: str,
+    mutation_id: str,
+) -> tuple[dict[str, object], ...] | None:
+    events = store._read_events_or_none()
+    if events is None:
+        return None
+    return tuple(
+        event
+        for event in events
+        if event.get("thread_id") == thread_id and event.get("mutation_id") == mutation_id
+    )
+
+
+def _details(event: Mapping[str, object]) -> Mapping[str, object]:
+    value = event.get("details")
+    return value if isinstance(value, Mapping) else {}
+
+
+def _string_detail(event: Mapping[str, object], key: str) -> str | None:
+    value = _details(event).get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _expected_pre_write_fingerprint(events: tuple[Mapping[str, object], ...]) -> str | None:
+    for event in events:
+        explicit = _string_detail(event, "expected_pre_write_fingerprint")
+        if explicit is not None:
+            return explicit
+        approval = _details(event).get("approval")
+        if isinstance(approval, Mapping):
+            value = approval.get("ticket_state_fingerprint")
+            if isinstance(value, str) and value and value != "unknown":
+                return value
+    return None
+
+
+def _expected_post_write_fingerprint(events: tuple[Mapping[str, object], ...]) -> str | None:
+    for event in events:
+        if event.get("status") == "ticket_written":
+            value = _string_detail(event, "post_write_fingerprint")
+            if value is not None and value != "unknown":
+                return value
+    for event in events:
+        explicit = _string_detail(event, "expected_post_write_fingerprint")
+        if explicit is not None and explicit != "unknown":
+            return explicit
+    return None
+
+
+def _reference_event(events: tuple[dict[str, object], ...]) -> dict[str, object] | None:
+    for event in events:
+        if event.get("event_type") == "mutation_attempt":
+            return event
+    return events[0] if events else None
+
+
+def _recovery_event(
+    *,
+    reference: Mapping[str, object],
+    event_type: str,
+    status: str,
+    reason: str,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    action = "summarize" if event_type == "summary_receipt" else str(reference["action"])
+    ticket_id = None if event_type == "summary_receipt" else reference["ticket_id"]
+    without_id = {
+        "schema": PENDING_SUMMARY_SCHEMA,
+        "thread_id": reference["thread_id"],
+        "turn_id": reference["turn_id"],
+        "event_type": event_type,
+        "status": status,
+        "action": action,
+        "ticket_id": ticket_id,
+        "mutation_id": reference["mutation_id"],
+        "repo_context": reference["repo_context"],
+        "reason": reason,
+        "details": dict(details),
+    }
+    payload_fingerprint = event_payload_fingerprint(without_id)
+    event_id = make_event_id(
+        schema=PENDING_SUMMARY_SCHEMA,
+        event_type=event_type,
+        thread_id=str(reference["thread_id"]),
+        turn_id=str(reference["turn_id"]),
+        mutation_id=str(reference["mutation_id"]),
+        status=status,
+        action=action,
+        ticket_id=ticket_id if isinstance(ticket_id, str) else None,
+        payload_fingerprint=payload_fingerprint,
+    )
+    return {"event_id": event_id, "timestamp": _now_z(), **without_id}
+
+
+def _pause_projection(
+    *,
+    thread_id: str,
+    mutation_id: str,
+    current_ticket_fingerprint: str | None,
+    expected_pre_write_fingerprint: str | None,
+    expected_post_write_fingerprint: str | None,
+    reason: str,
+) -> RecoveryProjection:
+    return RecoveryProjection(
+        "pause_for_reconciliation",
+        thread_id,
+        mutation_id,
+        current_ticket_fingerprint,
+        expected_pre_write_fingerprint,
+        expected_post_write_fingerprint,
+        reason=reason,
+    )
+
+
+def project_mutation_recovery(
+    *,
+    store: PendingSummaryStore,
+    thread_id: str,
+    mutation_id: str,
+    current_ticket_fingerprint: str | None,
+) -> RecoveryProjection:
+    """Project recovery action for one mutation from append-only events.
+
+    Args:
+        store: Pending-summary event store.
+        thread_id: Thread that owns the mutation.
+        mutation_id: Mutation to inspect.
+        current_ticket_fingerprint: Live ticket fingerprint, when a ticket exists.
+
+    Returns:
+        Recovery projection. The caller decides whether to append returned events.
+    """
+    events = _matching_mutation_events(store, thread_id=thread_id, mutation_id=mutation_id)
+    if events is None:
+        return _pause_projection(
+            thread_id=thread_id,
+            mutation_id=mutation_id,
+            current_ticket_fingerprint=current_ticket_fingerprint,
+            expected_pre_write_fingerprint=None,
+            expected_post_write_fingerprint=None,
+            reason="pending_summary_unhealthy",
+        )
+    expected_pre = _expected_pre_write_fingerprint(events)
+    expected_post = _expected_post_write_fingerprint(events)
+    state = store.derive_mutation_state(thread_id=thread_id, mutation_id=mutation_id)
+    if state in {"no_attempt", "summary_recorded"}:
+        return RecoveryProjection(
+            "healthy",
+            thread_id,
+            mutation_id,
+            current_ticket_fingerprint,
+            expected_pre,
+            expected_post,
+        )
+
+    reference = _reference_event(events)
+    if reference is None:
+        return RecoveryProjection(
+            "healthy",
+            thread_id,
+            mutation_id,
+            current_ticket_fingerprint,
+            expected_pre,
+            expected_post,
+        )
+
+    if state in {"attempt_recorded", "approval_consumed"}:
+        if expected_pre is None:
+            return _pause_projection(
+                thread_id=thread_id,
+                mutation_id=mutation_id,
+                current_ticket_fingerprint=current_ticket_fingerprint,
+                expected_pre_write_fingerprint=expected_pre,
+                expected_post_write_fingerprint=expected_post,
+                reason="missing_pre_write_fingerprint",
+            )
+        if current_ticket_fingerprint == expected_pre:
+            return RecoveryProjection(
+                "retry_with_same_mutation",
+                thread_id,
+                mutation_id,
+                current_ticket_fingerprint,
+                expected_pre,
+                expected_post,
+            )
+        if state == "approval_consumed" and current_ticket_fingerprint == expected_post:
+            if expected_post is None:
+                return _pause_projection(
+                    thread_id=thread_id,
+                    mutation_id=mutation_id,
+                    current_ticket_fingerprint=current_ticket_fingerprint,
+                    expected_pre_write_fingerprint=expected_pre,
+                    expected_post_write_fingerprint=expected_post,
+                    reason="missing_post_write_fingerprint",
+                )
+            events_to_append = (
+                _recovery_event(
+                    reference=reference,
+                    event_type="mutation_status",
+                    status="ticket_written",
+                    reason="Recovered missing autonomous Ticket write event.",
+                    details={"post_write_fingerprint": expected_post},
+                ),
+                _recovery_event(
+                    reference=reference,
+                    event_type="mutation_status",
+                    status="applied",
+                    reason="Recovered autonomous Ticket terminal status.",
+                    details={
+                        "commit_disposition": "commit_deferred",
+                        "commit_reason": "Recovered from pending-summary projection.",
+                    },
+                ),
+            )
+            return RecoveryProjection(
+                "append_missing_ticket_written",
+                thread_id,
+                mutation_id,
+                current_ticket_fingerprint,
+                expected_pre,
+                expected_post,
+                events_to_append,
+            )
+        return _pause_projection(
+            thread_id=thread_id,
+            mutation_id=mutation_id,
+            current_ticket_fingerprint=current_ticket_fingerprint,
+            expected_pre_write_fingerprint=expected_pre,
+            expected_post_write_fingerprint=expected_post,
+            reason="ticket_state_mismatch",
+        )
+
+    if state == "ticket_written":
+        if expected_post is None:
+            return _pause_projection(
+                thread_id=thread_id,
+                mutation_id=mutation_id,
+                current_ticket_fingerprint=current_ticket_fingerprint,
+                expected_pre_write_fingerprint=expected_pre,
+                expected_post_write_fingerprint=expected_post,
+                reason="missing_post_write_fingerprint",
+            )
+        if current_ticket_fingerprint != expected_post:
+            return _pause_projection(
+                thread_id=thread_id,
+                mutation_id=mutation_id,
+                current_ticket_fingerprint=current_ticket_fingerprint,
+                expected_pre_write_fingerprint=expected_pre,
+                expected_post_write_fingerprint=expected_post,
+                reason="ticket_state_mismatch",
+            )
+        events_to_append = (
+            _recovery_event(
+                reference=reference,
+                event_type="mutation_status",
+                status="applied",
+                reason="Recovered autonomous Ticket terminal status.",
+                details={
+                    "commit_disposition": "commit_deferred",
+                    "commit_reason": "Recovered from pending-summary projection.",
+                },
+            ),
+        )
+        return RecoveryProjection(
+            "append_missing_terminal_status",
+            thread_id,
+            mutation_id,
+            current_ticket_fingerprint,
+            expected_pre,
+            expected_post,
+            events_to_append,
+        )
+
+    if state == "status_recorded":
+        events_to_append = (
+            _recovery_event(
+                reference=reference,
+                event_type="summary_receipt",
+                status="summarized",
+                reason="Recovered autonomous Ticket summary receipt.",
+                details={},
+            ),
+        )
+        return RecoveryProjection(
+            "summary_ready",
+            thread_id,
+            mutation_id,
+            current_ticket_fingerprint,
+            expected_pre,
+            expected_post,
+            events_to_append,
+        )
+
+    return _pause_projection(
+        thread_id=thread_id,
+        mutation_id=mutation_id,
+        current_ticket_fingerprint=current_ticket_fingerprint,
+        expected_pre_write_fingerprint=expected_pre,
+        expected_post_write_fingerprint=expected_post,
+        reason="unsupported_recovery_state",
+    )

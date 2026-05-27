@@ -37,6 +37,7 @@ from scripts.ticket_turn_batch import (
     PendingSummaryStore,
     VerifiedRepoContext,
     event_payload_fingerprint,
+    project_mutation_recovery,
 )
 
 
@@ -154,6 +155,39 @@ def _validate_target_fingerprint(mutation: GatewayMutation) -> EngineResponse | 
     return None
 
 
+def _current_ticket_fingerprint(mutation: GatewayMutation) -> str | None:
+    if mutation.action == "create" or not mutation.ticket_id:
+        return None
+    ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id, include_closed=True)
+    if ticket is None:
+        return None
+    return compute_target_fingerprint(Path(ticket.path))
+
+
+def _expected_pre_write_fingerprint(
+    *,
+    mutation: GatewayMutation,
+    decision: AutonomyDecision,
+) -> str | None:
+    if mutation.target_fingerprint:
+        return mutation.target_fingerprint
+    approval = decision.approval
+    if isinstance(approval, Mapping):
+        value = approval.get("ticket_state_fingerprint")
+        if isinstance(value, str) and value and value != "unknown":
+            return value
+    return None
+
+
+def _fingerprint_details(
+    *,
+    mutation: GatewayMutation,
+    decision: AutonomyDecision,
+) -> dict[str, object]:
+    expected_pre = _expected_pre_write_fingerprint(mutation=mutation, decision=decision)
+    return {"expected_pre_write_fingerprint": expected_pre} if expected_pre is not None else {}
+
+
 def _base_event(
     *,
     event_type: str,
@@ -234,6 +268,46 @@ def _append_gateway_event(
         details=details,
     )
     return _append_event_or_block(pending_summary, event)
+
+
+def _existing_mutation_recovery_response(
+    *,
+    pending_summary: PendingSummaryStore,
+    mutation: GatewayMutation,
+    decision: AutonomyDecision,
+    thread_id: str,
+) -> EngineResponse | None:
+    if decision.mutation_id is None:
+        return _policy_blocked("Approval validation failed: mutation_id_required")
+    existing_state = pending_summary.derive_mutation_state(
+        thread_id=thread_id,
+        mutation_id=decision.mutation_id,
+    )
+    if existing_state == "no_attempt":
+        return None
+
+    projection = project_mutation_recovery(
+        store=pending_summary,
+        thread_id=thread_id,
+        mutation_id=decision.mutation_id,
+        current_ticket_fingerprint=_current_ticket_fingerprint(mutation),
+    )
+    if projection.state == "retry_with_same_mutation":
+        return None
+
+    for event in projection.events_to_append:
+        append_error = _append_event_or_block(pending_summary, event)
+        if append_error is not None:
+            return append_error
+
+    return _policy_blocked(
+        f"Approval already used or recovery required: {projection.state}",
+        data={
+            "recovery_state": projection.state,
+            "recovery_reason": projection.reason,
+            "events_appended": len(projection.events_to_append),
+        },
+    )
 
 
 def _execute_dispatch(
@@ -328,7 +402,14 @@ def apply_autonomous_mutation(
         mutation_id=decision.mutation_id,
     )
     if existing_state != "no_attempt":
-        return _policy_blocked(f"Approval already used or recovery required: {existing_state}")
+        recovery_response = _existing_mutation_recovery_response(
+            pending_summary=pending_summary,
+            mutation=mutation,
+            decision=decision,
+            thread_id=thread_id,
+        )
+        if recovery_response is not None:
+            return recovery_response
 
     target_error = _validate_target_fingerprint(mutation)
     if target_error is not None:
@@ -349,6 +430,7 @@ def apply_autonomous_mutation(
             "current_mode": str(decision.approval.get("current_mode", "agent_primary")),
             "approval": decision.approval,
             "evidence_kind": "runtime_context",
+            **_fingerprint_details(mutation=mutation, decision=decision),
         },
     )
     if attempt_error is not None:
@@ -370,7 +452,10 @@ def apply_autonomous_mutation(
         turn_id=turn_id,
         repo_context=repo_context,
         reason="Autonomous approval consumed.",
-        details={"approval_id": str(decision.approval["approval_id"])},
+        details={
+            "approval_id": str(decision.approval["approval_id"]),
+            **_fingerprint_details(mutation=mutation, decision=decision),
+        },
     )
     if consumed_error is not None:
         return consumed_error

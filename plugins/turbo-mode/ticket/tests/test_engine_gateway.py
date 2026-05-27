@@ -24,6 +24,7 @@ from scripts.ticket_engine_gateway import (
 from scripts.ticket_turn_batch import PendingSummaryStore, VerifiedRepoContext
 
 from tests.support.builders import make_ticket
+from tests.test_turn_batch import valid_attempt_event, valid_status_event
 
 
 def _declare_ignored_workspace(project_root: Path) -> None:
@@ -89,6 +90,21 @@ def _mutation(
 def _events(project_root: Path) -> list[dict[str, object]]:
     path = project_root / ".codex" / "ticket-workspace" / "ticket.pending-summary.jsonl"
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _event_with_recovery_fingerprints(
+    event: dict[str, object],
+    *,
+    pre: str,
+    post: str,
+) -> dict[str, object]:
+    details = dict(event["details"])
+    details["expected_pre_write_fingerprint"] = pre
+    details["expected_post_write_fingerprint"] = post
+    approval = details.get("approval")
+    if isinstance(approval, dict):
+        details["approval"] = {**approval, "ticket_state_fingerprint": pre}
+    return {**event, "details": details}
 
 
 def test_gateway_rejects_missing_mismatched_reused_and_expired_approvals(
@@ -206,6 +222,74 @@ def test_gateway_applies_update_records_events_and_writes_change_history(tmp_tic
         pending_summary=PendingSummaryStore(project_root),
     )
     assert reused.error_code == "gateway_required"
+
+
+def test_gateway_recovers_missing_write_events_without_rewriting_ticket(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
+    mutation = _mutation(tmp_tickets, ticket_path)
+    pre = mutation.target_fingerprint or ""
+    decision = _decision_for(ticket_id="T-20260527-01", target_fp=pre)
+
+    ticket_path.write_text(
+        ticket_path.read_text(encoding="utf-8").replace("priority: high", "priority: low"),
+        encoding="utf-8",
+    )
+    post = target_fingerprint(ticket_path) or ""
+    before = ticket_path.read_text(encoding="utf-8")
+    store = PendingSummaryStore(project_root)
+    assert (
+        store.append_event(
+            _event_with_recovery_fingerprints(
+                valid_attempt_event(
+                    event_id="evt_attempt_recover",
+                    thread_id="thread-1",
+                    mutation_id=decision.mutation_id,
+                ),
+                pre=pre,
+                post=post,
+            )
+        ).state
+        == "appended"
+    )
+    assert (
+        store.append_event(
+            _event_with_recovery_fingerprints(
+                valid_status_event(
+                    "approval_consumed",
+                    event_id="evt_approval_recover",
+                    thread_id="thread-1",
+                    mutation_id=decision.mutation_id,
+                ),
+                pre=pre,
+                post=post,
+            )
+        ).state
+        == "appended"
+    )
+
+    recovered = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=store,
+    )
+
+    assert recovered.error_code == "gateway_required"
+    assert recovered.data["recovery_state"] == "append_missing_ticket_written"
+    assert ticket_path.read_text(encoding="utf-8") == before
+    assert [event["status"] for event in _events(project_root)] == [
+        "pending",
+        "approval_consumed",
+        "ticket_written",
+        "applied",
+    ]
 
 
 def test_pending_summary_failure_and_pause_prevent_ticket_mutation(tmp_tickets: Path) -> None:

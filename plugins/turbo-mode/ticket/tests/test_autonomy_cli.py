@@ -5,9 +5,13 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from scripts.ticket_autonomy import build_repo_context
+from scripts.ticket_turn_batch import PendingSummaryStore
+
+from tests.test_turn_batch import valid_status_event
 
 SCRIPT = Path(__file__).parent.parent / "scripts" / "ticket_autonomy.py"
 
@@ -180,6 +184,44 @@ def test_recover_returns_parseable_json(tmp_path: Path) -> None:
     payload = json.loads(result.stdout)
     assert payload["state"] == "ok"
     assert payload["turn_id"] == "turn-1"
+
+
+def test_recover_compacts_old_correction_ready_detail(tmp_path: Path) -> None:
+    _init_ticket_project(tmp_path)
+    store = PendingSummaryStore(tmp_path)
+    old_timestamp = (datetime.now(UTC) - timedelta(days=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert (
+        store.append_event(
+            valid_status_event(
+                "failed",
+                event_id="evt_old_correction",
+                timestamp=old_timestamp,
+                thread_id="thread-1",
+                mutation_id="mut-old",
+                error_code="policy_blocked",
+                correction_ready=True,
+                correction_detail="full correction detail",
+            )
+        ).state
+        == "appended"
+    )
+
+    result = _run_autonomy(
+        tmp_path,
+        "recover",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "ok"
+    assert payload["compaction_state"] == "appended"
+    event = PendingSummaryStore(tmp_path).read_events()[0]
+    assert "correction_detail" not in event["details"]
+    assert event["details"]["correction_detail_compacted"] is True
 
 
 def test_apply_turn_rejects_invalid_context(tmp_path: Path) -> None:

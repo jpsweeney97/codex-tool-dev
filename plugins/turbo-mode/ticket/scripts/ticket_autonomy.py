@@ -528,12 +528,17 @@ def _run_pause(args: argparse.Namespace) -> int:
 def _run_recover(args: argparse.Namespace) -> int:
     project_root = Path(args.project_root).resolve(strict=False)
     store = PendingSummaryStore(project_root)
+    compaction = store.compact_correction_ready_events()
+    if compaction.state == "paused":
+        _emit(_paused_response(compaction.pause_reason or "pending_summary_unhealthy"))
+        return 3
     events = store.read_events()
     _emit(
         {
             "state": "ok",
             "turn_id": args.turn_id,
             "can_proceed": True,
+            "compaction_state": compaction.state,
             "event_count": len(events),
             "ticket_updates": None,
             "discussion_question": None,

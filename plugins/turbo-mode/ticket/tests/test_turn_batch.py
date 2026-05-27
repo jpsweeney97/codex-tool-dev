@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -369,3 +370,73 @@ def test_append_event_pauses_when_existing_jsonl_is_unhealthy(tmp_path: Path) ->
 
     assert result.state == "paused"
     assert result.pause_reason == "pending_summary_unhealthy"
+
+
+def _correction_ready_event(index: int, timestamp: str) -> dict[str, object]:
+    return valid_status_event(
+        "failed",
+        event_id=f"evt_correction_{index}",
+        timestamp=timestamp,
+        thread_id="thread-1",
+        mutation_id=f"mut_correction_{index}",
+        error_code="policy_blocked",
+        correction_ready=True,
+        correction_detail=f"full correction detail {index}",
+    )
+
+
+def test_compaction_keeps_recent_correction_detail_under_age_and_count_limits(
+    tmp_path: Path,
+) -> None:
+    project_root = project_root_with_ignored_workspace(tmp_path)
+    store = PendingSummaryStore(project_root)
+    now = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+    old_timestamp = (now - timedelta(days=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    recent_base = now - timedelta(days=1)
+
+    assert store.append_event(_correction_ready_event(0, old_timestamp)).state == "appended"
+    for index in range(1, 506):
+        timestamp = (recent_base + timedelta(seconds=index)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        assert store.append_event(_correction_ready_event(index, timestamp)).state == "appended"
+
+    result = store.compact_correction_ready_events(now=now)
+
+    assert result.state == "appended"
+    events = store.read_events()
+    detailed = [
+        event
+        for event in events
+        if isinstance(event["details"], dict) and "correction_detail" in event["details"]
+    ]
+    compacted = [
+        event
+        for event in events
+        if isinstance(event["details"], dict)
+        and event["details"].get("correction_detail_compacted") is True
+    ]
+    old = next(event for event in events if event["event_id"] == "evt_correction_0")
+    newest = next(event for event in events if event["event_id"] == "evt_correction_505")
+
+    assert len(detailed) == 500
+    assert len(compacted) == 6
+    assert "correction_detail" not in old["details"]
+    assert newest["details"]["correction_detail"] == "full correction detail 505"
+
+
+def test_compaction_validates_temp_jsonl_before_replacing_active_log(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = project_root_with_ignored_workspace(tmp_path)
+    store = PendingSummaryStore(project_root)
+    now = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+    old_timestamp = (now - timedelta(days=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert store.append_event(_correction_ready_event(0, old_timestamp)).state == "appended"
+    before = store.log_path.read_text(encoding="utf-8")
+
+    monkeypatch.setattr(store, "_validate_compacted_events", lambda _events: False)
+    result = store.compact_correction_ready_events(now=now)
+
+    assert result.state == "paused"
+    assert result.pause_reason == "invalid_compaction"
+    assert store.log_path.read_text(encoding="utf-8") == before
