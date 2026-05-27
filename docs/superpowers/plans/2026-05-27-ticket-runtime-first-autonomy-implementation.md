@@ -30,6 +30,12 @@ Implementation branch:
 git switch -c feature/ticket-runtime-first-autonomy-v1
 ```
 
+- This branch is intentionally created from the docs baseline, not directly
+  from `main`, because the plan/spec commits are not assumed to be on `main`
+  yet. If the execution lane must satisfy a strict "branch from main" policy,
+  stop and first land or rebase the docs baseline instead of dropping these
+  control-doc commits.
+
 Hard stops:
 
 - Stop if the branch is not at or after `9453d18` and the spec file differs materially from this plan.
@@ -75,6 +81,7 @@ Default dispositions for known legacy surfaces:
 | Tests asserting `engine_execute()` creates or appends `.audit/` records | Rewrite/remove | Task 1 |
 | YAML frontmatter `.codex/ticket.local.md` config | Remove | Task 2 |
 | Modes `suggest`, `auto_audit`, and `auto_silent` as current autonomy modes | Remove | Task 2 |
+| Runtime-readiness and integration surfaces that stage `auto_audit`, `auto_silent`, or `suggest` as current runtime behavior | Rewrite/remove | Task 2 |
 | Tests asserting missing config defaults to `suggest` or old modes are valid | Rewrite/remove | Task 2 |
 | README/HANDBOOK/contract guidance for old setup and active audit behavior | Rewrite/remove | Tasks 1, 2, 7, and 15 |
 | Public contract that lists only `capture`, `update`, and `ingest` as high-level mutation surfaces | Rewrite when the host-facing autonomy CLI lands | Task 7 |
@@ -94,10 +101,10 @@ surface as kept.
 
 Create these focused runtime modules:
 
-- `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py` - host-facing JSON-in/JSON-out CLI for `recover`, `apply-turn`, `doctor-ledger`, and `migrate-change-history`.
+- `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py` - host-facing JSON-in/JSON-out CLI for `pause`, `recover`, `apply-turn`, `doctor-ledger`, and `migrate-change-history`.
 - `plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py` - strict `.codex/ticket.local.md` JSON config, workspace pause marker, local setup, ignored-path checks, and local `.codex/ticket-workspace/AGENTS.md` repair.
 - `plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py` - canonical JSON serialization, deterministic `evt_`, `mut_`, and `appr_` IDs, and fingerprint helpers.
-- `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py` - pending-summary envelope types, validation, append-only JSONL writer, lock/temp-file handling, state derivation, recovery projections, summaries, and compaction.
+- `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py` - pending-summary envelope types, validation, append-only JSONL writer, lock/temp-file handling, event-derived state, recovery projections that receive live ticket fingerprints from gateway/CLI callers, summaries, and compaction.
 - `plugins/turbo-mode/ticket/scripts/ticket_change_history.py` - `## Change History` parsing, insertion, label validation, and `migrate-change-history` planning/application.
 - `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py` - `AutonomyIntent`, hard policy decisions, fanout caps, approval envelopes, and runtime decision objects.
 - `plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py` - deterministic candidate extraction from structured turn context, explicit ticket mentions, ticket metadata, related paths, diff/test references, and Codex-proposed candidate changes.
@@ -109,6 +116,7 @@ Modify these existing source surfaces:
 - `.gitignore` - add local-only `.codex/ticket-workspace/` rules when the workspace state path is introduced.
 - `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py` - disable future `.audit/` writes, remove legacy autonomy-mode behavior that is not part of the runtime-first system, expose existing low-level mutation dispatch to the autonomous gateway, and keep user-directed ordinary writes explicitly non-autonomous.
 - `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py` - preserve low-level compatibility while passing explicit non-autonomous intent for user-directed execute paths.
+- `plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py` - remove or rewrite old `auto_audit` readiness staging so source readiness evidence cannot preserve removed modes by accident.
 - `plugins/turbo-mode/ticket/scripts/ticket_capture.py` - later adapter integration for automatic creation of clear follow-up tickets.
 - `plugins/turbo-mode/ticket/scripts/ticket_update.py` - adapter integration for update/lifecycle/refinement mutation candidates.
 - `plugins/turbo-mode/ticket/scripts/ticket_review.py` - read-only review remains read-only, but hygiene suggestions can feed structured candidates to `apply-turn` when called from ordinary thread automation.
@@ -130,6 +138,8 @@ Create or extend tests:
 - `plugins/turbo-mode/ticket/tests/test_ticket_commit_coordinator.py`
 - Rewrite or reduce `plugins/turbo-mode/ticket/tests/test_audit.py` so it no longer asserts active `.audit` writes.
 - Rewrite or reduce `plugins/turbo-mode/ticket/tests/test_autonomy.py` so it no longer treats `suggest`, `auto_audit`, `auto_silent`, or missing-config defaults as current autonomy behavior.
+- Rewrite or reduce `plugins/turbo-mode/ticket/tests/test_autonomy_integration.py` so it no longer proves old `suggest` or `auto_audit` preflight/execute flows as current behavior.
+- Rewrite or reduce `plugins/turbo-mode/ticket/tests/test_runtime_readiness.py` so installed-runtime readiness proof no longer stages YAML `auto_audit` config or asserts old-mode payloads.
 - Extend or rewrite `plugins/turbo-mode/ticket/tests/test_docs_contract.py` so current-facing docs only describe the new system.
 - Extend wrapper and workflow tests only when adapter integration reaches those files.
 
@@ -209,6 +219,8 @@ TICKET_ACTIONS = (
 )
 
 OPERATIONAL_ACTIONS = ("summarize", "compact", "pause_automation")
+
+TURN_CONTEXT_OPERATIONS = ("apply_ticket_mutations", "pause_automation")
 ```
 
 Commit dispositions:
@@ -425,13 +437,16 @@ git commit -m "fix(ticket): disable future audit writes"
 - Create: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py`
 - Create: `plugins/turbo-mode/ticket/tests/test_autonomy_config.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_autonomy.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_integration.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_runtime_readiness.py`
 - Modify: `.gitignore`
 - Modify: `plugins/turbo-mode/ticket/references/ticket-contract.md`
 - Modify: `plugins/turbo-mode/ticket/README.md`
 - Modify: `plugins/turbo-mode/ticket/HANDBOOK.md`
 
-- [ ] **Step 1: Re-baseline legacy autonomy config tests**
+- [ ] **Step 1: Re-baseline legacy autonomy mode surfaces**
 
 Rewrite or delete existing assertions in `test_autonomy.py` that treat these as
 current behavior:
@@ -445,6 +460,22 @@ current behavior:
 Those tests describe the old plugin. They are not compatibility gates for the
 runtime-first plugin. Keep only tests that still exercise non-autonomous engine
 compatibility or rewrite them to call the new strict config surface.
+
+Also classify these still-live old-mode surfaces under the re-baseline policy
+before editing them:
+
+- `plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py`
+- `plugins/turbo-mode/ticket/tests/test_runtime_readiness.py`
+- `plugins/turbo-mode/ticket/tests/test_autonomy_integration.py`
+
+Default to rewrite/remove for any current-facing readiness or integration proof
+that stages YAML `auto_audit`, asserts `suggest` as the missing-config default,
+or treats `auto_silent` as a valid current mode. If a runtime-readiness lane is
+kept, it must prove the runtime-first source behavior with strict JSON config
+or be explicitly marked historical/non-current. Do not weaken or delete
+runtime-readiness evidence to make the old-mode grep pass; replace it with
+readiness evidence for `discussion_only`, `preview`, or `agent_primary`, or
+defer installed-runtime readiness to an explicit later runtime-proof lane.
 
 - [ ] **Step 2: Write strict config and workspace setup tests**
 
@@ -462,9 +493,18 @@ Test cases:
 - `ensure_ticket_workspace(project_root)` creates `.codex/ticket-workspace/AGENTS.md` with local-only staging guidance.
 - `ensure_ticket_workspace(project_root)` verifies `.codex/ticket-workspace/` is ignored.
 - `write_workspace_pause(project_root, reason="user_requested")` writes a local pause marker and `is_workspace_paused(project_root)` returns true.
+- `pause_workspace_automation(project_root, reason="user_requested")` writes
+  the pause marker and rewrites `.codex/ticket.local.md` to strict JSON
+  `discussion_only`.
 - `test_autonomy.py` contains no current-facing assertions that `suggest`,
   `auto_audit`, `auto_silent`, YAML frontmatter config, or missing-config
   defaults are valid runtime-first behavior.
+- `test_autonomy_integration.py` contains no current-facing assertions that
+  missing config defaults to `suggest`, that `auto_audit` preflight succeeds,
+  or that an automatic execute records active `.audit` state.
+- `test_runtime_readiness.py` and `ticket_runtime_readiness.py` contain no
+  current-facing readiness setup that writes YAML `auto_audit` config or
+  asserts old-mode payloads as runtime-readiness evidence.
 
 Required public surface:
 
@@ -492,6 +532,7 @@ def write_local_config(project_root: Path, mode: AutomationMode) -> Path: ...
 def write_local_config_from_setup_choice(project_root: Path, choice: SetupChoice) -> Path: ...
 def ensure_ticket_workspace(project_root: Path) -> Path: ...
 def write_workspace_pause(project_root: Path, *, reason: str) -> Path: ...
+def pause_workspace_automation(project_root: Path, *, reason: str) -> Path: ...
 def clear_workspace_pause(project_root: Path) -> None: ...
 def is_workspace_paused(project_root: Path) -> bool: ...
 ```
@@ -499,7 +540,7 @@ def is_workspace_paused(project_root: Path) -> bool: ...
 - [ ] **Step 3: Run the failing config tests**
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_config.py tests/test_autonomy.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_config.py tests/test_autonomy.py tests/test_autonomy_integration.py tests/test_runtime_readiness.py -q
 ```
 
 Expected before implementation: import failure for `scripts.ticket_autonomy_config` and/or failures from legacy config tests that have not yet been rewritten.
@@ -521,6 +562,11 @@ Implementation requirements:
   If a low-level direct-engine compatibility path must remain temporarily,
   mark it explicitly non-autonomous and keep it out of host-facing autonomy
   setup, docs, and final runtime-readiness claims.
+- Rewrite `ticket_runtime_readiness.py` so any retained source readiness helper
+  stages strict JSON mode config or no autonomy config at all. A retained
+  readiness helper must not write `autonomy_mode: auto_audit`,
+  `autonomy_mode: auto_silent`, or `autonomy_mode: suggest` to
+  `.codex/ticket.local.md`.
 - Create `.codex/ticket-workspace/AGENTS.md` with plain local guidance:
 
 ```markdown
@@ -549,8 +595,8 @@ Update README/HANDBOOK/contract to document strict JSON local config and workspa
 - [ ] **Step 7: Verify and commit**
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_config.py tests/test_autonomy.py tests/test_docs_contract.py -q
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_config.py tests/test_autonomy.py tests/test_autonomy_integration.py tests/test_runtime_readiness.py tests/test_docs_contract.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_integration.py plugins/turbo-mode/ticket/tests/test_runtime_readiness.py
 git diff --check
 git status --short
 ```
@@ -558,7 +604,7 @@ git status --short
 Commit:
 
 ```bash
-git add .gitignore plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy.py plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md
+git add .gitignore plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_integration.py plugins/turbo-mode/ticket/tests/test_runtime_readiness.py plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md
 git commit -m "feat(ticket): add strict autonomy workspace config"
 ```
 
@@ -734,9 +780,10 @@ Tests must prove:
   - `ticket_written`
   - `status_recorded`
   - `summary_recorded`
-- `approval_consumed` with current post-write fingerprint appends missing `ticket_written` and terminal status without rewriting the ticket.
-- `approval_consumed` with current pre-write fingerprint returns retry-with-same-mutation.
-- `approval_consumed` with neither fingerprint returns pause-for-reconciliation.
+- This task does not decide live ticket-file recovery from current
+  fingerprints. `PendingSummaryStore` records and derives event-only state;
+  fingerprint recovery projections land in Task 11, where CLI/gateway callers
+  can supply live ticket state.
 
 Required public surface:
 
@@ -773,7 +820,10 @@ Implementation requirements:
 
 - [ ] **Step 4: Implement recovery derivation**
 
-Represent derived mutation state from events, not from a mutable in-memory flag. Keep recovery output display-ready but do not let host/runtime parse raw events directly.
+Represent derived mutation state from events, not from a mutable in-memory flag.
+Do not inspect ticket files or compare current ticket fingerprints in this
+task. Keep recovery output display-ready but do not let host/runtime parse raw
+events directly.
 
 - [ ] **Step 5: Verify and commit**
 
@@ -848,7 +898,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 - [ ] **Step 3: Implement helper and CLI command**
 
-Create `ticket_autonomy.py` in this task with only the `migrate-change-history --project-root <PROJECT_ROOT> --dry-run|--apply` subcommand. Task 7 extends the same file with `recover`, `apply-turn`, and `doctor-ledger`.
+Create `ticket_autonomy.py` in this task with only the `migrate-change-history --project-root <PROJECT_ROOT> --dry-run|--apply` subcommand. Task 7 extends the same file with `pause`, `recover`, `apply-turn`, and `doctor-ledger`.
 
 CLI stdout examples:
 
@@ -882,6 +932,7 @@ git commit -m "feat(ticket): add change history runtime support"
 **Files:**
 
 - Create or modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`
 - Modify: `plugins/turbo-mode/ticket/references/ticket-contract.md`
 - Modify: `plugins/turbo-mode/ticket/tests/test_docs_contract.py`
@@ -892,6 +943,10 @@ git commit -m "feat(ticket): add change history runtime support"
 
 Tests must prove:
 
+- `pause --project-root <root> --reason user_requested` returns parseable JSON,
+  writes the workspace pause marker, rewrites `.codex/ticket.local.md` to
+  strict JSON `discussion_only`, verifies the local config file is ignored and
+  unstaged, and does not touch ticket files.
 - `recover --project-root <root> --turn-id <id>` returns parseable JSON on stdout.
 - `apply-turn --project-root <root> --turn-id <id> --context-file <path>` rejects invalid context with exit code `2`.
 - Missing or invalid local config returns exit code `3` with a setup-required JSON object that offers `automatic` and `ask_first` setup choices.
@@ -905,10 +960,22 @@ Tests must prove:
 - Host-facing CLI never exposes raw ledger append/consume/mark-summarized commands.
 - `doctor-ledger --dry-run` validates ledger health and returns JSON.
 - `doctor-ledger --confirm-repair` is the only repair command that can rewrite ledger files.
-- The public contract names `ticket_autonomy.py recover`, `apply-turn`,
-  `doctor-ledger`, and `migrate-change-history` as the host-facing autonomy
-  surface, while preserving that ordinary high-level user mutation wrappers
-  remain `capture`, `update`, and `ingest`.
+- The public contract names `ticket_autonomy.py pause`, `recover`,
+  `apply-turn`, `doctor-ledger`, and `migrate-change-history` as the
+  host-facing autonomy surface, while preserving that ordinary high-level user
+  mutation wrappers remain `capture`, `update`, and `ingest`.
+
+Required response shape for explicit user pause:
+
+```json
+{
+  "state": "paused",
+  "pause_reason": "user_requested",
+  "message": "Ticket automation paused for this workspace.",
+  "ticket_updates": null,
+  "discussion_question": null
+}
+```
 
 Required response shape for paused automation:
 
@@ -928,7 +995,7 @@ Required response shape for paused automation:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_cli.py -q
 ```
 
-- [ ] **Step 3: Implement `recover`, `apply-turn`, and `doctor-ledger`**
+- [ ] **Step 3: Implement `pause`, `recover`, `apply-turn`, and `doctor-ledger`**
 
 Implementation requirements:
 
@@ -936,6 +1003,10 @@ Implementation requirements:
 - Print one JSON object to stdout for every handled outcome.
 - Use stderr only for unexpected tracebacks.
 - Exit `0`, `1`, `2`, or `3` according to the shared contract.
+- `pause` calls the config helper that writes the workspace pause marker and
+  rewrites `.codex/ticket.local.md` to strict JSON `discussion_only` for future
+  sessions. It must verify that local config/workspace files are ignored and
+  unstaged before returning success.
 - `recover` calls `PendingSummaryStore` projections and returns display-ready summaries.
 - `apply-turn` validates strict turn context and local config, then returns
   `preview`, `discussion_only`, `paused`, or a JSON `no_change` result until
@@ -949,14 +1020,14 @@ Implementation requirements:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_cli.py tests/test_turn_batch.py tests/test_autonomy_config.py tests/test_docs_contract.py -q
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py
 git diff --check
 ```
 
 Commit:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/tests/test_docs_contract.py plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md
+git add plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/tests/test_docs_contract.py plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md
 git commit -m "feat(ticket): add autonomy cli projections"
 ```
 
@@ -1082,6 +1153,9 @@ Tests must prove:
 - Reused approval after `approval_consumed` is rejected unless recovery resumes the same mutation state.
 - Expired approval is rejected.
 - Gateway rechecks workspace pause marker immediately before consuming approval.
+- Gateway rejects a cached `agent_primary` approval when another live thread or
+  `ticket_autonomy.py pause` has written the workspace pause marker after the
+  session mode was read.
 - Pending-summary attempt event is recorded before ticket mutation.
 - Pending-summary failure prevents ticket mutation.
 - `approval_consumed`, `ticket_written`, and `applied` events are appended in order for a successful automatic update.
@@ -1123,7 +1197,9 @@ Implementation requirements:
 
 - Validate approval envelope against current inputs.
 - Re-read current ticket fingerprint immediately before write.
-- Recheck workspace pause marker immediately before consuming approval.
+- Recheck workspace pause marker immediately before consuming approval. If the
+  marker exists, return a paused response, leave ticket files unchanged, and do
+  not append `approval_consumed` or `ticket_written`.
 - Append `mutation_attempt` before write and fail closed if it cannot persist.
 - Append `approval_consumed` before entering protected write section.
 - Apply the existing low-level mutation mechanics through `ticket_engine_core.py`.
@@ -1177,6 +1253,7 @@ Use a strict context file:
 ```json
 {
   "schema": "codex.ticket.turn_context.v1",
+  "operation": "apply_ticket_mutations",
   "thread_id": "thread-1",
   "turn_id": "turn-1",
   "user_request": "Mark T-20260527-01 done after tests passed.",
@@ -1224,6 +1301,11 @@ Assertions:
 {"state":"no_change","changed":false,"ticket_updates":null,"discussion_question":null}
 ```
 
+- A strict context with `"operation": "pause_automation"` is handled before
+  candidate discovery, writes the same workspace pause marker and strict JSON
+  `discussion_only` config as `ticket_autonomy.py pause`, returns the explicit
+  pause JSON response, and appends no mutation-attempt or ticket-write events.
+
 - [ ] **Step 2: Run failing integration tests**
 
 ```bash
@@ -1235,20 +1317,27 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 `apply-turn` order:
 
 1. Validate context JSON.
-2. Ensure local workspace setup.
-3. Read session mode once.
-4. Check workspace pause marker.
-5. Run recovery projection and block new writes if recovery says bookkeeping is unhealthy.
-6. Discover candidates and evidence.
-7. Evaluate candidates.
-8. Append pending-summary records itself only for non-write outcomes:
+2. If context `operation` is `pause_automation`, write the workspace pause
+   marker, rewrite `.codex/ticket.local.md` to strict JSON `discussion_only`,
+   verify local files are ignored and unstaged, return the explicit pause JSON,
+   and stop before candidate discovery.
+3. Ensure local workspace setup.
+4. Read session mode once.
+5. Check workspace pause marker.
+6. Run the event-derived recovery health check from Task 5 and block new
+   writes if bookkeeping is unhealthy. For incomplete write states that require
+   live ticket fingerprint comparison, return a paused recovery-needed response
+   until the full Task 11 projection is available.
+7. Discover candidates and evidence.
+8. Evaluate candidates.
+9. Append pending-summary records itself only for non-write outcomes:
    `skipped`, `preview_only`, `discussion_required`, `deferred`, and
    non-gateway `failed`.
-9. Apply approved mutations through `apply_autonomous_mutation()` and let the
+10. Apply approved mutations through `apply_autonomous_mutation()` and let the
    gateway own `mutation_attempt`, `approval_consumed`, `ticket_written`, and
    terminal write outcomes including `applied`.
-10. Render display-ready summary and at most one discussion question.
-11. Append summary receipts.
+11. Render display-ready summary and at most one discussion question.
+12. Append summary receipts.
 
 - [ ] **Step 4: Verify and commit**
 
@@ -1273,6 +1362,7 @@ git commit -m "feat(ticket): apply autonomous turn updates"
 
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_turn_batch.py`
 
@@ -1281,11 +1371,47 @@ git commit -m "feat(ticket): apply autonomous turn updates"
 Tests must prove:
 
 - `attempt_recorded` only retries with the same `mutation_id` when approval inputs still match.
+- `approval_consumed` with current ticket state matching the expected
+  post-write fingerprint appends missing `ticket_written` and terminal status
+  events without rewriting the ticket.
+- `approval_consumed` with current ticket state matching the bound pre-write
+  fingerprint returns retry-with-same-mutation.
+- `approval_consumed` with current ticket state matching neither fingerprint
+  returns pause-for-reconciliation.
 - `ticket_written` without terminal status appends outcome status when current ticket matches expected post-write fingerprint.
 - `status_recorded` without summary emits recovery summary and appends `summary_receipt`.
 - `summary_recorded` does not retry mutation.
 - Compaction keeps correction-ready detail for no more than 14 days and no more than 500 correction-ready events.
 - Compaction writes a temp file, validates it, and atomically replaces active JSONL only after validation succeeds.
+
+Required public surface:
+
+```python
+@dataclass(frozen=True, slots=True)
+class RecoveryProjection:
+    state: Literal[
+        "healthy",
+        "retry_with_same_mutation",
+        "append_missing_ticket_written",
+        "append_missing_terminal_status",
+        "summary_ready",
+        "pause_for_reconciliation",
+    ]
+    mutation_id: str
+    current_ticket_fingerprint: str | None
+    expected_pre_write_fingerprint: str | None
+    expected_post_write_fingerprint: str | None
+    events_to_append: tuple[Mapping[str, object], ...] = ()
+    reason: str | None = None
+
+
+def project_mutation_recovery(
+    *,
+    store: PendingSummaryStore,
+    mutation_id: str,
+    current_ticket_fingerprint: str | None,
+) -> RecoveryProjection: ...
+```
 
 - [ ] **Step 2: Run failing recovery tests**
 
@@ -1296,19 +1422,25 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 - [ ] **Step 3: Implement recovery and compaction**
 
 Keep recovery append-only. Do not edit old event lines in normal operation.
+`project_mutation_recovery()` must read bound pre-write and expected post-write
+fingerprints from pending-summary event payloads, compare them to the
+`current_ticket_fingerprint` supplied by `ticket_autonomy.py` or
+`ticket_engine_gateway.py`, and return a display-ready projection. If the
+needed bound fingerprints are missing, return `pause_for_reconciliation`
+instead of guessing.
 
 - [ ] **Step 4: Verify and commit**
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_recovery.py tests/test_turn_batch.py tests/test_autonomy_cli.py -q
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_recovery.py tests/test_turn_batch.py tests/test_autonomy_cli.py tests/test_engine_gateway.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 git diff --check
 ```
 
 Commit:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py plugins/turbo-mode/ticket/tests/test_turn_batch.py
+git add plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py plugins/turbo-mode/ticket/tests/test_turn_batch.py
 git commit -m "feat(ticket): recover autonomous mutation state"
 ```
 
@@ -1531,12 +1663,14 @@ Tests must prove:
 - Legacy tests no longer assert active `.audit` writes, YAML autonomy config,
   missing-config fallback to `suggest`, valid `auto_audit`, or valid
   `auto_silent` as current runtime-first behavior.
+- Runtime-readiness source and tests no longer stage YAML `auto_audit` config
+  or assert old-mode payloads as current readiness evidence.
 
 - [ ] **Step 2: Run focused docs and guard tests**
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_docs_contract.py tests/test_static_autonomy_boundaries.py tests/test_engine_gateway.py tests/test_autonomy_cli.py -q
-! rg -n "autonomy_mode: auto_audit|autonomy_mode: auto_silent|autonomy_mode: suggest|defaults to `suggest`|creates `.audit`|created automatically on the first agent mutation" plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/tests
+! rg -n "autonomy_mode: auto_audit|autonomy_mode: auto_silent|autonomy_mode: suggest|defaults to `suggest`|creates `.audit`|created automatically on the first agent mutation" plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py plugins/turbo-mode/ticket/tests
 ```
 
 - [ ] **Step 3: Run full Ticket source verification**
