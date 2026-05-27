@@ -77,7 +77,7 @@ Default dispositions for known legacy surfaces:
 | Legacy surface | Disposition | Execution point |
 |---|---|---|
 | Future `docs/tickets/.audit/` writes from runtime execution | Remove | Task 1 |
-| Historical `.audit` reader/doctor support | Keep only if Task 1 identifies a real historical-data support need; otherwise remove as legacy residue | Task 1 and Task 15 |
+| Historical `.audit` reader/doctor support | Keep. This plan may disable future `.audit` writes, but it must preserve read/doctor support for existing historical files until a separate migration patches the spec, contract, and source deliberately. | Task 1 and Task 15 |
 | Tests asserting `engine_execute()` creates or appends `.audit/` records | Rewrite/remove | Task 1 |
 | YAML frontmatter `.codex/ticket.local.md` config | Remove | Task 2 |
 | Modes `suggest`, `auto_audit`, and `auto_silent` as current autonomy modes | Remove | Task 2 |
@@ -140,6 +140,12 @@ Create or extend tests:
 - Rewrite or reduce `plugins/turbo-mode/ticket/tests/test_autonomy.py` so it no longer treats `suggest`, `auto_audit`, `auto_silent`, or missing-config defaults as current autonomy behavior.
 - Rewrite or reduce `plugins/turbo-mode/ticket/tests/test_autonomy_integration.py` so it no longer proves old `suggest` or `auto_audit` preflight/execute flows as current behavior.
 - Rewrite or reduce `plugins/turbo-mode/ticket/tests/test_runtime_readiness.py` so installed-runtime readiness proof no longer stages YAML `auto_audit` config or asserts old-mode payloads.
+- Rewrite or reduce every additional test found by the Task 2 old-mode inventory.
+  Known live files outside the original narrow Task 2 set include
+  `plugins/turbo-mode/ticket/tests/test_execute.py`,
+  `plugins/turbo-mode/ticket/tests/test_engine_runner.py`,
+  `plugins/turbo-mode/ticket/tests/test_workflow_execute.py`, and
+  `plugins/turbo-mode/ticket/tests/test_review_findings.py`.
 - Extend or rewrite `plugins/turbo-mode/ticket/tests/test_docs_contract.py` so current-facing docs only describe the new system.
 - Extend wrapper and workflow tests only when adapter integration reaches those files.
 
@@ -304,8 +310,6 @@ Handled no-op responses are not silent. They use exit `0` and this shape:
 - Modify: `plugins/turbo-mode/ticket/references/ticket-contract.md`
 - Modify: `plugins/turbo-mode/ticket/tests/test_audit.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_docs_contract.py`
-- Modify if historical audit support is removed:
-  `docs/superpowers/specs/2026-05-26-ticket-runtime-first-autonomy-design.md`
 
 - [ ] **Step 1: Inventory and re-baseline legacy audit artifacts**
 
@@ -321,19 +325,18 @@ Classify every touched audit surface using the re-baseline policy:
 - Current-facing docs that present `.audit` as active behavior: **rewrite/remove**.
 - Existing tests whose only purpose is to assert active `.audit` creation,
   ordered active audit entries, or active append counts: **rewrite/remove**.
-- Historical reader/doctor support: **keep narrowly** only if the inventory
-  finds a real historical-data support need. Otherwise classify it as
-  **remove** and delete the associated tests, docs, and command surface as
-  legacy residue. If removal contradicts the current spec, patch the spec in
-  the same source docs slice before claiming the plan and spec agree.
+- Historical reader/doctor support: **keep narrowly**. Preserve
+  `ticket_audit.py`, `ticket_doctor.py repair-audit`, and engine helpers needed
+  to read/count/repair existing historical `.audit/` files. Do not delete or
+  bypass this support in Task 1. If the project later wants deletion, create a
+  separate migration plan that first patches the primary spec, ticket contract,
+  file list, and tests for that migration.
 
 - [ ] **Step 2: Write the failing `.audit` re-baseline tests**
 
 Add focused tests that prove `engine_execute()` no longer creates
-`docs/tickets/.audit/` for user or agent requests. If historical audit
-read/repair support is classified as kept, add tests that prove it remains
-read/repair-only. If it is classified as removed, delete the historical
-reader/doctor tests and update docs/contract/spec language in the same slice.
+`docs/tickets/.audit/` for user or agent requests. Add tests that prove
+historical audit support remains read/repair-only.
 
 Before adding new assertions, rewrite or delete the existing assertions in
 `test_audit.py` that expect `engine_execute()` to create `.audit/`, append
@@ -365,7 +368,7 @@ def test_engine_execute_does_not_create_future_audit_files(tmp_tickets: Path) ->
 ```
 
 ```python
-def test_historical_audit_reader_still_counts_existing_files_if_kept(tmp_tickets: Path) -> None:
+def test_historical_audit_reader_still_counts_existing_files(tmp_tickets: Path) -> None:
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     audit_file = tmp_tickets / ".audit" / today / "sess-historical.jsonl"
     audit_file.parent.mkdir(parents=True)
@@ -393,11 +396,10 @@ def test_historical_audit_reader_still_counts_existing_files_if_kept(tmp_tickets
 Add docs tests that normalize README/HANDBOOK/contract text and assert:
 
 - Future autonomous writes use `## Change History` plus local pending-summary bookkeeping.
-- If historical audit support was kept, `.audit` is described as historical or
-  legacy only.
-- If historical audit support was removed, `.audit`, `ticket_audit.py`, and
-  `repair-audit` are absent from current-facing docs except a short
-  historical-removal note if needed.
+- `.audit` is described as historical or legacy only.
+- `ticket_audit.py` and `ticket_doctor.py repair-audit` are described only as
+  read/repair tools for existing historical `.audit/` files, not as future
+  runtime history surfaces.
 - Active `.audit` creation, active full JSONL audit trail language, and old `auto_audit` setup instructions are absent from current-facing guidance except in clearly historical context.
 
 - [ ] **Step 3: Run the failing tests**
@@ -410,9 +412,9 @@ Expected before implementation: at least the new `.audit` write-disablement test
 
 - [ ] **Step 4: Disable future `.audit` writes in source**
 
-Change `ticket_engine_core.py` so normal execution no longer calls `_audit_append()` around dispatch. If historical audit support is kept, preserve `engine_count_session_creates()` and `ticket_audit.py` for historical read/doctor support only. If historical audit support is removed, delete or bypass dead audit helpers and remove their tests/docs instead of leaving unused compatibility code.
+Change `ticket_engine_core.py` so normal execution no longer calls `_audit_append()` around dispatch. Preserve `engine_count_session_creates()` and `ticket_audit.py` for historical read/doctor support only.
 
-Implementation shape if historical support is kept:
+Implementation shape:
 
 ```python
 def _audit_append(session_id: str, tickets_dir: Path, entry: dict[str, Any]) -> bool:
@@ -437,12 +439,11 @@ Patch README/HANDBOOK/contract so current-facing docs say:
 
 - Future autonomous durable history writes to affected tickets' `## Change History`.
 - Future local operational state writes to `.codex/ticket-workspace/ticket.pending-summary.jsonl`.
-- If historical audit support was kept, existing `docs/tickets/.audit/` files
-  are historical artifacts and `ticket_audit.py` / `ticket_doctor.py
-  repair-audit` remain read/repair tools for those files only.
-- If historical audit support was removed, README/HANDBOOK/contract/spec do not
-  expose `ticket_audit.py`, `repair-audit`, or `.audit` as current plugin
-  surfaces except in a short historical-removal note if needed.
+- Existing `docs/tickets/.audit/` files are historical artifacts.
+- `ticket_audit.py` and `ticket_doctor.py repair-audit` remain read/repair
+  tools for those files only.
+- README/HANDBOOK/contract/spec do not expose `.audit` as an active or future
+  autonomous history surface.
 
 - [ ] **Step 6: Verify and commit**
 
@@ -457,8 +458,6 @@ Commit:
 
 ```bash
 git add plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/tests/test_audit.py plugins/turbo-mode/ticket/tests/test_docs_contract.py
-# If historical audit support was removed, also add:
-# git add docs/superpowers/specs/2026-05-26-ticket-runtime-first-autonomy-design.md
 git commit -m "fix(ticket): disable future audit writes"
 ```
 
@@ -479,11 +478,47 @@ git commit -m "fix(ticket): disable future audit writes"
 - Modify: `plugins/turbo-mode/ticket/references/ticket-contract.md`
 - Modify: `plugins/turbo-mode/ticket/README.md`
 - Modify: `plugins/turbo-mode/ticket/HANDBOOK.md`
+- Modify discovered legacy-mode test files from the inventory below, including
+  but not limited to:
+  `plugins/turbo-mode/ticket/tests/test_execute.py`,
+  `plugins/turbo-mode/ticket/tests/test_engine_runner.py`,
+  `plugins/turbo-mode/ticket/tests/test_workflow_execute.py`, and
+  `plugins/turbo-mode/ticket/tests/test_review_findings.py`
 
 - [ ] **Step 1: Re-baseline legacy autonomy mode surfaces**
 
-Rewrite or delete existing assertions in `test_autonomy.py` that treat these as
-current behavior:
+Run this all-tests/all-scripts inventory before editing:
+
+```bash
+rg -n \
+  -e 'auto_audit' \
+  -e 'auto_silent' \
+  -e 'autonomy_mode' \
+  -e 'max_creates_per_session' \
+  -e 'defaults to `suggest`' \
+  plugins/turbo-mode/ticket/scripts \
+  plugins/turbo-mode/ticket/tests
+```
+
+Classify every matching source/test surface as **keep**, **rewrite**, or
+**remove** before implementing strict config. The classification must cover
+every file with old-mode strings, not only `test_autonomy.py`,
+`test_autonomy_integration.py`, and `test_runtime_readiness.py`.
+
+Allowed **keep** categories:
+
+- Negative config fixtures proving old YAML/frontmatter modes are rejected by
+  the strict JSON parser.
+- Historical `.audit` reader/doctor fixtures that intentionally preserve legacy
+  file reading and repair.
+- Non-current migration or model fixtures explicitly labeled historical.
+
+Everything else must be rewritten or removed if it treats `suggest`,
+`auto_audit`, `auto_silent`, YAML frontmatter config, or
+`max_creates_per_session` as current runtime-first behavior.
+
+Rewrite or delete existing assertions in `test_autonomy.py` and every matching
+test file from the inventory that treat these as current behavior:
 
 - missing `.codex/ticket.local.md` defaults to `suggest`;
 - YAML frontmatter config is accepted;
@@ -495,12 +530,16 @@ Those tests describe the old plugin. They are not compatibility gates for the
 runtime-first plugin. Keep only tests that still exercise non-autonomous engine
 compatibility or rewrite them to call the new strict config surface.
 
-Also classify these still-live old-mode surfaces under the re-baseline policy
-before editing them:
+In particular, classify these still-live old-mode surfaces under the
+re-baseline policy before editing them:
 
 - `plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py`
 - `plugins/turbo-mode/ticket/tests/test_runtime_readiness.py`
 - `plugins/turbo-mode/ticket/tests/test_autonomy_integration.py`
+- `plugins/turbo-mode/ticket/tests/test_execute.py`
+- `plugins/turbo-mode/ticket/tests/test_engine_runner.py`
+- `plugins/turbo-mode/ticket/tests/test_workflow_execute.py`
+- `plugins/turbo-mode/ticket/tests/test_review_findings.py`
 
 Default to rewrite/remove for any current-facing readiness or integration proof
 that stages YAML `auto_audit`, asserts `suggest` as the missing-config default,
@@ -574,7 +613,7 @@ def is_workspace_paused(project_root: Path) -> bool: ...
 - [ ] **Step 3: Run the failing config tests**
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_config.py tests/test_autonomy.py tests/test_autonomy_integration.py tests/test_runtime_readiness.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_config.py tests/test_autonomy.py tests/test_autonomy_integration.py tests/test_runtime_readiness.py tests/test_execute.py tests/test_engine_runner.py tests/test_workflow_execute.py tests/test_review_findings.py -q
 ```
 
 Expected before implementation: import failure for `scripts.ticket_autonomy_config` and/or failures from legacy config tests that have not yet been rewritten.
@@ -629,8 +668,8 @@ Update README/HANDBOOK/contract to document strict JSON local config and workspa
 - [ ] **Step 7: Verify and commit**
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_config.py tests/test_autonomy.py tests/test_autonomy_integration.py tests/test_runtime_readiness.py tests/test_docs_contract.py -q
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_integration.py plugins/turbo-mode/ticket/tests/test_runtime_readiness.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_config.py tests/test_autonomy.py tests/test_autonomy_integration.py tests/test_runtime_readiness.py tests/test_execute.py tests/test_engine_runner.py tests/test_workflow_execute.py tests/test_review_findings.py tests/test_docs_contract.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_integration.py plugins/turbo-mode/ticket/tests/test_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_workflow_execute.py plugins/turbo-mode/ticket/tests/test_review_findings.py
 git diff --check
 git status --short
 ```
@@ -638,7 +677,7 @@ git status --short
 Commit:
 
 ```bash
-git add .gitignore plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_integration.py plugins/turbo-mode/ticket/tests/test_runtime_readiness.py plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md
+git add .gitignore plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_integration.py plugins/turbo-mode/ticket/tests/test_runtime_readiness.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_workflow_execute.py plugins/turbo-mode/ticket/tests/test_review_findings.py plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md
 git commit -m "feat(ticket): add strict autonomy workspace config"
 ```
 
@@ -1742,11 +1781,22 @@ Tests must prove:
   maintenance command functions are flagged; whole helper-file allowlists are
   not sufficient proof.
 - No source file writes to `docs/tickets/.audit/` for future autonomous behavior.
+  Named historical read/doctor maintenance commands may still repair existing
+  `.audit/` files, and the static proof must keep that exception explicit.
 - Legacy tests no longer assert active `.audit` writes, YAML autonomy config,
   missing-config fallback to `suggest`, valid `auto_audit`, or valid
   `auto_silent` as current runtime-first behavior.
 - Runtime-readiness source and tests no longer stage YAML `auto_audit` config
   or assert old-mode payloads as current readiness evidence.
+- Test files may contain old-mode strings only in allowed negative or historical
+  fixtures identified by the Task 2 inventory. `test_static_autonomy_boundaries.py`
+  must distinguish forbidden current-behavior assertions from allowed fixture
+  text instead of raw-scanning all tests for any occurrence of the old strings.
+  At minimum, fail on tests that assert old modes are valid, old missing-config
+  fallback to `suggest` is valid, old `auto_audit`/`auto_silent` policy lanes
+  succeed as current behavior, or runtime-readiness proof stages old-mode YAML.
+  Permit strings inside tests whose assertions prove those old modes are invalid
+  under strict config or inside historical `.audit` reader/doctor fixtures.
 
 - [ ] **Step 2: Run focused docs and guard tests**
 
@@ -1762,8 +1812,7 @@ rg -n \
   plugins/turbo-mode/ticket/README.md \
   plugins/turbo-mode/ticket/HANDBOOK.md \
   plugins/turbo-mode/ticket/references/ticket-contract.md \
-  plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py \
-  plugins/turbo-mode/ticket/tests
+  plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py
 rg_status=$?
 if [ "$rg_status" -eq 0 ]; then
   exit 1
