@@ -67,6 +67,11 @@ created or mutated by the autonomous Ticket flow.
 Runtime note (v1.0): missing sections are advisory warnings/process failures,
 not hard runtime schema rejections, except that autonomous mutation must fail
 closed when `## Change History` cannot carry its required durable fact.
+Historical tickets missing `## Change History` are bootstrapped only through the
+explicit maintenance command `ticket_autonomy.py migrate-change-history
+--dry-run|--apply`. `--dry-run` is non-mutating. `--apply` inserts missing
+empty sections only; it does not add entries and does not write the current
+commit hash.
 Runtime note (v1.0): `update` mutates YAML frontmatter only. Section-backed fields are not writable through the `update` action.
 Capture-created tickets support these body sections: Captured Request, Problem, Next Action, Acceptance Criteria.
 Capture metadata never stores a raw user wording field; the rendered Captured Request section is a synthesized ticket section, not schema provenance.
