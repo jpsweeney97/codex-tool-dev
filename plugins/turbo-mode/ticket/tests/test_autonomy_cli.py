@@ -9,9 +9,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from scripts.ticket_autonomy import build_repo_context
+from scripts.ticket_dedup import target_fingerprint
 from scripts.ticket_turn_batch import PendingSummaryStore
 
-from tests.test_turn_batch import valid_status_event
+from tests.support.builders import make_ticket
+from tests.test_turn_batch import valid_attempt_event, valid_status_event
 
 SCRIPT = Path(__file__).parent.parent / "scripts" / "ticket_autonomy.py"
 
@@ -74,6 +76,21 @@ def _git_check_ignored(project_root: Path, path: str) -> bool:
         check=False,
     )
     return result.returncode == 0
+
+
+def _event_with_recovery_fingerprints(
+    event: dict[str, object],
+    *,
+    pre: str,
+    post: str,
+) -> dict[str, object]:
+    details = dict(event["details"])
+    details["expected_pre_write_fingerprint"] = pre
+    details["expected_post_write_fingerprint"] = post
+    approval = details.get("approval")
+    if isinstance(approval, dict):
+        details["approval"] = {**approval, "ticket_state_fingerprint": pre}
+    return {**event, "details": details}
 
 
 def test_migrate_change_history_dry_run_reports_candidates_without_changes(tmp_path: Path) -> None:
@@ -224,6 +241,73 @@ def test_recover_compacts_old_correction_ready_detail(tmp_path: Path) -> None:
     assert event["details"]["correction_detail_compacted"] is True
 
 
+def test_recover_reports_repair_required_for_unsummarized_prior_turn_mutation(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    pre = target_fingerprint(ticket) or ""
+    ticket.write_text(
+        ticket.read_text(encoding="utf-8").replace("priority: high", "priority: low"),
+        encoding="utf-8",
+    )
+    post = target_fingerprint(ticket) or ""
+    store = PendingSummaryStore(tmp_path)
+    assert (
+        store.append_event(
+            _event_with_recovery_fingerprints(
+                valid_attempt_event(
+                    event_id="evt_recover_attempt",
+                    turn_id="turn-old",
+                    mutation_id="mut-recover",
+                ),
+                pre=pre,
+                post=post,
+            )
+        ).state
+        == "appended"
+    )
+    assert (
+        store.append_event(
+            _event_with_recovery_fingerprints(
+                valid_status_event(
+                    "approval_consumed",
+                    event_id="evt_recover_approval",
+                    turn_id="turn-old",
+                    mutation_id="mut-recover",
+                ),
+                pre=pre,
+                post=post,
+            )
+        ).state
+        == "appended"
+    )
+
+    result = _run_autonomy(
+        tmp_path,
+        "recover",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-new",
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "ok"
+    assert payload["turn_id"] == "turn-new"
+    assert payload["can_proceed"] is False
+    assert payload["repairable_count"] == 1
+    assert payload["reconciliation_count"] == 0
+    assert payload["recoveries"][0]["mutation_id"] == "mut-recover"
+    assert payload["recoveries"][0]["projection_state"] == "append_missing_ticket_written"
+    assert payload["discussion_question"] == (
+        "Run ticket_autonomy.py doctor-ledger --confirm-repair before new automatic writes."
+    )
+
+
 def test_apply_turn_rejects_invalid_context(tmp_path: Path) -> None:
     _init_ticket_project(tmp_path)
 
@@ -308,6 +392,57 @@ def test_apply_turn_setup_choice_automatic_writes_config_snapshot_and_continues(
     assert _git_check_ignored(tmp_path, ".codex/ticket.local.md")
     assert _git_check_ignored(tmp_path, snapshots[0].relative_to(tmp_path).as_posix())
     assert _git_status(tmp_path, ".codex/ticket.local.md", ".codex/ticket-workspace") == ""
+
+
+def test_apply_turn_setup_choice_does_not_clear_pause_without_resume_flag(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    context = _write_context(tmp_path, candidate_changes=[{"action": "update"}])
+    pause = _run_autonomy(
+        tmp_path,
+        "pause",
+        "--project-root",
+        str(tmp_path),
+        "--reason",
+        "user_requested",
+    )
+    assert pause.returncode == 0
+
+    blocked = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+        "--setup-choice",
+        "automatic",
+    )
+    assert blocked.returncode == 3
+    assert json.loads(blocked.stdout)["state"] == "paused"
+    assert (tmp_path / ".codex" / "ticket-workspace" / "pause.json").is_file()
+    resumed = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+        "--setup-choice",
+        "automatic",
+        "--resume-paused",
+    )
+    assert resumed.returncode == 0
+    assert json.loads(resumed.stdout)["state"] == "no_change"
+    assert not (tmp_path / ".codex" / "ticket-workspace" / "pause.json").exists()
+    assert (tmp_path / ".codex" / "ticket.local.md").read_text(encoding="utf-8") == (
+        '{"schema":"codex.ticket.local.v1","mode":"agent_primary"}\n'
+    )
 
 
 def test_apply_turn_setup_choice_ask_first_writes_discussion_snapshot(
@@ -469,3 +604,115 @@ def test_doctor_ledger_dry_run_and_confirm_repair_return_json(tmp_path: Path) ->
     assert json.loads(dry_run.stdout)["state"] == "ok"
     assert repair.returncode == 0
     assert json.loads(repair.stdout)["state"] == "ok"
+
+
+def test_doctor_ledger_repairs_deterministic_recovery_gaps(tmp_path: Path) -> None:
+    _init_ticket_project(tmp_path)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    pre = target_fingerprint(ticket) or ""
+    ticket.write_text(
+        ticket.read_text(encoding="utf-8").replace("priority: high", "priority: low"),
+        encoding="utf-8",
+    )
+    post = target_fingerprint(ticket) or ""
+    store = PendingSummaryStore(tmp_path)
+    assert (
+        store.append_event(
+            _event_with_recovery_fingerprints(
+                valid_attempt_event(
+                    event_id="evt_doctor_attempt",
+                    mutation_id="mut-doctor",
+                ),
+                pre=pre,
+                post=post,
+            )
+        ).state
+        == "appended"
+    )
+    assert (
+        store.append_event(
+            _event_with_recovery_fingerprints(
+                valid_status_event(
+                    "approval_consumed",
+                    event_id="evt_doctor_approval",
+                    mutation_id="mut-doctor",
+                ),
+                pre=pre,
+                post=post,
+            )
+        ).state
+        == "appended"
+    )
+
+    dry_run = _run_autonomy(
+        tmp_path,
+        "doctor-ledger",
+        "--project-root",
+        str(tmp_path),
+        "--dry-run",
+    )
+    repair = _run_autonomy(
+        tmp_path,
+        "doctor-ledger",
+        "--project-root",
+        str(tmp_path),
+        "--confirm-repair",
+    )
+    second_dry_run = _run_autonomy(
+        tmp_path,
+        "doctor-ledger",
+        "--project-root",
+        str(tmp_path),
+        "--dry-run",
+    )
+
+    assert dry_run.returncode == 0
+    dry_payload = json.loads(dry_run.stdout)
+    assert dry_payload["healthy"] is False
+    assert dry_payload["repairable_count"] == 1
+    assert dry_payload["changed"] is False
+    assert repair.returncode == 0
+    repair_payload = json.loads(repair.stdout)
+    assert repair_payload["healthy"] is True
+    assert repair_payload["changed"] is True
+    assert repair_payload["events_appended"] == 3
+    assert [event["status"] for event in PendingSummaryStore(tmp_path).read_events()] == [
+        "pending",
+        "approval_consumed",
+        "ticket_written",
+        "applied",
+        "summarized",
+    ]
+    assert second_dry_run.returncode == 0
+    second_payload = json.loads(second_dry_run.stdout)
+    assert second_payload["healthy"] is True
+    assert second_payload["repairable_count"] == 0
+
+
+def test_doctor_ledger_fails_closed_for_corrupt_ledger_without_rewriting(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    log_path = tmp_path / ".codex" / "ticket-workspace" / "ticket.pending-summary.jsonl"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("{not-json\n", encoding="utf-8")
+
+    result = _run_autonomy(
+        tmp_path,
+        "doctor-ledger",
+        "--project-root",
+        str(tmp_path),
+        "--confirm-repair",
+    )
+
+    assert result.returncode == 3
+    assert json.loads(result.stdout) == {
+        "state": "paused",
+        "pause_reason": "pending_summary_unhealthy",
+        "message": "Ticket automation paused because pending-summary bookkeeping needs cleanup.",
+        "ticket_updates": None,
+        "discussion_question": None,
+    }
+    assert log_path.read_text(encoding="utf-8") == "{not-json\n"

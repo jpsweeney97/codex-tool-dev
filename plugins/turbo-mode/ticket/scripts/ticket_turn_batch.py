@@ -481,6 +481,10 @@ class PendingSummaryStore:
         events = self._read_events_or_none()
         return events if events is not None else ()
 
+    def read_events_or_none(self) -> tuple[dict[str, object], ...] | None:
+        """Read valid events, returning `None` when the log is corrupt."""
+        return self._read_events_or_none()
+
     def compact_correction_ready_events(
         self,
         *,

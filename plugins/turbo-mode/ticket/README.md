@@ -110,6 +110,16 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/t
 
 Both delegate to `ticket_engine_runner.py`, which dispatches to `ticket_engine_core.py`.
 
+**Host-facing autonomy entrypoints:**
+
+| Command | Purpose |
+|---------|---------|
+| `ticket_autonomy.py pause` | Write a workspace pause marker and force discussion-only local mode |
+| `ticket_autonomy.py recover` | Project pending-summary recovery state before new automatic writes |
+| `ticket_autonomy.py apply-turn` | Apply runtime-first turn candidates through the gateway |
+| `ticket_autonomy.py doctor-ledger` | Inspect or repair deterministic pending-summary ledger gaps |
+| `ticket_autonomy.py migrate-change-history` | Insert missing `## Change History` sections with dry-run/apply modes |
+
 **Read-only entrypoints:**
 
 | Script | Signature | Purpose |

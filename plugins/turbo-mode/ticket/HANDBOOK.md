@@ -47,6 +47,16 @@ Low-confidence captures are allowed when a next action exists; they should carry
 | `scripts/ticket_triage.py` | Any | Read-only: dashboard counts, stale/blocked detection, historical audit summary |
 | `scripts/ticket_audit.py` | Any | Historical audit validation and corrupt-line repair |
 
+Host-facing autonomy commands:
+
+| Command | Purpose |
+|---------|---------|
+| `ticket_autonomy.py pause` | Pause workspace automation |
+| `ticket_autonomy.py recover` | Project pending-summary recovery before automatic writes |
+| `ticket_autonomy.py apply-turn` | Apply turn candidates through the runtime-first gateway |
+| `ticket_autonomy.py doctor-ledger` | Inspect or repair deterministic ledger gaps |
+| `ticket_autonomy.py migrate-change-history` | Dry-run or apply missing Change History sections |
+
 Canonical Bash launcher for these scripts:
 
 ```bash

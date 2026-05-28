@@ -9,6 +9,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -40,12 +41,28 @@ from scripts.ticket_read import find_ticket_by_id  # noqa: E402
 from scripts.ticket_turn_batch import (  # noqa: E402
     PENDING_SUMMARY_SCHEMA,
     PendingSummaryStore,
+    RecoveryProjection,
     VerifiedRepoContext,
     event_payload_fingerprint,
+    project_mutation_recovery,
 )
 
 TURN_CONTEXT_SCHEMA = "codex.ticket.turn_context.v1"
 SETUP_CHOICES = ["automatic", "ask_first"]
+REPAIR_PROJECTION_STATES = {
+    "append_missing_ticket_written",
+    "append_missing_terminal_status",
+    "summary_ready",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class LedgerRecoveryItem:
+    """One pending-summary mutation recovery projection."""
+
+    projection: RecoveryProjection
+    turn_id: str
+    ticket_id: str | None
 
 
 def _emit(payload: dict[str, Any]) -> None:
@@ -465,6 +482,134 @@ def _commit_disposition_summary(
     return summary
 
 
+def _current_ticket_fingerprint_for_event(
+    project_root: Path,
+    event: Mapping[str, object],
+) -> str | None:
+    ticket_id = event.get("ticket_id")
+    if not isinstance(ticket_id, str) or not ticket_id:
+        return None
+    ticket = find_ticket_by_id(project_root / "docs" / "tickets", ticket_id, include_closed=True)
+    if ticket is None:
+        return None
+    return compute_target_fingerprint(Path(ticket.path))
+
+
+def _mutation_recovery_items(
+    *,
+    project_root: Path,
+    store: PendingSummaryStore,
+    events: tuple[dict[str, object], ...],
+    skip_turn_id: str | None = None,
+) -> list[LedgerRecoveryItem]:
+    seen: set[tuple[str, str]] = set()
+    items: list[LedgerRecoveryItem] = []
+    for event in events:
+        thread_id = event.get("thread_id")
+        mutation_id = event.get("mutation_id")
+        turn_id = event.get("turn_id")
+        if not isinstance(thread_id, str) or not isinstance(mutation_id, str):
+            continue
+        if not isinstance(turn_id, str) or turn_id == skip_turn_id:
+            continue
+        key = (thread_id, mutation_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        projection = project_mutation_recovery(
+            store=store,
+            thread_id=thread_id,
+            mutation_id=mutation_id,
+            current_ticket_fingerprint=_current_ticket_fingerprint_for_event(project_root, event),
+        )
+        if projection.state == "healthy":
+            continue
+        ticket_id = event.get("ticket_id")
+        items.append(
+            LedgerRecoveryItem(
+                projection=projection,
+                turn_id=turn_id,
+                ticket_id=ticket_id if isinstance(ticket_id, str) else None,
+            )
+        )
+    return items
+
+
+def _item_is_repairable(item: LedgerRecoveryItem) -> bool:
+    return item.projection.state in REPAIR_PROJECTION_STATES and bool(
+        item.projection.events_to_append
+    )
+
+
+def _ledger_item_payload(item: LedgerRecoveryItem) -> dict[str, object]:
+    projection = item.projection
+    payload: dict[str, object] = {
+        "thread_id": projection.thread_id,
+        "turn_id": item.turn_id,
+        "mutation_id": projection.mutation_id,
+        "ticket_id": item.ticket_id,
+        "projection_state": projection.state,
+        "events_to_append": len(projection.events_to_append),
+        "current_ticket_fingerprint": projection.current_ticket_fingerprint,
+        "expected_pre_write_fingerprint": projection.expected_pre_write_fingerprint,
+        "expected_post_write_fingerprint": projection.expected_post_write_fingerprint,
+    }
+    if projection.reason is not None:
+        payload["recovery_reason"] = projection.reason
+    return payload
+
+
+def _pending_summary_unhealthy() -> int:
+    _emit(_paused_response("pending_summary_unhealthy"))
+    return 3
+
+
+def _ledger_items_for_project(
+    *,
+    project_root: Path,
+    store: PendingSummaryStore,
+    skip_turn_id: str | None = None,
+) -> tuple[tuple[dict[str, object], ...] | None, list[LedgerRecoveryItem]]:
+    events = store.read_events_or_none()
+    if events is None:
+        return None, []
+    return events, _mutation_recovery_items(
+        project_root=project_root,
+        store=store,
+        events=events,
+        skip_turn_id=skip_turn_id,
+    )
+
+
+def _ledger_blocks_resume(project_root: Path) -> bool:
+    store = PendingSummaryStore(project_root)
+    events, items = _ledger_items_for_project(project_root=project_root, store=store)
+    return events is None or bool(items)
+
+
+def _doctor_ledger_payload(
+    *,
+    events: tuple[dict[str, object], ...],
+    items: list[LedgerRecoveryItem],
+    repair_confirmed: bool,
+    changed: bool,
+    events_appended: int,
+) -> dict[str, object]:
+    repairable = [item for item in items if _item_is_repairable(item)]
+    reconciliation = [item for item in items if not _item_is_repairable(item)]
+    return {
+        "state": "ok",
+        "healthy": not items,
+        "changed": changed,
+        "repair_confirmed": repair_confirmed,
+        "event_count": len(events),
+        "repairable_count": len(repairable),
+        "reconciliation_count": len(reconciliation),
+        "events_appended": events_appended,
+        "recoveries": [_ledger_item_payload(item) for item in items],
+    }
+
+
 def _run_migrate_change_history(args: argparse.Namespace) -> int:
     project_root = Path(args.project_root).resolve(strict=False)
     if args.dry_run == args.apply:
@@ -551,21 +696,45 @@ def _run_pause(args: argparse.Namespace) -> int:
 
 def _run_recover(args: argparse.Namespace) -> int:
     project_root = Path(args.project_root).resolve(strict=False)
+    unsafe = _local_state_setup_required(project_root)
+    if unsafe is not None:
+        return unsafe
+
     store = PendingSummaryStore(project_root)
     compaction = store.compact_correction_ready_events()
     if compaction.state == "paused":
         _emit(_paused_response(compaction.pause_reason or "pending_summary_unhealthy"))
         return 3
-    events = store.read_events()
+
+    events, items = _ledger_items_for_project(
+        project_root=project_root,
+        store=store,
+        skip_turn_id=args.turn_id,
+    )
+    if events is None:
+        return _pending_summary_unhealthy()
+    repairable = [item for item in items if _item_is_repairable(item)]
+    reconciliation = [item for item in items if not _item_is_repairable(item)]
+    can_proceed = not items
     _emit(
         {
             "state": "ok",
             "turn_id": args.turn_id,
-            "can_proceed": True,
+            "can_proceed": can_proceed,
             "compaction_state": compaction.state,
             "event_count": len(events),
+            "repairable_count": len(repairable),
+            "reconciliation_count": len(reconciliation),
+            "recoveries": [_ledger_item_payload(item) for item in items],
             "ticket_updates": None,
-            "discussion_question": None,
+            "discussion_question": (
+                None
+                if can_proceed
+                else (
+                    "Run ticket_autonomy.py doctor-ledger --confirm-repair "
+                    "before new automatic writes."
+                )
+            ),
         }
     )
     return 0
@@ -603,6 +772,8 @@ def _run_apply_turn(args: argparse.Namespace) -> int:
         return 0
 
     setup_choice_value = args.setup_choice
+    if args.resume_paused and setup_choice_value is None:
+        return _invalid_args("--resume-paused requires --setup-choice")
     if setup_choice_value is not None:
         if setup_choice_value == AutomationMode.PREVIEW.value:
             return _invalid_args("preview is a manual-only config mode")
@@ -614,6 +785,12 @@ def _run_apply_turn(args: argparse.Namespace) -> int:
         unsafe = _local_state_setup_required(project_root)
         if unsafe is not None:
             return unsafe
+        if _workspace_is_paused(project_root) and not args.resume_paused:
+            _emit(_paused_response(_read_pause_reason(project_root)))
+            return 3
+        if args.resume_paused and _ledger_blocks_resume(project_root):
+            _emit(_paused_response("repair"))
+            return 3
         resume_workspace_automation(project_root, choice=setup_choice)
         mode = _mode_from_setup_choice(setup_choice)
         write_mode_snapshot(project_root, str(context["thread_id"]), mode)
@@ -674,7 +851,10 @@ def _run_apply_turn_with_mode(
 
     for decision in decisions:
         ticket_id = decision.candidate.ticket_id or "new ticket"
-        if decision.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY:
+        if decision.kind in {
+            RuntimeDecisionKind.APPLY_AUTONOMOUSLY,
+            RuntimeDecisionKind.APPLY_CORRECTION,
+        }:
             mutation = GatewayMutation(
                 action=decision.candidate.action,
                 ticket_id=decision.candidate.ticket_id,
@@ -746,18 +926,83 @@ def _run_doctor_ledger(args: argparse.Namespace) -> int:
     if args.dry_run == args.confirm_repair:
         return _invalid_args("choose exactly one of --dry-run or --confirm-repair")
 
+    unsafe = _local_state_setup_required(project_root)
+    if unsafe is not None:
+        return unsafe
+
     store = PendingSummaryStore(project_root)
-    events = store.read_events()
+    events, items = _ledger_items_for_project(project_root=project_root, store=store)
+    if events is None:
+        return _pending_summary_unhealthy()
+    if args.dry_run:
+        _emit(
+            _doctor_ledger_payload(
+                events=events,
+                items=items,
+                repair_confirmed=False,
+                changed=False,
+                events_appended=0,
+            )
+        )
+        return 0
+
+    events_appended = 0
+    for _pass in range(10):
+        repairable = [item for item in items if _item_is_repairable(item)]
+        reconciliation = [item for item in items if not _item_is_repairable(item)]
+        if reconciliation:
+            _emit(
+                {
+                    **_doctor_ledger_payload(
+                        events=events,
+                        items=items,
+                        repair_confirmed=True,
+                        changed=events_appended > 0,
+                        events_appended=events_appended,
+                    ),
+                    "state": "paused",
+                    "pause_reason": "repair",
+                }
+            )
+            return 3
+        if not repairable:
+            _emit(
+                _doctor_ledger_payload(
+                    events=events,
+                    items=[],
+                    repair_confirmed=True,
+                    changed=events_appended > 0,
+                    events_appended=events_appended,
+                )
+            )
+            return 0
+
+        for item in repairable:
+            for event in item.projection.events_to_append:
+                result = store.append_event(event)
+                if result.state == "paused":
+                    _emit(_paused_response(result.pause_reason or "pending_summary_unhealthy"))
+                    return 3
+                if result.state == "appended":
+                    events_appended += 1
+        events, items = _ledger_items_for_project(project_root=project_root, store=store)
+        if events is None:
+            return _pending_summary_unhealthy()
+
     _emit(
         {
-            "state": "ok",
-            "healthy": True,
-            "changed": False,
-            "repair_confirmed": bool(args.confirm_repair),
-            "event_count": len(events),
+            **_doctor_ledger_payload(
+                events=events,
+                items=items,
+                repair_confirmed=True,
+                changed=events_appended > 0,
+                events_appended=events_appended,
+            ),
+            "state": "paused",
+            "pause_reason": "repair",
         }
     )
-    return 0
+    return 3
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -777,6 +1022,7 @@ def _build_parser() -> argparse.ArgumentParser:
     apply_turn.add_argument("--turn-id", required=True)
     apply_turn.add_argument("--context-file", required=True)
     apply_turn.add_argument("--setup-choice")
+    apply_turn.add_argument("--resume-paused", action="store_true")
 
     doctor_ledger = subparsers.add_parser("doctor-ledger")
     doctor_ledger.add_argument("--project-root", required=True)

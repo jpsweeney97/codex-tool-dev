@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from scripts.ticket_autonomy_config import WORKSPACE_RELATIVE_PATH
-from scripts.ticket_autonomy_ids import make_event_id
+from scripts.ticket_autonomy_config import WORKSPACE_RELATIVE_PATH, ensure_ticket_workspace
+from scripts.ticket_autonomy_ids import make_event_id, sha256_fingerprint
 from scripts.ticket_autonomy_runtime import (
     AutonomyDecision,
     CandidateMutation,
@@ -21,7 +23,6 @@ from scripts.ticket_autonomy_runtime import (
 from scripts.ticket_change_history import (
     ChangeHistoryEntry,
     ChangeHistoryLabel,
-    append_change_history_entry,
 )
 from scripts.ticket_commit_coordinator import (
     CommitDispositionRecord,
@@ -34,6 +35,7 @@ from scripts.ticket_engine_core import (
     _execute_create,
     _execute_reopen,
     _execute_update,
+    _plan_create,
 )
 from scripts.ticket_read import find_ticket_by_id
 from scripts.ticket_turn_batch import (
@@ -93,6 +95,62 @@ def _workspace_is_paused(project_root: Path) -> bool:
     return (project_root / WORKSPACE_RELATIVE_PATH / "pause.json").is_file()
 
 
+def _approval_ticket_id(mutation: GatewayMutation) -> str | None:
+    return mutation.ticket_id
+
+
+def _mutation_fingerprint(mutation: GatewayMutation) -> str:
+    return sha256_fingerprint(
+        {
+            "ticket_id": mutation.ticket_id,
+            "action": mutation.action,
+            "proposed_change": dict(mutation.fields),
+        }
+    )
+
+
+def _gateway_lock_path(project_root: Path, mutation: GatewayMutation) -> Path:
+    key = _mutation_fingerprint(mutation)
+    if mutation.action != "create" and mutation.ticket_id:
+        key = sha256_fingerprint({"ticket_id": mutation.ticket_id})
+    filename = f"gateway-write-{key.removeprefix('sha256:')}.lock"
+    return project_root / WORKSPACE_RELATIVE_PATH / filename
+
+
+def _acquire_gateway_write_lock(
+    project_root: Path,
+    mutation: GatewayMutation,
+    *,
+    timeout_seconds: float = 2.0,
+) -> Path | None:
+    workspace = ensure_ticket_workspace(project_root)
+    lock_path = _gateway_lock_path(project_root, mutation)
+    if lock_path.parent != workspace:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + max(timeout_seconds, 0.0)
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            try:
+                os.write(fd, f"{os.getpid()}\n".encode())
+            finally:
+                os.close(fd)
+            return lock_path
+        except FileExistsError:
+            if timeout_seconds <= 0 or time.monotonic() >= deadline:
+                return None
+            time.sleep(min(0.05, max(deadline - time.monotonic(), 0.0)))
+
+
+def _release_gateway_write_lock(lock_path: Path | None) -> None:
+    if lock_path is None:
+        return
+    try:
+        lock_path.unlink()
+    except FileNotFoundError:
+        pass
+
+
 def build_engine_dispatch(mutation: GatewayMutation) -> EngineDispatch:
     """Build deterministic engine dispatch for a gateway mutation."""
     candidate = CandidateMutation(
@@ -127,10 +185,12 @@ def _approval_error(
         return "mutation_id_required"
     if approval.get("thread_id") != thread_id:
         return "thread_mismatch"
-    if approval.get("ticket_id") != mutation.ticket_id:
+    if approval.get("ticket_id") != _approval_ticket_id(mutation):
         return "ticket_mismatch"
     if approval.get("mutation_id") != decision.mutation_id:
         return "mutation_mismatch"
+    if approval.get("mutation_fingerprint") != _mutation_fingerprint(mutation):
+        return "mutation_fingerprint_mismatch"
     if approval.get("decision") != RuntimeDecisionKind.APPLY_AUTONOMOUSLY.value:
         return "decision_mismatch"
     expires_at = _parse_z(approval.get("expires_at"))
@@ -329,11 +389,18 @@ def _execute_dispatch(
     dispatch: EngineDispatch,
     mutation: GatewayMutation,
     thread_id: str,
+    change_history_entry: ChangeHistoryEntry,
 ) -> EngineResponse:
     if dispatch.state != "ok" or dispatch.action is None:
         return _policy_blocked(dispatch.reason or "gateway dispatch failed")
     if dispatch.action == EngineAction.CREATE:
-        return _execute_create(dict(dispatch.fields), thread_id, "agent", mutation.tickets_dir)
+        return _execute_create(
+            dict(dispatch.fields),
+            thread_id,
+            "agent",
+            mutation.tickets_dir,
+            change_history_entry=change_history_entry,
+        )
     if dispatch.action == EngineAction.UPDATE:
         return _execute_update(
             mutation.ticket_id,
@@ -341,6 +408,7 @@ def _execute_dispatch(
             thread_id,
             "agent",
             mutation.tickets_dir,
+            change_history_entry=change_history_entry,
         )
     if dispatch.action == EngineAction.CLOSE:
         return _execute_close(
@@ -349,6 +417,7 @@ def _execute_dispatch(
             thread_id,
             "agent",
             mutation.tickets_dir,
+            change_history_entry=change_history_entry,
         )
     if dispatch.action == EngineAction.REOPEN:
         return _execute_reopen(
@@ -357,6 +426,7 @@ def _execute_dispatch(
             thread_id,
             "agent",
             mutation.tickets_dir,
+            change_history_entry=change_history_entry,
         )
     return _policy_blocked(f"Unsupported dispatch action: {dispatch.action!r}")
 
@@ -375,14 +445,29 @@ def _change_history_label(action: str) -> ChangeHistoryLabel:
     return ChangeHistoryLabel.AUTO_UPDATE
 
 
-def _write_change_history_entry(ticket_path: Path, *, action: str) -> None:
-    text = ticket_path.read_text(encoding="utf-8")
-    entry = ChangeHistoryEntry(
+def _change_history_entry(action: str) -> ChangeHistoryEntry:
+    return ChangeHistoryEntry(
         timestamp=_now_z(),
         label=_change_history_label(action),
         reason=f"Automatic Ticket {action} applied.",
     )
-    ticket_path.write_text(append_change_history_entry(text, entry), encoding="utf-8")
+
+
+def _validate_autonomous_create_dedup(
+    mutation: GatewayMutation,
+    *,
+    thread_id: str,
+) -> EngineResponse | None:
+    if mutation.action != "create":
+        return None
+    fields = dict(mutation.fields)
+    fields.setdefault("priority", "medium")
+    plan_response = _plan_create(fields, thread_id, "agent", mutation.tickets_dir)
+    if plan_response.state == "ok":
+        return None
+    if plan_response.state == "duplicate_candidate":
+        return plan_response
+    return plan_response
 
 
 def _record_commit_disposition(
@@ -437,6 +522,39 @@ def apply_autonomous_mutation(
         return _policy_blocked(f"Approval validation failed: {approval_error}")
     if decision.mutation_id is None:
         return _policy_blocked("Approval validation failed: mutation_id_required")
+    try:
+        lock_path = _acquire_gateway_write_lock(project_root, mutation)
+    except RuntimeError as exc:
+        return _policy_blocked(f"Gateway write lock failed: {exc}")
+    if lock_path is None:
+        return _policy_blocked(
+            "Gateway write lock failed: lock_timeout",
+            data={"pause_reason": "lock_timeout"},
+        )
+    try:
+        return _apply_autonomous_mutation_locked(
+            project_root=project_root,
+            thread_id=thread_id,
+            turn_id=turn_id,
+            repo_context=repo_context,
+            mutation=mutation,
+            decision=decision,
+            pending_summary=pending_summary,
+        )
+    finally:
+        _release_gateway_write_lock(lock_path)
+
+
+def _apply_autonomous_mutation_locked(
+    *,
+    project_root: Path,
+    thread_id: str,
+    turn_id: str,
+    repo_context: VerifiedRepoContext,
+    mutation: GatewayMutation,
+    decision: AutonomyDecision,
+    pending_summary: PendingSummaryStore,
+) -> EngineResponse:
     existing_state = pending_summary.derive_mutation_state(
         thread_id=thread_id,
         mutation_id=decision.mutation_id,
@@ -454,6 +572,16 @@ def apply_autonomous_mutation(
     target_error = _validate_target_fingerprint(mutation)
     if target_error is not None:
         return target_error
+
+    create_error = _validate_autonomous_create_dedup(mutation, thread_id=thread_id)
+    if create_error is not None:
+        return create_error
+
+    if _workspace_is_paused(project_root):
+        return _policy_blocked(
+            "Ticket automation paused for this workspace.",
+            data={"pause_reason": _pause_reason(project_root)},
+        )
 
     attempt_error = _append_gateway_event(
         pending_summary=pending_summary,
@@ -484,12 +612,6 @@ def apply_autonomous_mutation(
     if attempt_error is not None:
         return attempt_error
 
-    if _workspace_is_paused(project_root):
-        return _policy_blocked(
-            "Ticket automation paused for this workspace.",
-            data={"pause_reason": _pause_reason(project_root)},
-        )
-
     if decision.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY:
         if decision.approval is None:
             return _policy_blocked("Approval validation failed: approval_required")
@@ -511,8 +633,19 @@ def apply_autonomous_mutation(
         if consumed_error is not None:
             return consumed_error
 
+    if _workspace_is_paused(project_root):
+        return _policy_blocked(
+            "Ticket automation paused for this workspace.",
+            data={"pause_reason": _pause_reason(project_root)},
+        )
+
     dispatch = build_engine_dispatch(mutation)
-    response = _execute_dispatch(dispatch=dispatch, mutation=mutation, thread_id=thread_id)
+    response = _execute_dispatch(
+        dispatch=dispatch,
+        mutation=mutation,
+        thread_id=thread_id,
+        change_history_entry=_change_history_entry(mutation.action),
+    )
     if not _response_ok(response):
         _append_gateway_event(
             pending_summary=pending_summary,
@@ -529,11 +662,27 @@ def apply_autonomous_mutation(
         return response
 
     ticket_path_raw = response.data.get("ticket_path")
-    if isinstance(ticket_path_raw, str):
-        _write_change_history_entry(Path(ticket_path_raw), action=mutation.action)
-        post_write_fingerprint = compute_target_fingerprint(Path(ticket_path_raw)) or "unknown"
-    else:
-        post_write_fingerprint = "unknown"
+    if not isinstance(ticket_path_raw, str):
+        failed_error = _append_gateway_event(
+            pending_summary=pending_summary,
+            event_type="mutation_status",
+            status="failed",
+            mutation=mutation,
+            decision=decision,
+            thread_id=thread_id,
+            turn_id=turn_id,
+            repo_context=repo_context,
+            reason="Autonomous Ticket mutation returned no ticket path.",
+            details={"error_code": "ticket_path_missing"},
+        )
+        if failed_error is not None:
+            return failed_error
+        return _policy_blocked(
+            "Autonomous Ticket mutation failed: ticket_path_missing",
+            data={"error_code": "ticket_path_missing"},
+        )
+
+    post_write_fingerprint = compute_target_fingerprint(Path(ticket_path_raw)) or "unknown"
 
     ticket_written_error = _append_gateway_event(
         pending_summary=pending_summary,

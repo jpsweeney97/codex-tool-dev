@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
 from scripts.ticket_autonomy_config import AutomationMode, LocalConfigState, read_local_config
+from scripts.ticket_change_history import ChangeHistoryEntry, append_change_history_entry
 from scripts.ticket_id import allocate_id, build_filename
 from scripts.ticket_parse import (
     ParsedTicket,
@@ -1516,6 +1517,8 @@ def _execute_create(
     session_id: str,
     request_origin: str,
     tickets_dir: Path,
+    *,
+    change_history_entry: ChangeHistoryEntry | None = None,
 ) -> EngineResponse:
     """Create a new ticket file with all required contract fields."""
     missing = []
@@ -1583,6 +1586,8 @@ def _execute_create(
             contract_version=_CONTRACT_VERSION,
             defer=fields.get("defer"),
         )
+        if change_history_entry is not None:
+            content = append_change_history_entry(content, change_history_entry)
         try:
             _write_text_exclusive(ticket_path, content)
         except FileExistsError:
@@ -1743,6 +1748,8 @@ def _execute_update(
     session_id: str,
     request_origin: str,
     tickets_dir: Path,
+    *,
+    change_history_entry: ChangeHistoryEntry | None = None,
 ) -> EngineResponse:
     """Update an existing ticket's frontmatter fields."""
     if not ticket_id:
@@ -1856,6 +1863,8 @@ def _execute_update(
         if old_rendered.strip() != rendered.strip():
             changes["sections_changed"].append(heading)
         new_text = _replace_or_append_section(new_text, heading, rendered)
+    if change_history_entry is not None:
+        new_text = append_change_history_entry(new_text, change_history_entry)
     ticket_path.write_text(new_text, encoding="utf-8")
 
     return EngineResponse(
@@ -2186,6 +2195,7 @@ def _execute_close(
     tickets_dir: Path,
     *,
     dependency_override: bool = False,
+    change_history_entry: ChangeHistoryEntry | None = None,
 ) -> EngineResponse:
     """Close a ticket (set status to done or wontfix, optionally archive).
 
@@ -2253,6 +2263,8 @@ def _execute_close(
             ticket_id=ticket_id,
             error_code="parse_error",
         )
+    if change_history_entry is not None:
+        new_text = append_change_history_entry(new_text, change_history_entry)
     ticket_path.write_text(new_text, encoding="utf-8")
 
     changes = {"frontmatter": {"status": [old_status, resolution]}}
@@ -2313,6 +2325,8 @@ def _execute_reopen(
     session_id: str,
     request_origin: str,
     tickets_dir: Path,
+    *,
+    change_history_entry: ChangeHistoryEntry | None = None,
 ) -> EngineResponse:
     """Reopen a done/wontfix ticket."""
     if not ticket_id:
@@ -2393,6 +2407,8 @@ def _execute_reopen(
             new_text = new_text[:insert_pos].rstrip() + "\n" + entry + new_text[insert_pos:]
     else:
         new_text += reopen_entry
+    if change_history_entry is not None:
+        new_text = append_change_history_entry(new_text, change_history_entry)
 
     # Un-archive first: move before writing status change to prevent
     # "open but invisible" state if the rename fails.

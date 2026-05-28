@@ -133,6 +133,49 @@ def test_agent_primary_apply_turn_applies_update_through_gateway(tmp_path: Path)
     assert all(event["repo_context"] == expected_repo_context for event in events)
 
 
+def test_agent_primary_apply_turn_applies_correction_through_gateway(tmp_path: Path) -> None:
+    tickets_dir = _init_ticket_project(tmp_path)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="low")
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    context = _write_context(
+        tmp_path,
+        {
+            "candidate_mutations": [
+                {
+                    "ticket_id": "T-20260527-01",
+                    "action": "correction",
+                    "proposed_change": {"priority": "high"},
+                    "reason": "Correct the previous automatic priority update.",
+                    "evidence": [
+                        {
+                            "kind": "correction_detail",
+                            "ref": "previous automatic update used the wrong priority",
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    result = _apply_turn(tmp_path, context)
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "applied"
+    assert payload["changed"] is True
+    text = ticket.read_text(encoding="utf-8")
+    assert "priority: high" in text
+    assert "correction" in text
+    events = _events(tmp_path)
+    assert [event["status"] for event in events[:3]] == [
+        "pending",
+        "ticket_written",
+        "applied",
+    ]
+    assert events[0]["details"]["decision"] == "apply_correction"
+    assert "approval" not in events[0]["details"]
+
+
 def test_preview_and_discussion_modes_do_not_write_tickets(tmp_path: Path) -> None:
     tickets_dir = _init_ticket_project(tmp_path)
     ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01")

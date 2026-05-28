@@ -9,6 +9,13 @@ from urllib.parse import urlparse
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PLUGIN_ROOT.parents[2]
+PR22_REPAIR_CLOSEOUT = (
+    REPO_ROOT
+    / "docs"
+    / "superpowers"
+    / "closeouts"
+    / "2026-05-28-ticket-runtime-first-autonomy-pr22-review-repair.md"
+)
 ENGINE_RUNNER = PLUGIN_ROOT / "scripts" / "ticket_engine_runner.py"
 TICKET_PAYLOADS = PLUGIN_ROOT / "scripts" / "ticket_payloads.py"
 CAPTURE_SKILL = PLUGIN_ROOT / "skills" / "ticket-capture" / "SKILL.md"
@@ -120,6 +127,33 @@ def test_contract_names_host_facing_autonomy_cli_surface() -> None:
         "Ordinary high-level user mutation wrappers remain `capture`, `update`, and `ingest`."
         in normalized
     )
+
+
+def test_readme_and_handbook_list_all_host_facing_autonomy_commands() -> None:
+    commands = (
+        "ticket_autonomy.py pause",
+        "ticket_autonomy.py recover",
+        "ticket_autonomy.py apply-turn",
+        "ticket_autonomy.py doctor-ledger",
+        "ticket_autonomy.py migrate-change-history",
+    )
+    for path in (PLUGIN_ROOT / "README.md", PLUGIN_ROOT / "HANDBOOK.md"):
+        normalized = _normalize_whitespace(_read_text(path))
+        for command in commands:
+            assert f"`{command}`" in normalized
+
+
+def test_pr22_repair_closeout_records_test4_and_qualified_review_findings() -> None:
+    text = _read_text(PR22_REPAIR_CLOSEOUT)
+    normalized = _normalize_whitespace(text)
+
+    assert "Development Tenet Test 4" in text
+    assert "C14" in text
+    assert "undocumented rather than proven absent" in normalized
+    assert "C3" in text
+    assert "`--resume-paused`" in text
+    for finding_id in ("C1", "C2", "C4", "C5", "C6", "C7", "C8", "C11", "C13", "C15"):
+        assert finding_id in text
 
 
 def test_engine_docs_state_runner_is_not_public_mutation_surface() -> None:

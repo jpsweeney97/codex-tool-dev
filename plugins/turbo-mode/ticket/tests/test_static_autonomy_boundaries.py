@@ -78,7 +78,6 @@ ALLOWED_TICKET_WRITE_SITES = {
     ("ticket_engine_core.py", "_execute_reopen"),
     ("ticket_engine_core.py", "_execute_update"),
     ("ticket_engine_core.py", "_write_text_exclusive"),
-    ("ticket_engine_gateway.py", "_write_change_history_entry"),
 }
 ALLOWED_AUDIT_WRITE_SITES = {
     ("ticket_audit.py", "repair_audit_logs"),

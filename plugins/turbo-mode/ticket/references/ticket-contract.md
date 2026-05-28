@@ -173,6 +173,21 @@ Ordinary high-level user mutation wrappers remain `capture`, `update`, and
 `append-event`, `consume-approval`, or `mark-summarized`; ledger repair is only
 available through `doctor-ledger --confirm-repair`.
 
+`apply-turn --setup-choice` is setup only. If the workspace is paused, the
+command must keep returning the paused response unless the host also supplies
+`--resume-paused`. The explicit resume path must verify local-state safety and
+pending-summary ledger health before clearing the pause marker.
+
+`recover` is a projection command. It validates pending-summary state, compacts
+old correction-ready detail when safe, reports repairable and reconciliation
+counts, and returns `can_proceed: false` whenever prior-turn ledger records need
+`doctor-ledger` repair or manual reconciliation before new automatic writes.
+
+`doctor-ledger --dry-run` reports pending-summary health without mutation.
+`doctor-ledger --confirm-repair` may append only deterministic recovery events
+returned by the Ticket recovery projection. Corrupt/unreadable logs and live
+ticket fingerprint mismatches fail closed for manual reconciliation.
+
 ### Recovery Hints
 
 User-facing mutation and recovery surfaces may include `data.recovery_hint`.

@@ -7,6 +7,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import scripts.ticket_engine_gateway as gateway
 from scripts.ticket_autonomy_runtime import (
     AutonomyIntent,
     CandidateMutation,
@@ -15,7 +16,7 @@ from scripts.ticket_autonomy_runtime import (
     evaluate_autonomy_intent,
 )
 from scripts.ticket_dedup import target_fingerprint
-from scripts.ticket_engine_core import engine_execute
+from scripts.ticket_engine_core import EngineResponse, engine_execute
 from scripts.ticket_engine_gateway import (
     GatewayMutation,
     apply_autonomous_mutation,
@@ -89,6 +90,8 @@ def _mutation(
 
 def _events(project_root: Path) -> list[dict[str, object]]:
     path = project_root / ".codex" / "ticket-workspace" / "ticket.pending-summary.jsonl"
+    if not path.is_file():
+        return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
@@ -178,6 +181,45 @@ def test_gateway_rejects_missing_mismatched_reused_and_expired_approvals(
     assert expired.error_code == "gateway_required"
 
 
+def test_gateway_rejects_approval_when_live_mutation_fingerprint_differs(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
+    mutation = _mutation(tmp_tickets, ticket_path)
+    decision = _decision_for(ticket_id="T-20260527-01", target_fp=mutation.target_fingerprint or "")
+    forged_approval = dict(decision.approval or {})
+    forged_approval["mutation_fingerprint"] = "sha256:not-the-live-mutation"
+    forged = decision.__class__(
+        decision.candidate,
+        decision.kind,
+        decision.mutation_id,
+        forged_approval,
+        decision.engine_dispatch,
+        decision.reason,
+        decision.pending_summary_status,
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=forged,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    assert response.state == "policy_blocked"
+    assert "mutation_fingerprint_mismatch" in response.message
+    assert "priority: high" in ticket_path.read_text(encoding="utf-8")
+    pending_summary_path = (
+        project_root / ".codex" / "ticket-workspace" / "ticket.pending-summary.jsonl"
+    )
+    assert not pending_summary_path.exists()
+
+
 def test_gateway_applies_update_records_events_and_writes_change_history(tmp_tickets: Path) -> None:
     project_root = tmp_tickets.parent.parent
     _declare_ignored_workspace(project_root)
@@ -223,6 +265,58 @@ def test_gateway_applies_update_records_events_and_writes_change_history(tmp_tic
         pending_summary=PendingSummaryStore(project_root),
     )
     assert reused.error_code == "gateway_required"
+
+
+def test_gateway_autonomous_create_stops_at_duplicate_candidate(tmp_tickets: Path) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    today = datetime.now(UTC).date().isoformat()
+    make_ticket(
+        tmp_tickets,
+        "existing.md",
+        id="T-20260527-01",
+        date=today,
+        title="Fix auth bug",
+        problem="Auth times out.",
+    )
+    fields = {
+        "title": "Fix auth bug",
+        "problem": "Auth times out.",
+        "priority": "high",
+        "key_file_paths": ["test.py"],
+    }
+    candidate = CandidateMutation(
+        ticket_id=None,
+        action="create",
+        proposed_change=fields,
+        evidence=(EvidenceLink("current_thread_reason", "same issue"),),
+    )
+    decision = evaluate_autonomy_intent(
+        AutonomyIntent(
+            action_kind="create",
+            candidates=(candidate,),
+            source_context={},
+        ),
+        current_mode="agent_primary",
+        thread_id="thread-1",
+        turn_id="turn-1",
+        now=datetime.now(UTC),
+    )[0]
+    mutation = GatewayMutation("create", None, fields, tmp_tickets, None)
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    assert response.state == "duplicate_candidate"
+    assert response.error_code == "duplicate_candidate"
+    assert len(list(tmp_tickets.glob("*.md"))) == 1
 
 
 def test_gateway_recovers_missing_write_events_without_rewriting_ticket(
@@ -332,6 +426,77 @@ def test_pending_summary_failure_and_pause_prevent_ticket_mutation(tmp_tickets: 
     assert paused.state == "policy_blocked"
     assert paused.data["pause_reason"] == "user_requested"
     assert ticket_path.read_text(encoding="utf-8") == before
+    assert _events(project_root) == []
+
+
+def test_gateway_rechecks_pause_after_approval_consumption_before_dispatch(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
+    before = ticket_path.read_text(encoding="utf-8")
+    mutation = _mutation(tmp_tickets, ticket_path)
+    decision = _decision_for(ticket_id="T-20260527-01", target_fp=mutation.target_fingerprint or "")
+    checks = iter([False, True])
+
+    monkeypatch.setattr(gateway, "_workspace_is_paused", lambda _project_root: next(checks))
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    assert response.state == "policy_blocked"
+    assert response.data["pause_reason"] == "workspace_paused"
+    assert ticket_path.read_text(encoding="utf-8") == before
+    assert [event["status"] for event in _events(project_root)] == [
+        "pending",
+        "approval_consumed",
+    ]
+
+
+def test_gateway_treats_success_without_ticket_path_as_failed_mutation(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
+    before = ticket_path.read_text(encoding="utf-8")
+    mutation = _mutation(tmp_tickets, ticket_path)
+    decision = _decision_for(ticket_id="T-20260527-01", target_fp=mutation.target_fingerprint or "")
+
+    monkeypatch.setattr(
+        gateway,
+        "_execute_dispatch",
+        lambda **_kwargs: EngineResponse("ok_update", "Updated without path", data={}),
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    assert response.state == "policy_blocked"
+    assert "ticket_path_missing" in response.message
+    assert ticket_path.read_text(encoding="utf-8") == before
+    assert [event["status"] for event in _events(project_root)] == [
+        "pending",
+        "approval_consumed",
+        "failed",
+    ]
 
 
 def test_gateway_dispatch_maps_ticket_actions_and_rejects_archive_smuggling(
@@ -389,7 +554,7 @@ def test_static_guard_keeps_autonomy_ticket_writes_named() -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     allowed: dict[str, set[str]] = {
         "ticket_autonomy.py": {"_run_migrate_change_history"},
-        "ticket_engine_gateway.py": {"_write_change_history_entry"},
+        "ticket_engine_gateway.py": {"_release_gateway_write_lock"},
     }
     checked = [
         plugin_root / "scripts" / "ticket_autonomy.py",
