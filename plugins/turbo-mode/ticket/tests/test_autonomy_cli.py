@@ -494,6 +494,116 @@ def test_apply_turn_summarizes_applied_mutation_before_next_turn(
     assert json.loads(second.stdout)["state"] == "no_change"
 
 
+def test_apply_turn_summarizes_terminal_failed_mutation_before_next_turn(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    first_context = _write_context(
+        tmp_path,
+        candidate_mutations=[
+            {
+                "ticket_id": "T-20260527-01",
+                "action": "update",
+                "proposed_change": {"priority": "not-a-priority"},
+                "evidence": [{"kind": "current_thread_reason", "ref": "current turn"}],
+            }
+        ],
+    )
+
+    first = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(first_context),
+    )
+    second_context = _write_context(tmp_path, turn_id="turn-2")
+    second = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-2",
+        "--context-file",
+        str(second_context),
+    )
+    events = PendingSummaryStore(tmp_path).read_events()
+    failed_ids = {
+        event["mutation_id"]
+        for event in events
+        if event["event_type"] == "mutation_status" and event["status"] == "failed"
+    }
+    receipt_ids = {
+        event["mutation_id"]
+        for event in events
+        if event["event_type"] == "summary_receipt"
+    }
+
+    assert first.returncode == 0
+    assert json.loads(first.stdout)["state"] == "discussion_required"
+    assert "priority: high" in ticket.read_text(encoding="utf-8")
+    assert len(failed_ids) == 1
+    assert failed_ids <= receipt_ids
+    assert second.returncode == 0
+    assert json.loads(second.stdout)["state"] == "no_change"
+
+
+def test_apply_turn_reports_created_ticket_id_in_summary(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    context = _write_context(
+        tmp_path,
+        candidate_mutations=[
+            {
+                "ticket_id": None,
+                "action": "create",
+                "proposed_change": {
+                    "title": "Created by autonomy",
+                    "problem": "The automatic create path needs an observable ticket id.",
+                    "priority": "medium",
+                },
+                "evidence": [{"kind": "current_thread_reason", "ref": "current turn"}],
+            }
+        ],
+    )
+
+    result = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+    payload = json.loads(result.stdout)
+    tickets = list((tmp_path / "docs" / "tickets").glob("*.md"))
+    assert len(tickets) == 1
+    ticket_text = tickets[0].read_text(encoding="utf-8")
+    created_id = next(
+        line.removeprefix("id:").strip()
+        for line in ticket_text.splitlines()
+        if line.startswith("id:")
+    )
+
+    assert result.returncode == 0
+    assert payload["state"] == "applied"
+    assert created_id.startswith("T-")
+    assert payload["ticket_updates"]["Applied"] == [created_id]
+    assert payload["commit_dispositions"][0]["ticket_id"] == created_id
+
+
 def test_apply_turn_id_only_ticket_mention_does_not_mutate_ticket(
     tmp_path: Path,
 ) -> None:

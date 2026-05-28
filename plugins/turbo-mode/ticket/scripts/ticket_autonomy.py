@@ -485,6 +485,28 @@ def _commit_disposition_summary(
     return summary
 
 
+def _ticket_label(candidate_ticket_id: str | None, response_ticket_id: str | None = None) -> str:
+    if isinstance(response_ticket_id, str) and response_ticket_id:
+        return response_ticket_id
+    if isinstance(candidate_ticket_id, str) and candidate_ticket_id:
+        return candidate_ticket_id
+    return "new ticket"
+
+
+def _summarizable_terminal_mutation_id(
+    *,
+    store: PendingSummaryStore,
+    thread_id: str,
+    mutation_id: str | None,
+) -> str | None:
+    if not isinstance(mutation_id, str):
+        return None
+    state = store.derive_mutation_state(thread_id=thread_id, mutation_id=mutation_id)
+    if state == "status_recorded":
+        return mutation_id
+    return None
+
+
 def _current_ticket_fingerprint_for_event(
     project_root: Path,
     event: Mapping[str, object],
@@ -887,11 +909,11 @@ def _run_apply_turn_with_mode(
     skipped: list[str] = []
     discussion: list[str] = []
     commit_dispositions: list[dict[str, object]] = []
-    applied_mutation_ids: list[str] = []
+    summary_mutation_ids: list[str] = []
     discussion_question: str | None = None
 
     for decision in decisions:
-        ticket_id = decision.candidate.ticket_id or "new ticket"
+        ticket_id = _ticket_label(decision.candidate.ticket_id)
         if decision.kind in {
             RuntimeDecisionKind.APPLY_AUTONOMOUSLY,
             RuntimeDecisionKind.APPLY_CORRECTION,
@@ -917,10 +939,16 @@ def _run_apply_turn_with_mode(
                 decision=decision,
                 pending_summary=store,
             )
+            ticket_id = _ticket_label(decision.candidate.ticket_id, response.ticket_id)
+            summary_mutation_id = _summarizable_terminal_mutation_id(
+                store=store,
+                thread_id=str(context["thread_id"]),
+                mutation_id=decision.mutation_id,
+            )
+            if summary_mutation_id is not None:
+                summary_mutation_ids.append(summary_mutation_id)
             if response.state.startswith("ok_"):
                 applied.append(ticket_id)
-                if isinstance(decision.mutation_id, str):
-                    applied_mutation_ids.append(decision.mutation_id)
                 commit_summary = _commit_disposition_summary(ticket_id, response.data)
                 if commit_summary is not None:
                     commit_dispositions.append(commit_summary)
@@ -952,7 +980,7 @@ def _run_apply_turn_with_mode(
         thread_id=str(context["thread_id"]),
         turn_id=str(context["turn_id"]),
         repo_context=repo_context,
-        mutation_ids=tuple(applied_mutation_ids),
+        mutation_ids=tuple(summary_mutation_ids),
     )
     _emit(
         _summary_payload(
