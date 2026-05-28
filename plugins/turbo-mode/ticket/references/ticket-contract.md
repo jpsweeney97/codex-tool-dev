@@ -6,7 +6,15 @@ Single source of truth for the ticket plugin. All components (skills, agents, en
 
 - Active tickets: `docs/tickets/`
 - Archived tickets: `docs/tickets/closed-tickets/`
-- Audit trail: `docs/tickets/.audit/YYYY-MM-DD/<session_id>.jsonl`
+- Future autonomous durable history writes to `## Change History` on each
+  affected ticket.
+- Future local operational state writes to
+  `.codex/ticket-workspace/ticket.pending-summary.jsonl`.
+- Existing `docs/tickets/.audit/` files are historical artifacts. Future
+  `.audit/` writes are disabled; autonomous Ticket durable history must not
+  write there unless a later migration explicitly changes this contract.
+  `ticket_audit.py` and `ticket_doctor.py repair-audit` are read/repair tools
+  for existing historical `.audit/` files only.
 - Path boundary: hook payload files and all CLI `tickets_dir` arguments must resolve inside workspace/project root
 - tickets_dir resolution: CLI entrypoints resolve tickets_dir against a marker-based project root (nearest ancestor containing .codex/ or .git/), not against cwd. Root discovery starts from a resolved path, so symlinked cwd values are canonicalized before marker lookup. Explicit tickets_dir must resolve inside the project root. If no project root is found, the operation is rejected (policy_blocked).
 - Naming: `YYYY-MM-DD-<slug>.md`
@@ -54,7 +62,16 @@ Single source of truth for the ticket plugin. All components (skills, agents, en
 
 Recommended core sections: Problem, Approach, Acceptance Criteria, Verification, Key Files
 
-Runtime note (v1.0): missing sections are advisory warnings/process failures, not hard runtime schema rejections.
+Autonomous runtime requirement: `## Change History` is required for tickets
+created or mutated by the autonomous Ticket flow.
+Runtime note (v1.0): missing sections are advisory warnings/process failures,
+not hard runtime schema rejections, except that autonomous mutation must fail
+closed when `## Change History` cannot carry its required durable fact.
+Historical tickets missing `## Change History` are bootstrapped only through the
+explicit maintenance command `ticket_autonomy.py migrate-change-history
+--dry-run|--apply`. `--dry-run` is non-mutating. `--apply` inserts missing
+empty sections only; it does not add entries and does not write the current
+commit hash.
 Runtime note (v1.0): `update` mutates YAML frontmatter only. Section-backed fields are not writable through the `update` action.
 Capture-created tickets support these body sections: Captured Request, Problem, Next Action, Acceptance Criteria.
 Capture metadata never stores a raw user wording field; the rendered Captured Request section is a synthesized ticket section, not schema provenance.
@@ -65,7 +82,62 @@ Captured Request, Next Action, Context, Prior Investigation, Decisions Made, Rel
 
 ### Section Ordering
 
-Captured Request → Problem → Next Action → Context → Prior Investigation → Approach → Decisions Made → Acceptance Criteria → Verification → Key Files → Related → Reopen History
+Captured Request → Problem → Next Action → Context → Prior Investigation → Approach → Decisions Made → Acceptance Criteria → Verification → Key Files → Related → Change History → Reopen History
+
+### Change History
+
+`## Change History` is a required ticket-owned section for durable lightweight
+history facts in the autonomous Ticket contract. Use it for compact entries
+that should remain with the ticket, including automatic Ticket updates and
+approved corrections.
+
+Entry format:
+
+```markdown
+- <timestamp> | <label> | <reason>
+- <timestamp> | <label> | <reason> Prior commit: <short-hash>.
+```
+
+Rules:
+
+- timestamp is ISO 8601 UTC
+- label is one of the controlled labels below
+- reason is one short sentence and must not contain raw `|`
+- no current commit hash in the same entry
+- prior commit hash appears only when referencing an already-created commit is
+  genuinely useful
+- automatic writers must not create labels outside the controlled set
+- unknown labels, compatibility aliases, or ad hoc labels are invalid for new
+  automatic entries
+
+Controlled labels:
+
+- `auto-create`: Codex automatically created this ticket for clear follow-up
+  work.
+- `auto-update`: Codex automatically updated non-lifecycle ticket metadata,
+  refinement text, priority, tags, component, or other ordinary fields.
+- `auto-blocker`: Codex automatically changed blocker or dependency state.
+- `auto-close`: Codex automatically closed the ticket as `done` or `wontfix`.
+- `auto-reopen`: Codex automatically reopened the ticket.
+- `correction`: Codex corrected or reversed a prior automatic Ticket change.
+- `discussion-approved`: Codex applied a change after policy required user
+  discussion, such as delete, archive, or history repair. Do not use this label
+  for ordinary user-requested Ticket changes that fit an action-specific label.
+
+Keep YAML frontmatter for current ticket metadata, not a growing history log.
+Do not store local pending-summary detail or full before/after correction
+payloads in `## Change History`.
+Do not try to write the containing commit's own hash into the same committed
+ticket change. That hash is self-referential and does not exist when the ticket
+file is written. The end-of-turn summary may report the created commit hash,
+and a later `## Change History` entry may reference an earlier commit hash when
+that is genuinely useful.
+
+When an automatic Ticket mutation needs a durable lightweight history fact, the
+`## Change History` entry must be written as part of the same ticket-file
+mutation. If the automatic flow cannot create or update `## Change History`
+cleanly, it must pause or defer the automatic ticket change rather than leave
+durable project history incomplete.
 
 ### Capture Refinement Semantics
 
@@ -91,6 +163,44 @@ Exit codes: 0 (success), 1 (engine error), 2 (validation failure)
 ### Supported Mutation Surfaces
 
 Ticket has exactly three supported high-level mutation surfaces: `capture`, `update`, and `ingest`. `capture` and `update` use their preview-first prepare/execute wrappers. `ingest` uses the guarded engine entrypoints to consume a DeferredWorkEnvelope from `docs/tickets/.envelopes/<filename>.json`. Direct engine `classify`/`plan`/`preflight`/`execute` and `ticket_workflow.py prepare`/`execute` remain low-level compatibility, debug, and agent-internal paths. They are not normal user-facing mutation interfaces and must not be documented as the preferred way to create or mutate tickets.
+
+### Host-Facing Autonomy Surface
+
+`ticket_autonomy.py pause`, `recover`, `apply-turn`, `doctor-ledger`, and
+`migrate-change-history` are the host-facing Ticket autonomy CLI commands.
+Ordinary high-level user mutation wrappers remain `capture`, `update`, and
+`ingest`. The autonomy CLI does not expose raw ledger mutation commands such as
+`append-event`, `consume-approval`, or `mark-summarized`; ledger repair is only
+available through `doctor-ledger --confirm-repair`.
+
+`apply-turn --setup-choice` is setup only. If the workspace is paused, the
+command must keep returning the paused response unless the host also supplies
+`--resume-paused`. The explicit resume path must verify local-state safety and
+pending-summary ledger health before clearing the pause marker.
+
+Structured turn-context `candidate_mutations` may include optional
+`ticket_change_scope: "current_branch" | "unrelated_backlog"`. Missing or
+invalid values normalize to `"current_branch"`. The scope is not ticket content:
+it must bind the candidate/gateway mutation fingerprint and the resulting
+approval, then flow only to commit disposition. Path-derived and text-derived
+candidates always use `"current_branch"`.
+
+Before candidate discovery or new writes, `apply-turn` must compact safe
+correction-ready ledger detail and check prior-turn pending-summary recovery
+needs. If prior-turn ledger repair is required, it exits 3 with the normal
+paused response, `pause_reason: "repair"`, `recoveries`, `repairable_count`,
+`reconciliation_count`, and the existing `doctor-ledger --confirm-repair`
+discussion question.
+
+`recover` is a projection command. It validates pending-summary state, compacts
+old correction-ready detail when safe, reports repairable and reconciliation
+counts, and returns `can_proceed: false` whenever prior-turn ledger records need
+`doctor-ledger` repair or manual reconciliation before new automatic writes.
+
+`doctor-ledger --dry-run` reports pending-summary health without mutation.
+`doctor-ledger --confirm-repair` may append only deterministic recovery events
+returned by the Ticket recovery projection. Corrupt/unreadable logs and live
+ticket fingerprint mismatches fail closed for manual reconciliation.
 
 ### Recovery Hints
 
@@ -179,9 +289,27 @@ Runtime activation driver failures use:
 
 ## 5. Autonomy Model
 
-Modes: suggest (default), auto_audit, auto_silent (v1.1 only)
+Runtime-first modes: `discussion_only`, `preview`, and `agent_primary`.
 
-Config: `.codex/ticket.local.md` YAML frontmatter
+Config is strict local `.codex/ticket.local.md` JSON:
+
+```json
+{"schema":"codex.ticket.local.v1","mode":"agent_primary"}
+```
+
+The config file accepts exactly `schema` and `mode`. Missing config, unknown
+keys, Markdown, YAML frontmatter, comments, and older mode names are
+`setup_required`, not implicit defaults. Guided setup maps `automatic` to
+`agent_primary` and `ask_first` to `discussion_only`; `preview` is manual-only
+config.
+
+Workspace state lives under ignored `.codex/ticket-workspace/`. Mode snapshots
+are scoped to `(project_root, thread_id)`: the first automatic turn in a thread
+reads strict config and writes a local snapshot, and later turns reuse that
+snapshot even if `.codex/ticket.local.md` changes. `.codex/ticket-workspace/pause.json`
+blocks autonomous mode resolution immediately. Production resume requires an
+explicit setup choice, removes the pause marker, invalidates project-local mode
+snapshots, and rewrites strict JSON config before later automatic writes can run.
 
 `request_origin`: "user" (ticket_engine_user.py), "agent" (ticket_engine_agent.py), "unknown" (fail closed)
 
@@ -212,24 +340,21 @@ Stage-specific missing-confidence behavior: preflight entrypoints coerce absent 
 
 Agent execute re-reads live `.codex/ticket.local.md` policy and blocks if it diverges from the preflight snapshot.
 
-Activation V1 certifies only `ticket_engine_agent.py execute`. Activation V1
-proves installed hook-mediated direct-execute wiring, not host-owned or
-spawned-agent identity. `hook_request_origin` is hook-observed provenance
-metadata on the current host and may still be reported as `"user"` for the
-certified direct-execute lane. `capture`, `update`, and `ticket_workflow.py`
-remain outside the activation proof scope alongside `ingest_dispatch` and
-`activation_smoke_bootstrap`, and require a separate follow-up before widening
-certification. Privileged host diagnostic runs and prompt-driven smokes are
-diagnostics only. AgentControl child smoke, when captured, is same-membrane
-corroboration only and not identity proof. Normal agent direct execute fails
-with `runtime_readiness_required` when the runtime proof is missing, stale, or
-mismatched.
+Direct `ticket_engine_agent.py execute` is not an autonomous mutation route in
+the runtime-first design. It fails closed with `gateway_required`. Source
+autonomous writes enter through `ticket_autonomy.py apply-turn`, where the
+runtime-first gateway validates a gateway-approved decision, writes
+ticket-local `## Change History`, and appends pending-summary bookkeeping. This
+is a fail-closed source boundary, not installed-runtime proof.
 
 Field validation: title, problem, reopen_reason, captured_request, next_action, capture_source, and component must be strings when present. priority, status, resolution, capture_confidence, and refinement_status are validated against contract enums before writes. key_file_paths, related_paths, tags, blocked_by, blocks, and acceptance_criteria must be lists of strings. source must be a dict with string values. key_files must be a list of dicts. defer must be a dict. Invalid inputs are rejected (need_fields), not silently coerced.
 
 Renderer invariant: `acceptance_criteria` is create-time `list[string]` input only. Bare strings are rejected before rendering and are not coerced into a single checklist item.
 
-Known limitation (v1.3): create now uses exclusive file creation with bounded retry to prevent same-path silent overwrite, but concurrent autonomous creates are still not fully serialized. Session create cap enforcement and ID allocation are not lock-based, so parallel subagent execution is not a hard safety boundary.
+Known limitation (v1.3): create now uses exclusive file creation with bounded
+retry to prevent same-path silent overwrite. Runtime-first autonomous
+serialization belongs to the gateway/pending-summary implementation, not to
+legacy direct execute.
 
 ## 6. Dedup Policy
 

@@ -9,8 +9,9 @@ and maintenance workflows. It is provided without warranty. You are responsible
 for reviewing generated ticket previews, confirming mutations before execution,
 and checking repair or doctor output before approving any maintenance action.
 
-Ticket files and audit logs are project artifacts. Review them before sharing,
-publishing, deleting, repairing, or relying on them for release decisions.
+Ticket files, local Ticket workspace state, processed envelopes, and historical
+audit logs are project artifacts. Review them before sharing, publishing,
+deleting, repairing, or relying on them for release decisions.
 
 Installed-runtime behavior, cache refresh, hook registration, and runtime proof
 are separate operational steps from editing this source tree.

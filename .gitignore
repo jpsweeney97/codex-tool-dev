@@ -20,6 +20,8 @@ docs/handoffs/*.md
 # Ticket plugin runtime audit ledger is local by default (see ADR 0005; mirrors handoff policy).
 docs/tickets/.audit/
 .codex/local/
+.codex/ticket-workspace/
+.codex/ticket.local.md
 .codex/ticket-tmp/
 .codex/plugin-dev/**/.codex/ticket-tmp/
 .codex/plugin-dev/
@@ -28,3 +30,4 @@ docs/tickets/.audit/
 .codex/ticket-runtime-smoke-preflight/
 .codex/ticket-runtime-smoke/
 .worktrees/
+docs/reviews/

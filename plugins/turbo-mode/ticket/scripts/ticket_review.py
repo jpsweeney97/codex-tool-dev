@@ -51,6 +51,27 @@ def audit_payload(tickets_dir: Path, *, days: int = 7) -> dict[str, Any]:
     }
 
 
+def hygiene_candidates_from_review(payload: dict[str, Any]) -> dict[str, Any]:
+    """Build discussion-gated hygiene candidates from read-only review data."""
+    findings: list[dict[str, Any]] = []
+    stale = payload.get("stale", [])
+    if isinstance(stale, list):
+        for item in stale:
+            if not isinstance(item, dict):
+                continue
+            ticket_id = item.get("id")
+            if not isinstance(ticket_id, str) or not ticket_id:
+                continue
+            findings.append(
+                {
+                    "ticket_id": ticket_id,
+                    "action": "stale_cleanup",
+                    "reason": "Ticket review found a stale active ticket.",
+                }
+            )
+    return {"state": "ok", "review_hygiene_findings": findings}
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 

@@ -4,14 +4,16 @@ import json
 from pathlib import Path
 
 import pytest
+from scripts.ticket_autonomy_config import AutomationMode, write_local_config
 from scripts.ticket_dedup import dedup_fingerprint as compute_dedup_fp
+from scripts.ticket_dedup import target_fingerprint as compute_target_fp
 from scripts.ticket_engine_runner import run
 from scripts.ticket_runtime_readiness import (
     RUNTIME_ACTIVATION_BOOTSTRAP_ENV,
     RUNTIME_PROOF_PATH_ENV,
 )
 
-from tests.support.builders import write_autonomy_config
+from tests.support.builders import make_ticket, write_autonomy_config
 
 
 def _write_payload(root: Path, payload: dict[str, object]) -> str:
@@ -34,8 +36,7 @@ def _agent_create_payload(problem: str, hook_origin: str | None = "user") -> dic
         "classify_confidence": 0.95,
         "dedup_fingerprint": compute_dedup_fp(problem, []),
         "autonomy_config": {
-            "mode": "auto_audit",
-            "max_creates": 5,
+            "mode": "agent_primary",
             "warnings": [],
         },
     }
@@ -44,39 +45,88 @@ def _agent_create_payload(problem: str, hook_origin: str | None = "user") -> dic
     return payload
 
 
-def test_agent_execute_with_user_hook_origin_reaches_runtime_readiness_gate(
-    tmp_tickets: Path,
-    capsys,
-    monkeypatch,
-) -> None:
+def _snapshot_ticket_files(tickets_dir: Path) -> dict[str, str]:
+    return {
+        path.relative_to(tickets_dir).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(tickets_dir.glob("*.md"))
+    }
+
+
+def _write_old_mode_config(tickets_dir: Path, mode: str) -> None:
     write_autonomy_config(
-        tmp_tickets,
-        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
+        tickets_dir,
+        f"---\nautonomy_mode: {mode}\nmax_creates_per_session: 5\n---\n",
     )
-    project_root = tmp_tickets.parent.parent
-    monkeypatch.chdir(project_root)
-    problem = "Runner should reach the runtime readiness gate."
-    payload_file = _write_payload(
-        project_root,
-        {
+
+
+def _old_mode_agent_execute_payload(
+    tickets_dir: Path,
+    *,
+    action: str,
+    mode: str,
+) -> dict[str, object]:
+    session_id = f"runner-{mode}-{action}"
+    if action == "create":
+        problem = f"Old {mode} direct create must require the gateway."
+        return {
             "action": "create",
             "fields": {
-                "title": "Runtime gate",
+                "title": "Gateway required",
                 "problem": problem,
                 "priority": "medium",
             },
-            "session_id": "runner-session",
+            "session_id": session_id,
             "hook_injected": True,
             "hook_request_origin": "user",
             "classify_intent": "create",
             "classify_confidence": 0.95,
             "dedup_fingerprint": compute_dedup_fp(problem, []),
-            "autonomy_config": {
-                "mode": "auto_audit",
-                "max_creates": 5,
-                "warnings": [],
-            },
-        },
+            "autonomy_config": {"mode": mode, "max_creates": 5, "warnings": []},
+        }
+
+    status = "done" if action == "reopen" else "open"
+    ticket_path = make_ticket(
+        tickets_dir,
+        f"2026-03-02-{action}-{mode}.md",
+        id="T-20260302-01",
+        status=status,
+    )
+    fields_by_action: dict[str, dict[str, object]] = {
+        "update": {"priority": "low"},
+        "close": {"resolution": "done"},
+        "reopen": {"reopen_reason": "Need another pass."},
+    }
+    return {
+        "action": action,
+        "ticket_id": "T-20260302-01",
+        "fields": fields_by_action[action],
+        "session_id": session_id,
+        "hook_injected": True,
+        "hook_request_origin": "user",
+        "classify_intent": action,
+        "classify_confidence": 0.95,
+        "target_fingerprint": compute_target_fp(ticket_path),
+        "autonomy_config": {"mode": mode, "max_creates": 5, "warnings": []},
+    }
+
+
+@pytest.mark.parametrize("action", ["create", "update", "close", "reopen"])
+@pytest.mark.parametrize("mode", ["auto_audit", "auto_silent", "suggest"])
+def test_agent_execute_old_autonomy_modes_require_gateway_decision(
+    tmp_tickets: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+    mode: str,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    _write_old_mode_config(tmp_tickets, mode)
+    payload = _old_mode_agent_execute_payload(tmp_tickets, action=action, mode=mode)
+    before = _snapshot_ticket_files(tmp_tickets)
+    payload_file = _write_payload(
+        project_root,
+        payload,
     )
 
     exit_code = run("agent", ["execute", payload_file], prog="ticket_engine_agent.py")
@@ -84,7 +134,9 @@ def test_agent_execute_with_user_hook_origin_reaches_runtime_readiness_gate(
     assert exit_code == 1
     response = json.loads(capsys.readouterr().out)
     assert response["state"] == "policy_blocked"
-    assert response["error_code"] == "runtime_readiness_required"
+    assert response["error_code"] == "gateway_required"
+    assert _snapshot_ticket_files(tmp_tickets) == before
+    assert not (tmp_tickets / ".audit").exists()
 
 
 def test_agent_execute_with_unknown_hook_origin_rejects_before_runtime_gate(
@@ -92,10 +144,7 @@ def test_agent_execute_with_unknown_hook_origin_rejects_before_runtime_gate(
     capsys,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    write_autonomy_config(
-        tmp_tickets,
-        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
-    )
+    write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
     project_root = tmp_tickets.parent.parent
     monkeypatch.chdir(project_root)
     payload_file = _write_payload(
@@ -121,10 +170,7 @@ def test_agent_user_hook_origin_bypass_is_execute_only(
     monkeypatch: pytest.MonkeyPatch,
     subcommand: str,
 ) -> None:
-    write_autonomy_config(
-        tmp_tickets,
-        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
-    )
+    write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
     project_root = tmp_tickets.parent.parent
     monkeypatch.chdir(project_root)
     payload_file = _write_payload(
@@ -139,15 +185,12 @@ def test_agent_user_hook_origin_bypass_is_execute_only(
     assert response["error_code"] == "origin_mismatch"
 
 
-def test_agent_execute_with_agent_hook_origin_uses_normal_runtime_gate(
+def test_agent_execute_with_agent_hook_origin_requires_gateway_before_runtime_gate(
     tmp_tickets: Path,
     capsys,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    write_autonomy_config(
-        tmp_tickets,
-        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
-    )
+    write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
     project_root = tmp_tickets.parent.parent
     missing_proof = project_root / ".codex" / "agent-hook-runtime-proof.json"
     monkeypatch.chdir(project_root)
@@ -165,20 +208,16 @@ def test_agent_execute_with_agent_hook_origin_uses_normal_runtime_gate(
     assert exit_code == 1
     response = json.loads(capsys.readouterr().out)
     assert response["state"] == "policy_blocked"
-    assert response["error_code"] == "runtime_readiness_required"
-    assert response["data"]["runtime_readiness"]["error_code"] == "proof_missing"
-    assert str(missing_proof) in response["data"]["runtime_readiness"]["message"]
+    assert response["error_code"] == "gateway_required"
+    assert "runtime_readiness" not in response.get("data", {})
 
 
-def test_agent_execute_with_missing_runtime_proof_env_reports_proof_missing(
+def test_agent_execute_with_missing_runtime_proof_env_still_requires_gateway_first(
     tmp_tickets: Path,
     capsys,
     monkeypatch,
 ) -> None:
-    write_autonomy_config(
-        tmp_tickets,
-        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
-    )
+    write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
     project_root = tmp_tickets.parent.parent
     missing_proof = project_root / ".codex" / "missing-runtime-proof.json"
     monkeypatch.chdir(project_root)
@@ -200,8 +239,7 @@ def test_agent_execute_with_missing_runtime_proof_env_reports_proof_missing(
             "classify_confidence": 0.95,
             "dedup_fingerprint": compute_dedup_fp(problem, []),
             "autonomy_config": {
-                "mode": "auto_audit",
-                "max_creates": 5,
+                "mode": "agent_primary",
                 "warnings": [],
             },
         },
@@ -212,9 +250,8 @@ def test_agent_execute_with_missing_runtime_proof_env_reports_proof_missing(
     assert exit_code == 1
     response = json.loads(capsys.readouterr().out)
     assert response["state"] == "policy_blocked"
-    assert response["error_code"] == "runtime_readiness_required"
-    assert response["data"]["runtime_readiness"]["error_code"] == "proof_missing"
-    assert str(missing_proof) in response["data"]["runtime_readiness"]["message"]
+    assert response["error_code"] == "gateway_required"
+    assert "runtime_readiness" not in response.get("data", {})
 
 
 def test_runner_passes_activation_bootstrap_only_with_execute_proof_env(
@@ -259,7 +296,7 @@ def test_runner_passes_activation_bootstrap_only_with_execute_proof_env(
             "classify_intent": "create",
             "classify_confidence": 0.95,
             "dedup_fingerprint": compute_dedup_fp("bootstrap", []),
-            "autonomy_config": {"mode": "auto_audit", "max_creates": 5, "warnings": []},
+            "autonomy_config": {"mode": "agent_primary", "warnings": []},
         },
     )
 

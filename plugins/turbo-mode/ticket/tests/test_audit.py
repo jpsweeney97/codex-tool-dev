@@ -1,4 +1,4 @@
-"""Tests for centralized audit wrapper in engine_execute."""
+"""Tests for historical audit support after runtime-first re-baseline."""
 
 from __future__ import annotations
 
@@ -10,26 +10,13 @@ from pathlib import Path
 
 import pytest
 from scripts.ticket_dedup import dedup_fingerprint as compute_dedup_fp
-from scripts.ticket_dedup import target_fingerprint as compute_target_fp
 from scripts.ticket_engine_core import (
     AUDIT_UNAVAILABLE,
     engine_count_session_creates,
     engine_execute,
 )
 
-from tests.support.builders import make_ticket
-
 _AUDIT_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "ticket_audit.py"
-
-
-def _read_audit_lines(tickets_dir: Path, session_id: str) -> list[dict]:
-    """Read all JSONL entries from the audit file for the given session."""
-    today = datetime.now(UTC).strftime("%Y-%m-%d")
-    audit_file = tickets_dir / ".audit" / today / f"{session_id}.jsonl"
-    if not audit_file.exists():
-        return []
-    lines = audit_file.read_text(encoding="utf-8").strip().split("\n")
-    return [json.loads(line) for line in lines if line.strip()]
 
 
 def _run_audit_cli(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -42,29 +29,17 @@ def _run_audit_cli(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-_REQUIRED_FIELDS = {
-    "ts",
-    "action",
-    "ticket_id",
-    "session_id",
-    "request_origin",
-    "autonomy_mode",
-    "result",
-    "changes",
-}
+class TestAuditRebaseline:
+    """Future runtime writes no longer use docs/tickets/.audit/."""
 
-
-class TestAuditAppend:
-    """Tests for the audit trail written by engine_execute."""
-
-    def test_audit_file_created_on_execute(self, tmp_tickets: Path) -> None:
-        """engine_execute creates an audit file on first call."""
-        session_id = "sess-create-1"
-        engine_execute(
+    def test_engine_execute_does_not_create_future_audit_files(
+        self, tmp_tickets: Path
+    ) -> None:
+        response = engine_execute(
             action="create",
             ticket_id=None,
-            fields={"title": "Test ticket", "problem": "Test problem"},
-            session_id=session_id,
+            fields={"title": "No audit", "problem": "Future writes use Change History."},
+            session_id="sess-no-audit",
             request_origin="user",
             dedup_override=False,
             dependency_override=False,
@@ -73,232 +48,51 @@ class TestAuditAppend:
             hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp("Test problem", []),
+            dedup_fingerprint=compute_dedup_fp("Future writes use Change History.", []),
         )
-        entries = _read_audit_lines(tmp_tickets, session_id)
-        assert len(entries) >= 1, "Audit file should exist with at least one entry"
 
-    def test_audit_attempt_started_before_result(self, tmp_tickets: Path) -> None:
-        """First entry is attempt_started, second is the action result."""
-        session_id = "sess-order-1"
-        engine_execute(
-            action="create",
-            ticket_id=None,
-            fields={"title": "Order test", "problem": "Order problem"},
-            session_id=session_id,
-            request_origin="user",
-            dedup_override=False,
-            dependency_override=False,
-            tickets_dir=tmp_tickets,
-            hook_injected=True,
-            hook_request_origin="user",
-            classify_intent="create",
-            classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp("Order problem", []),
-        )
-        entries = _read_audit_lines(tmp_tickets, session_id)
-        assert len(entries) == 2
-        assert entries[0]["action"] == "attempt_started"
-        assert entries[1]["action"] == "create"
+        assert response.state == "ok_create"
+        assert not (tmp_tickets / ".audit").exists()
 
-    def test_audit_entry_schema(self, tmp_tickets: Path) -> None:
-        """Each audit entry contains all required fields."""
-        session_id = "sess-schema-1"
-        engine_execute(
-            action="create",
-            ticket_id=None,
-            fields={"title": "Schema test", "problem": "Schema problem"},
-            session_id=session_id,
-            request_origin="user",
-            dedup_override=False,
-            dependency_override=False,
-            tickets_dir=tmp_tickets,
-            hook_injected=True,
-            hook_request_origin="user",
-            classify_intent="create",
-            classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp("Schema problem", []),
-        )
-        entries = _read_audit_lines(tmp_tickets, session_id)
-        assert len(entries) == 2
-        for entry in entries:
-            missing = _REQUIRED_FIELDS - set(entry.keys())
-            assert not missing, f"Entry missing fields: {missing}"
-
-    def test_audit_on_error_writes_result(self, tmp_tickets: Path) -> None:
-        """On non-exception error (e.g., invalid transition), audit still writes both entries."""
-
-        session_id = "sess-error-1"
-        ticket_path = make_ticket(
-            tmp_tickets, "2026-03-02-test.md", id="T-20260302-01", status="done"
-        )
-        engine_execute(
-            action="update",
-            ticket_id="T-20260302-01",
-            fields={"status": "in_progress"},
-            session_id=session_id,
-            request_origin="user",
-            dedup_override=False,
-            dependency_override=False,
-            tickets_dir=tmp_tickets,
-            hook_injected=True,
-            hook_request_origin="user",
-            classify_intent="update",
-            classify_confidence=0.95,
-            target_fingerprint=compute_target_fp(ticket_path),
-        )
-        # The update should fail (invalid transition done->in_progress) but not raise
-        entries = _read_audit_lines(tmp_tickets, session_id)
-        assert len(entries) == 2
-        assert entries[0]["action"] == "attempt_started"
-        assert entries[1]["action"] == "update"
-        # Result should reflect the error state, not None
-        assert entries[1]["result"] is not None
-
-    def test_audit_on_exception_writes_error_and_reraises(self, tmp_tickets: Path) -> None:
-        """On exception in dispatch, audit writes error entry then re-raises."""
-        from unittest.mock import patch
-
-        session_id = "sess-exception-1"
-        with patch(
-            "scripts.ticket_engine_core._execute_create",
-            side_effect=RuntimeError("boom"),
-        ):
-            with pytest.raises(RuntimeError, match="boom"):
-                engine_execute(
-                    action="create",
-                    ticket_id=None,
-                    fields={"title": "Test", "problem": "A problem"},
-                    session_id=session_id,
-                    request_origin="user",
-                    dedup_override=False,
-                    dependency_override=False,
-                    tickets_dir=tmp_tickets,
-                    hook_injected=True,
-                    hook_request_origin="user",
-                    classify_intent="create",
-                    classify_confidence=0.95,
-                    dedup_fingerprint=compute_dedup_fp("A problem", []),
-                )
-        entries = _read_audit_lines(tmp_tickets, session_id)
-        assert len(entries) == 2
-        assert entries[0]["action"] == "attempt_started"
-        assert entries[1]["action"] == "create"
-        assert entries[1]["result"] == "error:RuntimeError"
-
-    def test_audit_directory_creation(self, tmp_tickets: Path) -> None:
-        """.audit directory is created if it doesn't exist."""
-        session_id = "sess-dir-1"
+    def test_historical_audit_reader_still_counts_existing_files(
+        self, tmp_tickets: Path
+    ) -> None:
         today = datetime.now(UTC).strftime("%Y-%m-%d")
-        audit_dir = tmp_tickets / ".audit" / today
-        assert not audit_dir.exists(), "Audit dir should not exist before first call"
-
-        engine_execute(
-            action="create",
-            ticket_id=None,
-            fields={"title": "Dir test", "problem": "Dir problem"},
-            session_id=session_id,
-            request_origin="user",
-            dedup_override=False,
-            dependency_override=False,
-            tickets_dir=tmp_tickets,
-            hook_injected=True,
-            hook_request_origin="user",
-            classify_intent="create",
-            classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp("Dir problem", []),
-        )
-
-        assert audit_dir.exists(), "Audit dir should be created by engine_execute"
-        audit_file = audit_dir / f"{session_id}.jsonl"
-        assert audit_file.exists(), "Audit file should exist"
-
-    def test_audit_multiple_executions_append(self, tmp_tickets: Path) -> None:
-        """Multiple executions in same session append to same file (3 creates = 6 lines)."""
-        session_id = "sess-multi-1"
-        for i in range(3):
-            problem = f"Multi problem {i}"
-            engine_execute(
-                action="create",
-                ticket_id=None,
-                fields={"title": f"Multi test {i}", "problem": problem},
-                session_id=session_id,
-                request_origin="user",
-                dedup_override=False,
-                dependency_override=False,
-                tickets_dir=tmp_tickets,
-                hook_injected=True,
-                hook_request_origin="user",
-                classify_intent="create",
-                classify_confidence=0.95,
-                dedup_fingerprint=compute_dedup_fp(problem, []),
+        audit_file = tmp_tickets / ".audit" / today / "sess-historical.jsonl"
+        audit_file.parent.mkdir(parents=True)
+        audit_file.write_text(
+            json.dumps(
+                {
+                    "ts": "2026-05-27T00:00:00+00:00",
+                    "action": "attempt_started",
+                    "intent": "create",
+                    "ticket_id": None,
+                    "session_id": "sess-historical",
+                    "request_origin": "agent",
+                    "autonomy_mode": "auto_audit",
+                    "result": None,
+                    "changes": None,
+                }
             )
-        entries = _read_audit_lines(tmp_tickets, session_id)
-        assert len(entries) == 6, f"Expected 6 entries (3 creates x 2), got {len(entries)}"
-        # Verify alternating pattern
-        for i in range(3):
-            assert entries[i * 2]["action"] == "attempt_started"
-            assert entries[i * 2 + 1]["action"] == "create"
-
-    def test_audit_ts_is_iso_utc(self, tmp_tickets: Path) -> None:
-        """Timestamps are ISO 8601 with timezone info."""
-        session_id = "sess-ts-1"
-        engine_execute(
-            action="create",
-            ticket_id=None,
-            fields={"title": "TS test", "problem": "TS problem"},
-            session_id=session_id,
-            request_origin="user",
-            dedup_override=False,
-            dependency_override=False,
-            tickets_dir=tmp_tickets,
-            hook_injected=True,
-            hook_request_origin="user",
-            classify_intent="create",
-            classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp("TS problem", []),
+            + "\n",
+            encoding="utf-8",
         )
-        entries = _read_audit_lines(tmp_tickets, session_id)
-        for entry in entries:
-            ts = entry["ts"]
-            # Should parse as ISO 8601 with timezone
-            parsed = datetime.fromisoformat(ts)
-            assert parsed.tzinfo is not None, f"Timestamp {ts!r} should have timezone info"
+
+        assert engine_count_session_creates("sess-historical", tmp_tickets) == 1
 
 
 class TestSessionCounting:
     """Tests for engine_count_session_creates."""
 
-    def test_count_creates_in_session(self, tmp_tickets: Path) -> None:
-        """Creating 3 tickets yields a count of 3."""
-        session_id = "sess-count-1"
-        for i in range(3):
-            problem = f"Problem {i}"
-            engine_execute(
-                action="create",
-                ticket_id=None,
-                fields={"title": f"Count test {i}", "problem": problem},
-                session_id=session_id,
-                request_origin="user",
-                dedup_override=False,
-                dependency_override=False,
-                tickets_dir=tmp_tickets,
-                hook_injected=True,
-                hook_request_origin="user",
-                classify_intent="create",
-                classify_confidence=0.95,
-                dedup_fingerprint=compute_dedup_fp(problem, []),
-            )
-        assert engine_count_session_creates(session_id, tmp_tickets, request_origin="user") == 3
-
-    def test_count_ignores_non_create_actions(self, tmp_tickets: Path) -> None:
-        """Create + update in same session counts only the create."""
-        session_id = "sess-count-2"
-        resp = engine_execute(
+    def test_future_engine_creates_are_not_counted_without_historical_audit(
+        self, tmp_tickets: Path
+    ) -> None:
+        problem = "Future writes are tracked outside historical audit."
+        response = engine_execute(
             action="create",
             ticket_id=None,
-            fields={"title": "Update target", "problem": "A problem"},
-            session_id=session_id,
+            fields={"title": "Future count", "problem": problem},
+            session_id="sess-future-count",
             request_origin="user",
             dedup_override=False,
             dependency_override=False,
@@ -307,25 +101,11 @@ class TestSessionCounting:
             hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp("A problem", []),
+            dedup_fingerprint=compute_dedup_fp(problem, []),
         )
-        tid = resp.ticket_id
-        engine_execute(
-            action="update",
-            ticket_id=tid,
-            fields={"priority": "high"},
-            session_id=session_id,
-            request_origin="user",
-            dedup_override=False,
-            dependency_override=False,
-            tickets_dir=tmp_tickets,
-            hook_injected=True,
-            hook_request_origin="user",
-            classify_intent="update",
-            classify_confidence=0.95,
-            target_fingerprint=compute_target_fp(next(tmp_tickets.glob("*.md"))),
-        )
-        assert engine_count_session_creates(session_id, tmp_tickets, request_origin="user") == 1
+
+        assert response.state == "ok_create"
+        assert engine_count_session_creates("sess-future-count", tmp_tickets) == 0
 
     def test_count_missing_file_returns_zero(self, tmp_tickets: Path) -> None:
         """Non-existent session returns 0."""

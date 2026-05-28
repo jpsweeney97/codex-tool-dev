@@ -2,7 +2,7 @@
 
 A Codex plugin for capture-first repo-local ticket management from within Codex sessions.
 
-Tickets are stored as Markdown files with fenced YAML frontmatter in `docs/tickets/`. User-facing creation flows through `ticket-capture`, which synthesizes a compact preview from natural language and writes only after explicit confirmation. Existing-ticket lifecycle, metadata, and focused refinement changes flow through `ticket_update.py prepare` and `ticket_update.py execute`, which reuse the same engine, guard hook, and trust model as the lower-level 4-stage pipeline, with a full JSONL audit trail.
+Tickets are stored as Markdown files with fenced YAML frontmatter in `docs/tickets/`. User-facing creation flows through `ticket-capture`, which synthesizes a compact preview from natural language and writes only after explicit confirmation. Existing-ticket lifecycle, metadata, and focused refinement changes flow through `ticket_update.py prepare` and `ticket_update.py execute`, which reuse the same engine, guard hook, and trust model as the lower-level 4-stage pipeline.
 
 This directory is the source-authority package for the Ticket plugin. Installed
 cache and runtime artifacts are separate proof surfaces and may diverge until an
@@ -30,8 +30,8 @@ The plugin registers its hook, skills, and scripts automatically. No build step 
 - **Update existing tickets** with scoped lifecycle, frontmatter metadata, and focused refinement changes through preview-first `ticket_update.py` commands
 - **List, query, and check close readiness** with read-only filters and ID-prefix search
 - **Review backlog health** with the read-only `ticket_review.py` wrapper for stale detection, blocked dependency chains, size warnings, and next-action recommendations
-- **Doctor storage and audit logs** only when explicitly requested through `ticket_doctor.py`, with dry-run repair before mutation and confirmed stale payload cleanup
-- **Agent autonomy** — external agents can create tickets autonomously, gated by a configurable policy and elevated confidence thresholds
+- **Doctor storage and historical audit logs** only when explicitly requested through `ticket_doctor.py`, with dry-run repair before mutation and confirmed stale payload cleanup
+- **Runtime-first autonomy source work** — direct agent execution fails closed until the engine-owned gateway applies approved autonomous mutations
 
 ## Components
 
@@ -83,7 +83,7 @@ All mutations display a confirmation prompt (`y / edit / n`) before executing. N
 Intercepts all Bash commands, detects ticket script invocations, and:
 - **Engine entrypoints:** validates subcommand against allowlist, validates the absolute payload path stays within workspace, atomically injects trust fields (session_id, hook_injected, hook_request_origin) into the payload file
 - **Read-only scripts:** allows without injection
-- **Audit repair:** allows for user-origin, denies for agent-origin
+- **Historical audit repair:** allows for user-origin, denies for agent-origin
 - **Unknown `ticket_*.py` scripts:** denies (fail-closed catch-all)
 - **Non-ticket commands:** passes through silently
 
@@ -110,6 +110,16 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/t
 
 Both delegate to `ticket_engine_runner.py`, which dispatches to `ticket_engine_core.py`.
 
+**Host-facing autonomy entrypoints:**
+
+| Command | Purpose |
+|---------|---------|
+| `ticket_autonomy.py pause` | Write a workspace pause marker and force discussion-only local mode |
+| `ticket_autonomy.py recover` | Project pending-summary recovery state before new automatic writes |
+| `ticket_autonomy.py apply-turn` | Apply runtime-first turn candidates through the gateway |
+| `ticket_autonomy.py doctor-ledger` | Inspect or repair deterministic pending-summary ledger gaps |
+| `ticket_autonomy.py migrate-change-history` | Insert missing `## Change History` sections with dry-run/apply modes |
+
 **Read-only entrypoints:**
 
 | Script | Signature | Purpose |
@@ -118,7 +128,7 @@ Both delegate to `ticket_engine_runner.py`, which dispatches to `ticket_engine_c
 | `ticket_read.py` | `query <tickets_dir> <search_term>` | ID-prefix search |
 | `ticket_read.py` | `check <tickets_dir> <ticket_id>` | Close-readiness check |
 | `ticket_triage.py` | `dashboard <tickets_dir>` | Health dashboard |
-| `ticket_triage.py` | `audit <tickets_dir> [--days N]` | Audit trail summary (default 7 days) |
+| `ticket_triage.py` | `audit <tickets_dir> [--days N]` | Historical audit summary (default 7 days) |
 | `ticket_review.py` | `review <tickets_dir>` / `audit <tickets_dir> [--days N]` | User-facing read-only backlog review wrapper |
 | `ticket_doctor.py` | `diagnose <tickets_dir> --plugin-root <plugin_root> --cache-root <cache_root> [--runtime-probe-output <path>]` | User-facing explicit diagnostics wrapper |
 | `ticket_triage.py` | `doctor <tickets_dir> --plugin-root <plugin_root> --cache-root <cache_root> [--runtime-probe-output <path>]` | Static source/cache/project diagnostic |
@@ -130,7 +140,7 @@ Both delegate to `ticket_engine_runner.py`, which dispatches to `ticket_engine_c
 | `ticket_doctor.py` | `activate-runtime <tickets_dir> --marketplace-path <marketplace_path>` | User-facing direct_execute-only runtime activation wrapper |
 | `ticket_doctor.py` | `clean-stale-payloads <tickets_dir> [--confirm-clean-stale-payloads]` | User-facing confirmed cleanup for stale prepare payloads |
 | `ticket_doctor.py` | `repair-audit <tickets_dir> [--confirm-repair]` | User-facing dry-run-first audit repair wrapper |
-| `ticket_audit.py` | `repair <tickets_dir> [--fix | --dry-run]` | Repair corrupt JSONL audit logs backend (defaults to dry-run; `--fix` mutates) |
+| `ticket_audit.py` | `repair <tickets_dir> [--fix | --dry-run]` | Repair corrupt historical JSONL audit logs backend (defaults to dry-run; `--fix` mutates) |
 | `ticket_workflow.py` | `prepare <payload_file>` / `execute <payload_file>` / `recover <payload_file> <action>` | Internal/debugging legacy workflow runner for lower-level orchestration |
 
 **Response envelope (all engine commands):**
@@ -157,31 +167,21 @@ personal plugin copy as staging only, not the proof target.
 
 ## Configuration
 
-### Autonomy Policy
+### Runtime-First Autonomy State
 
-Controls agent-origin behavior. Configured per-project in `.codex/ticket.local.md` (YAML frontmatter):
+Future autonomous durable history writes to `## Change History` on each affected ticket. Future local operational state writes to `.codex/ticket-workspace/ticket.pending-summary.jsonl`. Existing `docs/tickets/.audit/` files are historical artifacts; `ticket_audit.py` and `ticket_doctor.py repair-audit` are read/repair tools for existing historical `.audit/` files only.
 
-```yaml
----
-autonomy_mode: suggest
-max_creates_per_session: 5
----
+Direct `ticket_engine_agent.py execute` is not an autonomous mutation route in this source slice. It fails closed with `gateway_required`. Source autonomous writes enter through `ticket_autonomy.py apply-turn`, where the runtime-first gateway validates a gateway-approved decision, appends pending-summary bookkeeping, and writes ticket-local `## Change History`. This is a fail-closed source boundary, not installed-runtime proof.
+
+Local automation setup is strict JSON at `.codex/ticket.local.md`:
+
+```json
+{"schema":"codex.ticket.local.v1","mode":"agent_primary"}
 ```
 
-| Field | Type | Default | Values |
-|-------|------|---------|--------|
-| `autonomy_mode` | string | `suggest` | `suggest`, `auto_audit`, `auto_silent` (v1.1 only) |
-| `max_creates_per_session` | int | `5` | Per-session cap on agent-created tickets; `0` disables agent creates |
+Allowed modes are `discussion_only`, `preview`, and `agent_primary`. Missing or invalid config is `setup_required`; the engine does not fall back to older YAML/frontmatter modes. Guided setup choices map `automatic` to `agent_primary` and `ask_first` to `discussion_only`; `preview` is manual-only config.
 
-| Mode | Behavior |
-|------|----------|
-| `suggest` (default) | Agent proposes tickets but cannot create them |
-| `auto_audit` | Agent can create tickets with full audit trail |
-| `auto_silent` | Reserved for v1.1 — not yet implemented, gated with explicit error |
-
-The agent entrypoint re-reads the live policy at execute time and blocks if it has changed since preflight — preventing policy drift during pipeline execution.
-
-`auto_audit` is single-writer. Do not intentionally launch two or more ticket-capable agents in the same Codex session. The operational trigger for future locking/queueing work is: any workflow intentionally launches two or more ticket-capable agents in the same Codex session, or `auto_audit` is enabled for delegated multi-agent work.
+Local runtime-first workspace state lives under `.codex/ticket-workspace/`, which must stay ignored by git. The workspace owns local mode snapshots and `pause.json`; a workspace pause immediately blocks autonomous mode resolution until resume rewrites strict JSON config from an explicit setup choice and invalidates stale mode snapshots.
 
 ### Path Resolution
 
@@ -203,7 +203,9 @@ Skills and hooks do not require shell environment setup. Skills derive the plugi
 |------|---------|
 | `docs/tickets/` | Active tickets |
 | `docs/tickets/closed-tickets/` | Archived closed tickets |
-| `docs/tickets/.audit/YYYY-MM-DD/<session_id>.jsonl` | Append-only audit trail |
+| affected ticket `## Change History` | Future autonomous durable history |
+| `.codex/ticket-workspace/ticket.pending-summary.jsonl` | Future local autonomous operational state |
+| `docs/tickets/.audit/YYYY-MM-DD/<session_id>.jsonl` | Historical audit artifacts for read/repair only |
 | `.codex/ticket-tmp/` | Temporary payload files during pipeline execution |
 
 ### Ticket Schema
@@ -307,11 +309,11 @@ User/Agent Intent
     v  (skill merges response.data into payload)
 [preflight] -- enforcement: origin, autonomy, confidence, dedup, dependencies, TOCTOU
     |
-    v  (skill merges autonomy_config into payload)
-[execute] -- defense-in-depth re-checks, writes ticket file, appends audit entry
+    v  (skill carries verified stage data into payload)
+[execute] -- defense-in-depth re-checks and writes ticket files for supported user-directed paths
     |
     v
-Ticket file on disk + JSONL audit entry
+Ticket file on disk
 ```
 
 The engine is **stateless** — each script invocation reads a payload file, processes one stage, prints JSON to stdout, and exits. The update workflow skill instructions orchestrate state between stages by merging response data into the payload file before each subsequent call.
@@ -326,9 +328,9 @@ Mutations are secured by a **trust triple** injected atomically by the guard hoo
 | `hook_injected` | Proves the command passed through the guard hook |
 | `hook_request_origin` | Records hook-observed provenance such as `user` or `agent`; on current Codex runtime it is metadata, not security-grade caller identity |
 
-Execute validates all three fields before allowing any write. Requests routed
-through `ticket_engine_agent.py` face higher confidence thresholds (0.65 vs
-0.5) and require `auto_audit` autonomy mode.
+Execute validates all three fields before allowing any write. Direct requests
+routed through `ticket_engine_agent.py execute` fail closed until the
+runtime-first gateway supplies a gateway-approved decision.
 
 ### Defense in Depth
 
@@ -337,12 +339,11 @@ Security checks are duplicated across pipeline stages:
 | Check | Stages |
 |-------|--------|
 | Deduplication | plan, execute |
-| Autonomy policy | preflight, execute (with live re-read) |
+| Direct-agent gateway requirement | execute |
 | Confidence threshold | preflight, execute |
 | Agent restrictions | preflight, execute |
 | Origin verification | runner, preflight, execute |
 | Intent match | preflight, execute |
-| Session create cap | preflight, execute |
 | TOCTOU fingerprint | preflight, execute |
 
 ### Machine States (15)
@@ -357,39 +358,13 @@ Security checks are duplicated across pipeline stages:
 
 ### Agent Integration
 
-External agents can use `ticket_engine_agent.py` to create and manage tickets
-autonomously, subject to:
-
-1. **Autonomy policy** in `.codex/ticket.local.md` must be `auto_audit` or higher
-2. **Trust triple** injected by the guard hook (`hook_injected=true`,
-   non-empty `session_id`, and recorded `hook_request_origin` provenance)
-3. **Higher confidence threshold** (0.65 for agents vs 0.5 for users)
-4. **Live policy re-read** at execute time blocks if policy changed since preflight
-5. **Session create cap** enforcement via audit trail (configurable via `max_creates_per_session`)
-6. **Reopen is user-only** in v1.0 — agents cannot reopen tickets
-
-Activation V1 certifies only `ticket_engine_agent.py execute`. Activation V1
-proves installed hook-mediated direct-execute wiring, not host-owned or
-spawned-agent identity. `hook_request_origin` is hook-observed provenance
-metadata on the current host and may still be reported as `"user"` for the
-certified direct-execute lane. `capture`, `update`, and `ticket_workflow.py`
-remain outside the activation proof scope alongside `ingest_dispatch` and
-`activation_smoke_bootstrap`, and require a separate follow-up before widening
-certification. Privileged host diagnostic runs and prompt-driven smokes are
-diagnostics only. AgentControl child smoke, when captured, is same-membrane
-corroboration only and not identity proof. Normal agent direct execute fails
-with `runtime_readiness_required` when the runtime proof is missing, stale, or
-mismatched.
+External autonomous Ticket writes must enter through the runtime-first gateway. The gateway is responsible for validating approval, checking pause/config state, writing ticket-local `## Change History`, and appending pending-summary bookkeeping. Structured turn-context candidates may carry `ticket_change_scope` only as gateway/commit-disposition context; it is not written into tickets. Direct `ticket_engine_agent.py execute` remains a low-level compatibility path and fails closed for create, update, close, and reopen without that gateway-approved decision contract.
 
 The `agents/` directory is a placeholder (`.gitkeep` only) — consuming projects define their own agent definitions that invoke the agent entrypoint.
 
 ### Consuming Project Setup
 
-To enable agent-origin ticket creation in your project:
-
-1. Create `.codex/ticket.local.md` with `autonomy_mode: auto_audit` in YAML frontmatter
-2. Define an agent that invokes `ticket_engine_agent.py` via the Bash tool
-3. The guard hook handles trust injection automatically
+Runtime-first autonomous setup is not enabled by editing YAML mode flags. Use strict `.codex/ticket.local.md` JSON only, keep `.codex/ticket-workspace/` ignored, and route autonomous writes through `ticket_autonomy.py apply-turn` and the runtime-first gateway.
 
 ## Development
 
@@ -437,11 +412,9 @@ Source lives in `scripts/` rather than a standard Python package directory. Modu
 
 ## Known Limitations
 
-- **Single-writer `auto_audit` boundary** — this source slice does not add locking or queueing. Run at most one ticket-capable agent in a Codex session; intentional delegated multi-agent `auto_audit` work is a future locking/queueing trigger.
 - **Triage detects linear dependency chains only**, not cycles
-- **Session create cap** is audit-based, not lock-based — it is not a hard safety boundary for intentionally parallel ticket-capable agents
 - **Guard hook fails closed for Ticket candidates** — malformed hook input and internal guard errors emit stop entries instead of allowing the command through.
-- **`auto_silent` mode** is defined in the contract but gated with an explicit error — reserved for v1.1
+- **Direct agent execute is not the autonomy gateway** — autonomous create, update, close, and reopen route through `ticket_autonomy.py apply-turn` and the runtime-first gateway; direct `ticket_engine_agent.py execute` fails closed with `gateway_required`.
 
 ## License
 

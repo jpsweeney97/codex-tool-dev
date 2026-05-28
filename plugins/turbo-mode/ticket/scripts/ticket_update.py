@@ -408,6 +408,74 @@ def _validate_lifecycle_payload(update: dict[str, Any]) -> dict[str, Any] | None
     return None
 
 
+def _candidate_action(action: str, fields: dict[str, Any]) -> str:
+    if action == "close":
+        resolution = fields.get("resolution")
+        return resolution if resolution in {"done", "wontfix"} else "done"
+    if action == "reopen":
+        return "reopen"
+    if fields.get("_update_mode") == "focused_refinement":
+        return "refine"
+    return "update"
+
+
+def _candidate_evidence(ticket_id: str, action: str) -> list[dict[str, str]]:
+    evidence = [
+        {"kind": "explicit_ticket", "ref": ticket_id},
+        {"kind": "current_thread_reason", "ref": "ticket_update adapter"},
+    ]
+    if action in {"done", "wontfix", "reopen"}:
+        evidence.append({"kind": "ticket_state", "ref": ticket_id})
+    return evidence
+
+
+def autonomy_candidate_from_update_payload(payload_path: Path) -> dict[str, Any]:
+    """Build apply-turn update candidates without writing ticket files."""
+    payload, tickets_dir, _request_origin, error = _load_update_context("prepare", payload_path)
+    if error is not None:
+        return error
+    assert payload is not None and tickets_dir is not None
+
+    update, update_error = _validate_update_payload(payload.get("update"))
+    if update_error is not None or update is None:
+        return update_error or _response("need_fields", "update fields invalid")
+    lifecycle_error = _validate_lifecycle_payload(update)
+    if lifecycle_error is not None:
+        return lifecycle_error
+
+    ticket_id = payload.get("ticket_id")
+    if not isinstance(ticket_id, str) or not ticket_id:
+        return _response(
+            "need_fields",
+            "ticket_id required for update",
+            error_code="need_fields",
+            data={"missing_fields": ["ticket_id"]},
+        )
+    ticket = find_ticket_by_id(tickets_dir, ticket_id, include_closed=True)
+    if ticket is None:
+        return _response(
+            "not_found",
+            f"No ticket found matching {ticket_id}",
+            error_code="not_found",
+            ticket_id=ticket_id,
+        )
+
+    action, fields, _clear_refinement = _prepare_fields(ticket, update)
+    candidate_action = _candidate_action(action, fields)
+    return {
+        "state": "ok",
+        "update_candidates": [
+            {
+                "ticket_id": ticket_id,
+                "action": candidate_action,
+                "proposed_change": fields,
+                "reason": "ticket_update adapter candidate",
+                "evidence": _candidate_evidence(ticket_id, candidate_action),
+            }
+        ],
+    }
+
+
 def _prepare(payload_path: Path) -> dict[str, Any]:
     payload, tickets_dir, request_origin, error = _load_update_context("prepare", payload_path)
     if error is not None:

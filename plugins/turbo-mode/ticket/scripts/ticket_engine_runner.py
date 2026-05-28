@@ -8,7 +8,8 @@ Entrypoints import and call run() with their hardcoded request_origin.
 This module is never invoked directly.
 The public guarded engine entrypoints are ticket_engine_user.py and ticket_engine_agent.py.
 Direct engine stages are low-level compatibility, debug, and agent-internal paths.
-They are not normal user-facing mutation interfaces.
+They are not normal user-facing mutation interfaces. Agent-origin direct execute
+fails closed outside the runtime-first gateway.
 """
 
 from __future__ import annotations

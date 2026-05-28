@@ -7,6 +7,7 @@ from typing import cast
 
 import pytest
 import scripts.ticket_engine_core as ticket_engine_core
+from scripts.ticket_autonomy_config import AutomationMode, write_local_config
 from scripts.ticket_dedup import (
     dedup_fingerprint as compute_dedup_fp,
 )
@@ -20,7 +21,7 @@ from scripts.ticket_engine_core import (
 )
 from scripts.ticket_parse import extract_fenced_yaml
 
-from tests.support.builders import expected_canonical_yaml, make_ticket, write_autonomy_config
+from tests.support.builders import expected_canonical_yaml, make_ticket
 from tests.test_runtime_readiness import build_valid_runtime_readiness_fixture
 
 
@@ -28,10 +29,7 @@ def test_unknown_runtime_execute_surface_does_not_use_direct_execute_bypass(
     tmp_tickets: Path,
 ) -> None:
     (tmp_tickets.parent.parent / ".git").mkdir(exist_ok=True)
-    write_autonomy_config(
-        tmp_tickets,
-        "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
-    )
+    write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
     problem = "Unknown runtime execute surfaces must not widen the provenance bypass."
 
     response = engine_execute(
@@ -48,7 +46,7 @@ def test_unknown_runtime_execute_surface_does_not_use_direct_execute_bypass(
         classify_intent="create",
         classify_confidence=0.95,
         dedup_fingerprint=compute_dedup_fp(problem, []),
-        autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
+        autonomy_config=AutonomyConfig(mode=AutomationMode.AGENT_PRIMARY),
         runtime_execute_surface=cast(ticket_engine_core.RuntimeExecuteSurface, "agent_control"),
     )
 
@@ -157,10 +155,7 @@ class TestEngineExecute:
     def test_agent_override_rejected(self, tmp_tickets):
 
         make_ticket(tmp_tickets, "2026-03-02-test.md", id="T-20260302-01")
-        write_autonomy_config(
-            tmp_tickets,
-            "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
-        )
+        write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
         resp = engine_execute(
             action="create",
             ticket_id=None,
@@ -175,7 +170,7 @@ class TestEngineExecute:
             classify_intent="create",
             classify_confidence=0.95,
             dedup_fingerprint=compute_dedup_fp("Test", []),
-            autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
+            autonomy_config=AutonomyConfig(mode=AutomationMode.AGENT_PRIMARY),
         )
         assert resp.state == "policy_blocked"
         assert "agent" in resp.message.lower() or "override" in resp.message.lower()
@@ -1817,10 +1812,7 @@ class TestExecuteTrustTripleEngine:
         self,
         tmp_tickets,
     ):
-        write_autonomy_config(
-            tmp_tickets,
-            "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
-        )
+        write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
         problem = "Direct execute should fail closed without runtime proof."
         resp = engine_execute(
             action="create",
@@ -1836,21 +1828,18 @@ class TestExecuteTrustTripleEngine:
             classify_intent="create",
             classify_confidence=0.95,
             dedup_fingerprint=compute_dedup_fp(problem, []),
-            autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
+            autonomy_config=AutonomyConfig(mode=AutomationMode.AGENT_PRIMARY),
             runtime_execute_surface="direct_execute",
         )
         assert resp.state == "policy_blocked"
-        assert resp.error_code == "runtime_readiness_required"
+        assert resp.error_code == "gateway_required"
 
     def test_agent_direct_execute_project_root_oserror_returns_policy_blocked(
         self,
         tmp_tickets,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        write_autonomy_config(
-            tmp_tickets,
-            "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
-        )
+        write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
         problem = "Direct execute should fail closed on project-root errors."
 
         def _raise_oserror(_tickets_dir: Path) -> Path:
@@ -1859,7 +1848,7 @@ class TestExecuteTrustTripleEngine:
         monkeypatch.setattr(
             ticket_engine_core,
             "read_autonomy_config",
-            lambda _tickets_dir: AutonomyConfig(mode="auto_audit", max_creates=5),
+            lambda _tickets_dir: AutonomyConfig(mode=AutomationMode.AGENT_PRIMARY),
         )
         monkeypatch.setattr(ticket_engine_core, "discover_project_root", _raise_oserror)
 
@@ -1877,14 +1866,12 @@ class TestExecuteTrustTripleEngine:
             classify_intent="create",
             classify_confidence=0.95,
             dedup_fingerprint=compute_dedup_fp(problem, []),
-            autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
+            autonomy_config=AutonomyConfig(mode=AutomationMode.AGENT_PRIMARY),
             runtime_execute_surface="direct_execute",
         )
 
         assert resp.state == "policy_blocked"
-        assert resp.error_code == "policy_blocked"
-        assert "Cannot determine project root" in resp.message
-        assert "symlink loop" in resp.message
+        assert resp.error_code == "gateway_required"
 
     def test_agent_direct_execute_succeeds_when_runtime_proof_verifies(
         self,
@@ -1896,10 +1883,7 @@ class TestExecuteTrustTripleEngine:
         )
         tickets_dir = project_root / "docs" / "tickets"
         tickets_dir.mkdir(parents=True, exist_ok=True)
-        write_autonomy_config(
-            tickets_dir,
-            "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
-        )
+        write_local_config(project_root, AutomationMode.AGENT_PRIMARY)
         problem = "Verified runtime proof should allow direct execute."
         monkeypatch.setattr(
             ticket_engine_core,
@@ -1921,11 +1905,12 @@ class TestExecuteTrustTripleEngine:
             classify_intent="create",
             classify_confidence=0.95,
             dedup_fingerprint=compute_dedup_fp(problem, []),
-            autonomy_config=AutonomyConfig(mode="auto_audit", max_creates=5),
+            autonomy_config=AutonomyConfig(mode=AutomationMode.AGENT_PRIMARY),
             runtime_execute_surface="direct_execute",
             runtime_proof_path=proof_path,
         )
-        assert resp.state == "ok_create"
+        assert resp.state == "policy_blocked"
+        assert resp.error_code == "gateway_required"
 
     def test_execute_with_empty_session_id_rejected(self, tmp_tickets):
         resp = engine_execute(
@@ -2182,10 +2167,7 @@ class TestExecuteStructuralPrerequisites:
         assert resp.state == "policy_blocked"
 
     def test_agent_missing_autonomy_config_rejected(self, tmp_tickets):
-        write_autonomy_config(
-            tmp_tickets,
-            "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n",
-        )
+        write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
         resp = engine_execute(
             action="create",
             ticket_id=None,

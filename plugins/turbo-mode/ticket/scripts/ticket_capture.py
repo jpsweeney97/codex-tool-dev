@@ -554,6 +554,69 @@ def _suggested_next_capture(edit_text: str | None) -> str:
     return ""
 
 
+def _vague_capture_requires_discussion(capture: dict[str, Any]) -> bool:
+    text = " ".join(
+        str(capture.get(key, ""))
+        for key in ("title", "captured_request", "problem", "next_action")
+    ).lower()
+    if "maybe later" in text or "someday" in text:
+        return True
+    return capture.get("capture_confidence") == "low" and "needs_refinement" not in capture.get(
+        "tags",
+        [],
+    )
+
+
+def autonomy_candidate_from_capture_payload(
+    payload_path: Path,
+    *,
+    edit_text: str | None = None,
+) -> dict[str, Any]:
+    """Build apply-turn capture candidates without writing ticket files."""
+    payload, _tickets_dir, _request_origin, error = _load_capture_context("prepare", payload_path)
+    if error is not None:
+        return error
+    assert payload is not None
+    capture = payload.get("capture")
+    if not isinstance(capture, dict):
+        return _response(
+            "need_fields",
+            "capture must be a JSON object",
+            error_code="need_fields",
+            data={"missing_fields": ["capture"]},
+        )
+
+    fields, field_error = _capture_fields(payload, edit_text=edit_text)
+    if field_error is not None or fields is None:
+        return field_error or _response(
+            "need_fields", "capture fields invalid", error_code="need_fields"
+        )
+    if _vague_capture_requires_discussion(capture):
+        reason = "Capture is vague and needs user confirmation before ticket creation."
+        return {
+            "state": "discussion_required",
+            "possible_candidates": [
+                {
+                    "ticket_id": None,
+                    "action": "create",
+                    "reason": reason,
+                }
+            ],
+        }
+    return {
+        "state": "ok",
+        "capture_candidates": [
+            {
+                "ticket_id": None,
+                "action": "create",
+                "proposed_change": fields,
+                "reason": "ticket_capture adapter candidate",
+                "evidence": [{"kind": "current_thread_reason", "ref": "ticket_capture adapter"}],
+            }
+        ],
+    }
+
+
 def _prepare(payload_path: Path, edit_text: str | None) -> dict[str, Any]:
     payload, tickets_dir, request_origin, error = _load_capture_context("prepare", payload_path)
     if error is not None:

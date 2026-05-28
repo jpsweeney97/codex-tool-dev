@@ -2082,7 +2082,7 @@ def test_run_activation_smoke_requires_pre_activation_gate(
     assert exc_info.value.error_code == "engine_gate_required"
 
 
-def test_run_post_activation_direct_execute_smoke_stages_auto_audit_policy_lane(
+def test_run_post_activation_direct_execute_smoke_stages_agent_primary_policy_lane(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -2107,14 +2107,10 @@ def test_run_post_activation_direct_execute_smoke_stages_auto_audit_policy_lane(
         payload = json.loads(
             (run_dir / "post-direct" / "post-direct-payload.json").read_text(encoding="utf-8")
         )
-        assert payload["autonomy_config"] == {
-            "mode": "auto_audit",
-            "max_creates": 5,
-            "warnings": [],
-        }
+        assert payload["autonomy_config"] == {"mode": "agent_primary", "warnings": []}
         assert (run_dir / "post-direct" / ".codex" / "ticket.local.md").read_text(
             encoding="utf-8"
-        ) == "---\nautonomy_mode: auto_audit\nmax_creates_per_session: 5\n---\n"
+        ) == '{"schema":"codex.ticket.local.v1","mode":"agent_primary"}\n'
         return [
             {
                 "direction": "recv",
@@ -3616,7 +3612,7 @@ def build_valid_runtime_readiness_fixture(
         "activation_scope": {
             "gated_execute_surfaces": ["direct_execute"],
             "certified_entrypoints": ["ticket_engine_agent.py"],
-            "certified_policy_lane": "ticket_engine_agent.py execute + autonomy_mode=auto_audit",
+            "certified_policy_lane": "ticket_engine_agent.py execute + gateway_required",
             "excluded_mutation_paths": [
                 "ingest_dispatch",
                 "activation_smoke_bootstrap",
@@ -3624,7 +3620,7 @@ def build_valid_runtime_readiness_fixture(
                 "ticket_update.py",
                 "ticket_workflow.py",
             ],
-            "autonomy_mode": "auto_audit",
+            "automation_mode": "agent_primary",
             "caller_identity_proven": False,
             "hook_request_origin_contract": "provenance_metadata_only_currently_user",
         },
