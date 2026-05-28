@@ -10,6 +10,7 @@ from scripts.ticket_autonomy_runtime import (
     EngineAction,
     EvidenceLink,
     RuntimeDecisionKind,
+    TicketChangeScope,
     evaluate_autonomy_intent,
     map_candidate_to_engine,
 )
@@ -28,6 +29,7 @@ def _candidate(
     proposed_change: dict[str, object] | None = None,
     evidence: tuple[EvidenceLink, ...] | None = None,
     conflict_reason: str | None = None,
+    ticket_change_scope: TicketChangeScope = "current_branch",
 ) -> CandidateMutation:
     change = {"field": "value"} if proposed_change is None else proposed_change
     return CandidateMutation(
@@ -36,6 +38,7 @@ def _candidate(
         proposed_change=change,
         evidence=evidence or _evidence("current_thread_reason"),
         conflict_reason=conflict_reason,
+        ticket_change_scope=ticket_change_scope,
     )
 
 
@@ -220,6 +223,23 @@ def test_approval_envelope_binds_decision_context_and_expires_within_ten_minutes
     assert approval["approval_id"].startswith("appr_")
     assert approval["created_at"] == "2026-05-27T12:00:00Z"
     assert approval["expires_at"] == "2026-05-27T12:10:00Z"
+
+
+def test_ticket_change_scope_binds_mutation_identity_and_approval_fingerprint() -> None:
+    current_branch = _decisions(
+        _candidate("update", ticket_change_scope="current_branch"),
+    )[0]
+    unrelated_backlog = _decisions(
+        _candidate("update", ticket_change_scope="unrelated_backlog"),
+    )[0]
+
+    assert current_branch.mutation_id != unrelated_backlog.mutation_id
+    assert current_branch.approval is not None
+    assert unrelated_backlog.approval is not None
+    assert (
+        current_branch.approval["mutation_fingerprint"]
+        != unrelated_backlog.approval["mutation_fingerprint"]
+    )
 
 
 def test_ticket_actions_map_to_engine_dispatch_exactly() -> None:

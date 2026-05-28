@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -356,6 +357,40 @@ def test_append_event_lock_timeout_pauses_without_writing(tmp_path: Path) -> Non
 
     assert result.state == "paused"
     assert result.pause_reason == "lock_timeout"
+    assert store.read_events() == ()
+
+
+def test_append_event_clears_dead_pid_lock_and_writes(tmp_path: Path) -> None:
+    project_root = project_root_with_ignored_workspace(tmp_path)
+    store = PendingSummaryStore(project_root, lock_timeout_seconds=0)
+    lock_path = project_root / ".codex" / "ticket-workspace" / "ticket.pending-summary.lock"
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text("999999999\n", encoding="utf-8")
+
+    result = store.append_event(valid_attempt_event())
+
+    assert result.state == "appended"
+    assert len(store.read_events()) == 1
+    assert not lock_path.exists()
+
+
+def test_append_event_live_or_malformed_lock_fails_closed(tmp_path: Path) -> None:
+    project_root = project_root_with_ignored_workspace(tmp_path)
+    store = PendingSummaryStore(project_root, lock_timeout_seconds=0)
+    lock_path = project_root / ".codex" / "ticket-workspace" / "ticket.pending-summary.lock"
+    lock_path.parent.mkdir(parents=True)
+
+    lock_path.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    live_result = store.append_event(valid_attempt_event(event_id="evt_live"))
+    assert live_result.state == "paused"
+    assert live_result.pause_reason == "lock_timeout"
+    assert lock_path.exists()
+
+    lock_path.write_text("not-a-pid\n", encoding="utf-8")
+    malformed_result = store.append_event(valid_attempt_event(event_id="evt_malformed"))
+    assert malformed_result.state == "paused"
+    assert malformed_result.pause_reason == "lock_timeout"
+    assert lock_path.exists()
     assert store.read_events() == ()
 
 

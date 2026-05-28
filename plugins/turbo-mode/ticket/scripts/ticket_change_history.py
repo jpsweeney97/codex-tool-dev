@@ -111,6 +111,10 @@ def _append_to_existing_change_history(
     entry_line: str,
 ) -> str:
     next_start = _find_next_section_start(ticket_text, heading_match.end())
+    section_end = next_start if next_start is not None else len(ticket_text)
+    section_lines = ticket_text[heading_match.end() : section_end].splitlines()
+    if entry_line in section_lines:
+        return ticket_text
     if next_start is None:
         base = ticket_text.rstrip("\n")
         return f"{base}\n{entry_line}\n"

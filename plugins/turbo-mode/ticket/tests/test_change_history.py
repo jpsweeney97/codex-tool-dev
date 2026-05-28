@@ -118,6 +118,33 @@ def test_existing_change_history_receives_appended_entry() -> None:
     assert updated.index("- 2026-05-27") < updated.index("## Reopen History")
 
 
+def test_existing_change_history_exact_rendered_line_is_idempotent() -> None:
+    text = (
+        "# T: Example\n\n"
+        "## Change History\n"
+        "- 2026-05-27T12:00:00Z | auto-update | Automatic Ticket update applied.\n"
+        "\n"
+        "## Reopen History\n"
+        "- old\n"
+    )
+    duplicate = ChangeHistoryEntry(
+        timestamp="2026-05-27T12:00:00Z",
+        label=ChangeHistoryLabel.AUTO_UPDATE,
+        reason="Automatic Ticket update applied.",
+    )
+    later = ChangeHistoryEntry(
+        timestamp="2026-05-27T12:00:01Z",
+        label=ChangeHistoryLabel.AUTO_UPDATE,
+        reason="Automatic Ticket update applied.",
+    )
+
+    assert append_change_history_entry(text, duplicate) == text
+
+    updated = append_change_history_entry(text, later)
+    assert updated.count("Automatic Ticket update applied.") == 2
+    assert "- 2026-05-27T12:00:01Z | auto-update | Automatic Ticket update applied." in updated
+
+
 def test_helper_does_not_write_containing_commit_hash() -> None:
     entry = ChangeHistoryEntry(
         timestamp="2026-05-27T12:00:00Z",

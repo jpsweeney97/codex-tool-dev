@@ -423,6 +423,75 @@ def _parse_z(value: object) -> datetime | None:
         return None
 
 
+def _lock_pid(lock_path: Path) -> int | None:
+    try:
+        raw = lock_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    try:
+        pid = int(raw)
+    except ValueError:
+        return None
+    return pid if pid > 0 else None
+
+
+def _pid_is_definitely_dead(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except (PermissionError, OSError):
+        return False
+    return False
+
+
+def _clear_dead_process_lock(lock_path: Path) -> bool:
+    pid = _lock_pid(lock_path)
+    if pid is None:
+        return False
+    if not _pid_is_definitely_dead(pid):
+        return False
+    try:
+        lock_path.unlink()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def acquire_process_lock(lock_path: Path, *, timeout_seconds: float) -> bool:
+    """Acquire a PID lock, clearing only locks whose PID is definitely dead."""
+
+    deadline = time.monotonic() + max(timeout_seconds, 0.0)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            try:
+                os.write(fd, f"{os.getpid()}\n".encode())
+            finally:
+                os.close(fd)
+            return True
+        except FileExistsError:
+            if _clear_dead_process_lock(lock_path):
+                continue
+            if timeout_seconds <= 0 or time.monotonic() >= deadline:
+                return False
+            time.sleep(min(0.05, max(deadline - time.monotonic(), 0.0)))
+
+
+def release_process_lock(lock_path: Path | None) -> None:
+    """Release a PID lock when the current process acquired it."""
+
+    if lock_path is None:
+        return
+    try:
+        lock_path.unlink()
+    except FileNotFoundError:
+        pass
+
+
 class PendingSummaryStore:
     """Append-only local pending-summary event store."""
 
@@ -578,25 +647,10 @@ class PendingSummaryStore:
         return state
 
     def _acquire_lock(self) -> bool:
-        deadline = time.monotonic() + max(self.lock_timeout_seconds, 0.0)
-        while True:
-            try:
-                fd = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-                try:
-                    os.write(fd, f"{os.getpid()}\n".encode())
-                finally:
-                    os.close(fd)
-                return True
-            except FileExistsError:
-                if self.lock_timeout_seconds <= 0 or time.monotonic() >= deadline:
-                    return False
-                time.sleep(min(0.05, max(deadline - time.monotonic(), 0.0)))
+        return acquire_process_lock(self.lock_path, timeout_seconds=self.lock_timeout_seconds)
 
     def _release_lock(self) -> None:
-        try:
-            self.lock_path.unlink()
-        except FileNotFoundError:
-            pass
+        release_process_lock(self.lock_path)
 
     def _read_events_or_none(self) -> tuple[dict[str, object], ...] | None:
         return self._read_events_from_path_or_none(self.log_path)

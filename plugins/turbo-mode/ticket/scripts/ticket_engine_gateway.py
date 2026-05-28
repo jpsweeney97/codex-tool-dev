@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -26,6 +24,7 @@ from scripts.ticket_change_history import (
 )
 from scripts.ticket_commit_coordinator import (
     CommitDispositionRecord,
+    TicketChangeScope,
     record_ticket_commit_disposition,
 )
 from scripts.ticket_dedup import target_fingerprint as compute_target_fingerprint
@@ -42,8 +41,10 @@ from scripts.ticket_turn_batch import (
     PENDING_SUMMARY_SCHEMA,
     PendingSummaryStore,
     VerifiedRepoContext,
+    acquire_process_lock,
     event_payload_fingerprint,
     project_mutation_recovery,
+    release_process_lock,
 )
 
 
@@ -56,6 +57,7 @@ class GatewayMutation:
     fields: Mapping[str, object]
     tickets_dir: Path
     target_fingerprint: str | None
+    ticket_change_scope: TicketChangeScope = "current_branch"
 
 
 def _policy_blocked(message: str, *, data: dict[str, object] | None = None) -> EngineResponse:
@@ -105,6 +107,7 @@ def _mutation_fingerprint(mutation: GatewayMutation) -> str:
             "ticket_id": mutation.ticket_id,
             "action": mutation.action,
             "proposed_change": dict(mutation.fields),
+            "ticket_change_scope": mutation.ticket_change_scope,
         }
     )
 
@@ -127,28 +130,13 @@ def _acquire_gateway_write_lock(
     lock_path = _gateway_lock_path(project_root, mutation)
     if lock_path.parent != workspace:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-    deadline = time.monotonic() + max(timeout_seconds, 0.0)
-    while True:
-        try:
-            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-            try:
-                os.write(fd, f"{os.getpid()}\n".encode())
-            finally:
-                os.close(fd)
-            return lock_path
-        except FileExistsError:
-            if timeout_seconds <= 0 or time.monotonic() >= deadline:
-                return None
-            time.sleep(min(0.05, max(deadline - time.monotonic(), 0.0)))
+    if not acquire_process_lock(lock_path, timeout_seconds=timeout_seconds):
+        return None
+    return lock_path
 
 
 def _release_gateway_write_lock(lock_path: Path | None) -> None:
-    if lock_path is None:
-        return
-    try:
-        lock_path.unlink()
-    except FileNotFoundError:
-        pass
+    release_process_lock(lock_path)
 
 
 def build_engine_dispatch(mutation: GatewayMutation) -> EngineDispatch:
@@ -158,6 +146,7 @@ def build_engine_dispatch(mutation: GatewayMutation) -> EngineDispatch:
         action=mutation.action,
         proposed_change=dict(mutation.fields),
         evidence=(),
+        ticket_change_scope=mutation.ticket_change_scope,
     )
     return map_candidate_to_engine(candidate)
 
@@ -445,9 +434,26 @@ def _change_history_label(action: str) -> ChangeHistoryLabel:
     return ChangeHistoryLabel.AUTO_UPDATE
 
 
-def _change_history_entry(action: str) -> ChangeHistoryEntry:
+def _mutation_attempt_timestamp(
+    pending_summary: PendingSummaryStore,
+    *,
+    thread_id: str,
+    mutation_id: str,
+) -> str | None:
+    for event in pending_summary.read_events():
+        if event.get("thread_id") != thread_id or event.get("mutation_id") != mutation_id:
+            continue
+        if event.get("event_type") != "mutation_attempt":
+            continue
+        timestamp = event.get("timestamp")
+        if isinstance(timestamp, str) and _parse_z(timestamp) is not None:
+            return timestamp
+    return None
+
+
+def _change_history_entry(action: str, *, timestamp: str | None = None) -> ChangeHistoryEntry:
     return ChangeHistoryEntry(
-        timestamp=_now_z(),
+        timestamp=timestamp or _now_z(),
         label=_change_history_label(action),
         reason=f"Automatic Ticket {action} applied.",
     )
@@ -473,6 +479,7 @@ def _validate_autonomous_create_dedup(
 def _record_commit_disposition(
     project_root: Path,
     ticket_path_raw: object,
+    ticket_change_scope: TicketChangeScope,
 ) -> CommitDispositionRecord:
     if not isinstance(ticket_path_raw, str):
         return CommitDispositionRecord(
@@ -482,7 +489,7 @@ def _record_commit_disposition(
     return record_ticket_commit_disposition(
         project_root=project_root,
         touched_ticket_paths=(Path(ticket_path_raw),),
-        ticket_change_scope="current_branch",
+        ticket_change_scope=ticket_change_scope,
         create_ticket_only_commit=True,
     )
 
@@ -568,6 +575,15 @@ def _apply_autonomous_mutation_locked(
         )
         if recovery_response is not None:
             return recovery_response
+    change_history_timestamp = (
+        _mutation_attempt_timestamp(
+            pending_summary,
+            thread_id=thread_id,
+            mutation_id=decision.mutation_id,
+        )
+        if existing_state != "no_attempt"
+        else None
+    )
 
     target_error = _validate_target_fingerprint(mutation)
     if target_error is not None:
@@ -644,7 +660,10 @@ def _apply_autonomous_mutation_locked(
         dispatch=dispatch,
         mutation=mutation,
         thread_id=thread_id,
-        change_history_entry=_change_history_entry(mutation.action),
+        change_history_entry=_change_history_entry(
+            mutation.action,
+            timestamp=change_history_timestamp,
+        ),
     )
     if not _response_ok(response):
         _append_gateway_event(
@@ -699,7 +718,11 @@ def _apply_autonomous_mutation_locked(
     if ticket_written_error is not None:
         return ticket_written_error
 
-    commit_record = _record_commit_disposition(project_root, ticket_path_raw)
+    commit_record = _record_commit_disposition(
+        project_root,
+        ticket_path_raw,
+        mutation.ticket_change_scope,
+    )
     response.data.update(_commit_disposition_details(commit_record))
 
     applied_error = _append_gateway_event(

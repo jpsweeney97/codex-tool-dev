@@ -564,6 +564,24 @@ def _pending_summary_unhealthy() -> int:
     return 3
 
 
+def _recovery_paused_response(items: list[LedgerRecoveryItem]) -> dict[str, Any]:
+    repairable = [item for item in items if _item_is_repairable(item)]
+    reconciliation = [item for item in items if not _item_is_repairable(item)]
+    payload = _paused_response("repair")
+    payload.update(
+        {
+            "repairable_count": len(repairable),
+            "reconciliation_count": len(reconciliation),
+            "recoveries": [_ledger_item_payload(item) for item in items],
+            "discussion_question": (
+                "Run ticket_autonomy.py doctor-ledger --confirm-repair "
+                "before new automatic writes."
+            ),
+        }
+    )
+    return payload
+
+
 def _ledger_items_for_project(
     *,
     project_root: Path,
@@ -776,7 +794,10 @@ def _run_apply_turn(args: argparse.Namespace) -> int:
         return _invalid_args("--resume-paused requires --setup-choice")
     if setup_choice_value is not None:
         if setup_choice_value == AutomationMode.PREVIEW.value:
-            return _invalid_args("preview is a manual-only config mode")
+            return _invalid_args(
+                "setup choice must be automatic or ask_first; "
+                "preview is configured manually in .codex/ticket.local.md"
+            )
         try:
             setup_choice = SetupChoice(setup_choice_value)
         except ValueError:
@@ -823,6 +844,23 @@ def _run_apply_turn_with_mode(
         _emit(_paused_response(_read_pause_reason(project_root)))
         return 3
 
+    store = PendingSummaryStore(project_root)
+    compaction = store.compact_correction_ready_events()
+    if compaction.state == "paused":
+        _emit(_paused_response(compaction.pause_reason or "pending_summary_unhealthy"))
+        return 3
+
+    events, items = _ledger_items_for_project(
+        project_root=project_root,
+        store=store,
+        skip_turn_id=str(context["turn_id"]),
+    )
+    if events is None:
+        return _pending_summary_unhealthy()
+    if items:
+        _emit(_recovery_paused_response(items))
+        return 3
+
     tickets_dir = project_root / "docs" / "tickets"
     candidates = discover_candidate_mutations(context, tickets_dir)
     if not candidates:
@@ -842,7 +880,6 @@ def _run_apply_turn_with_mode(
         thread_id=str(context["thread_id"]),
         turn_id=str(context["turn_id"]),
     )
-    store = PendingSummaryStore(project_root)
     applied: list[str] = []
     skipped: list[str] = []
     discussion: list[str] = []
@@ -865,6 +902,7 @@ def _run_apply_turn_with_mode(
                     if isinstance(decision.candidate.ticket_id, str)
                     else None
                 ),
+                ticket_change_scope=decision.candidate.ticket_change_scope,
             )
             response = apply_autonomous_mutation(
                 project_root=project_root,

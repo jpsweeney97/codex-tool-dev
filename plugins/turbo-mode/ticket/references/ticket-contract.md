@@ -178,6 +178,20 @@ command must keep returning the paused response unless the host also supplies
 `--resume-paused`. The explicit resume path must verify local-state safety and
 pending-summary ledger health before clearing the pause marker.
 
+Structured turn-context `candidate_mutations` may include optional
+`ticket_change_scope: "current_branch" | "unrelated_backlog"`. Missing or
+invalid values normalize to `"current_branch"`. The scope is not ticket content:
+it must bind the candidate/gateway mutation fingerprint and the resulting
+approval, then flow only to commit disposition. Path-derived and text-derived
+candidates always use `"current_branch"`.
+
+Before candidate discovery or new writes, `apply-turn` must compact safe
+correction-ready ledger detail and check prior-turn pending-summary recovery
+needs. If prior-turn ledger repair is required, it exits 3 with the normal
+paused response, `pause_reason: "repair"`, `recoveries`, `repairable_count`,
+`reconciliation_count`, and the existing `doctor-ledger --confirm-repair`
+discussion question.
+
 `recover` is a projection command. It validates pending-summary state, compacts
 old correction-ready detail when safe, reports repairable and reconciliation
 counts, and returns `can_proceed: false` whenever prior-turn ledger records need

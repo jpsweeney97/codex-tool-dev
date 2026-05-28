@@ -36,6 +36,9 @@ class EngineAction(StrEnum):
     REOPEN = "reopen"
 
 
+TicketChangeScope = Literal["current_branch", "unrelated_backlog"]
+
+
 @dataclass(frozen=True, slots=True)
 class EvidenceLink:
     """Evidence that connects a turn candidate to a ticket."""
@@ -54,6 +57,7 @@ class CandidateMutation:
     proposed_change: Mapping[str, object]
     evidence: tuple[EvidenceLink, ...]
     conflict_reason: str | None = None
+    ticket_change_scope: TicketChangeScope = "current_branch"
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +155,7 @@ def _candidate_payload(candidate: CandidateMutation) -> dict[str, object]:
         "ticket_id": candidate.ticket_id,
         "action": candidate.action,
         "proposed_change": dict(candidate.proposed_change),
+        "ticket_change_scope": candidate.ticket_change_scope,
     }
 
 

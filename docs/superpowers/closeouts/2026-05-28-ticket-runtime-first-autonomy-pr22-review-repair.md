@@ -79,4 +79,3 @@ PR #22 remains mergeable as a source-only repair after the verified blocker set
 is fixed and tests pass. Installed runtime activation remains blocked until a
 separate proof lane verifies the source/cache/runtime boundary and revisits any
 Codex-facing skill that would directly construct strict autonomy payloads.
-

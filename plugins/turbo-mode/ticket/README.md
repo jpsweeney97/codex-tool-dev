@@ -358,7 +358,7 @@ Security checks are duplicated across pipeline stages:
 
 ### Agent Integration
 
-External autonomous Ticket writes must enter through the runtime-first gateway. The gateway is responsible for validating approval, checking pause/config state, writing ticket-local `## Change History`, and appending pending-summary bookkeeping. Direct `ticket_engine_agent.py execute` remains a low-level compatibility path and fails closed for create, update, close, and reopen without that gateway-approved decision contract.
+External autonomous Ticket writes must enter through the runtime-first gateway. The gateway is responsible for validating approval, checking pause/config state, writing ticket-local `## Change History`, and appending pending-summary bookkeeping. Structured turn-context candidates may carry `ticket_change_scope` only as gateway/commit-disposition context; it is not written into tickets. Direct `ticket_engine_agent.py execute` remains a low-level compatibility path and fails closed for create, update, close, and reopen without that gateway-approved decision contract.
 
 The `agents/` directory is a placeholder (`.gitkeep` only) — consuming projects define their own agent definitions that invoke the agent entrypoint.
 

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from scripts.ticket_autonomy import build_repo_context
+from scripts.ticket_autonomy_config import AutomationMode, write_local_config
 from scripts.ticket_dedup import target_fingerprint
 from scripts.ticket_turn_batch import PendingSummaryStore
 
@@ -357,6 +359,177 @@ def test_apply_turn_missing_config_requires_setup_choices(tmp_path: Path) -> Non
     }
 
 
+def test_apply_turn_pauses_for_prior_turn_ledger_recovery_before_new_write(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    pre = target_fingerprint(ticket) or ""
+    ticket.write_text(
+        ticket.read_text(encoding="utf-8").replace("priority: high", "priority: low"),
+        encoding="utf-8",
+    )
+    post = target_fingerprint(ticket) or ""
+    store = PendingSummaryStore(tmp_path)
+    assert (
+        store.append_event(
+            _event_with_recovery_fingerprints(
+                valid_attempt_event(
+                    event_id="evt_prior_attempt",
+                    turn_id="turn-old",
+                    mutation_id="mut-recover",
+                ),
+                pre=pre,
+                post=post,
+            )
+        ).state
+        == "appended"
+    )
+    assert (
+        store.append_event(
+            _event_with_recovery_fingerprints(
+                valid_status_event(
+                    "approval_consumed",
+                    event_id="evt_prior_approval",
+                    turn_id="turn-old",
+                    mutation_id="mut-recover",
+                ),
+                pre=pre,
+                post=post,
+            )
+        ).state
+        == "appended"
+    )
+    context = _write_context(
+        tmp_path,
+        turn_id="turn-new",
+        candidate_mutations=[
+            {
+                "ticket_id": "T-20260527-01",
+                "action": "update",
+                "proposed_change": {"priority": "medium"},
+                "evidence": [{"kind": "current_thread_reason", "ref": "current turn"}],
+            }
+        ],
+    )
+
+    result = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-new",
+        "--context-file",
+        str(context),
+    )
+
+    assert result.returncode == 3
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "paused"
+    assert payload["pause_reason"] == "repair"
+    assert payload["repairable_count"] == 1
+    assert payload["reconciliation_count"] == 0
+    assert payload["recoveries"][0]["mutation_id"] == "mut-recover"
+    assert payload["discussion_question"] == (
+        "Run ticket_autonomy.py doctor-ledger --confirm-repair before new automatic writes."
+    )
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
+    assert "priority: medium" not in ticket.read_text(encoding="utf-8")
+    assert [event["event_id"] for event in PendingSummaryStore(tmp_path).read_events()] == [
+        "evt_prior_attempt",
+        "evt_prior_approval",
+    ]
+
+
+def test_apply_turn_compacts_correction_ready_events_before_discovery(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    store = PendingSummaryStore(tmp_path)
+    old_timestamp = (datetime.now(UTC) - timedelta(days=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert (
+        store.append_event(
+            valid_status_event(
+                "failed",
+                event_id="evt_old_correction",
+                timestamp=old_timestamp,
+                thread_id="thread-1",
+                turn_id="turn-1",
+                mutation_id="mut-old",
+                error_code="policy_blocked",
+                correction_ready=True,
+                correction_detail="full correction detail",
+            )
+        ).state
+        == "appended"
+    )
+    context = _write_context(tmp_path)
+
+    result = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["state"] == "no_change"
+    event = PendingSummaryStore(tmp_path).read_events()[0]
+    assert "correction_detail" not in event["details"]
+    assert event["details"]["correction_detail_compacted"] is True
+
+
+def test_apply_turn_compaction_lock_timeout_pauses_before_new_write(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    lock_path = tmp_path / ".codex" / "ticket-workspace" / "ticket.pending-summary.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    context = _write_context(
+        tmp_path,
+        candidate_mutations=[
+            {
+                "ticket_id": "T-20260527-01",
+                "action": "update",
+                "proposed_change": {"priority": "low"},
+                "evidence": [{"kind": "current_thread_reason", "ref": "current turn"}],
+            }
+        ],
+    )
+
+    result = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+
+    assert result.returncode == 3
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "paused"
+    assert payload["pause_reason"] == "lock_timeout"
+    assert "priority: high" in ticket.read_text(encoding="utf-8")
+    assert not (tmp_path / ".codex" / "ticket-workspace" / "ticket.pending-summary.jsonl").exists()
+
+
 def test_apply_turn_setup_choice_automatic_writes_config_snapshot_and_continues(
     tmp_path: Path,
 ) -> None:
@@ -495,7 +668,13 @@ def test_apply_turn_rejects_preview_setup_choice(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 2
-    assert json.loads(result.stdout)["state"] == "invalid_args"
+    assert json.loads(result.stdout) == {
+        "state": "invalid_args",
+        "message": (
+            "setup choice must be automatic or ask_first; "
+            "preview is configured manually in .codex/ticket.local.md"
+        ),
+    }
 
 
 def test_apply_turn_uses_thread_mode_snapshot_over_later_config_edits(tmp_path: Path) -> None:
