@@ -397,20 +397,23 @@ def _append_summary_receipt(
     thread_id: str,
     turn_id: str,
     repo_context: VerifiedRepoContext,
+    mutation_ids: tuple[str, ...] = (),
 ) -> None:
-    event = _event_payload(
-        event_type="summary_receipt",
-        status="summarized",
-        action="summarize",
-        ticket_id=None,
-        mutation_id=None,
-        thread_id=thread_id,
-        turn_id=turn_id,
-        repo_context=repo_context,
-        reason="Apply-turn summary returned.",
-        details={},
-    )
-    store.append_event(event)
+    receipt_mutation_ids: tuple[str | None, ...] = tuple(dict.fromkeys(mutation_ids)) or (None,)
+    for mutation_id in receipt_mutation_ids:
+        event = _event_payload(
+            event_type="summary_receipt",
+            status="summarized",
+            action="summarize",
+            ticket_id=None,
+            mutation_id=mutation_id,
+            thread_id=thread_id,
+            turn_id=turn_id,
+            repo_context=repo_context,
+            reason="Apply-turn summary returned.",
+            details={},
+        )
+        store.append_event(event)
 
 
 def _ticket_state_fingerprints(candidates: tuple[Any, ...], tickets_dir: Path) -> dict[str, str]:
@@ -884,6 +887,7 @@ def _run_apply_turn_with_mode(
     skipped: list[str] = []
     discussion: list[str] = []
     commit_dispositions: list[dict[str, object]] = []
+    applied_mutation_ids: list[str] = []
     discussion_question: str | None = None
 
     for decision in decisions:
@@ -915,6 +919,8 @@ def _run_apply_turn_with_mode(
             )
             if response.state.startswith("ok_"):
                 applied.append(ticket_id)
+                if isinstance(decision.mutation_id, str):
+                    applied_mutation_ids.append(decision.mutation_id)
                 commit_summary = _commit_disposition_summary(ticket_id, response.data)
                 if commit_summary is not None:
                     commit_dispositions.append(commit_summary)
@@ -946,6 +952,7 @@ def _run_apply_turn_with_mode(
         thread_id=str(context["thread_id"]),
         turn_id=str(context["turn_id"]),
         repo_context=repo_context,
+        mutation_ids=tuple(applied_mutation_ids),
     )
     _emit(
         _summary_payload(

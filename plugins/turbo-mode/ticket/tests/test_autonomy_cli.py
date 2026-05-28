@@ -445,6 +445,55 @@ def test_apply_turn_pauses_for_prior_turn_ledger_recovery_before_new_write(
     ]
 
 
+def test_apply_turn_summarizes_applied_mutation_before_next_turn(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    first_context = _write_context(
+        tmp_path,
+        candidate_mutations=[
+            {
+                "ticket_id": "T-20260527-01",
+                "action": "update",
+                "proposed_change": {"priority": "low"},
+                "evidence": [{"kind": "current_thread_reason", "ref": "current turn"}],
+            }
+        ],
+    )
+
+    first = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(first_context),
+    )
+    second_context = _write_context(tmp_path, turn_id="turn-2")
+    second = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-2",
+        "--context-file",
+        str(second_context),
+    )
+
+    assert first.returncode == 0
+    assert json.loads(first.stdout)["state"] == "applied"
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
+    assert second.returncode == 0
+    assert json.loads(second.stdout)["state"] == "no_change"
+
+
 def test_apply_turn_compacts_correction_ready_events_before_discovery(
     tmp_path: Path,
 ) -> None:
