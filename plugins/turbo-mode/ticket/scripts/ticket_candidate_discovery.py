@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from scripts.ticket_autonomy_runtime import CandidateMutation, EvidenceLink, TicketChangeScope
 from scripts.ticket_read import list_tickets
-
-_TICKET_ID_RE = re.compile(r"\bT-\d{8}-\d{2,}\b")
 
 
 def _value_error(operation: str, reason: str, value: object) -> ValueError:
@@ -42,21 +39,6 @@ def _ticket_metadata_paths(ticket: Any) -> set[str]:
         if isinstance(path, str):
             paths.add(_normalize_path(path))
     return paths
-
-
-def _explicit_ticket_ids(*texts: object) -> list[str]:
-    seen: set[str] = set()
-    ids: list[str] = []
-    for text in texts:
-        if not isinstance(text, str):
-            continue
-        for match in _TICKET_ID_RE.finditer(text):
-            ticket_id = match.group(0)
-            if ticket_id in seen:
-                continue
-            seen.add(ticket_id)
-            ids.append(ticket_id)
-    return ids
 
 
 def _append_candidate(
@@ -178,27 +160,6 @@ def _append_structured_candidates(
                 _append_candidate(candidates, seen, candidate)
 
 
-def _append_text_id_candidates(
-    candidates: list[CandidateMutation],
-    seen: set[tuple[str | None, str, str, str]],
-    turn_context: Mapping[str, object],
-) -> None:
-    for ticket_id in _explicit_ticket_ids(
-        turn_context.get("user_request"),
-        turn_context.get("assistant_work_summary"),
-    ):
-        _append_candidate(
-            candidates,
-            seen,
-            CandidateMutation(
-                ticket_id=ticket_id,
-                action="update",
-                proposed_change={},
-                evidence=(EvidenceLink(kind="explicit_ticket_id", ref=ticket_id),),
-            ),
-        )
-
-
 def _path_refs(turn_context: Mapping[str, object]) -> list[tuple[str, str]]:
     refs: list[tuple[str, str]] = []
     for key, evidence_kind in (
@@ -262,6 +223,5 @@ def discover_candidate_mutations(
     candidates: list[CandidateMutation] = []
     seen: set[tuple[str | None, str, str, str]] = set()
     _append_structured_candidates(candidates, seen, turn_context)
-    _append_text_id_candidates(candidates, seen, turn_context)
     _append_path_candidates(candidates, seen, turn_context, tickets_dir)
     return tuple(candidates)

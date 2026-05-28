@@ -494,6 +494,37 @@ def test_apply_turn_summarizes_applied_mutation_before_next_turn(
     assert json.loads(second.stdout)["state"] == "no_change"
 
 
+def test_apply_turn_id_only_ticket_mention_does_not_mutate_ticket(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    before = ticket.read_text(encoding="utf-8")
+    context = _write_context(
+        tmp_path,
+        user_request="Look at T-20260527-01 before deciding what to change.",
+    )
+
+    result = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["state"] == "no_change"
+    assert ticket.read_text(encoding="utf-8") == before
+    assert not (tmp_path / ".codex" / "ticket-workspace" / "ticket.pending-summary.jsonl").exists()
+
+
 def test_apply_turn_compacts_correction_ready_events_before_discovery(
     tmp_path: Path,
 ) -> None:

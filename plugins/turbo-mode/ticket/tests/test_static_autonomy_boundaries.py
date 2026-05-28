@@ -265,10 +265,12 @@ def test_pending_summary_validation_requires_live_repo_identity_fields() -> None
     missing_repo_context.pop("repo_context")
     assert validate_pending_summary_event(missing_repo_context).ok is False
 
-    missing_branch = _valid_repo_context(branch=None)
-    assert validate_repo_context(missing_branch).ok is False
+    detached_head = _valid_repo_context(branch=None)
+    assert validate_repo_context(detached_head).ok is True
     missing_head = _valid_repo_context(head=None)
     assert validate_repo_context(missing_head).ok is False
+    no_git_metadata = _valid_repo_context(branch=None, head=None)
+    assert validate_repo_context(no_git_metadata).ok is True
     mismatched_worktree = _valid_repo_context(worktree_root="/other")
     assert validate_repo_context(mismatched_worktree).ok is False
 

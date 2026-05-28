@@ -132,6 +132,10 @@ def test_pending_summary_event_requires_thread_id_from_turn_context() -> None:
 
 def test_repo_context_requires_exact_normalized_fields() -> None:
     assert validate_repo_context(valid_repo_context()).ok is True
+    assert validate_repo_context(valid_repo_context(branch=None, head="abc123")).ok is True
+    assert validate_pending_summary_event(
+        valid_attempt_event(repo_context=valid_repo_context(branch=None, head="abc123"))
+    ).ok is True
 
     missing = valid_repo_context()
     missing.pop("head")

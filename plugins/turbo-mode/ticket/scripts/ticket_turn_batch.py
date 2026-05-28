@@ -238,6 +238,8 @@ def validate_repo_context(repo_context: Mapping[str, object]) -> ValidationResul
     head = repo_context["head"]
     if branch is None and head is None:
         return _ok()
+    if branch is None:
+        return _ok() if _nonempty_string(head) else _invalid("head must identify detached HEAD")
     if not _nonempty_string(branch):
         return _invalid("branch must be present when git metadata is available")
     if not _nonempty_string(head):

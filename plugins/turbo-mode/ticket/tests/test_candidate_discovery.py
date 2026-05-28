@@ -120,7 +120,7 @@ def test_structured_candidates_may_supply_bounded_ticket_change_scope(
     ]
 
 
-def test_discovers_ticket_ids_mentioned_in_request_and_summary(tmp_path: Path) -> None:
+def test_id_only_mentions_do_not_create_mutation_candidates(tmp_path: Path) -> None:
     tickets_dir = tmp_path / "docs" / "tickets"
     context = _context(
         user_request="Please check T-20260527-01 after this fix.",
@@ -129,11 +129,7 @@ def test_discovers_ticket_ids_mentioned_in_request_and_summary(tmp_path: Path) -
 
     candidates = discover_candidate_mutations(context, tickets_dir)
 
-    assert [candidate.ticket_id for candidate in candidates] == [
-        "T-20260527-01",
-        "T-20260527-02",
-    ]
-    assert {candidate.evidence[0].kind for candidate in candidates} == {"explicit_ticket_id"}
+    assert candidates == ()
 
 
 def test_matches_related_paths_against_ticket_metadata(tmp_path: Path) -> None:
