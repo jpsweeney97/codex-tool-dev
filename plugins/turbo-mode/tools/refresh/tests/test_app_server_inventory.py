@@ -729,6 +729,26 @@ def test_validate_readonly_inventory_contract_rejects_plugin_list_id_in_wrong_fi
         )
 
 
+def test_validate_readonly_inventory_contract_rejects_missing_review_family_plugin(
+    tmp_path: Path,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    raw = copy.deepcopy(list(transcript(refresh_paths)))
+    raw[3]["body"]["result"]["plugins"] = [
+        plugin
+        for plugin in raw[3]["body"]["result"]["plugins"]
+        if plugin != "review-family@turbo-mode"
+    ]
+
+    with pytest.raises(RefreshError, match="plugin/list missing Turbo Mode plugins"):
+        validate_readonly_inventory_contract(
+            tuple(raw),
+            paths=refresh_paths,
+            identity=identity(),
+            request_methods=("initialize",),
+        )
+
+
 def test_validate_readonly_inventory_contract_rejects_skill_name_in_wrong_field(
     tmp_path: Path,
 ) -> None:
@@ -813,15 +833,23 @@ def test_validate_readonly_inventory_contract_rejects_unexpected_handoff_hook(
         )
 
 
+@pytest.mark.parametrize(
+    "missing_skill",
+    [
+        "ticket:ticket-triage",
+        "review-family:scrutinize",
+    ],
+)
 def test_validate_readonly_inventory_contract_rejects_missing_skill(
     tmp_path: Path,
+    missing_skill: str,
 ) -> None:
     refresh_paths = paths(tmp_path)
     raw = list(transcript(refresh_paths))
     raw[4]["body"]["result"]["skills"] = [
         item
         for item in raw[4]["body"]["result"]["skills"]
-        if item["name"] != "ticket:ticket-triage"
+        if item["name"] != missing_skill
     ]
 
     with pytest.raises(RefreshError, match="skills/list missing Turbo Mode skills"):
@@ -833,7 +861,35 @@ def test_validate_readonly_inventory_contract_rejects_missing_skill(
         )
 
 
-@pytest.mark.parametrize("response_index", [1, 2])
+def test_validate_readonly_inventory_contract_rejects_review_family_skill_wrong_cache_prefix(
+    tmp_path: Path,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    raw = copy.deepcopy(list(transcript(refresh_paths)))
+    wrong_path = (
+        refresh_paths.codex_home
+        / "plugins/cache/turbo-mode/review-family/9.9.9/skills/scrutinize/SKILL.md"
+    )
+    for item in raw[4]["body"]["result"]["skills"]:
+        if item["name"] == "review-family:scrutinize":
+            item["sourcePath"] = str(wrong_path)
+            break
+    else:  # pragma: no cover - fixture corruption would be a test authoring error
+        raise AssertionError("review-family:scrutinize fixture missing")
+
+    with pytest.raises(
+        RefreshError,
+        match="skills/list missing installed-cache skill path for review-family:scrutinize",
+    ):
+        validate_readonly_inventory_contract(
+            tuple(raw),
+            paths=refresh_paths,
+            identity=identity(),
+            request_methods=("initialize",),
+        )
+
+
+@pytest.mark.parametrize("response_index", [1, 2, 6])
 def test_validate_readonly_inventory_contract_rejects_plugin_read_plugin_dev_paths(
     tmp_path: Path,
     response_index: int,

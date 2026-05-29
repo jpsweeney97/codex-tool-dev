@@ -13,6 +13,7 @@ Source edits here do not prove installed Codex behavior.
 Install via the Codex plugin system:
 
 ```bash
+codex plugin marketplace update turbo-mode
 codex plugin install review-family@turbo-mode
 ```
 
