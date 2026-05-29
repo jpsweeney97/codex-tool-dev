@@ -2864,6 +2864,25 @@ def test_snapshot_captures_config_and_cache_manifest(tmp_path: Path) -> None:
     }
 
 
+def test_cache_snapshot_restore_preserves_missing_review_family_cache(
+    tmp_path: Path,
+) -> None:
+    ctx = context(tmp_path)
+    seed_config(ctx)
+    seed_plugins(ctx)
+    review_family_cache = ctx.codex_home / "plugins/cache/turbo-mode/review-family/0.1.0"
+    shutil.rmtree(review_family_cache)
+    snapshot = create_snapshot_set(ctx)
+
+    review_family_cache.mkdir(parents=True)
+    (review_family_cache / "installed.txt").write_text("installed\n", encoding="utf-8")
+
+    mutation_module._restore_cache_snapshots(ctx, snapshot)
+
+    assert snapshot.pre_refresh_cache_root_exists["review-family"] is False
+    assert not review_family_cache.exists()
+
+
 def test_guarded_hook_disable_only_writes_from_true(tmp_path: Path) -> None:
     ctx = context(tmp_path)
     seed_config(ctx)

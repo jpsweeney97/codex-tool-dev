@@ -861,6 +861,30 @@ def test_validate_readonly_inventory_contract_rejects_missing_skill(
         )
 
 
+def test_validate_readonly_inventory_contract_allows_missing_review_family_skills_before_install(
+    tmp_path: Path,
+) -> None:
+    refresh_paths = paths(tmp_path)
+    raw = copy.deepcopy(list(transcript(refresh_paths)))
+    raw[4]["body"]["result"]["skills"] = [
+        item
+        for item in raw[4]["body"]["result"]["skills"]
+        if not str(item["name"]).startswith("review-family:")
+    ]
+
+    inventory = validate_readonly_inventory_contract(
+        tuple(raw),
+        paths=refresh_paths,
+        identity=identity(),
+        request_methods=("initialize",),
+        allow_missing_plugins=("review-family",),
+    )
+
+    assert inventory.state == "aligned"
+    assert not any(skill.startswith("review-family:") for skill in inventory.skills)
+    assert inventory.reasons == ("review-family-skills-missing-before-install",)
+
+
 def test_validate_readonly_inventory_contract_rejects_review_family_skill_wrong_cache_prefix(
     tmp_path: Path,
 ) -> None:

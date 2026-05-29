@@ -25,10 +25,12 @@ from .models import (
     CoverageState,
     CoverageStatus,
     DiffEntry,
+    DiffKind,
     FilesystemState,
     ManifestEntry,
     MutationMode,
     PathClassification,
+    PathOutcome,
     PlanAxes,
     PluginSpec,
     PreflightState,
@@ -54,6 +56,8 @@ EXPECTED_CONFIG_PLUGINS = (
     "review-family@turbo-mode",
     "ticket@turbo-mode",
 )
+INSTALLABLE_MISSING_CACHE_PLUGINS = frozenset({"review-family"})
+MISSING_CACHE_ROOT_INSTALL_REASON = "missing-cache-root-install"
 
 
 InventoryCollector = Callable[
@@ -130,6 +134,7 @@ def plan_refresh(
         fail("plan refresh", "mode must be dry-run or plan-refresh", mode)
     specs = build_plugin_specs(repo_root=paths.repo_root, codex_home=paths.codex_home)
     preflight_reasons: list[str] = []
+    installable_missing_cache_plugins: set[str] = set()
     try:
         residue_issues = tuple(scan_generated_residue(specs))
     except RefreshError as exc:
@@ -139,7 +144,11 @@ def plan_refresh(
     for spec in specs:
         if not spec.source_root.exists():
             preflight_reasons.append(f"missing source root: {spec.source_root}")
-        if not spec.cache_root.exists():
+        if spec.cache_root.exists():
+            continue
+        if spec.name in INSTALLABLE_MISSING_CACHE_PLUGINS and spec.source_root.exists():
+            installable_missing_cache_plugins.add(spec.name)
+        else:
             preflight_reasons.append(f"missing cache root: {spec.cache_root}")
     if residue_issues:
         preflight_reasons.append("generated residue present")
@@ -157,7 +166,14 @@ def plan_refresh(
                 spec_diffs = diff_manifests(source_manifest, cache_manifest)
                 diffs.extend(spec_diffs)
                 classifications.extend(
-                    _classify_diff_for_spec(spec, diff) for diff in spec_diffs
+                    _classify_diff_for_spec(
+                        spec,
+                        diff,
+                        installable_missing_cache_root=(
+                            spec.name in installable_missing_cache_plugins
+                        ),
+                    )
+                    for diff in spec_diffs
                 )
             manifest_collected = True
         except RefreshError as exc:
@@ -182,8 +198,17 @@ def plan_refresh(
             inventory_failure_reason = "runtime config preflight unavailable"
         else:
             try:
-                collector = inventory_collector or collect_readonly_runtime_inventory
-                app_server_inventory, app_server_transcript = collector(paths)
+                if inventory_collector is not None:
+                    app_server_inventory, app_server_transcript = inventory_collector(paths)
+                else:
+                    app_server_inventory, app_server_transcript = (
+                        collect_readonly_runtime_inventory(
+                            paths,
+                            allow_missing_plugins=tuple(
+                                sorted(installable_missing_cache_plugins)
+                            ),
+                        )
+                    )
                 inventory_status = "collected"
             except InventoryCollectionError as exc:
                 app_server_transcript = exc.transcript
@@ -551,7 +576,24 @@ def _plugin_enablement_state(data: dict[str, Any]) -> tuple[dict[str, str], tupl
     return states, tuple(reasons)
 
 
-def _classify_diff_for_spec(spec: PluginSpec, diff: DiffEntry) -> PathClassification:
+def _classify_diff_for_spec(
+    spec: PluginSpec,
+    diff: DiffEntry,
+    *,
+    installable_missing_cache_root: bool = False,
+) -> PathClassification:
+    if (
+        installable_missing_cache_root
+        and diff.kind == DiffKind.ADDED
+        and diff.source is not None
+    ):
+        return PathClassification(
+            canonical_path=diff.canonical_path,
+            mutation_mode=MutationMode.GUARDED,
+            coverage_status=CoverageStatus.COVERED,
+            outcome=PathOutcome.GUARDED_ONLY,
+            reasons=(MISSING_CACHE_ROOT_INSTALL_REASON,),
+        )
     source_text = _read_text_for_entry(spec.source_root, diff.source)
     cache_text = _read_text_for_entry(spec.cache_root, diff.cache)
     executable = bool(

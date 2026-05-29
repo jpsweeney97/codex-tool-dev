@@ -54,6 +54,11 @@ REAL_CODEX_HOME = real_codex_home()
 APP_SERVER_RESPONSE_SCHEMA_VERSION = ACCEPTED_RESPONSE_SCHEMA_VERSION
 PLUGIN_VERSIONS = {"handoff": "1.6.0", "ticket": "1.4.0", "review-family": "0.1.0"}
 PLUGIN_READ_RESPONSE_IDS = {"handoff": 1, "ticket": 2, "review-family": 6}
+EXPECTED_SKILLS_BY_PLUGIN = {
+    "handoff": EXPECTED_HANDOFF_SKILLS,
+    "ticket": EXPECTED_TICKET_SKILLS,
+    "review-family": EXPECTED_REVIEW_FAMILY_SKILLS,
+}
 
 
 @dataclass(frozen=True)
@@ -324,6 +329,7 @@ def collect_readonly_runtime_inventory(
     scratch_cwd: Path | None = None,
     roundtrip=None,
     identity_collector=None,
+    allow_missing_plugins: tuple[str, ...] = (),
 ) -> tuple[AppServerInventoryCheck, tuple[dict[str, Any], ...]]:
     if scratch_cwd is None:
         with tempfile.TemporaryDirectory(prefix="turbo-mode-refresh-inventory-") as tmpdir:
@@ -332,12 +338,14 @@ def collect_readonly_runtime_inventory(
                 scratch_cwd=Path(tmpdir),
                 roundtrip=roundtrip,
                 identity_collector=identity_collector,
+                allow_missing_plugins=allow_missing_plugins,
             )
     return _collect_readonly_runtime_inventory(
         paths,
         scratch_cwd=scratch_cwd,
         roundtrip=roundtrip,
         identity_collector=identity_collector,
+        allow_missing_plugins=allow_missing_plugins,
     )
 
 
@@ -347,6 +355,7 @@ def _collect_readonly_runtime_inventory(
     scratch_cwd: Path,
     roundtrip=None,
     identity_collector=None,
+    allow_missing_plugins: tuple[str, ...] = (),
 ) -> tuple[AppServerInventoryCheck, tuple[dict[str, Any], ...]]:
     scratch_cwd.mkdir(parents=True, exist_ok=True)
     requests = build_readonly_inventory_requests(paths, scratch_cwd=scratch_cwd)
@@ -388,6 +397,7 @@ def _collect_readonly_runtime_inventory(
             paths=paths,
             identity=identity,
             request_methods=tuple(request.get("method", "") for request in requests),
+            allow_missing_plugins=allow_missing_plugins,
         )
     except InventoryCollectionError:
         raise
@@ -560,6 +570,7 @@ def collect_app_server_launch_authority(
     codex_help_text: str | None = None,
     executable: str | None = None,
     ticket_hook_policy: str = "required",
+    allow_missing_plugins: tuple[str, ...] = (),
 ) -> tuple[AppServerLaunchAuthority, tuple[dict[str, Any], ...]]:
     needs_executable = (
         roundtrip is None
@@ -627,6 +638,7 @@ def collect_app_server_launch_authority(
         identity=identity,
         request_methods=tuple(request.get("method", "") for request in requests),
         ticket_hook_policy=ticket_hook_policy,
+        allow_missing_plugins=allow_missing_plugins,
     )
     candidates = discover_binding_candidates(
         app_server_help_text=active_app_server_help,
@@ -1239,6 +1251,7 @@ def validate_readonly_inventory_contract(
     identity: CodexRuntimeIdentity,
     request_methods: tuple[str, ...],
     ticket_hook_policy: str = "required",
+    allow_missing_plugins: tuple[str, ...] = (),
 ) -> AppServerInventoryCheck:
     if ticket_hook_policy not in {"required", "disabled"}:
         fail("inventory contract", "unexpected Ticket hook policy", ticket_hook_policy)
@@ -1256,14 +1269,18 @@ def validate_readonly_inventory_contract(
         for plugin, response_id in PLUGIN_READ_RESPONSE_IDS.items()
     }
     plugin_list = validate_plugin_list_response(responses[3], paths)
-    skills = validate_skills_response(responses[4], paths)
+    skills, skill_reasons = validate_skills_response(
+        responses[4],
+        paths,
+        allow_missing_plugins=allow_missing_plugins,
+    )
     if ticket_hook_policy == "required":
         ticket_hook = validate_hooks_response(responses[5], paths)
-        reasons: tuple[str, ...] = ()
+        reasons = skill_reasons
     else:
         validate_hooks_disabled_response(responses[5])
         ticket_hook = {}
-        reasons = ("ticket-hook-disabled-by-config",)
+        reasons = (*skill_reasons, "ticket-hook-disabled-by-config")
     handoff_hooks = validate_no_handoff_hooks(responses[5])
     return AppServerInventoryCheck(
         state="aligned",
@@ -1309,15 +1326,34 @@ def validate_plugin_list_response(response: dict[str, Any], paths: Any) -> list[
     return sorted(expected)
 
 
-def validate_skills_response(response: dict[str, Any], paths: Any) -> list[str]:
-    expected = EXPECTED_HANDOFF_SKILLS + EXPECTED_TICKET_SKILLS + EXPECTED_REVIEW_FAMILY_SKILLS
+def validate_skills_response(
+    response: dict[str, Any],
+    paths: Any,
+    *,
+    allow_missing_plugins: tuple[str, ...] = (),
+) -> tuple[list[str], tuple[str, ...]]:
+    allowed_missing = _normalize_allowed_missing_plugins(allow_missing_plugins)
+    expected = tuple(
+        skill for plugin_skills in EXPECTED_SKILLS_BY_PLUGIN.values() for skill in plugin_skills
+    )
     if json_contains(response, "/plugin-dev/"):
         fail("inventory contract", "skills/list contains plugin-dev path", response)
     skills = skill_records_by_name(response)
-    missing = sorted(skill for skill in expected if skill not in skills)
+    missing = sorted(
+        skill
+        for skill in expected
+        if skill not in skills and skill.split(":", 1)[0] not in allowed_missing
+    )
     if missing:
         fail("inventory contract", "skills/list missing Turbo Mode skills", missing)
+    reasons = tuple(
+        f"{plugin}-skills-missing-before-install"
+        for plugin in sorted(allowed_missing)
+        if any(skill not in skills for skill in EXPECTED_SKILLS_BY_PLUGIN[plugin])
+    )
     for skill in expected:
+        if skill not in skills:
+            continue
         record = skills[skill]
         actual_path = skill_record_path(record)
         plugin = skill.split(":", 1)[0]
@@ -1329,7 +1365,15 @@ def validate_skills_response(response: dict[str, Any], paths: Any) -> list[str]:
                 f"skills/list missing installed-cache skill path for {skill}",
                 actual_path,
             )
-    return sorted(expected)
+    return sorted(skill for skill in expected if skill in skills), reasons
+
+
+def _normalize_allowed_missing_plugins(allow_missing_plugins: tuple[str, ...]) -> frozenset[str]:
+    allowed = frozenset(allow_missing_plugins)
+    unknown = sorted(allowed - set(PLUGIN_VERSIONS))
+    if unknown:
+        fail("inventory contract", "unexpected allowed missing plugins", unknown)
+    return allowed
 
 
 def validate_hooks_response(response: dict[str, Any], paths: Any) -> dict[str, str]:

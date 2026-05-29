@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -13,9 +14,12 @@ from refresh.app_server_inventory import (
 from refresh.classifier import HANDOFF_STORAGE_GATE5_REFRESH_CONTRACTS
 from refresh.models import (
     CoverageState,
+    CoverageStatus,
     DiffEntry,
     FilesystemState,
     ManifestEntry,
+    MutationMode,
+    PathClassification,
     PathOutcome,
     PluginSpec,
     PreflightState,
@@ -564,6 +568,42 @@ def test_plan_refresh_inventory_check_can_prove_no_drift(tmp_path: Path) -> None
     assert result.terminal_status == TerminalPlanStatus.NO_DRIFT
     assert result.app_server_inventory is not None
     assert result.app_server_transcript == ({"direction": "recv"},)
+
+
+def test_plan_refresh_missing_review_family_cache_is_installable_guarded_drift(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    codex_home = tmp_path / ".codex"
+    write_valid_marketplace(repo_root)
+    write_aligned_config(codex_home, repo_root)
+    ensure_complete_plugin_roots(repo_root, codex_home)
+    review_family_cache = codex_home / "plugins/cache/turbo-mode/review-family/0.1.0"
+    shutil.rmtree(review_family_cache)
+
+    result = plan_refresh(
+        repo_root=repo_root,
+        codex_home=codex_home,
+        mode="dry-run",
+        inventory_check=True,
+        inventory_collector=lambda _paths: (aligned_inventory(), ({"direction": "recv"},)),
+    )
+
+    assert result.axes.preflight_state == PreflightState.PASSED
+    assert result.axes.filesystem_state == FilesystemState.DRIFT
+    assert result.axes.coverage_state == CoverageState.COVERED
+    assert result.axes.selected_mutation_mode == SelectedMutationMode.GUARDED_REFRESH
+    assert result.terminal_status == TerminalPlanStatus.GUARDED_REFRESH_REQUIRED
+    assert result.diff_classification == (
+        PathClassification(
+            canonical_path="review-family/0.1.0/README.md",
+            mutation_mode=MutationMode.GUARDED,
+            coverage_status=CoverageStatus.COVERED,
+            outcome=PathOutcome.GUARDED_ONLY,
+            reasons=("missing-cache-root-install",),
+        ),
+    )
+    assert not any("missing cache root" in reason for reason in result.axes.reasons)
 
 
 def test_plan_refresh_handoff_state_helper_doc_migration_requires_guarded_refresh(
