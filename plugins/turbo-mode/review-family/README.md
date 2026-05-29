@@ -14,7 +14,7 @@ Install via the Codex plugin system:
 
 ```bash
 codex plugin marketplace update turbo-mode
-codex plugin install review-family@turbo-mode
+codex plugin add review-family@turbo-mode
 ```
 
 Or install directly from the development repo:
