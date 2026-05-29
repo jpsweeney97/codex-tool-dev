@@ -2941,6 +2941,7 @@ def _untracked_relevant_paths(repo_root: Path) -> tuple[str, ...]:
     relevant_roots = (
         "plugins/turbo-mode/tools/",
         "plugins/turbo-mode/handoff/",
+        "plugins/turbo-mode/review-family/",
         "plugins/turbo-mode/ticket/",
         "plugins/turbo-mode/evidence/refresh/",
         ".agents/plugins/marketplace.json",

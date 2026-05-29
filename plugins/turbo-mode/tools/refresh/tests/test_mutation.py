@@ -55,6 +55,7 @@ LIVE_HOME_SKILL_PATH = (
     "/Users/jp/.codex/plugins/cache/turbo-mode/handoff/1.6.0/skills/save/SKILL.md"
 )
 RELEVANT_TOOL_PATH = "plugins/turbo-mode/tools/refresh/orchestration.py"
+RELEVANT_REVIEW_FAMILY_PATH = "plugins/turbo-mode/review-family/skills/new/SKILL.md"
 APPROVED_EVIDENCE_PATH = "plugins/turbo-mode/evidence/refresh/notes.md"
 
 
@@ -812,13 +813,21 @@ def test_source_identity_allows_docs_evidence_delta_and_records_local_proof(
     assert APPROVED_EVIDENCE_PATH in proof_path.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize(
+    "untracked_path",
+    [
+        RELEVANT_TOOL_PATH,
+        RELEVANT_REVIEW_FAMILY_PATH,
+    ],
+)
 def test_source_identity_rejects_untracked_relevant_file_before_evidence(
     tmp_path: Path,
+    untracked_path: str,
 ) -> None:
     repo_root, local_only_run_root, source_commit, source_tree = source_identity_repo(tmp_path)
-    write_repo_file(repo_root, RELEVANT_TOOL_PATH, "print('untracked')\n")
+    write_repo_file(repo_root, untracked_path, "untracked\n")
 
-    with pytest.raises(RefreshError, match="untracked relevant files"):
+    with pytest.raises(RefreshError, match="untracked relevant files") as exc_info:
         verify_source_execution_identity(
             repo_root=repo_root,
             local_only_run_root=local_only_run_root,
@@ -826,6 +835,7 @@ def test_source_identity_rejects_untracked_relevant_file_before_evidence(
             source_implementation_tree=source_tree,
         )
 
+    assert untracked_path in str(exc_info.value)
     assert not local_only_run_root.exists()
 
 
