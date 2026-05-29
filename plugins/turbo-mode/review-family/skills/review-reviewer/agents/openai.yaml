@@ -1,0 +1,7 @@
+interface:
+  display_name: "Review Reviewer"
+  short_description: "Adjudicate supplied reviews independently"
+  default_prompt: "Use $review-reviewer to independently adjudicate this review against its inferred target before I decide what to act on."
+
+policy:
+  allow_implicit_invocation: false

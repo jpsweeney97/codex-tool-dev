@@ -31,3 +31,4 @@ docs/tickets/.audit/
 .codex/ticket-runtime-smoke/
 .worktrees/
 docs/reviews/
+.claude/workflows/

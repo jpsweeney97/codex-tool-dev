@@ -49,6 +49,13 @@ def write_marketplace(path: Path) -> None:
                             "path": "./plugins/turbo-mode/ticket",
                         },
                     },
+                    {
+                        "name": "review-family",
+                        "source": {
+                            "source": "local",
+                            "path": "./plugins/turbo-mode/review-family",
+                        },
+                    },
                 ],
             }
         ),
@@ -67,6 +74,7 @@ def write_aligned_config(codex_home: Path, repo_root: Path) -> None:
         f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
@@ -108,6 +116,15 @@ def ensure_complete_plugin_roots(repo_root: Path, codex_home: Path) -> None:
         rel="README.md",
         source_text="ticket same\n",
         cache_text="ticket same\n",
+    )
+    write_plugin_pair(
+        repo_root,
+        codex_home,
+        plugin="review-family",
+        version="0.1.0",
+        rel="README.md",
+        source_text="review-family same\n",
+        cache_text="review-family same\n",
     )
 
 
@@ -173,6 +190,9 @@ def write_plan05_seed_sources(repo_root: Path) -> None:
     )
     ticket_guard = repo_root / "plugins/turbo-mode/ticket/hooks/ticket_engine_guard.py"
     ticket_guard.write_text("#!/usr/bin/env python3\nprint('guard')\n", encoding="utf-8")
+    review_family = repo_root / "plugins/turbo-mode/review-family/README.md"
+    review_family.parent.mkdir(parents=True, exist_ok=True)
+    review_family.write_text("review-family source\n", encoding="utf-8")
 
 
 def commit_all(repo_root: Path) -> None:
@@ -347,7 +367,13 @@ for line in sys.stdin:
         plugin = request["params"]["pluginName"]
         result = {"source": {"path": f"{repo}/plugins/turbo-mode/{plugin}"}}
     elif method == "plugin/list":
-        result = {"plugins": ["handoff@turbo-mode", "ticket@turbo-mode"]}
+        result = {
+            "plugins": [
+                "handoff@turbo-mode",
+                "review-family@turbo-mode",
+                "ticket@turbo-mode",
+            ]
+        }
     elif method == "skills/list":
         result = {
             "skills": [
@@ -359,6 +385,54 @@ for line in sys.stdin:
                 skill("handoff:search", "handoff", "1.6.0", "search"),
                 skill("handoff:summary", "handoff", "1.6.0", "summary"),
                 skill("handoff:triage", "handoff", "1.6.0", "triage"),
+                skill(
+                    "review-family:adversarial-review",
+                    "review-family",
+                    "0.1.0",
+                    "adversarial-review",
+                ),
+                skill(
+                    "review-family:implementation-review",
+                    "review-family",
+                    "0.1.0",
+                    "implementation-review",
+                ),
+                skill(
+                    "review-family:pragmatic-review",
+                    "review-family",
+                    "0.1.0",
+                    "pragmatic-review",
+                ),
+                skill(
+                    "review-family:request-claude-pr-review",
+                    "review-family",
+                    "0.1.0",
+                    "request-claude-pr-review",
+                ),
+                skill(
+                    "review-family:review-claude-claims",
+                    "review-family",
+                    "0.1.0",
+                    "review-claude-claims",
+                ),
+                skill(
+                    "review-family:review-reviewer",
+                    "review-family",
+                    "0.1.0",
+                    "review-reviewer",
+                ),
+                skill(
+                    "review-family:scrutinize",
+                    "review-family",
+                    "0.1.0",
+                    "scrutinize",
+                ),
+                skill(
+                    "review-family:system-design-review",
+                    "review-family",
+                    "0.1.0",
+                    "system-design-review",
+                ),
                 skill("ticket:ticket", "ticket", "1.4.0", "ticket"),
                 skill("ticket:ticket-triage", "ticket", "1.4.0", "ticket-triage"),
             ]
@@ -455,6 +529,7 @@ def test_cli_dry_run_outputs_json_and_writes_evidence(tmp_path: Path) -> None:
     assert payload["terminal_plan_status"] == "filesystem-no-drift"
     assert payload["runtime_config"]["plugin_enablement_state"] == {
         "handoff@turbo-mode": "enabled",
+        "review-family@turbo-mode": "enabled",
         "ticket@turbo-mode": "enabled",
     }
     assert (codex_home / "local-only/turbo-mode-refresh/run-1/dry-run.summary.json").is_file()
@@ -2198,6 +2273,7 @@ def test_cli_record_summary_inventory_check_projects_methods_without_transcript(
         "plugin/list",
         "skills/list",
         "hooks/list",
+        "plugin/read",
     ]
     assert "app_server_transcript" not in summary
     assert "secret" not in dumped

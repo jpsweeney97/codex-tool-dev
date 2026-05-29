@@ -54,7 +54,7 @@ from .lock_state import (
 from .manifests import build_manifest, diff_manifests
 from .models import DiffEntry, DiffKind, PluginSpec, RefreshError, fail
 from .paths import RefreshPaths
-from .planner import build_plugin_specs, plan_refresh
+from .planner import INSTALLABLE_MISSING_CACHE_PLUGINS, build_plugin_specs, plan_refresh
 from .process_gate import capture_process_gate
 from .publication import (
     PublicationReplayPaths,
@@ -157,6 +157,7 @@ class SnapshotSet:
     cache_snapshot_root: Path
     source_manifest_sha256: dict[str, str]
     pre_refresh_cache_manifest_sha256: dict[str, str]
+    pre_refresh_cache_root_exists: dict[str, bool]
     config_path: Path
     snapshot_manifest_path: Path
 
@@ -222,10 +223,12 @@ def prove_app_server_home_authority(
     context: MutationContext,
     *,
     ticket_hook_policy: str = "required",
+    allow_missing_plugins: tuple[str, ...] = (),
 ) -> AppServerLaunchAuthority:
     authority, transcript = collect_app_server_launch_authority(
         _refresh_paths(context),
         ticket_hook_policy=ticket_hook_policy,
+        allow_missing_plugins=allow_missing_plugins,
     )
     _validate_launch_authority(authority, context=context, transcript=transcript)
     return authority
@@ -760,7 +763,14 @@ def run_guarded_refresh_orchestration(
             )
             phase_log.append("before-snapshot")
 
-            launch_authority = prove_app_server_home_authority(context)
+            missing_cache_plugins = _installable_missing_cache_plugins(context)
+            if missing_cache_plugins:
+                launch_authority = prove_app_server_home_authority(
+                    context,
+                    allow_missing_plugins=missing_cache_plugins,
+                )
+            else:
+                launch_authority = prove_app_server_home_authority(context)
             launch_authority_proof_path = context.local_only_run_root / (
                 "app-server-authority.proof.json"
             )
@@ -1503,15 +1513,18 @@ def create_snapshot_set(context: MutationContext) -> SnapshotSet:
 
     source_manifest_sha256: dict[str, str] = {}
     pre_refresh_cache_manifest_sha256: dict[str, str] = {}
+    pre_refresh_cache_root_exists: dict[str, bool] = {}
     for spec in build_plugin_specs(repo_root=context.repo_root, codex_home=context.codex_home):
+        cache_root_exists = spec.cache_root.exists()
         source_manifest = build_manifest(spec, root_kind="source")
         cache_manifest = build_manifest(spec, root_kind="cache")
         source_manifest_sha256[spec.name] = authority_digest(source_manifest)
         pre_refresh_cache_manifest_sha256[spec.name] = authority_digest(cache_manifest)
+        pre_refresh_cache_root_exists[spec.name] = cache_root_exists
         destination = cache_snapshot_root / spec.name / spec.version
         if destination.exists():
             shutil.rmtree(destination)
-        if spec.cache_root.exists():
+        if cache_root_exists:
             shutil.copytree(spec.cache_root, destination)
 
     config_sha256 = _sha256_file(config_snapshot_path)
@@ -1524,6 +1537,7 @@ def create_snapshot_set(context: MutationContext) -> SnapshotSet:
             "cache_snapshot_root": str(cache_snapshot_root),
             "source_manifest_sha256": source_manifest_sha256,
             "pre_refresh_cache_manifest_sha256": pre_refresh_cache_manifest_sha256,
+            "pre_refresh_cache_root_exists": pre_refresh_cache_root_exists,
         },
     )
     return SnapshotSet(
@@ -1532,6 +1546,7 @@ def create_snapshot_set(context: MutationContext) -> SnapshotSet:
         cache_snapshot_root=cache_snapshot_root,
         source_manifest_sha256=source_manifest_sha256,
         pre_refresh_cache_manifest_sha256=pre_refresh_cache_manifest_sha256,
+        pre_refresh_cache_root_exists=pre_refresh_cache_root_exists,
         config_path=config_path,
         snapshot_manifest_path=snapshot_manifest_path,
     )
@@ -1647,6 +1662,7 @@ def _snapshot_from_recovery_state(context: MutationContext, state: RunState) -> 
         cache_snapshot_root=Path(cache_snapshot),
         source_manifest_sha256={},
         pre_refresh_cache_manifest_sha256=state.pre_refresh_cache_manifest_sha256,
+        pre_refresh_cache_root_exists=_read_snapshot_cache_root_exists(Path(manifest)),
         config_path=context.codex_home / "config.toml",
         snapshot_manifest_path=Path(manifest),
     )
@@ -1732,12 +1748,36 @@ def _recovery_phase_may_have_cache_mutation(phase: str) -> bool:
 
 def _restore_cache_snapshots(context: MutationContext, snapshot: SnapshotSet) -> None:
     for spec in build_plugin_specs(repo_root=context.repo_root, codex_home=context.codex_home):
+        if not snapshot.pre_refresh_cache_root_exists.get(spec.name, True):
+            if spec.cache_root.exists():
+                shutil.rmtree(spec.cache_root)
+            continue
         source = snapshot.cache_snapshot_root / spec.name / spec.version
         if not source.exists():
             fail("run guarded refresh recovery", "cache snapshot path missing", str(source))
         if spec.cache_root.exists():
             shutil.rmtree(spec.cache_root)
         shutil.copytree(source, spec.cache_root)
+
+
+def _read_snapshot_cache_root_exists(snapshot_manifest_path: Path) -> dict[str, bool]:
+    try:
+        payload = json.loads(snapshot_manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        fail(
+            "run guarded refresh recovery",
+            f"read snapshot manifest failed: {exc}",
+            str(snapshot_manifest_path),
+        )
+    exists = payload.get("pre_refresh_cache_root_exists")
+    if not isinstance(exists, dict):
+        return {plugin: True for plugin in INSTALLABLE_MISSING_CACHE_PLUGINS}
+    result: dict[str, bool] = {}
+    for plugin, value in exists.items():
+        if not isinstance(plugin, str) or not isinstance(value, bool):
+            fail("run guarded refresh recovery", "malformed cache root existence map", exists)
+        result[plugin] = value
+    return result
 
 
 def install_plugins_via_app_server(
@@ -1750,10 +1790,18 @@ def install_plugins_via_app_server(
     if context.live_target or context.codex_home == REAL_CODEX_HOME:
         state = _read_existing_run_state(context)
         validate_cache_install_allowed(state)
-    launch_authority = prove_app_server_home_authority(
-        context,
-        ticket_hook_policy=pre_install_ticket_hook_policy,
-    )
+    missing_cache_plugins = _installable_missing_cache_plugins(context)
+    if missing_cache_plugins:
+        launch_authority = prove_app_server_home_authority(
+            context,
+            ticket_hook_policy=pre_install_ticket_hook_policy,
+            allow_missing_plugins=missing_cache_plugins,
+        )
+    else:
+        launch_authority = prove_app_server_home_authority(
+            context,
+            ticket_hook_policy=pre_install_ticket_hook_policy,
+        )
     pre_install_authority = build_pre_install_target_authority(
         launch_authority=launch_authority,
         marketplace_path=context.repo_root / ".agents/plugins/marketplace.json",
@@ -1785,12 +1833,19 @@ def install_plugins_via_app_server(
             response: dict[str, Any],
             _transcript: list[dict[str, Any]],
         ) -> None:
-            if request.get("id") != 2 or response.get("id") != 2:
+            if request.get("method") != "plugin/install":
                 return
-            rewrite_ticket_hook_manifest(
-                ticket_plugin_root=context.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
-            )
-            if restore_config_before_post_install is not None:
+            if request.get("id") != response.get("id"):
+                return
+            params = request.get("params")
+            plugin_name = params.get("pluginName") if isinstance(params, dict) else None
+            if plugin_name == "ticket":
+                rewrite_ticket_hook_manifest(
+                    ticket_plugin_root=(
+                        context.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
+                    )
+                )
+            if request.get("id") == len(install_requests) and restore_config_before_post_install:
                 restore_config_before_post_install()
 
         install_transcript = tuple(
@@ -1927,14 +1982,15 @@ def rollback_guarded_refresh(
 ) -> dict[str, object]:
     _validate_snapshot_for_rollback(snapshot)
     restore_config_snapshot(snapshot, current_expected_sha256=None)
-    for spec in build_plugin_specs(repo_root=context.repo_root, codex_home=context.codex_home):
-        source = snapshot.cache_snapshot_root / spec.name / spec.version
-        if not source.exists():
-            fail("rollback guarded refresh", "cache snapshot path missing", str(source))
-        if spec.cache_root.exists():
-            shutil.rmtree(spec.cache_root)
-        shutil.copytree(source, spec.cache_root)
-    inventory, transcript = collect_readonly_runtime_inventory(_refresh_paths(context))
+    missing_cache_plugins = _snapshot_installable_missing_cache_plugins(context, snapshot)
+    _restore_cache_snapshots(context, snapshot)
+    if missing_cache_plugins:
+        inventory, transcript = collect_readonly_runtime_inventory(
+            _refresh_paths(context),
+            allow_missing_plugins=missing_cache_plugins,
+        )
+    else:
+        inventory, transcript = collect_readonly_runtime_inventory(_refresh_paths(context))
     return {
         "failed_phase": failed_phase,
         "final_status": "rollback-complete",
@@ -1964,6 +2020,28 @@ def _refresh_paths(context: MutationContext) -> RefreshPaths:
         marketplace_path=context.repo_root / ".agents/plugins/marketplace.json",
         config_path=context.codex_home / "config.toml",
         local_only_root=context.codex_home / "local-only/turbo-mode-refresh",
+    )
+
+
+def _installable_missing_cache_plugins(context: MutationContext) -> tuple[str, ...]:
+    return tuple(
+        spec.name
+        for spec in build_plugin_specs(repo_root=context.repo_root, codex_home=context.codex_home)
+        if spec.name in INSTALLABLE_MISSING_CACHE_PLUGINS
+        and spec.source_root.exists()
+        and not spec.cache_root.exists()
+    )
+
+
+def _snapshot_installable_missing_cache_plugins(
+    context: MutationContext,
+    snapshot: SnapshotSet,
+) -> tuple[str, ...]:
+    return tuple(
+        spec.name
+        for spec in build_plugin_specs(repo_root=context.repo_root, codex_home=context.codex_home)
+        if spec.name in INSTALLABLE_MISSING_CACHE_PLUGINS
+        and not snapshot.pre_refresh_cache_root_exists.get(spec.name, True)
     )
 
 
@@ -2818,6 +2896,7 @@ def _write_seed_config(config_path: Path, *, repo_root: Path) -> None:
             f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
             "[features]\nplugin_hooks = true\n"
             '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+            '[plugins."review-family@turbo-mode"]\nenabled = true\n'
             '[plugins."ticket@turbo-mode"]\nenabled = true\n'
         )
     os.chmod(config_path, 0o600)
@@ -2933,6 +3012,7 @@ def _untracked_relevant_paths(repo_root: Path) -> tuple[str, ...]:
     relevant_roots = (
         "plugins/turbo-mode/tools/",
         "plugins/turbo-mode/handoff/",
+        "plugins/turbo-mode/review-family/",
         "plugins/turbo-mode/ticket/",
         "plugins/turbo-mode/evidence/refresh/",
         ".agents/plugins/marketplace.json",

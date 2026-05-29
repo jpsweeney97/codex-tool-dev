@@ -6,12 +6,15 @@ description: Use when the user asks to plan, refresh, sync, update, or locally i
 # Turbo Plugin Refresh
 
 Run the official local-plugin baseline for Turbo Mode plugins. The repo remains
-source authority, and the sync helper decides which Turbo Mode plugins are copied
-to the user's personal Codex plugin directories.
+source authority for the expected Turbo Mode plugin set: Handoff, Ticket, and
+Review Family. The sync helper copies manifest-backed plugin directories under
+`plugins/turbo-mode/` to the user's personal Codex plugin directories.
 
 ## Rules
 
 - Use the repo at `/Users/jp/Projects/active/codex-tool-dev`.
+- Expect at least these source packages: `handoff`, `ticket`, and
+  `review-family`.
 - Use npm scripts for the normal workflow.
 - Always start with the non-mutating plan workflow.
 - Do not run the sync command on the first turn, even if the user says
@@ -22,9 +25,15 @@ to the user's personal Codex plugin directories.
 - Treat marketplace writes as separate setup/configuration work, not normal
   refresh. Do not write `~/.agents/plugins/marketplace.json` unless the user
   explicitly asks for marketplace setup or configuration.
-- After a successful sync, say: "Restart Codex so it loads the synced personal
-  plugin copies."
-- Do not describe the sync as runtime proof.
+- Treat copying, marketplace availability, installed status, and loaded runtime
+  state as separate proof surfaces.
+- After a successful sync, run `codex plugin list` before saying what restart
+  will accomplish.
+- If an expected plugin is listed as `not installed`, say that sync made the
+  source available but did not install it. For the default personal marketplace,
+  install it with `codex plugin add <plugin>@turbo-mode`, then start a new
+  thread or restart Codex so the runtime can load the newly installed plugin.
+- Do not describe sync, marketplace metadata, or copied files as runtime proof.
 
 ## Plan Workflow
 
@@ -40,6 +49,8 @@ Report:
 
 - current branch and whether the working tree is dirty
 - the planned plugin copy operations from the npm output
+- whether `handoff`, `ticket`, and `review-family` all appear in the planned
+  copy operations
 - the intended personal marketplace path and JSON from the npm output
 - whether the user must say `sync now` to copy files
 
@@ -73,7 +84,10 @@ Report:
 - whether the sync command succeeded
 - any copied plugin paths shown by the helper
 - whether dirty source was copied
-- "Restart Codex so it loads the synced personal plugin copies."
+- the `codex plugin list` status for `handoff`, `ticket`, and `review-family`
+- whether any expected plugin still needs `codex plugin add <plugin>@turbo-mode`
+- whether a restart or new thread is needed to load newly installed plugin
+  skills and tools
 
 Do not ask for a third confirmation after `sync now` unless the preflight fails,
 the repo path is unavailable, the npm scripts are missing, or the user asks for

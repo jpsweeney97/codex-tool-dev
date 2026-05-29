@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scrutinize"
+  short_description: "Adversarial review with hard gates"
+  default_prompt: "Use $scrutinize to tear this artifact apart and list the required changes before it can be trusted."

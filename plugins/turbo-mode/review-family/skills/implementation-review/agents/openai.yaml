@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implementation Review"
+  short_description: "Review code against a plan"
+  default_prompt: "Use $implementation-review to check this completed implementation against the plan and identify blockers or unverified requirements."
