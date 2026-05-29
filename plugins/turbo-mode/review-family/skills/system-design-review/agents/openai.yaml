@@ -1,0 +1,4 @@
+interface:
+  display_name: "System Design Review"
+  short_description: "Review architecture tradeoffs"
+  default_prompt: "Use $system-design-review to examine this design for architectural gaps, inherited defaults, and next probes."
