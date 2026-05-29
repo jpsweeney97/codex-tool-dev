@@ -3243,6 +3243,37 @@ def test_rollback_restores_config_and_cache_from_snapshot(
     ) == "same"
 
 
+def test_rollback_restores_missing_review_family_cache_absence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    ctx = context(tmp_path)
+    seed_config(ctx)
+    seed_plugins(ctx)
+    review_family_cache = ctx.codex_home / "plugins/cache/turbo-mode/review-family/0.1.0"
+    shutil.rmtree(review_family_cache)
+    snapshot = create_snapshot_set(ctx)
+    review_family_cache.mkdir(parents=True)
+    (review_family_cache / "installed.txt").write_text("installed\n", encoding="utf-8")
+    observed_inventory_allowance: list[tuple[str, ...]] = []
+
+    def fake_inventory(_paths: object, *, allow_missing_plugins: tuple[str, ...] = ()):
+        observed_inventory_allowance.append(allow_missing_plugins)
+        return "inventory", ()
+
+    monkeypatch.setattr(
+        mutation_module,
+        "collect_readonly_runtime_inventory",
+        fake_inventory,
+    )
+
+    result = rollback_guarded_refresh(ctx, snapshot, failed_phase="install-complete")
+
+    assert result["final_status"] == "rollback-complete"
+    assert not review_family_cache.exists()
+    assert observed_inventory_allowance == [("review-family",)]
+
+
 def test_rollback_rejects_missing_snapshot_manifest(tmp_path: Path) -> None:
     ctx = context(tmp_path)
     seed_config(ctx)

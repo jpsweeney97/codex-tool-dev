@@ -1982,14 +1982,15 @@ def rollback_guarded_refresh(
 ) -> dict[str, object]:
     _validate_snapshot_for_rollback(snapshot)
     restore_config_snapshot(snapshot, current_expected_sha256=None)
-    for spec in build_plugin_specs(repo_root=context.repo_root, codex_home=context.codex_home):
-        source = snapshot.cache_snapshot_root / spec.name / spec.version
-        if not source.exists():
-            fail("rollback guarded refresh", "cache snapshot path missing", str(source))
-        if spec.cache_root.exists():
-            shutil.rmtree(spec.cache_root)
-        shutil.copytree(source, spec.cache_root)
-    inventory, transcript = collect_readonly_runtime_inventory(_refresh_paths(context))
+    missing_cache_plugins = _snapshot_installable_missing_cache_plugins(context, snapshot)
+    _restore_cache_snapshots(context, snapshot)
+    if missing_cache_plugins:
+        inventory, transcript = collect_readonly_runtime_inventory(
+            _refresh_paths(context),
+            allow_missing_plugins=missing_cache_plugins,
+        )
+    else:
+        inventory, transcript = collect_readonly_runtime_inventory(_refresh_paths(context))
     return {
         "failed_phase": failed_phase,
         "final_status": "rollback-complete",
@@ -2029,6 +2030,18 @@ def _installable_missing_cache_plugins(context: MutationContext) -> tuple[str, .
         if spec.name in INSTALLABLE_MISSING_CACHE_PLUGINS
         and spec.source_root.exists()
         and not spec.cache_root.exists()
+    )
+
+
+def _snapshot_installable_missing_cache_plugins(
+    context: MutationContext,
+    snapshot: SnapshotSet,
+) -> tuple[str, ...]:
+    return tuple(
+        spec.name
+        for spec in build_plugin_specs(repo_root=context.repo_root, codex_home=context.codex_home)
+        if spec.name in INSTALLABLE_MISSING_CACHE_PLUGINS
+        and not snapshot.pre_refresh_cache_root_exists.get(spec.name, True)
     )
 
 
