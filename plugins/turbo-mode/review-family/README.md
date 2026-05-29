@@ -13,7 +13,7 @@ Source edits here do not prove installed Codex behavior.
 Install via the Codex plugin system:
 
 ```bash
-codex plugin install review-family
+codex plugin install review-family@turbo-mode
 ```
 
 Or install directly from the development repo:
