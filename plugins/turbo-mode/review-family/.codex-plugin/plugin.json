@@ -29,6 +29,9 @@
       "Review this implementation against the spec",
       "Adjudicate this review before I act"
     ],
+    "websiteURL": "https://github.com/jpsweeney97/codex-tool-dev/tree/main/plugins/turbo-mode/review-family",
+    "privacyPolicyURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/review-family/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/review-family/TERMS.md",
     "brandColor": "#4F46E5",
     "screenshots": []
   }
