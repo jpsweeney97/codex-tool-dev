@@ -33,7 +33,17 @@ EXPECTED_HANDOFF_SKILLS = (
     "handoff:triage",
 )
 EXPECTED_TICKET_SKILLS = ("ticket:ticket", "ticket:ticket-triage")
-EXPECTED_RESPONSE_IDS = frozenset({0, 1, 2, 3, 4, 5})
+EXPECTED_REVIEW_FAMILY_SKILLS = (
+    "review-family:adversarial-review",
+    "review-family:implementation-review",
+    "review-family:pragmatic-review",
+    "review-family:request-claude-pr-review",
+    "review-family:review-claude-claims",
+    "review-family:review-reviewer",
+    "review-family:scrutinize",
+    "review-family:system-design-review",
+)
+EXPECTED_RESPONSE_IDS = frozenset({0, 1, 2, 3, 4, 5, 6})
 
 
 def real_codex_home() -> Path:
@@ -42,7 +52,8 @@ def real_codex_home() -> Path:
 
 REAL_CODEX_HOME = real_codex_home()
 APP_SERVER_RESPONSE_SCHEMA_VERSION = ACCEPTED_RESPONSE_SCHEMA_VERSION
-PLUGIN_VERSIONS = {"handoff": "1.6.0", "ticket": "1.4.0"}
+PLUGIN_VERSIONS = {"handoff": "1.6.0", "ticket": "1.4.0", "review-family": "0.1.0"}
+PLUGIN_READ_RESPONSE_IDS = {"handoff": 1, "ticket": 2, "review-family": 6}
 
 
 @dataclass(frozen=True)
@@ -255,6 +266,15 @@ def build_readonly_inventory_requests(paths: Any, *, scratch_cwd: Path) -> list[
         },
         {"id": 4, "method": "skills/list", "params": {"cwds": [str(scratch_cwd)]}},
         {"id": 5, "method": "hooks/list", "params": {"cwds": [str(scratch_cwd)]}},
+        {
+            "id": 6,
+            "method": "plugin/read",
+            "params": {
+                "marketplacePath": marketplace,
+                "pluginName": "review-family",
+                "remoteMarketplaceName": None,
+            },
+        },
     ]
 
 
@@ -268,7 +288,7 @@ def build_same_child_post_install_requests(
         if request.get("method") in {"initialize", "initialized"}:
             continue
         copied = dict(request)
-        copied["id"] = int(copied["id"]) + 2
+        copied["id"] = int(copied["id"]) + len(PLUGIN_VERSIONS)
         requests.append(copied)
     return requests
 
@@ -276,7 +296,14 @@ def build_same_child_post_install_requests(
 def normalize_same_child_post_install_transcript(
     raw_transcript: tuple[dict[str, Any], ...],
 ) -> tuple[dict[str, Any], ...]:
-    response_id_map = {0: 0, 3: 1, 4: 2, 5: 3, 6: 4, 7: 5}
+    response_id_map = {
+        0: 0,
+        **{
+            original_id + len(PLUGIN_VERSIONS): original_id
+            for original_id in sorted(EXPECTED_RESPONSE_IDS)
+            if original_id != 0
+        },
+    }
     normalized: list[dict[str, Any]] = []
     for item in raw_transcript:
         body = item.get("body")
@@ -725,23 +752,15 @@ def build_install_requests(
         )
     return [
         {
-            "id": 1,
+            "id": request_id,
             "method": "plugin/install",
             "params": {
                 "marketplacePath": str(expected_marketplace_path),
-                "pluginName": "handoff",
+                "pluginName": plugin_name,
                 "remoteMarketplaceName": pre_install_authority.remote_marketplace_name,
             },
-        },
-        {
-            "id": 2,
-            "method": "plugin/install",
-            "params": {
-                "marketplacePath": str(expected_marketplace_path),
-                "pluginName": "ticket",
-                "remoteMarketplaceName": pre_install_authority.remote_marketplace_name,
-            },
-        },
+        }
+        for request_id, plugin_name in enumerate(PLUGIN_VERSIONS, start=1)
     ]
 
 
@@ -786,7 +805,7 @@ def validate_install_responses(
         pre_install_authority=pre_install_authority,
         ticket_hook_policy="required",
     )
-    for request_id, plugin_name in ((1, "handoff"), (2, "ticket")):
+    for request_id, plugin_name in enumerate(PLUGIN_VERSIONS, start=1):
         request = request_by_id.get(request_id)
         if request is None:
             fail("validate install responses", "missing install request", request_id)
@@ -864,7 +883,7 @@ def _install_response_by_id(transcript: tuple[dict[str, Any], ...]) -> dict[int,
         if not isinstance(body, dict):
             fail("validate install responses", "malformed install response stream", item)
         response_id = body.get("id")
-        if response_id not in {1, 2}:
+        if response_id not in range(1, len(PLUGIN_VERSIONS) + 1):
             continue
         if response_id in responses:
             fail("validate install responses", "duplicate install response id", response_id)
@@ -1224,12 +1243,17 @@ def validate_readonly_inventory_contract(
     if ticket_hook_policy not in {"required", "disabled"}:
         fail("inventory contract", "unexpected Ticket hook policy", ticket_hook_policy)
     responses = response_by_id(transcript)
-    missing = sorted({0, 1, 2, 3, 4, 5} - set(responses))
+    missing = sorted(EXPECTED_RESPONSE_IDS - set(responses))
     if missing:
         fail("inventory contract", "missing app-server responses", missing)
     plugin_read_sources = {
-        "handoff": validate_plugin_read_response(responses[1], paths, "handoff", "1.6.0"),
-        "ticket": validate_plugin_read_response(responses[2], paths, "ticket", "1.4.0"),
+        plugin: validate_plugin_read_response(
+            responses[response_id],
+            paths,
+            plugin,
+            PLUGIN_VERSIONS[plugin],
+        )
+        for plugin, response_id in PLUGIN_READ_RESPONSE_IDS.items()
     }
     plugin_list = validate_plugin_list_response(responses[3], paths)
     skills = validate_skills_response(responses[4], paths)
@@ -1278,15 +1302,15 @@ def validate_plugin_list_response(response: dict[str, Any], paths: Any) -> list[
     if json_contains(response, "/plugin-dev/"):
         fail("inventory contract", "plugin/list contains plugin-dev path", response)
     plugin_ids = plugin_list_ids(response, paths)
-    expected = {"handoff@turbo-mode", "ticket@turbo-mode"}
+    expected = {f"{plugin}@turbo-mode" for plugin in PLUGIN_VERSIONS}
     missing = sorted(expected - plugin_ids)
     if missing:
         fail("inventory contract", "plugin/list missing Turbo Mode plugins", missing)
-    return ["handoff@turbo-mode", "ticket@turbo-mode"]
+    return sorted(expected)
 
 
 def validate_skills_response(response: dict[str, Any], paths: Any) -> list[str]:
-    expected = EXPECTED_HANDOFF_SKILLS + EXPECTED_TICKET_SKILLS
+    expected = EXPECTED_HANDOFF_SKILLS + EXPECTED_TICKET_SKILLS + EXPECTED_REVIEW_FAMILY_SKILLS
     if json_contains(response, "/plugin-dev/"):
         fail("inventory contract", "skills/list contains plugin-dev path", response)
     skills = skill_records_by_name(response)
@@ -1297,7 +1321,7 @@ def validate_skills_response(response: dict[str, Any], paths: Any) -> list[str]:
         record = skills[skill]
         actual_path = skill_record_path(record)
         plugin = skill.split(":", 1)[0]
-        version = "1.4.0" if skill.startswith("ticket:") else "1.6.0"
+        version = PLUGIN_VERSIONS[plugin]
         cache_prefix = str(paths.codex_home / f"plugins/cache/turbo-mode/{plugin}/{version}/skills")
         if actual_path is None or not actual_path.startswith(cache_prefix + "/"):
             fail(

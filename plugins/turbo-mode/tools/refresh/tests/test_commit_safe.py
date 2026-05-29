@@ -89,6 +89,7 @@ def test_commit_safe_plan06_constants_and_reason_allowlist() -> None:
     assert commit_safe.RELEVANT_DIRTY_PATHS == (
         ".agents/plugins/marketplace.json",
         "plugins/turbo-mode/handoff",
+        "plugins/turbo-mode/review-family",
         "plugins/turbo-mode/ticket",
         "plugins/turbo-mode/tools/refresh",
         "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",

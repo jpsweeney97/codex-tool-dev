@@ -137,6 +137,7 @@ NESTED_ALLOWED_KEYS = {
     },
     "runtime_config_plugin_enablement_state": {
         "handoff@turbo-mode",
+        "review-family@turbo-mode",
         "ticket@turbo-mode",
     },
     "diff_classification_item": {
@@ -268,6 +269,7 @@ EXPECTED_COMMIT_SAFE_SCHEMA_VERSION = "turbo-mode-refresh-commit-safe-plan-06"
 ALLOWED_DIRTY_RELEVANT_PATHS = {
     ".agents/plugins/marketplace.json",
     "plugins/turbo-mode/handoff",
+    "plugins/turbo-mode/review-family",
     "plugins/turbo-mode/ticket",
     "plugins/turbo-mode/tools/refresh",
     "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",

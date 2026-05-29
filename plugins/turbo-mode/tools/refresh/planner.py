@@ -46,9 +46,14 @@ TOOL_RELATIVE_PATH = "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py"
 DEV_REFRESH_COMMAND = "npm run turbo:sync-personal-plugins"
 EXPECTED_MARKETPLACE_SOURCES = {
     "handoff": "./plugins/turbo-mode/handoff",
+    "review-family": "./plugins/turbo-mode/review-family",
     "ticket": "./plugins/turbo-mode/ticket",
 }
-EXPECTED_CONFIG_PLUGINS = ("handoff@turbo-mode", "ticket@turbo-mode")
+EXPECTED_CONFIG_PLUGINS = (
+    "handoff@turbo-mode",
+    "review-family@turbo-mode",
+    "ticket@turbo-mode",
+)
 
 
 InventoryCollector = Callable[
@@ -99,6 +104,12 @@ def build_plugin_specs(*, repo_root: Path, codex_home: Path) -> list[PluginSpec]
             version="1.4.0",
             source_root=repo_root / "plugins/turbo-mode/ticket",
             cache_root=codex_home / "plugins/cache/turbo-mode/ticket/1.4.0",
+        ),
+        PluginSpec(
+            name="review-family",
+            version="0.1.0",
+            source_root=repo_root / "plugins/turbo-mode/review-family",
+            cache_root=codex_home / "plugins/cache/turbo-mode/review-family/0.1.0",
         ),
     ]
 

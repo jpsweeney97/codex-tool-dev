@@ -48,11 +48,16 @@ def test_build_plugin_specs_uses_repo_source_and_codex_cache_roots(tmp_path: Pat
     assert [(spec.name, spec.version) for spec in specs] == [
         ("handoff", "1.6.0"),
         ("ticket", "1.4.0"),
+        ("review-family", "0.1.0"),
     ]
     assert specs[0].source_root == repo_root / "plugins/turbo-mode/handoff"
     assert specs[0].cache_root == codex_home / "plugins/cache/turbo-mode/handoff/1.6.0"
     assert specs[1].source_root == repo_root / "plugins/turbo-mode/ticket"
     assert specs[1].cache_root == codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
+    assert specs[2].source_root == repo_root / "plugins/turbo-mode/review-family"
+    assert specs[2].cache_root == (
+        codex_home / "plugins/cache/turbo-mode/review-family/0.1.0"
+    )
 
 
 def test_build_paths_normalizes_relative_repo_root(
@@ -121,6 +126,13 @@ def write_marketplace(
                         "name": "ticket",
                         "source": {"source": "local", "path": ticket_path},
                     },
+                    {
+                        "name": "review-family",
+                        "source": {
+                            "source": "local",
+                            "path": "./plugins/turbo-mode/review-family",
+                        },
+                    },
                 ],
             }
         ),
@@ -136,6 +148,7 @@ def test_validate_repo_marketplace_accepts_expected_local_plugins(tmp_path: Path
 
     assert result == {
         "handoff": "./plugins/turbo-mode/handoff",
+        "review-family": "./plugins/turbo-mode/review-family",
         "ticket": "./plugins/turbo-mode/ticket",
     }
 
@@ -156,6 +169,7 @@ def test_read_runtime_config_state_aligned_when_marketplace_and_hooks_true(
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/repo"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
@@ -167,6 +181,7 @@ def test_read_runtime_config_state_aligned_when_marketplace_and_hooks_true(
     assert state.marketplace_state == "aligned"
     assert state.plugin_enablement_state == {
         "handoff@turbo-mode": "enabled",
+        "review-family@turbo-mode": "enabled",
         "ticket@turbo-mode": "enabled",
     }
 
@@ -176,6 +191,7 @@ def test_read_runtime_config_state_absent_hooks_is_unchecked(tmp_path: Path) -> 
     config.write_text(
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/repo"\n'
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
@@ -194,6 +210,7 @@ def test_read_runtime_config_state_conflicting_marketplace_is_repairable(
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/other"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
@@ -210,6 +227,7 @@ def test_read_runtime_config_state_disabled_hooks_is_unrepairable(tmp_path: Path
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/repo"\n'
         "[features]\nplugin_hooks = false\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
@@ -234,6 +252,7 @@ def test_read_runtime_config_state_disabled_plugin_is_unrepairable(tmp_path: Pat
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/repo"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = false\n',
         encoding="utf-8",
     )
@@ -251,7 +270,8 @@ def test_read_runtime_config_state_missing_plugin_enablement_is_unknown(
     config.write_text(
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/repo"\n'
         "[features]\nplugin_hooks = true\n"
-        '[plugins."handoff@turbo-mode"]\nenabled = true\n',
+        '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
 
@@ -269,6 +289,7 @@ def test_read_runtime_config_state_missing_enabled_key_is_unknown(
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/repo"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\n',
         encoding="utf-8",
     )
@@ -287,6 +308,7 @@ def test_read_runtime_config_state_non_boolean_plugin_enablement_is_unrepairable
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/repo"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = "yes"\n',
         encoding="utf-8",
     )
@@ -307,6 +329,7 @@ def test_read_runtime_config_state_normalizes_config_source_path(
         f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo}/."\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
@@ -337,6 +360,7 @@ def test_read_runtime_config_state_fallback_parser_handles_unrelated_config_shap
         '[marketplaces.turbo-mode]\nsource_type = "local"\n'
         f'source = "{repo}"\n'
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
@@ -360,6 +384,7 @@ def test_read_runtime_config_state_fallback_parser_rejects_duplicate_tables(
         f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo}"\n'
         "[features]\nplugin_hooks = false\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = true\n'
         "[features]\nplugin_hooks = true\n",
         encoding="utf-8",
@@ -381,6 +406,7 @@ def test_read_runtime_config_state_fallback_parser_rejects_duplicate_keys(
         f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo}"\n'
         "[features]\nplugin_hooks = false\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
@@ -427,6 +453,15 @@ def ensure_complete_plugin_roots(repo_root: Path, codex_home: Path) -> None:
         source_text="ticket same\n",
         cache_text="ticket same\n",
     )
+    write_plugin_pair(
+        repo_root,
+        codex_home,
+        plugin="review-family",
+        version="0.1.0",
+        rel="README.md",
+        source_text="review-family same\n",
+        cache_text="review-family same\n",
+    )
 
 
 def write_aligned_config(codex_home: Path, repo_root: Path) -> None:
@@ -436,6 +471,7 @@ def write_aligned_config(codex_home: Path, repo_root: Path) -> None:
         f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
@@ -459,9 +495,14 @@ def aligned_inventory() -> AppServerInventoryCheck:
         identity=identity,
         plugin_read_sources={
             "handoff": "/repo/plugins/turbo-mode/handoff",
+            "review-family": "/repo/plugins/turbo-mode/review-family",
             "ticket": "/repo/plugins/turbo-mode/ticket",
         },
-        plugin_list=("handoff@turbo-mode", "ticket@turbo-mode"),
+        plugin_list=(
+            "handoff@turbo-mode",
+            "review-family@turbo-mode",
+            "ticket@turbo-mode",
+        ),
         skills=("handoff:save", "ticket:ticket"),
         ticket_hook={"command": "python3 ticket_engine_guard.py", "sourcePath": "hooks.json"},
         handoff_hooks=(),
@@ -876,6 +917,7 @@ def test_plan_refresh_repairable_runtime_mismatch_emits_future_guarded_advice(
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/other"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
@@ -902,6 +944,7 @@ def test_plan_refresh_unrepairable_config_suppresses_future_advice_for_covered_d
         f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
         "[features]\nplugin_hooks = false\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
@@ -1011,6 +1054,7 @@ def test_plan_refresh_absent_hooks_blocks_repairable_future_advice(
     config.write_text(
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/other"\n'
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
@@ -1040,6 +1084,7 @@ def test_plan_refresh_fallback_duplicate_config_blocks_future_advice(
         f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
         "[features]\nplugin_hooks = false\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = true\n'
         "[features]\nplugin_hooks = true\n",
         encoding="utf-8",
@@ -1076,6 +1121,7 @@ def test_plan_refresh_repairable_mismatch_suppresses_future_advice_for_coverage_
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/other"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
         '[plugins."ticket@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )

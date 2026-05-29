@@ -1785,12 +1785,19 @@ def install_plugins_via_app_server(
             response: dict[str, Any],
             _transcript: list[dict[str, Any]],
         ) -> None:
-            if request.get("id") != 2 or response.get("id") != 2:
+            if request.get("method") != "plugin/install":
                 return
-            rewrite_ticket_hook_manifest(
-                ticket_plugin_root=context.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
-            )
-            if restore_config_before_post_install is not None:
+            if request.get("id") != response.get("id"):
+                return
+            params = request.get("params")
+            plugin_name = params.get("pluginName") if isinstance(params, dict) else None
+            if plugin_name == "ticket":
+                rewrite_ticket_hook_manifest(
+                    ticket_plugin_root=(
+                        context.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
+                    )
+                )
+            if request.get("id") == len(install_requests) and restore_config_before_post_install:
                 restore_config_before_post_install()
 
         install_transcript = tuple(
@@ -2818,6 +2825,7 @@ def _write_seed_config(config_path: Path, *, repo_root: Path) -> None:
             f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
             "[features]\nplugin_hooks = true\n"
             '[plugins."handoff@turbo-mode"]\nenabled = true\n'
+            '[plugins."review-family@turbo-mode"]\nenabled = true\n'
             '[plugins."ticket@turbo-mode"]\nenabled = true\n'
         )
     os.chmod(config_path, 0o600)

@@ -82,7 +82,11 @@ def context(tmp_path: Path, *, codex_home: Path | None = None) -> MutationContex
 
 
 def seed_plugins(ctx: MutationContext, *, cache_text: str = "same") -> None:
-    for plugin, version in (("handoff", "1.6.0"), ("ticket", "1.4.0")):
+    for plugin, version in (
+        ("handoff", "1.6.0"),
+        ("ticket", "1.4.0"),
+        ("review-family", "0.1.0"),
+    ):
         source = ctx.repo_root / f"plugins/turbo-mode/{plugin}"
         cache = ctx.codex_home / f"plugins/cache/turbo-mode/{plugin}/{version}"
         source.mkdir(parents=True, exist_ok=True)
@@ -190,7 +194,11 @@ def launch_authority(ctx: MutationContext) -> AppServerLaunchAuthority:
         initialize_result={"codexHome": str(ctx.codex_home)},
         accepted_response_schema_version="app-server-readonly-inventory-v1",
         candidate_mechanisms_checked=(),
-        plugin_read_sources={"handoff": str(ctx.repo_root), "ticket": str(ctx.repo_root)},
+        plugin_read_sources={
+            "handoff": str(ctx.repo_root),
+            "review-family": str(ctx.repo_root),
+            "ticket": str(ctx.repo_root),
+        },
         skill_paths=(
             str(ctx.codex_home / "plugins/cache/turbo-mode/handoff/1.6.0/skills/save/SKILL.md"),
         ),
@@ -598,7 +606,11 @@ def install_source_plugins_for_test(
     restore_config_before_post_install = kwargs["restore_config_before_post_install"]
     assert callable(restore_config_before_post_install)
     restore_config_before_post_install()
-    for plugin, version in (("handoff", "1.6.0"), ("ticket", "1.4.0")):
+    for plugin, version in (
+        ("handoff", "1.6.0"),
+        ("ticket", "1.4.0"),
+        ("review-family", "0.1.0"),
+    ):
         source = active_context.repo_root / f"plugins/turbo-mode/{plugin}"
         cache = active_context.codex_home / f"plugins/cache/turbo-mode/{plugin}/{version}"
         if cache.exists():
@@ -2712,7 +2724,7 @@ def test_install_plugins_restores_hooks_before_same_child_corroboration(
             for item in same_child
             if item.get("direction") == "recv" and isinstance(item.get("body"), dict)
         ]
-        assert response_ids == [0, 1, 2, 3, 4, 5]
+        assert response_ids == [0, 1, 2, 3, 4, 5, 6]
         return install_authority(ctx, launch)
 
     def fake_prove_app_server_home_authority(
@@ -2768,7 +2780,11 @@ def pre_install_authority(
         marketplace_path=str(ctx.repo_root / ".agents/plugins/marketplace.json"),
         remote_marketplace_name=None,
         no_real_home_paths=not str(ctx.codex_home).startswith("/Users/jp/.codex"),
-        pre_install_cache_manifest_sha256={"handoff": "pre-handoff", "ticket": "pre-ticket"},
+        pre_install_cache_manifest_sha256={
+            "handoff": "pre-handoff",
+            "review-family": "pre-review-family",
+            "ticket": "pre-ticket",
+        },
     )
 
 
@@ -2781,21 +2797,41 @@ def install_authority(
         requested_codex_home=str(ctx.codex_home),
         launch_authority_sha256=authority_digest(launch),
         pre_install_target_authority_sha256=authority_digest(pre),
-        install_request_sha256={"handoff": "request-handoff", "ticket": "request-ticket"},
-        install_response_sha256={"handoff": "response-handoff", "ticket": "response-ticket"},
+        install_request_sha256={
+            "handoff": "request-handoff",
+            "review-family": "request-review-family",
+            "ticket": "request-ticket",
+        },
+        install_response_sha256={
+            "handoff": "response-handoff",
+            "review-family": "response-review-family",
+            "ticket": "response-ticket",
+        },
         same_child_post_install_corroboration_sha256="same-child",
         fresh_child_post_install_corroboration_sha256="fresh-child",
         installed_destination_paths={
             "handoff": str(ctx.codex_home / "plugins/cache/turbo-mode/handoff/1.6.0"),
+            "review-family": str(
+                ctx.codex_home / "plugins/cache/turbo-mode/review-family/0.1.0"
+            ),
             "ticket": str(ctx.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"),
         },
         accepted_install_response_schema_by_plugin={
             "handoff": "sparse-success-auth-v1",
+            "review-family": "sparse-success-auth-v1",
             "ticket": "sparse-success-auth-v1",
         },
         pre_install_cache_manifest_sha256=pre.pre_install_cache_manifest_sha256,
-        post_install_cache_manifest_sha256={"handoff": "post-handoff", "ticket": "post-ticket"},
-        cache_manifest_delta_sha256={"handoff": "delta-handoff", "ticket": "delta-ticket"},
+        post_install_cache_manifest_sha256={
+            "handoff": "post-handoff",
+            "review-family": "post-review-family",
+            "ticket": "post-ticket",
+        },
+        cache_manifest_delta_sha256={
+            "handoff": "delta-handoff",
+            "review-family": "delta-review-family",
+            "ticket": "delta-ticket",
+        },
     )
 
 
@@ -2810,8 +2846,12 @@ def test_snapshot_captures_config_and_cache_manifest(tmp_path: Path) -> None:
     )
     assert snapshot.config_sha256
     assert snapshot.cache_snapshot_root.exists()
-    assert set(snapshot.source_manifest_sha256) == {"handoff", "ticket"}
-    assert set(snapshot.pre_refresh_cache_manifest_sha256) == {"handoff", "ticket"}
+    assert set(snapshot.source_manifest_sha256) == {"handoff", "review-family", "ticket"}
+    assert set(snapshot.pre_refresh_cache_manifest_sha256) == {
+        "handoff",
+        "review-family",
+        "ticket",
+    }
 
 
 def test_guarded_hook_disable_only_writes_from_true(tmp_path: Path) -> None:
@@ -2907,11 +2947,13 @@ def test_install_uses_app_server_plugin_install_after_authority_proofs(
             "initialized",
             "plugin/install",
             "plugin/install",
+            "plugin/install",
             "plugin/read",
             "plugin/read",
             "plugin/list",
             "skills/list",
             "hooks/list",
+            "plugin/read",
         ]
         install_requests = [
             request for request in requests if request["method"] == "plugin/install"
@@ -2919,6 +2961,7 @@ def test_install_uses_app_server_plugin_install_after_authority_proofs(
         assert [request["params"]["pluginName"] for request in install_requests] == [
             "handoff",
             "ticket",
+            "review-family",
         ]
         assert all(
             request["params"]["remoteMarketplaceName"] is None for request in install_requests
@@ -2935,6 +2978,13 @@ def test_install_uses_app_server_plugin_install_after_authority_proofs(
                 "direction": "recv",
                 "body": {
                     "id": 2,
+                    "result": {"appsNeedingAuth": [], "authPolicy": "ON_INSTALL"},
+                },
+            },
+            {
+                "direction": "recv",
+                "body": {
+                    "id": 3,
                     "result": {"appsNeedingAuth": [], "authPolicy": "ON_INSTALL"},
                 },
             },
@@ -3032,7 +3082,12 @@ def test_verify_source_cache_equality_detects_drift(tmp_path: Path) -> None:
         ctx.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0",
         dirs_exist_ok=True,
     )
-    assert set(verify_source_cache_equality(ctx)) == {"handoff", "ticket"}
+    shutil.copytree(
+        ctx.repo_root / "plugins/turbo-mode/review-family",
+        ctx.codex_home / "plugins/cache/turbo-mode/review-family/0.1.0",
+        dirs_exist_ok=True,
+    )
+    assert set(verify_source_cache_equality(ctx)) == {"handoff", "review-family", "ticket"}
 
 
 def test_verify_source_cache_equality_accepts_ticket_hook_manifest_localization(
@@ -3058,7 +3113,7 @@ def test_verify_source_cache_equality_accepts_ticket_hook_manifest_localization(
     )
     cache_hooks.write_text(json.dumps(cache_payload, indent=2) + "\n", encoding="utf-8")
 
-    assert set(verify_source_cache_equality(ctx)) == {"handoff", "ticket"}
+    assert set(verify_source_cache_equality(ctx)) == {"handoff", "review-family", "ticket"}
 
 
 def test_verify_source_cache_equality_rejects_ticket_hook_wrong_source_layout(
