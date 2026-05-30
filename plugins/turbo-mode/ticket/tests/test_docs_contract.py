@@ -110,6 +110,40 @@ def test_contract_states_supported_high_level_mutation_surfaces() -> None:
     assert "must not be documented as the preferred way to create or mutate tickets" in text
 
 
+def test_readme_ticket_schema_matches_yaml_contract_boundary() -> None:
+    text = _read_text(PLUGIN_ROOT / "README.md")
+    schema = text.split("### Ticket Schema", maxsplit=1)[1].split(
+        "## Usage Patterns", maxsplit=1
+    )[0]
+    normalized_schema = _normalize_whitespace(schema)
+
+    assert "### Ticket Schema" in text
+    assert "**Optional YAML fields:**" in schema
+    for field in (
+        "effort",
+        "tags",
+        "blocked_by",
+        "blocks",
+        "defer",
+        "key_file_paths",
+        "created_at",
+        "capture_confidence",
+        "capture_source",
+        "refinement_status",
+        "component",
+        "related_paths",
+    ):
+        assert f"| `{field}` |" in schema
+
+    assert "`acceptance_criteria` (list of strings)" not in schema
+    assert "`verification` (string)" not in schema
+    assert "`key_files` (list of `{file, role, look_for}` objects)" not in schema
+    assert (
+        "`acceptance_criteria`, `verification`, and `key_files` are create/render inputs "
+        "that become body sections, not ordinary YAML fields."
+    ) in normalized_schema
+
+
 def test_contract_names_host_facing_autonomy_cli_surface() -> None:
     text = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
     normalized = _normalize_whitespace(text)

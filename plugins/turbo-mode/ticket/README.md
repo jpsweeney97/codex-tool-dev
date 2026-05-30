@@ -214,7 +214,7 @@ Skills and hooks do not require shell environment setup. Skills derive the plugi
 
 Tickets use fenced YAML blocks (` ```yaml `, not `---` frontmatter).
 
-**Required fields:**
+**Required YAML fields:**
 
 | Field | Format | Values |
 |-------|--------|--------|
@@ -225,9 +225,27 @@ Tickets use fenced YAML blocks (` ```yaml `, not `---` frontmatter).
 | `source` | dict | `{type: "...", ref: "...", session: "..."}` |
 | `contract_version` | string | `"1.0"` |
 
-**Optional fields:** `effort` (XS/S/M/L/XL), `tags` (list), `blocked_by` (list of ticket IDs), `blocks` (list), `defer` (dict with `active`, `reason`, `deferred_at`), `acceptance_criteria` (list of strings), `verification` (string), `key_files` (list of `{file, role, look_for}` objects), `key_file_paths` (list of strings).
+**Optional YAML fields:**
 
-`acceptance_criteria` is create-time `list[string]` input only. Bare strings are rejected before rendering.
+| Field | Format | Default |
+|-------|--------|---------|
+| `effort` | string | `""` |
+| `tags` | list of strings | `[]` |
+| `blocked_by` | list of ticket IDs | `[]` |
+| `blocks` | list of ticket IDs | `[]` |
+| `defer` | dict with `active`, `reason`, `deferred_at` | null |
+| `key_file_paths` | list of strings | `[]` |
+| `created_at` | ISO 8601 UTC string | `""` |
+| `capture_confidence` | `low`, `medium`, or `high` | `""` |
+| `capture_source` | string such as `conversation` | `""` |
+| `refinement_status` | `needs_refinement` | `""` |
+| `component` | string | `""` |
+| `related_paths` | list of strings | `[]` |
+
+`acceptance_criteria`, `verification`, and `key_files` are create/render inputs
+that become body sections, not ordinary YAML fields. `acceptance_criteria` is
+create-time `list[string]` input only. Bare strings are rejected before
+rendering.
 
 ## Usage Patterns
 
