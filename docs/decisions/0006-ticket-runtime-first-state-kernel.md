@@ -6,6 +6,10 @@
 - **Supersedes where conflicting:**
   `docs/superpowers/specs/2026-05-26-ticket-runtime-first-autonomy-design.md`
   and `docs/superpowers/plans/2026-05-27-ticket-runtime-first-autonomy-implementation.md`.
+- **Implementation control:**
+  `docs/superpowers/specs/2026-05-30-ticket-runtime-first-state-kernel-control.md`
+  applies this ADR during Ticket contract migration, ticket-file cutover, and
+  source implementation.
 
 ## Context
 
