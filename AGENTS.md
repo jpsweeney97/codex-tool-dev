@@ -238,7 +238,7 @@ hypothetical environment.
 - Canonical plugin script launcher shape is:
 
   ```bash
-  python3 -B <PLUGIN_ROOT>/scripts/<script>.py ...
+  uv run python -B <PLUGIN_ROOT>/scripts/<script>.py ...
   ```
 
 - `PLUGIN_ROOT` is the plugin package root. `PROJECT_ROOT` is the active

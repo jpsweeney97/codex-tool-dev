@@ -854,6 +854,13 @@ def test_claude_instructions_reference_current_turbo_mode_source_roots() -> None
     assert "uv run --directory plugins/turbo-mode/handoff pytest -q" in text
 
 
+def test_repo_agents_instructions_reference_ticket_public_launcher() -> None:
+    text = _read_text(REPO_ROOT / "AGENTS.md")
+
+    assert "uv run python -B <PLUGIN_ROOT>/scripts/<script>.py ..." in text
+    assert "python3 -B <PLUGIN_ROOT>/scripts/<script>.py ..." not in text
+
+
 def test_skill_docs_use_project_root_marker_walk_not_git_rev_parse() -> None:
     for path in CURRENT_FACING_DOCS:
         assert "git rev-parse --show-toplevel" not in _read_text(path), str(path)
