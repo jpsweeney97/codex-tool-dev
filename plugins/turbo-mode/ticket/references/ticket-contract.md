@@ -157,7 +157,7 @@ public contract.
 Common response envelope: `{state: string, ticket_id: string|null, message: string, data: object}`
 
 Exit codes: 0 (success), 1 (engine error), 2 (validation failure)
-- Error responses include `error_code` at the top level (one of the 12 defined error codes below). Success responses omit `error_code`.
+- Error responses include `error_code` at the top level; public engine responses may emit either core engine or autonomy gate error codes. Success responses omit `error_code`.
 - Exit code 2 maps only to the `need_fields` error code. `invalid_transition` and `parse_error` return exit 1 (engine error); `parse_error` covers both malformed CLI payloads and corrupted stored ticket YAML.
 
 ### Supported Mutation Surfaces
@@ -267,6 +267,13 @@ ok, ok_create, ok_update, ok_close, ok_close_archived, ok_reopen, need_fields, d
 ### Core Engine Error Codes (13)
 
 `need_fields`, `invalid_transition`, `policy_blocked`, `preflight_failed`, `stale_plan`, `duplicate_candidate`, `parse_error`, `io_error`, `internal_error`, `not_found`, `dependency_blocked`, `intent_mismatch`, `origin_mismatch`
+
+### Autonomy Gate Error Codes (2)
+
+The autonomy gate code set is: `setup_required`, `gateway_required`.
+
+- `setup_required`: local Ticket automation config is missing or invalid, so automation cannot run.
+- `gateway_required`: direct agent writes are blocked; use the runtime-first gateway path instead.
 
 ### Runtime Readiness Error Codes
 

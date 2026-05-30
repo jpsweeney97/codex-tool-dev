@@ -426,6 +426,8 @@ Valid subcommands: `classify`, `plan`, `preflight`, `execute`, `ingest`.
 
 Success responses omit `error_code`; error responses include it at the top level.
 
+Engine responses can use core engine error codes or autonomy gate error codes; see the Ticket Contract for the full list.
+
 **Failure modes**
 | Symptom | Cause | Recovery |
 |---------|-------|---------|

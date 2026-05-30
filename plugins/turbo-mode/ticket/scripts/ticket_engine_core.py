@@ -82,7 +82,7 @@ class EngineResponse:
     """Common response envelope for all engine subcommands.
 
     state: machine state (15 total: 14 emittable + 1 reserved)
-    error_code: machine-readable error code (12 defined codes, or None on success)
+    error_code: machine-readable failure code, or None on success
     ticket_id: affected ticket ID or None
     message: human-readable description
     data: subcommand-specific output

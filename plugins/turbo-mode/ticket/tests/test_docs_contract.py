@@ -196,12 +196,25 @@ def test_contract_separates_core_runtime_and_activation_error_codes() -> None:
     normalized = _normalize_whitespace(contract)
 
     assert "Core Engine Error Codes (13)" in normalized
+    assert "Autonomy Gate Error Codes (2)" in normalized
     assert "Runtime Readiness Error Codes" in normalized
     assert "Activation Driver Error Codes" in normalized
     assert "`need_fields`, `invalid_transition`, `policy_blocked`" in normalized
     assert "`io_error`, `internal_error`, `not_found`" in normalized
+    assert "`setup_required`, `gateway_required`" in normalized
+    assert "public engine responses may emit either core engine or autonomy gate" in normalized
     assert "`proof_missing`, `proof_invalid`, `stale_proof`" in normalized
     assert "`host_policy_blocked`, `deterministic_driver_unavailable`" in normalized
+
+
+def test_response_envelope_docs_point_to_error_code_taxonomy() -> None:
+    for path in (PLUGIN_ROOT / "README.md", PLUGIN_ROOT / "HANDBOOK.md"):
+        text = _read_text(path)
+        normalized = _normalize_whitespace(text)
+        assert (
+            "Engine responses can use core engine error codes or autonomy gate error codes; "
+            "see the Ticket Contract for the full list."
+        ) in normalized
 
 
 def test_contract_documents_current_exit_code_mapping() -> None:

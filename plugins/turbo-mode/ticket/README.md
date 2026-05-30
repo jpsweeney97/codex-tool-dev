@@ -151,6 +151,8 @@ Both delegate to `ticket_engine_runner.py`, which dispatches to `ticket_engine_c
 
 Success responses omit `error_code`; error responses include it at the top level.
 
+Engine responses can use core engine error codes or autonomy gate error codes; see the Ticket Contract for the full list.
+
 Exit codes: `0` (success), `1` (engine error), `2` (validation failure / need_fields).
 
 For live installed activation and certification, use the cache-installed
