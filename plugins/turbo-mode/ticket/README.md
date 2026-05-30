@@ -2,7 +2,7 @@
 
 A Codex plugin for capture-first repo-local ticket management from within Codex sessions.
 
-Tickets are stored as Markdown files with fenced YAML frontmatter in `docs/tickets/`. User-facing creation flows through `ticket-capture`, which synthesizes a compact preview from natural language and writes only after explicit confirmation. Existing-ticket lifecycle, metadata, and focused refinement changes flow through `ticket_update.py prepare` and `ticket_update.py execute`, which reuse the same engine, guard hook, and trust model as the lower-level 4-stage pipeline.
+Tickets are stored as Markdown files with fenced YAML frontmatter in `docs/tickets/`. User-facing creation flows through `capture-ticket`, which synthesizes a compact preview from natural language and writes only after explicit confirmation. Existing-ticket lifecycle, metadata, and focused refinement changes flow through `ticket_update.py prepare` and `ticket_update.py execute`, which reuse the same engine, guard hook, and trust model as the lower-level 4-stage pipeline.
 
 This directory is the source-authority package for the Ticket plugin. Installed
 cache and runtime artifacts are separate proof surfaces and may diverge until an
@@ -39,14 +39,14 @@ The plugin registers its hook, skills, and scripts automatically. No build step 
 
 | Skill | Trigger | Purpose |
 |-------|---------|---------|
-| `ticket-capture` | Track, file, capture, ticket, or remember follow-up work | Create one ticket from natural language after preview confirmation |
-| `ticket-find` | Show, list, find, open, or check close readiness | Read-only `ticket_read.py list`, `query`, and `check` |
-| `ticket-update` | Update existing ticket metadata, lifecycle, or focused refinement fields | Preview-first updates via `ticket_update.py prepare` and `execute` |
-| `ticket-review` | Backlog health, stale, blocked, or next-work questions | Read-only `ticket_review.py review` and `audit`; may suggest capture prompts |
+| `capture-ticket` | Track, file, capture, ticket, or remember follow-up work | Create one ticket from natural language after preview confirmation |
+| `read-ticket` | Show, list, find, open, or check close readiness | Read-only `ticket_read.py list`, `query`, and `check` |
+| `update-ticket` | Update existing ticket metadata, lifecycle, or focused refinement fields | Preview-first updates via `ticket_update.py prepare` and `execute` |
+| `ticket-backlog-triage` | Backlog health, stale, blocked, or next-work questions | Read-only `ticket_review.py review` and `audit`; may suggest capture prompts |
 | `ticket-doctor` | Explicit storage/plugin diagnostics, installed runtime activation, stale payload cleanup, or audit repair | Maintenance-only `ticket_doctor.py diagnose`, explicit `activate-runtime`, confirmed `clean-stale-payloads`, and dry-run-first `repair-audit` |
 
 Generic creation through the old broad `ticket` skill is no longer user-facing.
-Use `ticket-capture` for new tickets. Low-confidence captures are allowed when a
+Use `capture-ticket` for new tickets. Low-confidence captures are allowed when a
 concrete next action can be synthesized; those tickets carry
 `refinement_status: needs_refinement`. `needs_refinement` is capture metadata,
 not a lifecycle status.
@@ -231,7 +231,7 @@ Tickets use fenced YAML blocks (` ```yaml `, not `---` frontmatter).
 
 ### Guided UX Layer
 
-The user-facing creation path is `ticket-capture`. It writes a capture payload,
+The user-facing creation path is `capture-ticket`. It writes a capture payload,
 runs `ticket_capture.py prepare`, presents a compact preview, and writes only
 after explicit `create` confirmation. Existing-ticket changes use
 `ticket_update.py prepare` to validate scoped lifecycle, metadata, or focused
@@ -246,7 +246,7 @@ and does not write tickets until execute.
 Track this follow-up: authentication fails on expired tokens.
 ```
 
-Codex uses `ticket-capture` to synthesize title, problem, next action,
+Codex uses `capture-ticket` to synthesize title, problem, next action,
 confidence, priority, tags, and acceptance criteria. If the request is vague
 but has a concrete next action, it can create a low-confidence ticket marked
 with `refinement_status: needs_refinement`.
@@ -391,7 +391,7 @@ Tests map 1:1 to source modules plus pipeline-stage and integration tests. Fixtu
 ```
 scripts/          # plugin script entrypoints and support modules
 hooks/            # Guard hook + registration
-skills/           # ticket-capture, find, update, review, and doctor skill definitions
+skills/           # capture-ticket, read-ticket, update-ticket, ticket-backlog-triage, and ticket-doctor skill definitions
 tests/            # pytest suite + support fixtures
 references/       # Ticket contract (canonical schema)
 agents/           # Placeholder — consuming projects define their own

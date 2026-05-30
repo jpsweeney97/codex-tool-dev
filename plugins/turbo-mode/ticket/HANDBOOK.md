@@ -2,7 +2,7 @@
 
 ## Overview
 
-The ticket plugin provides capture-first structured work tracking for Codex sessions. It manages tickets as markdown files with YAML frontmatter. New-ticket creation is user-facing through `ticket-capture`; existing-ticket lifecycle, metadata, and focused refinement mutations use `ticket_update.py` while preserving the underlying 4-stage mutation pipeline (classify → plan → preflight → execute) for engine dispatch and debugging.
+The ticket plugin provides capture-first structured work tracking for Codex sessions. It manages tickets as markdown files with YAML frontmatter. New-ticket creation is user-facing through `capture-ticket`; existing-ticket lifecycle, metadata, and focused refinement mutations use `ticket_update.py` while preserving the underlying 4-stage mutation pipeline (classify → plan → preflight → execute) for engine dispatch and debugging.
 
 **Scope:** Ticket capture, existing-ticket lifecycle mutations, scoped frontmatter metadata updates, read queries, backlog health review, explicit diagnostics, and historical audit repair.
 
@@ -22,10 +22,10 @@ Source edits here do not prove installed Codex behavior.
 
 | Skill | Trigger | Purpose |
 |-------|---------|---------|
-| `ticket-capture` | `skills/ticket-capture/SKILL.md` | Capture new tickets from natural language after preview confirmation |
-| `ticket-find` | `skills/ticket-find/SKILL.md` | Read-only show, list, query, and close-readiness checks |
-| `ticket-update` | `skills/ticket-update/SKILL.md` | Existing-ticket lifecycle and frontmatter metadata updates |
-| `ticket-review` | `skills/ticket-review/SKILL.md` | Read-only backlog health, stale, blocked, and next-action review |
+| `capture-ticket` | `skills/capture-ticket/SKILL.md` | Capture new tickets from natural language after preview confirmation |
+| `read-ticket` | `skills/read-ticket/SKILL.md` | Read-only show, list, query, and close-readiness checks |
+| `update-ticket` | `skills/update-ticket/SKILL.md` | Existing-ticket lifecycle and frontmatter metadata updates |
+| `ticket-backlog-triage` | `skills/ticket-backlog-triage/SKILL.md` | Read-only backlog health, stale, blocked, and next-action review |
 | `ticket-doctor` | `skills/ticket-doctor/SKILL.md` | Explicit-only storage/plugin diagnostics, stale payload cleanup, and audit repair |
 
 Generic creation through the old broad `ticket` skill is no longer user-facing.
@@ -243,7 +243,7 @@ Located at `docs/tickets/.audit/YYYY-MM-DD/*.jsonl` in projects that already hav
 
 ## Component Runbooks
 
-### `ticket-capture` skill
+### `capture-ticket` skill
 
 **When to use**
 Use when the user asks to track, file, capture, ticket, or remember a bug,
@@ -264,12 +264,12 @@ creation surface.
 |---------|-------|---------|
 | `error: trust_triple_invalid` | Hook not running or trust fields absent | Verify `hooks/ticket_engine_guard.py` is registered in `settings.json` |
 | `error: path_traversal` | `tickets_dir` resolves outside project root | Confirm project has `.git/` or `.codex/` at expected root |
-| `error: dedup_collision` | Same problem+files created within 24 hours | Review existing open tickets with `ticket-find`; update the duplicate instead |
+| `error: dedup_collision` | Same problem+files created within 24 hours | Review existing open tickets with `read-ticket`; update the duplicate instead |
 | Direct agent mutation rejected | Direct agent execute is not an autonomous mutation route | Use a user-confirmed mutation path or route automation through `ticket_autonomy.py apply-turn` |
 
 ---
 
-### `ticket-find` skill
+### `read-ticket` skill
 
 **When to use**
 Show, list, search, open, or check close readiness for tickets. This skill is
@@ -285,7 +285,7 @@ read-only and calls only `ticket_read.py list`, `query`, and `check`.
 
 ---
 
-### `ticket-update` skill
+### `update-ticket` skill
 
 **When to use**
 Update an existing ticket's lifecycle, priority, tags, blockers, component,
@@ -326,12 +326,12 @@ confirmation, and `recover` applies supported user-selected payload patches.
 
 ---
 
-### `ticket-review` skill
+### `ticket-backlog-triage` skill
 
 **When to use**
 Read-only health check for the ticket backlog. Surfaces stale tickets, blocked
 dependency chains, historical audit activity, and next-action recommendations. It may
-suggest `ticket-capture` prompts but must not write tickets.
+suggest `capture-ticket` prompts but must not write tickets.
 
 **Flow**
 1. Resolve plugin root
@@ -354,7 +354,7 @@ suggest `ticket-capture` prompts but must not write tickets.
 **When to use**
 Explicit maintenance only: diagnose ticket storage, validate plugin health,
 activate the installed direct-execute runtime, or repair corrupt audit logs.
-Casual audit, triage, or review language belongs to `ticket-review`.
+Casual audit, triage, or review language belongs to `ticket-backlog-triage`.
 
 **Flow**
 1. Resolve plugin root

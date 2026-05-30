@@ -82,7 +82,7 @@ def test_review_output_suggests_capture_prompts_without_writing_tickets(tmp_tick
     assert prompts == [
         {
             "ticket_id": "T-20260518-03",
-            "prompt": "Use ticket-capture to refine T-20260518-03: Captured placeholder",
+            "prompt": "Use capture-ticket to refine T-20260518-03: Captured placeholder",
         }
     ]
     assert ticket_path.read_text(encoding="utf-8") == before[ticket_path]

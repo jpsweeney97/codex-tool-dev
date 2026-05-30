@@ -1,5 +1,5 @@
 ---
-name: save
+name: save-handoff
 description: Use when user says "wrap this up", "new session", "almost out of context", "save", "next session", or "handoff"; use when stopping work with context to preserve.
 ---
 
@@ -19,7 +19,7 @@ The plugin writes filesystem artifacts only. It does not add gitignore rules, st
 
 - Use for `/save`, `/save <title>`, "wrap this up", "new session", "save", or "handoff".
 - Skip trivial sessions with no decisions, changes, gotchas, or next steps unless the user explicitly wants a handoff.
-- Do not use to resume prior work; use `load`.
+- Do not use to resume prior work; use `load-handoff`.
 - If active-writer reservation or write fails, report the helper error and STOP. Do not write the final handoff manually or fall back to `docs/handoffs/`.
 
 ## Procedure

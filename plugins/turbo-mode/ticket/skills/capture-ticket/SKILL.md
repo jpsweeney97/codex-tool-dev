@@ -1,5 +1,5 @@
 ---
-name: ticket-capture
+name: capture-ticket
 description: "Create repo-local tickets from natural language capture intent. Use when the user says to track, file, capture, ticket, or remember a bug, feature, follow-up, task, or cleanup item. Infer aggressively, synthesize a compact ticket preview, and require explicit confirmation before writing. Do not trigger from casual statements like 'this is a bug' unless the user also asks to track or file it."
 allowed-tools:
   - Bash

@@ -518,7 +518,7 @@ def _suggested_capture_prompts(active_ticket_rows: list[dict[str, Any]]) -> list
         prompts.append(
             {
                 "ticket_id": row["id"],
-                "prompt": f"Use ticket-capture to refine {row['id']}: {row['title']}",
+                "prompt": f"Use capture-ticket to refine {row['id']}: {row['title']}",
             }
         )
     return prompts

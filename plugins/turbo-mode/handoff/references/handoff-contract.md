@@ -1,13 +1,13 @@
 # Handoff Contract
 
-Shared contract for all handoff plugin skills. Loaded by save, quicksave, and load.
+Shared contract for all handoff plugin skills. Loaded by save-handoff, quicksave, load-handoff, and save-summary.
 
 ## Session IDs
 
 Codex does not inject a stable skill-level session UUID. Instead:
 
-- `save`, `quicksave`, and `summary` generate a fresh UUID when they write a handoff, checkpoint, or summary
-- `load` uses a per-project resume state file rather than a per-session one
+- `save-handoff`, `quicksave`, and `save-summary` generate a fresh UUID when they write a handoff, checkpoint, or summary
+- `load-handoff` uses a per-project resume state file rather than a per-session one
 
 The `session_id` frontmatter field remains required and should always be a UUID generated at write time.
 
@@ -40,11 +40,11 @@ files:
 
 The chain protocol enables `resumed_from` tracking across sessions. Three skills participate:
 
-**Resume (load) — writes state:**
+**Resume (`load-handoff`, `/load`) — writes state:**
 1. Archive the handoff to `<project_root>/.codex/handoffs/archive/<filename>`
 2. Write archive state to `<project_root>/.codex/handoffs/.session-state/handoff-<project>-<resume_token>.json`
 
-**Save/Quicksave/Summary (save, quicksave, summary) — reads and cleans state:**
+**Save/Quicksave/Summary (`save-handoff`, `quicksave`, `save-summary`) — reads and cleans state:**
 1. **Read:** Check `<project_root>/.codex/handoffs/.session-state/handoff-<project>-<resume_token>.json` — if exists, include the archive path as `resumed_from` in frontmatter
 2. **Write:** Write the new handoff/checkpoint/summary through the active-writer reservation helper
 3. **Cleanup:** Clear the consumed primary JSON state file and any matching legacy bridge after the new artifact is written. If cleanup warns, report it but do not block artifact creation — the 24-hour TTL will clean it up.

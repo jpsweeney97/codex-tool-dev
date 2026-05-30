@@ -1,5 +1,5 @@
 ---
-name: load
+name: load-handoff
 description: Use when continuing from a previous session, when user runs `/load` to load the most recent handoff, or when user runs `/load <path>` for a specific handoff.
 ---
 
@@ -19,7 +19,7 @@ Read these only when needed:
 ## Use
 
 - Use for `/load`, `/load <path>`, "continue from where we left off", or "pick up where I stopped".
-- Do not create handoffs; use `save`, `summary`, or `quicksave`.
+- Do not create handoffs; use `save-handoff`, `save-summary`, or `quicksave`.
 - If no eligible handoff exists, report "No handoffs found for this project" and STOP.
 - If a provided path does not exist, report `Handoff not found at <path>` and STOP.
 

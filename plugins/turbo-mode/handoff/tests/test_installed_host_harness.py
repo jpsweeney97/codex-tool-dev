@@ -98,7 +98,9 @@ def test_source_harness_payload_rejects_source_checkout_helper_leakage(
             tmp_path / "isolated" / "handoff" / HARNESS_CACHE_PATH_VERSION
         ),
         "resolved_facade_path": str(source_plugin / "scripts" / "session_state.py"),
-        "resolved_skill_doc_path": str(source_plugin / "skills" / "save" / "SKILL.md"),
+        "resolved_skill_doc_path": str(
+            source_plugin / "skills" / "save-handoff" / "SKILL.md"
+        ),
         "facade_subprocess_command_paths": [str(source_plugin / "scripts" / "session_state.py")],
         "helper_process_cwd": str(tmp_path / "host-root"),
         "helper_process_pythonpath": None,

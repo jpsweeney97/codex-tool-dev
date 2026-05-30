@@ -4,22 +4,22 @@ from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).parent.parent
 COMMAND_SKILLS = [
-    PLUGIN_ROOT / "skills" / "search" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "search-handoffs" / "SKILL.md",
     PLUGIN_ROOT / "skills" / "distill" / "SKILL.md",
     PLUGIN_ROOT / "skills" / "triage" / "SKILL.md",
     PLUGIN_ROOT / "skills" / "defer" / "SKILL.md",
 ]
 STATE_SKILLS = [
-    PLUGIN_ROOT / "skills" / "load" / "SKILL.md",
-    PLUGIN_ROOT / "skills" / "save" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "load-handoff" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "save-handoff" / "SKILL.md",
     PLUGIN_ROOT / "skills" / "quicksave" / "SKILL.md",
-    PLUGIN_ROOT / "skills" / "summary" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "save-summary" / "SKILL.md",
 ]
-LOAD_SKILL = PLUGIN_ROOT / "skills" / "load" / "SKILL.md"
+LOAD_SKILL = PLUGIN_ROOT / "skills" / "load-handoff" / "SKILL.md"
 CHAIN_STATE_SKILLS = [
-    PLUGIN_ROOT / "skills" / "save" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "save-handoff" / "SKILL.md",
     PLUGIN_ROOT / "skills" / "quicksave" / "SKILL.md",
-    PLUGIN_ROOT / "skills" / "summary" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "save-summary" / "SKILL.md",
 ]
 
 

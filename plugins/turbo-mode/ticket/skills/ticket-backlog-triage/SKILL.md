@@ -1,6 +1,6 @@
 ---
-name: ticket-review
-description: "Review ticket backlog health and recommend next actions. Use when the user asks what needs attention, what to work on next, what is stale or blocked, or asks for ticket backlog triage. Read-only; may suggest capture prompts but must not write tickets. Do not use for direct show, list, search, ticket lookup, or close-readiness requests; use ticket-find."
+name: ticket-backlog-triage
+description: "Review ticket backlog health and recommend next actions. Use when the user asks what needs attention, what to work on next, what is stale or blocked, or asks for ticket backlog triage. Read-only; may suggest capture prompts but must not write tickets. Do not use for direct show, list, search, ticket lookup, or close-readiness requests; use read-ticket."
 allowed-tools:
   - Bash
   - Read
@@ -46,6 +46,6 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_review.py audit <TICKETS_DIR>
 - Keep the review read-only. Do not create, update, close, reopen, doctor, or
   repair tickets from this skill.
 - If the review reveals missing work that should become a ticket, suggest a
-  concrete `ticket-capture` prompt instead of writing the ticket.
+  concrete `capture-ticket` prompt instead of writing the ticket.
 - Casual audit or backlog review language stays here. Run maintenance or repair
   only when the user explicitly asks for `ticket-doctor`.

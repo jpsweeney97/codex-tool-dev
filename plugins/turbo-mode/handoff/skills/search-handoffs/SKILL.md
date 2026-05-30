@@ -1,5 +1,5 @@
 ---
-name: search
+name: search-handoffs
 description: Search across handoff history for decisions, learnings, and context. Use when user says "search handoffs", "find in handoffs", "what did we decide about", or runs /search.
 ---
 
@@ -12,7 +12,7 @@ Search active and archived handoffs for the current project. Returns full matchi
 **Step 1 - Resolve plugin root:**
 Set `PLUGIN_ROOT` to the plugin root directory three levels above this `SKILL.md`, not the `skills/` directory.
 Use a literal absolute value such as `PLUGIN_ROOT="/absolute/path/to/handoff"`.
-For example, if the skill file is `/absolute/path/to/handoff/skills/search/SKILL.md`, then `PLUGIN_ROOT` is `/absolute/path/to/handoff`.
+For example, if the skill file is `/absolute/path/to/handoff/skills/search-handoffs/SKILL.md`, then `PLUGIN_ROOT` is `/absolute/path/to/handoff`.
 When executing commands, use the absolute path for `PLUGIN_ROOT`; do not `cd` into the plugin directory.
 
 ## Procedure

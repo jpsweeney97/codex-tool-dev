@@ -241,7 +241,7 @@ def _run_helper_probe(
         )
         if facade_completed.returncode != 0:
             raise SystemExit(facade_completed.stderr)
-        skill_doc_path = installed_plugin / "skills" / "save" / "SKILL.md"
+        skill_doc_path = installed_plugin / "skills" / "save-handoff" / "SKILL.md"
         payload = {
             "resolved_facade_path": str(session_state_facade_path.resolve()),
             "resolved_skill_doc_path": str(skill_doc_path.resolve()),

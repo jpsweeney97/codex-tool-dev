@@ -35,14 +35,14 @@ codex plugin install ./plugins/turbo-mode/handoff
 
 | Skill | Trigger Phrases | Purpose |
 |-------|----------------|---------|
-| **save** | `/save`, "wrap this up", "new session", "handoff" | Full session report (13 sections, 400+ lines). Writes to `<project_root>/.codex/handoffs/`. |
-| **load** | `/load`, "continue from where we left off" | Resume from a previous handoff. Archives the source file, writes a state file for chain linking. |
+| **save-handoff** | `/save`, "wrap this up", "new session", "handoff" | Full session report (13 sections, 400+ lines). Writes to `<project_root>/.codex/handoffs/`. |
+| **load-handoff** | `/load`, "continue from where we left off" | Resume from a previous handoff. Archives the source file, writes a state file for chain linking. |
 | **quicksave** | `/quicksave`, "checkpoint", "save state" | Lightweight checkpoint (22-55 lines, 5 sections). Warns on 3rd consecutive checkpoint. |
-| **summary** | `/summary`, "summary", "summarize" | Medium-depth session summary with project arc context. Writes to `<project_root>/.codex/handoffs/`. |
+| **save-summary** | `/summary`, "summary", "summarize" | Medium-depth session summary with project arc context. Writes to `<project_root>/.codex/handoffs/`. |
 | **defer** | `/defer`, "track these for later", "create tickets" | Extract deferred work items from conversation into ticket files in `docs/tickets/`. |
 | **triage** | `/triage`, "what's in the backlog", "any open tickets" | Audit open tickets by priority. Detect orphaned handoff items not tracked by tickets. |
 | **distill** | `/distill`, "extract knowledge", "graduate knowledge" | Extract durable insights from handoffs into `docs/learnings/learnings.md` with SHA256 deduplication. |
-| **search** | `/search`, "find in handoffs", "what did we decide about" | Section-aware search across active and archived handoffs. Supports literal and regex queries. |
+| **search-handoffs** | `/search`, "find in handoffs", "what did we decide about" | Section-aware search across active and archived handoffs. Supports literal and regex queries. |
 
 ### Hooks
 
@@ -239,7 +239,7 @@ argument-hint: "[optional-argument]"
 ---
 ```
 
-See `skills/save/SKILL.md` for a comprehensive example.
+See `skills/save-handoff/SKILL.md` for a comprehensive example.
 
 ### Hook Scope
 
@@ -303,7 +303,7 @@ When a chain-state operation raises a `ChainStateDiagnosticError`, see the **Cha
 | `references/ARCHITECTURE.md` | Runtime ownership map, storage layout, and reseam boundaries |
 | `references/handoff-contract.md` | Frontmatter schema, chain protocol, storage conventions, known limitations |
 | `references/format-reference.md` | Section checklist, quality targets, worked examples |
-| `skills/save/synthesis-guide.md` | Internal synthesis guidance for the save skill |
+| `skills/save-handoff/synthesis-guide.md` | Internal synthesis guidance for the save-handoff skill |
 | `CHANGELOG.md` | Version history (1.0.0-1.7.0) |
 
 ## License

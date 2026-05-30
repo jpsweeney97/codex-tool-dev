@@ -18,10 +18,10 @@ PR22_REPAIR_CLOSEOUT = (
 )
 ENGINE_RUNNER = PLUGIN_ROOT / "scripts" / "ticket_engine_runner.py"
 TICKET_PAYLOADS = PLUGIN_ROOT / "scripts" / "ticket_payloads.py"
-CAPTURE_SKILL = PLUGIN_ROOT / "skills" / "ticket-capture" / "SKILL.md"
-FIND_SKILL = PLUGIN_ROOT / "skills" / "ticket-find" / "SKILL.md"
-UPDATE_SKILL = PLUGIN_ROOT / "skills" / "ticket-update" / "SKILL.md"
-REVIEW_SKILL = PLUGIN_ROOT / "skills" / "ticket-review" / "SKILL.md"
+CAPTURE_SKILL = PLUGIN_ROOT / "skills" / "capture-ticket" / "SKILL.md"
+FIND_SKILL = PLUGIN_ROOT / "skills" / "read-ticket" / "SKILL.md"
+UPDATE_SKILL = PLUGIN_ROOT / "skills" / "update-ticket" / "SKILL.md"
+REVIEW_SKILL = PLUGIN_ROOT / "skills" / "ticket-backlog-triage" / "SKILL.md"
 DOCTOR_SKILL = PLUGIN_ROOT / "skills" / "ticket-doctor" / "SKILL.md"
 NEW_SKILL_FILES = [
     CAPTURE_SKILL,
@@ -304,7 +304,7 @@ def test_ticket_capture_skill_frontmatter_matches_task3_contract() -> None:
     text = _read_text(CAPTURE_SKILL)
     frontmatter = _frontmatter(text)
     assert set(frontmatter) == {"name", "description", "allowed-tools"}
-    assert frontmatter["name"] == "ticket-capture"
+    assert frontmatter["name"] == "capture-ticket"
     assert frontmatter["allowed-tools"] == ["Bash", "Write", "Read"]
     assert "argument-hint" not in text
 
@@ -512,7 +512,7 @@ def test_ticket_find_skill_contract_is_read_only() -> None:
     text = _read_text(FIND_SKILL)
     frontmatter = _frontmatter(text)
     assert set(frontmatter) == {"name", "description", "allowed-tools"}
-    assert frontmatter["name"] == "ticket-find"
+    assert frontmatter["name"] == "read-ticket"
     assert frontmatter["allowed-tools"] == ["Bash", "Read"]
     description = frontmatter["description"]
     assert isinstance(description, str)
@@ -528,7 +528,7 @@ def test_ticket_find_skill_contract_is_read_only() -> None:
             "do not create, update, close, reopen, triage, repair, prioritize, "
             "or answer what to work on next"
         ),
-        "use ticket-review for backlog health and next-action analysis",
+        "use ticket-backlog-triage for backlog health and next-action analysis",
     ):
         assert snippet in description
     assert "ticket_read.py list" in text
@@ -545,7 +545,7 @@ def test_ticket_update_skill_contract_is_preview_first_and_scoped() -> None:
     text = _read_text(UPDATE_SKILL)
     frontmatter = _frontmatter(text)
     assert set(frontmatter) == {"name", "description", "allowed-tools"}
-    assert frontmatter["name"] == "ticket-update"
+    assert frontmatter["name"] == "update-ticket"
     assert frontmatter["allowed-tools"] == ["Bash", "Write", "Read"]
     description = frontmatter["description"]
     assert isinstance(description, str)
@@ -610,7 +610,7 @@ def test_ticket_review_skill_contract_is_read_only_and_capture_prompt_only() -> 
     text = _read_text(REVIEW_SKILL)
     frontmatter = _frontmatter(text)
     assert set(frontmatter) == {"name", "description", "allowed-tools"}
-    assert frontmatter["name"] == "ticket-review"
+    assert frontmatter["name"] == "ticket-backlog-triage"
     assert frontmatter["allowed-tools"] == ["Bash", "Read"]
     description = frontmatter["description"]
     assert isinstance(description, str)
@@ -620,14 +620,14 @@ def test_ticket_review_skill_contract_is_read_only_and_capture_prompt_only() -> 
         "Do not use for direct show, list, search, ticket lookup, or close-readiness requests"
         in description
     )
-    assert "use ticket-find" in description
+    assert "use read-ticket" in description
     assert "ticket_review.py review" in text
     assert "ticket_review.py audit" in text
     assert "ticket_triage.py dashboard" not in text
     assert "ticket_triage.py audit" not in text
     normalized = _normalize_whitespace(text)
     assert "Do not create, update, close, reopen, doctor, or repair tickets" in normalized
-    assert "suggest a concrete `ticket-capture` prompt instead of writing the ticket" in normalized
+    assert "suggest a concrete `capture-ticket` prompt instead of writing the ticket" in normalized
 
 
 def test_ticket_doctor_skill_contract_is_explicit_maintenance_only() -> None:
@@ -1048,10 +1048,10 @@ def test_docs_describe_capture_first_five_skill_surface() -> None:
     for path in (PLUGIN_ROOT / "README.md", PLUGIN_ROOT / "HANDBOOK.md"):
         text = _read_text(path)
         for snippet in (
-            "ticket-capture",
-            "ticket-find",
-            "ticket-update",
-            "ticket-review",
+            "capture-ticket",
+            "read-ticket",
+            "update-ticket",
+            "ticket-backlog-triage",
             "ticket-doctor",
             "Generic creation through the old broad `ticket` skill is no longer user-facing",
             "Low-confidence captures are allowed when",

@@ -1,5 +1,5 @@
 ---
-name: ticket-update
+name: update-ticket
 description: "Refine or change existing repo-local tickets. Use when the user asks to update a ticket, mark work in progress, close, reopen, change priority, edit tags, add blockers, set component or related paths, or replace placeholder problem, next action, or acceptance criteria. Requires preview before writing."
 allowed-tools:
   - Bash
@@ -11,7 +11,7 @@ allowed-tools:
 
 Refine or change an existing repo-local ticket through the focused
 `ticket_update.py` backend. This skill does not create new tickets; use
-`ticket-capture` for capture intent.
+`capture-ticket` for capture intent.
 
 ## Setup
 
