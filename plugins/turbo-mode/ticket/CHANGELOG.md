@@ -8,8 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Capture-first skill split: `ticket-capture`, `ticket-find`, `ticket-update`,
-  `ticket-review`, and explicit-only `ticket-doctor` replace the old broad
+- Capture-first skill split: `capture-ticket`, `read-ticket`, `update-ticket`,
+  `ticket-backlog-triage`, and explicit-only `ticket-doctor` replace the old broad
   user-facing Ticket skill.
 - Purpose-built capture, update, review, and doctor entrypoints:
   `ticket_capture.py`, `ticket_update.py`, `ticket_review.py`, and
@@ -19,9 +19,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `refinement_status: needs_refinement`.
 - Source manifest readiness URLs for website, privacy policy, and terms of
   service. This is source metadata only, not installed runtime proof.
-- Guided ticket UX plan: workflow prepare/execute, mutation previews,
-  recovery options, close-readiness checks, triage next actions, and static
-  doctor diagnostics
+- Guided ticket UX plan: capture availability checks, read-only ticket lookup,
+  backlog triage next actions, close-readiness checks, recovery options, and
+  static doctor diagnostics.
 - `DeferredWorkEnvelope` schema validator with JSON Schema-based validation (T-04a, #69)
 - `ticket_envelope.py` module: envelope read, field mapping, and lifecycle management for consuming deferred work envelopes (T-04a, #69)
 - `DeferredWorkEnvelope` schema documented in ticket contract §11 (T-04a, #69)

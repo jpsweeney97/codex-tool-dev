@@ -767,6 +767,15 @@ def test_ticket_review_skill_contract_is_read_only_and_capture_prompt_only() -> 
     assert "ticket_triage.py dashboard" not in text
     assert "ticket_triage.py audit" not in text
     normalized = _normalize_whitespace(text)
+    assert "ADR 0006" in normalized
+    assert "May 30 control doc" in normalized
+    assert "Backlog triage is read/query/reporting" in normalized
+    assert (
+        "Persisted `blocked` status and reverse `blocks` edges are not target schema"
+        in normalized
+    )
+    assert "target blockedness derives from `blocked_by`" in normalized
+    assert "blocked-chain analysis" not in normalized
     assert "Do not create, update, close, reopen, doctor, or repair tickets" in normalized
     assert "suggest a concrete `capture-ticket` prompt instead of writing the ticket" in normalized
 
@@ -786,6 +795,18 @@ def test_ticket_doctor_skill_contract_is_explicit_maintenance_only() -> None:
     assert "repair corrupt ticket audit logs" in description
     assert "validate ticket plugin health" in description
     assert "Do not trigger on casual audit, review, triage, or backlog-health language" in text
+    normalized = _normalize_whitespace(text)
+    assert "ADR 0006" in normalized
+    assert "May 30 control doc" in normalized
+    assert "maintenance and diagnostic material only" in normalized
+    assert "not normal target ticket mutation authority" in normalized
+    assert (
+        "Preview, audit logs, activation proof, and cache refresh are not part of "
+        "ordinary target capture or update mutation"
+        in normalized
+    )
+    assert "not target preview-mode authority" in normalized
+    assert "historical audit artifacts only" in normalized
     assert "ticket_doctor.py diagnose" in text
     assert (
         "ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>"
@@ -930,6 +951,21 @@ def test_changelog_announces_activate_runtime_subcommand() -> None:
     unreleased = text.split("## 1.4.0", maxsplit=1)[0]
 
     assert "`ticket_doctor.py activate-runtime`" in unreleased
+    for skill_name in (
+        "capture-ticket",
+        "read-ticket",
+        "update-ticket",
+        "ticket-backlog-triage",
+        "ticket-doctor",
+    ):
+        assert f"`{skill_name}`" in unreleased
+    for old_skill_name in (
+        "ticket-capture",
+        "ticket-find",
+        "ticket-update",
+        "ticket-review",
+    ):
+        assert f"`{old_skill_name}`" not in unreleased
 
 
 def test_claude_instructions_reference_current_turbo_mode_source_roots() -> None:
@@ -1203,6 +1239,22 @@ def test_task4_docs_do_not_overclaim_current_placeholder_refinement() -> None:
     assert "`ticket_workflow.py` is a compatibility/debug runner" not in _normalize_whitespace(
         _target_sections(handbook)
     )
+
+
+def test_current_facing_docs_do_not_keep_old_active_product_sections() -> None:
+    forbidden_active_phrases = (
+        "Ticket has exactly three supported high-level mutation surfaces",
+        "Capture new tickets from natural language after preview confirmation",
+        "Preview-first updates via `ticket_update.py prepare` and `execute`",
+        "Every mutation traverses all four stages in sequence",
+        "Tickets use fenced YAML blocks",
+        "Runtime-first modes: `discussion_only`, `preview`, and `agent_primary`",
+        "All mutations display a confirmation prompt",
+    )
+    for path in CORE_AUTHORITY_DOCS:
+        text = _read_text(path)
+        for phrase in forbidden_active_phrases:
+            assert phrase not in text, f"{path} still has old active product wording"
 
 
 def test_docs_describe_capture_first_five_skill_surface() -> None:

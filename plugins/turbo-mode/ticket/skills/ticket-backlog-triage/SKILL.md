@@ -9,8 +9,20 @@ allowed-tools:
 # Ticket Review
 
 Review ticket backlog health without writing tickets. Use this for read-only
-backlog triage, stale-ticket checks, blocked-chain analysis, and next-action
+backlog triage, stale-ticket checks, blocker observations, and next-action
 recommendations.
+
+## Authority Boundary
+
+ADR 0006 is the accepted architecture authority for the Ticket runtime-first
+state-kernel rebaseline. The May 30 control doc is the implementation and
+cutover control surface. This skill is source-authority guidance, not
+installed-runtime proof and not runtime proof. This docs/tests slice does not
+perform cutover inventory or normalization.
+
+Backlog triage is read/query/reporting unless it produces candidate mutations
+for the future runtime path. Persisted `blocked` status and reverse `blocks`
+edges are not target schema; target blockedness derives from `blocked_by`.
 
 ## Setup
 
@@ -41,8 +53,8 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_review.py audit <TICKETS_DIR>
 
 ## Output Rules
 
-- Summarize counts, stale tickets, blocked chains, and the highest-signal next
-  actions from script output.
+- Summarize counts, stale tickets, blocker relationships derived from
+  `blocked_by`, and the highest-signal next actions from script output.
 - Keep the review read-only. Do not create, update, close, reopen, doctor, or
   repair tickets from this skill.
 - If the review reveals missing work that should become a ticket, suggest a

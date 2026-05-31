@@ -12,6 +12,20 @@ allowed-tools:
 Run explicit maintenance and diagnostics for ticket storage or plugin health.
 Do not trigger on casual audit, review, triage, or backlog-health language.
 
+## Authority Boundary
+
+ADR 0006 is the accepted architecture authority for the Ticket runtime-first
+state-kernel rebaseline. The May 30 control doc is the implementation and
+cutover control surface. This skill is source-authority guidance, not
+installed-runtime proof and not runtime proof. This docs/tests slice does not
+perform cutover inventory or normalization.
+
+Explicit maintenance, diagnostics, activation, stale payload cleanup,
+historical audit repair, and runtime-readiness commands are maintenance and
+diagnostic material only. They are not normal target ticket mutation authority.
+Preview, audit logs, activation proof, and cache refresh are not part of
+ordinary target capture or update mutation.
+
 ## Setup
 
 Resolve paths before running commands:
@@ -47,6 +61,10 @@ Activation is `direct_execute only`. Use it only when the user explicitly asks
 to activate or validate the installed Ticket runtime for the certified
 direct-execute lane.
 
+Activation is maintenance and diagnostic material only. It does not make cache
+refresh, activation proof, or live runtime inventory part of normal target
+ticket mutation authority.
+
 Activation is user-origin only. Do not run this command as an agent. Present
 the command below to the user and report that a user-owned shell must run it:
 
@@ -80,10 +98,14 @@ If activation blocks, report the blocker code first:
 When a backend response includes `data.recovery_hint`, show the recovery summary and next step before any lower-level message. Do not expose payload paths, envelope paths, canonical command repair, raw temp/workspace paths, or hook/provenance fields in the transcript.
 
 - `cleanup_stale_preview`: say old abandoned Ticket preview state can be cleaned
-  up after review. Do not clean anything until the user explicitly approves the
-  confirmed cleanup command.
+  up after review. This is maintenance and diagnostic legacy-source cleanup,
+  not target preview-mode authority. Do not clean anything until the user
+  explicitly approves the confirmed cleanup command.
 
 ## Audit Repair
+
+Audit repair covers historical audit artifacts only. It does not create active
+target mutation history.
 
 Always dry-run audit repair first:
 

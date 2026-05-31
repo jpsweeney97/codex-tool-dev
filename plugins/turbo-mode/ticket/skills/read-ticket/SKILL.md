@@ -11,6 +11,14 @@ allowed-tools:
 Read repo-local tickets without mutation. Use only `ticket_read.py` with the
 `list`, `query`, and `check` subcommands.
 
+## Authority Boundary
+
+ADR 0006 is the accepted architecture authority for the Ticket runtime-first
+state-kernel rebaseline. The May 30 control doc is the implementation and
+cutover control surface. This skill is source-authority guidance, not
+installed-runtime proof and not runtime proof. This docs/tests slice does not
+perform cutover inventory or normalization.
+
 ## Setup
 
 Resolve paths before running commands:

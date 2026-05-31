@@ -5,7 +5,9 @@
 The ticket plugin provides repo-local ticket reading, triage, diagnostics, and
 runtime-first ticket authority work for Codex sessions.
 
-**Scope:** Ticket capture, existing-ticket lifecycle mutations, scoped frontmatter metadata updates, read queries, backlog health review, explicit diagnostics, and historical audit repair.
+**Scope:** Ticket capture availability, existing-ticket update availability,
+read queries, backlog health review, explicit diagnostics, and historical audit
+repair while write mutation is rebaselined onto the target candidate contract.
 
 **Not covered:** External issue tracker integrations, UI rendering, cross-project ticket syncing, or agent-orchestration workflows (roadmap).
 
@@ -169,40 +171,26 @@ evidence.
 
 | Skill | Trigger | Purpose |
 |-------|---------|---------|
-| `capture-ticket` | `skills/capture-ticket/SKILL.md` | Capture new tickets from natural language after preview confirmation |
+| `capture-ticket` | `skills/capture-ticket/SKILL.md` | Report capture availability and summarize the intended create candidate; write mutation is temporarily unavailable |
 | `read-ticket` | `skills/read-ticket/SKILL.md` | Read-only show, list, query, and close-readiness checks |
-| `update-ticket` | `skills/update-ticket/SKILL.md` | Existing-ticket lifecycle and frontmatter metadata updates |
-| `ticket-backlog-triage` | `skills/ticket-backlog-triage/SKILL.md` | Read-only backlog health, stale, blocked, and next-action review |
+| `update-ticket` | `skills/update-ticket/SKILL.md` | Summarize intended update candidates; write mutation is temporarily unavailable |
+| `ticket-backlog-triage` | `skills/ticket-backlog-triage/SKILL.md` | Read-only backlog health, stale, blocker, and next-action review |
 | `ticket-doctor` | `skills/ticket-doctor/SKILL.md` | Explicit-only storage/plugin diagnostics, stale payload cleanup, and audit repair |
 
 Generic creation through the old broad `ticket` skill is no longer user-facing.
-Low-confidence captures are allowed when a next action exists; they should carry
-`refinement_status: needs_refinement`. `needs_refinement` is metadata, not a lifecycle status.
+Use `capture-ticket` for capture-intent handling. Until a live source entrypoint
+accepts the target candidate mutation contract, capture and update skills stop
+after a prose candidate summary and do not write tickets.
 
 ### CLI Entrypoints
 
 | Script | Origin | Purpose |
 |--------|--------|---------|
-| `scripts/ticket_engine_user.py` | User | Mutation pipeline with `request_origin="user"` |
-| `scripts/ticket_engine_agent.py` | Agent | Direct execute fails closed; autonomous writes use `ticket_autonomy.py apply-turn` and the runtime-first gateway |
-| `scripts/ticket_capture.py` | User | Capture-first prepare/execute workflow for new tickets |
-| `scripts/ticket_update.py` | User | Preview-first prepare/execute workflow for existing tickets |
 | `scripts/ticket_review.py` | Any | User-facing read-only review and historical audit wrapper |
 | `scripts/ticket_doctor.py` | User | Explicit-only diagnostics, runtime activation, stale payload cleanup, and dry-run-first historical audit repair wrapper |
-| `scripts/ticket_workflow.py` | Any | Internal/debugging legacy prepare/execute/recover workflow runner |
 | `scripts/ticket_read.py` | Any | Read-only: list, query by ID-prefix, and close-readiness check |
 | `scripts/ticket_triage.py` | Any | Read-only: dashboard counts, stale/blocked detection, historical audit summary |
 | `scripts/ticket_audit.py` | Any | Historical audit validation and corrupt-line repair |
-
-Host-facing autonomy commands:
-
-| Command | Purpose |
-|---------|---------|
-| `ticket_autonomy.py pause` | Pause workspace automation |
-| `ticket_autonomy.py recover` | Project pending-summary recovery before automatic writes |
-| `ticket_autonomy.py apply-turn` | Apply turn candidates through the runtime-first gateway |
-| `ticket_autonomy.py doctor-ledger` | Inspect or repair deterministic ledger gaps |
-| `ticket_autonomy.py migrate-change-history` | Dry-run or apply missing Change History sections |
 
 Canonical Bash launcher for these scripts:
 
@@ -210,40 +198,19 @@ Canonical Bash launcher for these scripts:
 uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/tickets
 ```
 
-### Supported Mutation Surfaces
+### Target Candidate Mutation Path
 
-Ticket has exactly three supported high-level mutation surfaces: `capture`, `update`, and `ingest`.
-
-- `capture`: `ticket_capture.py prepare` then `ticket_capture.py execute`
-- `update`: `ticket_update.py prepare` then `ticket_update.py execute`
-- `ingest`: `ticket_engine_user.py ingest <payload_file>` or `ticket_engine_agent.py ingest <payload_file>`
-
-`capture` and `update` use their preview-first prepare/execute wrappers. `ingest` uses the guarded engine entrypoints to consume a DeferredWorkEnvelope from `docs/tickets/.envelopes/<filename>.json`. Direct engine `classify`/`plan`/`preflight`/`execute` and `ticket_workflow.py prepare`/`execute` remain low-level compatibility, debug, and agent-internal paths, not normal user-facing mutation interfaces.
-
-`ticket_workflow.py` is a compatibility/debug runner kept for tests and
-low-level recovery work, not a supported user-facing mutation surface.
+This docs slice does not identify a live source entrypoint that accepts target
+candidate mutations. When source exposes that entrypoint, it must accept
+`action`, `ticket_id`, `target.fields`, `target.sections`, `proposed_change`,
+`expected_ticket_fingerprint`, and `evidence_summary`, and it must reject
+unknown fields.
 
 ### Recovery Hints
 
-User-facing mutation and recovery surfaces may include `data.recovery_hint`.
-When present, it is safe to show directly to a human user. Valid codes are
-`stale_plan`, `trust_setup`, `retry_preview`, `cleanup_stale_preview`,
-`policy_blocked`, `preflight_failed`, `host_policy_blocked`,
-`deterministic_driver_unavailable`, `hook_contract_blocked`,
-`engine_gate_required`, `runtime_readiness_required`, `internal_error`,
-`proof_invalid`, and `stale_proof`.
-
-The schema is `{"code": "...", "summary": "...", "next_step": "..."}`. The
-whole object is transcript-safe. `plugin hook setup` is allowed only as
-setup-level recovery wording for `trust_setup`; hook/provenance field names and
-command repair instructions remain internal.
-
-Ingest stdout is a machine-readable JSON envelope. Skills and transcript-facing
-workflows must parse it and render only the allowlisted projection: recovery
-summary, recovery next step, safe message, ticket ID, duplicate candidate ticket
-ID, and user-safe ingest outcome prose. Raw `data` fields such as processed
-paths, incoming envelope paths, and envelope provenance are not transcript
-fields.
+Maintenance and diagnostic surfaces may include `data.recovery_hint`. When a
+hint appears, show the safe recovery summary and next step. Do not treat
+recovery hint codes as target result-envelope states.
 
 ### Hook
 
@@ -255,31 +222,27 @@ fields.
 
 ## Core Components
 
-### Pipeline Stages
+### State-Kernel Boundary
 
-| File | Responsibility | Key Dependencies |
-|------|----------------|-----------------|
-| `scripts/ticket_engine_core.py` | Orchestrates 4 stages, preserves historical audit readers, and blocks direct agent execute outside the runtime-first gateway | `ticket_parse`, `ticket_render`, `ticket_validate`, `ticket_id`, `ticket_dedup`, `ticket_paths`, `ticket_trust` |
-| `scripts/ticket_engine_runner.py` | CLI dispatcher: parses args, reads JSON payload, calls stage function, prints response | `ticket_engine_core` |
-
-### Pipeline Inputs
-
-| File | Responsibility |
-|------|----------------|
-| `scripts/ticket_stage_models.py` | Dataclass boundary models: `ClassifyInput`, `PlanInput`, `PreflightInput`, `ExecuteInput` |
+ADR 0006 demotes the old workflow engine into a deterministic ticket-state
+kernel. Codex owns semantic discovery, candidate selection, prioritization, and
+duplicate judgment. Ticket owns deterministic validation and persistence:
+allowed fields, canonical paths, schema shape, status values, blocker
+references, fingerprints, `Change History` append rules, idempotency, recovery,
+and file writes.
 
 ### Support Modules
 
 | File | Responsibility |
 |------|----------------|
-| `scripts/ticket_parse.py` | Markdown → structured; resolves Gen 1/2/3 legacy ID formats |
-| `scripts/ticket_render.py` | Structured → markdown with canonical YAML serialization and fixed section ordering |
-| `scripts/ticket_validate.py` | Field schema validation; rejects unknown keys in mutation payloads |
+| `scripts/ticket_parse.py` | Markdown parsing and legacy cutover inspection support |
+| `scripts/ticket_render.py` | Markdown rendering with canonical serialization and section ordering |
+| `scripts/ticket_validate.py` | Field schema validation; rejects unknown target fields |
 | `scripts/ticket_id.py` | ID allocation: `T-YYYYMMDD-NN` format, scans live tickets for next slot |
-| `scripts/ticket_dedup.py` | SHA-256 fingerprint of normalized problem + key file paths; 24-hour window |
+| `scripts/ticket_dedup.py` | Deterministic fingerprint helpers |
 | `scripts/ticket_paths.py` | Project root discovery (nearest `.codex/` or `.git/`); path containment validation |
-| `scripts/ticket_trust.py` | Trust triple validation: `session_id`, `hook_injected`, `request_origin` consistency |
-| `scripts/ticket_triage.py` | Dashboard aggregation; stale/blocked chain detection; historical `.audit/` JSONL aggregation |
+| `scripts/ticket_trust.py` | Historical trust/provenance validation support |
+| `scripts/ticket_triage.py` | Dashboard aggregation; stale and blocker summaries; historical `.audit/` JSONL aggregation |
 | `scripts/ticket_read.py` | Query engine: filters by status/priority/tag, ID-prefix lookup |
 | `scripts/ticket_audit.py` | Reads `.audit/YYYY-MM-DD/*.jsonl`; validates and repairs corrupt lines with backups |
 
@@ -287,8 +250,11 @@ fields.
 
 | File | Responsibility |
 |------|----------------|
-| `scripts/ticket_engine_user.py` | Sets `request_origin="user"`, delegates to `ticket_engine_runner` |
-| `scripts/ticket_engine_agent.py` | Sets `request_origin="agent"`, delegates to `ticket_engine_runner` |
+| `scripts/ticket_read.py` | Read-only list, query, and close-readiness checks |
+| `scripts/ticket_review.py` | Read-only backlog review |
+| `scripts/ticket_doctor.py` | Explicit diagnostics and maintenance |
+| `scripts/ticket_triage.py doctor` | Backend source/cache/project diagnostic |
+| `scripts/ticket_audit.py repair` | Historical audit backend repair |
 
 ### Hook
 
@@ -310,9 +276,10 @@ fields.
 
 ### Runtime-First Autonomy State
 
-Future autonomous durable history writes to `## Change History` on each affected ticket. Future local operational state writes to `.codex/ticket-workspace/ticket.pending-summary.jsonl`. Existing `docs/tickets/.audit/` files are historical artifacts; `ticket_audit.py` and `ticket_doctor.py repair-audit` are read/repair tools for existing historical `.audit/` files only.
-
-Direct `ticket_engine_agent.py execute` is not an autonomous mutation route in this source slice. It fails closed with `gateway_required`. Source autonomous writes enter through `ticket_autonomy.py apply-turn`, where the runtime-first gateway validates a gateway-approved decision, appends pending-summary bookkeeping, and writes ticket-local `## Change History`. This is a fail-closed source boundary, not installed-runtime proof.
+Future autonomous durable history writes to `## Change History` on each
+affected ticket. Existing `docs/tickets/.audit/` files are historical
+artifacts; `ticket_audit.py` and `ticket_doctor.py repair-audit` are
+read/repair tools for existing historical `.audit/` files only.
 
 Local automation setup is strict JSON at `.codex/ticket.local.md`:
 
@@ -320,7 +287,10 @@ Local automation setup is strict JSON at `.codex/ticket.local.md`:
 {"schema":"codex.ticket.local.v1","mode":"agent_primary"}
 ```
 
-Allowed modes are `discussion_only`, `preview`, and `agent_primary`. Missing, Markdown, YAML frontmatter, old mode names, comments, or unknown keys all require setup instead of falling back to a default. Guided setup choices map `automatic` to `agent_primary` and `ask_first` to `discussion_only`; `preview` is manual-only config.
+Target durable modes are `discussion_only` and `agent_primary`. Diagnostic
+preview is not a durable mode. Missing, Markdown, YAML frontmatter, old mode
+names, comments, or unknown keys all require setup instead of falling back to a
+default.
 
 Local runtime-first workspace state lives under `.codex/ticket-workspace/`, which must stay ignored by git. The workspace owns local mode snapshots and `pause.json`; a pause immediately blocks autonomous mode resolution until resume rewrites strict JSON config from an explicit setup choice and invalidates stale snapshots.
 
@@ -338,7 +308,9 @@ Neither variable is a normal operator input.
 
 ### Tickets Directory
 
-The `tickets_dir` defaults to `<project_root>/docs/tickets/`. Read, triage, and audit scripts accept it as a positional argument. Engine entrypoints resolve it from the payload or use the default. In every case it must resolve inside the project root — path traversal is blocked.
+The `tickets_dir` defaults to `<project_root>/docs/tickets/`. Read, triage, and
+audit scripts accept it as a positional argument. In every case it must resolve
+inside the project root; path traversal is blocked.
 
 The `.audit/` subdirectory (`docs/tickets/.audit/`) may exist in older projects as historical data. Future runtime execution does not create it.
 
@@ -346,44 +318,19 @@ The `.audit/` subdirectory (`docs/tickets/.audit/`) may exist in older projects 
 
 ## Operating Model
 
-### Trust Model
+### Autonomy Boundary
 
-Every mutation must carry a **trust triple** injected by the hook:
-
-| Field | Source | Purpose |
-|-------|--------|---------|
-| `session_id` | Hook (`event.session_id`) | Session identity; sanitized (no `/`, `\`, `\0`) before filesystem use |
-| `hook_injected` | Hook | Proves request passed through the hook |
-| `hook_request_origin` | Hook | Hook-observed provenance metadata; current runtime may report `"user"` even for the certified direct-execute lane, and activation readiness does not treat it as caller identity |
-
-The hook injects these fields atomically into the payload file before allowing
-the Bash command to proceed. At execute and ingest stages, the engine
-re-validates the trust triple against the selected policy lane. Missing or
-malformed trust data rejects with an error, and the certified direct-execute
-lane accepts the current host's `hook_request_origin="user"` observation as
-provenance metadata rather than caller identity.
-
-**Flow:** Hook validates and injects → entrypoint selects a policy lane →
-pipeline re-validates the triple.
-
-### Autonomy Enforcement
-
-Agent mutations face additional gating that user mutations do not:
-
-1. **Direct execute fails closed** unless a write enters through `ticket_autonomy.py apply-turn` and the runtime-first gateway.
-2. **The gateway owns approval validation** and must write ticket-local `## Change History` plus pending-summary bookkeeping.
-3. **User-directed mutations remain explicit** and continue through the supported user-facing prepare/execute or ingest paths.
-
-User-directed mutations continue through the explicit user-facing paths and do
-not become autonomous writes.
-
-Installed runtime activation remains a separate proof lane and does not enable source-local autonomous writes. Normal agent direct execute fails with `gateway_required`; autonomous writes use `ticket_autonomy.py apply-turn` and the runtime-first gateway.
+Current source docs do not prove installed or live runtime autonomy behavior.
+Future writes must use the target candidate mutation contract and target result
+envelope. Installed runtime activation remains a separate proof lane and does
+not enable source-local autonomous writes.
 
 ### Historical Audit Files
 
 Located at `docs/tickets/.audit/YYYY-MM-DD/*.jsonl` in projects that already have legacy audit data. Each line is a historical JSON object recording an older mutation event with action, result, session, and payload snapshot.
 
-- **Future autonomous writes:** durable history belongs in affected tickets' `## Change History` plus local pending-summary bookkeeping.
+- **Future autonomous writes:** durable history belongs in affected tickets'
+  `## Change History`.
 - **Historical repair:** `ticket_audit.py` and `ticket_doctor.py repair-audit` remain available to validate and repair existing historical `.audit/` files.
 
 ---
@@ -394,25 +341,20 @@ Located at `docs/tickets/.audit/YYYY-MM-DD/*.jsonl` in projects that already hav
 
 **When to use**
 Use when the user asks to track, file, capture, ticket, or remember a bug,
-feature, follow-up, task, or cleanup item. This is the only user-facing generic
-creation surface.
+feature, follow-up, task, or cleanup item.
 
 **Flow**
 1. Resolve plugin root from the skill's own directory
 2. Resolve `PROJECT_ROOT` from the current working directory
 3. Determine `TICKETS_DIR` as `<PROJECT_ROOT>/docs/tickets/`
-4. Synthesize a capture payload with title, problem, next action, confidence,
-   priority, tags, component, related paths, and acceptance criteria
-5. Run `ticket_capture.py prepare` and show the compact preview
-6. Execute only after explicit `create` confirmation
+4. Report that active create mutation is temporarily unavailable
+5. Summarize the intended target candidate in prose without writing
 
 **Failure modes**
 | Symptom | Cause | Recovery |
 |---------|-------|---------|
-| `error: trust_triple_invalid` | Hook not running or trust fields absent | Verify `hooks/ticket_engine_guard.py` is registered in `settings.json` |
 | `error: path_traversal` | `tickets_dir` resolves outside project root | Confirm project has `.git/` or `.codex/` at expected root |
-| `error: dedup_collision` | Same problem+files created within 24 hours | Review existing open tickets with `read-ticket`; update the duplicate instead |
-| Direct agent mutation rejected | Direct agent execute is not an autonomous mutation route | Use a user-confirmed mutation path or route automation through `ticket_autonomy.py apply-turn` |
+| Write requested | Target candidate entrypoint is unavailable in this source slice | Summarize the candidate and stop |
 
 ---
 
@@ -427,27 +369,21 @@ read-only and calls only `ticket_read.py list`, `query`, and `check`.
 2. Resolve `PROJECT_ROOT` from the current working directory
 3. Resolve `TICKETS_DIR` as `<PROJECT_ROOT>/docs/tickets/`
 4. Run the requested `ticket_read.py` command
-5. For ordinary open-work output, group `refinement_status: needs_refinement`
-   tickets separately from ready open work
+5. Present ID, title, status, priority, and path
 
 ---
 
 ### `update-ticket` skill
 
 **When to use**
-Update an existing ticket's lifecycle, priority, tags, blockers, component,
-related paths, or focused refinement fields. Do not use it for arbitrary
-body-section editing in v1. Source, defer, and capture provenance metadata are
-not supported by `ticket_update.py` in v1. Placeholder problem, next action, and
-acceptance criteria refinement uses the focused `ticket_update.py` backend.
+Use when the user asks to update an existing ticket's lifecycle, priority, tags,
+blockers, related paths, or target sections.
 
 **Flow**
 1. Resolve plugin root
 2. Resolve `PROJECT_ROOT` from the current working directory
-3. Create an absolute payload under `<PROJECT_ROOT>/.codex/ticket-tmp/`
-4. Run `ticket_update.py prepare`
-5. Show the preview and wait for explicit confirmation
-6. Run `ticket_update.py execute` only after confirmation
+3. Report that active update mutation is temporarily unavailable
+4. Summarize the intended target candidate in prose without writing
 
 ---
 
@@ -476,15 +412,17 @@ confirmation, and `recover` applies supported user-selected payload patches.
 ### `ticket-backlog-triage` skill
 
 **When to use**
-Read-only health check for the ticket backlog. Surfaces stale tickets, blocked
-dependency chains, historical audit activity, and next-action recommendations. It may
-suggest `capture-ticket` prompts but must not write tickets.
+Read-only health check for the ticket backlog. Surfaces stale tickets, blocker
+relationships derived from `blocked_by`, historical audit activity, and
+next-action recommendations. It may suggest `capture-ticket` prompts but must
+not write tickets.
 
 **Flow**
 1. Resolve plugin root
 2. Resolve `PROJECT_ROOT` from the current working directory
 3. Resolve `TICKETS_DIR` as `<PROJECT_ROOT>/docs/tickets/`
-4. Run `ticket_review.py review` → counts by status, stale list, blocked chain detection, size warnings
+4. Run `ticket_review.py review` for counts, stale tickets, blocker
+   relationships, size warnings, and next actions
 5. Run `ticket_review.py audit` → aggregate historical `.audit/` JSONL by action/result/session
 6. Format and render recommendations
 
@@ -547,43 +485,6 @@ Cleanup is TTL-scoped to stale JSON payloads under
 
 ---
 
-### `ticket_engine_user.py` / `ticket_engine_agent.py`
-
-**When to use**
-Called by skills to execute the 4-stage mutation pipeline. `ticket_engine_user.py` for interactive user operations; `ticket_engine_agent.py` for autonomous agent mutations.
-
-**Inputs**
-```bash
-uv run python -B <PLUGIN_ROOT>/scripts/ticket_engine_user.py <subcommand> <payload_json_path>
-uv run python -B <PLUGIN_ROOT>/scripts/ticket_engine_agent.py <subcommand> <payload_json_path>
-```
-
-Valid subcommands: `classify`, `plan`, `preflight`, `execute`, `ingest`.
-
-**Response envelope**
-```json
-{
-  "state": "<machine_state>",
-  "ticket_id": "<string|null>",
-  "message": "human-readable result",
-  "data": { ... },
-  "error_code": "<string on failure only>"
-}
-```
-
-Success responses omit `error_code`; error responses include it at the top level.
-
-Engine responses can use core engine error codes or autonomy gate error codes; see the Ticket Contract for the full list.
-
-**Failure modes**
-| Symptom | Cause | Recovery |
-|---------|-------|---------|
-| `error_code: origin_mismatch` | Origin in payload doesn't match entrypoint | Do not call agent entrypoint with user-origin payload, or vice versa |
-| `error_code: gateway_required` | Direct agent execute attempted outside the runtime-first gateway | Use a user-confirmed mutation path or route automation through `ticket_autonomy.py apply-turn` |
-| `state: duplicate_candidate` | Matching ticket exists within 24 hours | Use the returned `ticket_id` to update the existing ticket instead |
-
----
-
 ### `ticket_read.py`
 
 **When to use**
@@ -591,7 +492,7 @@ List or query tickets without triggering the mutation pipeline. Safe to run at a
 
 **Inputs**
 ```bash
-uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <tickets_dir> [--status open|blocked|in_progress] [--priority high|critical] [--tag <tag>]
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <tickets_dir> [--status open|in_progress|done|wontfix] [--priority high|normal|low] [--tag <tag>]
 uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py query <tickets_dir> <id_prefix>
 uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py check <tickets_dir> <ticket_id> [--resolution done|wontfix]
 ```
@@ -622,7 +523,7 @@ wrapper, not the preferred user-facing doctor entrypoint.
 **Failure modes**
 | Symptom | Cause | Recovery |
 |---------|-------|---------|
-| Blocked chain not detected | Cycle in `blocked_by`/`blocks` graph | Manual review; triage detects linear chains only, not cycles |
+| Blocker cycle not summarized | Cyclic `blocked_by` references | Manual review; triage reports source data and should not persist reverse `blocks` edges |
 
 ---
 
@@ -673,46 +574,19 @@ Registered as `PreToolUse` hook in `settings.json`. Runs automatically before an
 
 ## Internals
 
-### 4-Stage Mutation Pipeline
+### Target Candidate Flow
 
-Every mutation traverses all four stages in sequence. A stage failure stops the pipeline and returns an error — no partial writes occur.
-
-```
-Input payload (JSON)
-       │
-       ▼
- ┌─────────────┐
- │  CLASSIFY   │  Intent resolution: infer operation (create/update/close/reopen)
- │             │  from payload fields. Confidence scored; ambiguous intents error.
- └──────┬──────┘  Validates trust triple consistency.
-        │
-        ▼
- ┌─────────────┐
- │    PLAN     │  Field validation: checks required fields, resolves defaults,
- │             │  rejects unknown keys. Runs dedup fingerprint check (SHA-256
- └──────┬──────┘  of normalized problem + key file paths). 24-hour window.
-        │
-        ▼
- ┌─────────────┐
- │  PREFLIGHT  │  Policy enforcement: validates status transitions
- │             │  against dependency graph and takes TOCTOU
- └──────┬──────┘  fingerprint snapshots for existing tickets.
-        ▼
- ┌─────────────┐
- │   EXECUTE   │  Re-checks TOCTOU snapshot and dispatches file writes
- │             │  for supported user-directed paths. Direct agent
- └─────────────┘  execute fails closed outside the runtime-first gateway.
+```text
+Codex discovery -> target candidate -> deterministic validation -> write or mechanical result
 ```
 
-### Status Transitions
+Ticket should validate only the target candidate shape and deterministic ticket
+state. It should not own semantic discovery, ranking, or workflow sequencing.
 
-Key transition rules:
+### Status Values
 
-- `open` → `in_progress` requires no extra fields
-- `open` or `in_progress` → `blocked` requires non-empty `blocked_by`
-- `in_progress` → `done` requires an Acceptance Criteria section; close flow remains separate
-- `*` → `wontfix` is allowed
-- `done` or `wontfix` → `open` requires `reopen_reason` and is user-only in v1.0
+Target persisted statuses are `open`, `in_progress`, `done`, and `wontfix`.
+Blockedness derives from `blocked_by`; it is not a persisted status.
 
 ### ID Allocation
 
@@ -720,7 +594,9 @@ IDs follow `T-YYYYMMDD-NN` format (e.g., `T-20260309-01`). The allocator scans l
 
 ### TOCTOU Protection
 
-At preflight, the engine takes a fingerprint snapshot of any existing ticket being mutated. At execute, it re-reads and re-fingerprints before writing. If the live file changed between stages, the mutation is blocked with the public `stale_plan` error code. `toctou_conflict` is descriptive prose only, not a public error code.
+Target non-create writes require `expected_ticket_fingerprint`. If the live file
+changed after candidate creation, the target result is `invalid_state` or
+`blocked` with safe validation details.
 
 ---
 
@@ -728,27 +604,20 @@ At preflight, the engine takes a fingerprint snapshot of any existing ticket bei
 
 | Symptom | Likely Cause | Diagnosis | Recovery |
 |---------|-------------|-----------|---------|
-| All direct agent mutations rejected | Direct agent execute is not an autonomous mutation route | Inspect the JSON response for `gateway_required` | Use a user-confirmed mutation path or route automation through `ticket_autonomy.py apply-turn` |
-| `trust_triple_invalid` error | Hook not running | Check `settings.json` for hook registration | Register `hooks/ticket_engine_guard.py` as PreToolUse hook |
-| `trust_triple_mismatch` error | Agent entrypoint called with user payload | Inspect `request_origin` in payload vs entrypoint | Ensure skill routes mutations to correct entrypoint |
-| `dedup_collision` on first create | Another ticket with same problem exists within 24 hours | Run `ticket_read.py list` and look for near-duplicate | Update existing ticket; or override dedup if content is genuinely distinct |
-| `stale_plan` on update | Concurrent write between preflight and execute | Inspect ticket file mtime | Re-run update after verifying current state |
+| Write unavailable | Capture/update target candidate entrypoint is not exposed in this source slice | Check active skill docs | Summarize the candidate without writing |
 | Corrupt audit JSONL lines | Interrupted write (crash during mutation) | Run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir>` | After explicit approval, run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <tickets_dir> --confirm-repair` |
-| Stale `.codex/ticket-tmp/` payloads | Interrupted or abandoned prepare/execute flow | Run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <tickets_dir> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>` | After explicit approval, run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads` |
-| Stale tickets not surfaced by triage | Missing `updated` field in old ticket YAML | Inspect ticket frontmatter | Triage falls back to file mtime; results are approximate for legacy tickets |
-| `path_outside_cwd` from hook | Project root not at Codex launch directory | Check hook's `event.cwd` vs actual tickets path | Launch Codex from the project root containing `.git/` or `.codex/` |
+| Stale `.codex/ticket-tmp/` payloads | Interrupted or abandoned diagnostic payload flow | Run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py diagnose <tickets_dir> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT>` | After explicit approval, run `uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py clean-stale-payloads <TICKETS_DIR> --confirm-clean-stale-payloads` |
+| Installed runtime proof missing | Source docs do not prove cache/runtime state | Inspect `hooks/list` and `skills/list` in a separate proof lane | Refresh or prove runtime only when explicitly requested |
 
 ---
 
 ## Known Limitations
 
-**Direct agent execute is not the autonomy gateway:** autonomous create, update, close, and reopen route through `ticket_autonomy.py apply-turn` and the runtime-first gateway; direct `ticket_engine_agent.py execute` fails closed with `gateway_required`.
-
-**24-hour dedup window only:** Dedup fingerprinting covers a 24-hour same-day window. Tickets created on different calendar days with identical content will not be detected as duplicates, even if created minutes apart around midnight.
-
-**Dependency cycle detection:** `ticket_triage.py` detects blocked chains by linear traversal. Cycles in the `blocked_by`/`blocks` graph are not detected and will cause triage to report misleading results.
-
-**Gen 1/2 legacy IDs:** `ticket_parse.py` resolves slug-based (Gen 1), alpha-ID (Gen 2), and short-ID (Gen 3) formats. Legacy tickets may parse with reduced field completeness if they predate required fields added in contract v1.0.
+- Runtime-first source behavior is not installed runtime proof.
+- Legacy source tests may still assert old behavior until source implementation
+  is rebased.
+- Installed runtime activation is a separate operator action and not implied by
+  source edits.
 
 ---
 
@@ -805,32 +674,12 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_triage.py dashboard <PROJECT_ROOT>
 # Should return JSON with counts (all zeros valid for empty directory)
 ```
 
-### 6. Capture Preview Smoke Test
+### 6. Capture Availability Check
 
-```bash
-mkdir -p <PROJECT_ROOT>/.codex/ticket-tmp
-cat > <PROJECT_ROOT>/.codex/ticket-tmp/capture-smoke.json << 'EOF'
-{
-  "tickets_dir": "docs/tickets",
-  "capture": {
-    "title": "Handbook verification test",
-    "captured_request": "Verify the capture preview path from the handbook.",
-    "problem": "The handbook capture smoke should exercise the user-facing preview path.",
-    "next_action": "Run the capture prepare command and inspect the compact preview.",
-    "capture_confidence": "high",
-    "capture_source": "manual-smoke",
-    "priority": "low",
-    "tags": ["test"],
-    "acceptance_criteria": [
-      "Capture prepare returns a preview without writing a ticket."
-    ]
-  }
-}
-EOF
-
-uv run python -B <PLUGIN_ROOT>/scripts/ticket_capture.py prepare <PROJECT_ROOT>/.codex/ticket-tmp/capture-smoke.json
-# Expected: {"state": "ready_to_execute", ...}; do not run execute unless you intend to create the ticket.
-```
+Read [skills/capture-ticket/SKILL.md](skills/capture-ticket/SKILL.md) and
+confirm active create guidance says mutation is temporarily unavailable until
+source exposes a live target-candidate entrypoint. This is a docs check only;
+do not write a ticket.
 
 ### 7. Historical Audit Repair Verification
 
@@ -839,4 +688,5 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py repair-audit <PROJECT_RO
 # Dry-run should complete with no errors when historical audit files are present or absent
 ```
 
-`references/ticket-contract.md` is the canonical schema source for field shapes and machine states.
+`references/ticket-contract.md` is a source-facing reference subordinate to
+ADR 0006 and the May 30 control doc.
