@@ -2,7 +2,8 @@
 
 ## Overview
 
-The ticket plugin provides capture-first structured work tracking for Codex sessions. It manages tickets as markdown files with YAML frontmatter. New-ticket creation is user-facing through `capture-ticket`; existing-ticket lifecycle, metadata, and focused refinement mutations use `ticket_update.py` while preserving the underlying 4-stage mutation pipeline (classify → plan → preflight → execute) for engine dispatch and debugging.
+The ticket plugin provides repo-local ticket reading, triage, diagnostics, and
+runtime-first ticket authority work for Codex sessions.
 
 **Scope:** Ticket capture, existing-ticket lifecycle mutations, scoped frontmatter metadata updates, read queries, backlog health review, explicit diagnostics, and historical audit repair.
 
@@ -13,6 +14,152 @@ The ticket plugin provides capture-first structured work tracking for Codex sess
 Installed cache and runtime artifacts are separate proof surfaces and may
 diverge until an explicit cache-refresh or runtime-proof lane verifies them.
 Source edits here do not prove installed Codex behavior.
+
+## Authority Boundary
+
+ADR 0006 is the accepted architecture authority for the Ticket runtime-first
+state-kernel rebaseline. The May 30 control doc is the implementation and
+cutover control surface. This handbook is source-authority documentation, not
+installed-runtime proof and not runtime proof. Source edits here do not prove
+installed Codex behavior; installed cache, `hooks/list`, `skills/list`, and
+live runtime inventory require a separate cache-refresh or runtime-proof lane.
+The cache-installed runtime authority is the proof target; a synced personal
+plugin copy is staging only, not the proof target. This docs/tests slice does
+not perform cutover inventory or normalization and does not mutate
+`docs/tickets/`.
+
+Durable runtime modes are `agent_primary` and `discussion_only`.
+
+## Target Post-Cutover Ticket Shape
+
+Post-cutover active tickets use ID-only filenames under
+`docs/tickets/T-YYYYMMDD-NN.md`. Ticket content uses YAML frontmatter, followed
+by Markdown sections. Closed YAML frontmatter keys are `id`, `title`, `status`,
+`priority`, `tags`, `related_paths`, and `blocked_by`.
+
+Target statuses are `open`, `in_progress`, `done`, and `wontfix`. Target
+priorities are `high`, `normal`, and `low`. Required sections are `Problem`,
+`Next Action`, and `Change History`. Unknown frontmatter keys are invalid.
+`blocked` is not a status; blockedness derives from `blocked_by`. Store
+`blocked_by` only and derive reverse `blocks` views by scanning tickets.
+
+## Target Candidate Mutation Contract
+
+Ticket accepts one target candidate mutation at a time. The candidate fields
+are `action`, `ticket_id`, `target.fields`, `target.sections`,
+`proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`.
+
+`target.fields` and `target.sections` name the exact frontmatter fields or
+Markdown sections the candidate proposes to change. `proposed_change` may
+contain only those named targets. non-create writes require an expected ticket
+fingerprint. Ticket computes candidate identity from canonical candidate
+content plus the live target fingerprint; callers do not supply authoritative
+identity values. Unknown fields are invalid.
+
+## Target Result Envelope
+
+Target mutation results use only these mechanical states: `ok`, `blocked`,
+`needs_discussion`, `invalid_state`, and `no_change`.
+
+Human-facing context belongs in the message and structured facts such as ticket
+ID, validation detail, candidate identity, discussion prompt facts, and
+post-write fingerprint.
+
+## Target Change History Grammar
+
+Target `Change History` entries use deterministic prose:
+
+```markdown
+- <timestamp> | <actor> | <reason>
+- <timestamp> | <actor> | <reason> Corrects: <reference>.
+```
+
+The actor is a source value such as `codex`, `user-approved`, or `migration`.
+The actor is not a workflow label and must not encode action type. `Corrects:
+<reference>` is optional.
+
+## Deprecated Source Drift
+
+Deprecated source drift may mention old four-stage, prepare/execute, or
+persistent `preview` behavior only as non-target implementation debt. These
+surfaces are subordinate to ADR 0006 and the May 30 control doc.
+
+Direct `ticket_engine_agent.py execute` is not an autonomous mutation route in
+this source slice. It fails closed with `gateway_required`. The runtime-first
+gateway, `direct_execute`, `ticket_update.py prepare`,
+`ticket_update.py execute`, `ticket_capture.py prepare`, and
+`ticket_capture.py execute` remain deprecated or diagnostic source facts, not
+target product architecture.
+
+Runtime-first source bookkeeping such as
+`.codex/ticket-workspace/ticket.pending-summary.jsonl` is diagnostic source
+state here, not target ticket content.
+
+## Legacy Cutover Input
+
+Legacy ticket records may still contain fenced YAML, slug filenames, old
+statuses, old priorities, historical fields, and noncanonical sections. Those
+records are input to a future read-only cutover inventory and later reviewed
+normalization. This handbook does not perform that inventory.
+
+## Historical Changelog
+
+Older release notes may describe prior Ticket behavior. Treat those entries as
+historical changelog context rather than current authority.
+
+## Maintenance And Diagnostics
+
+Maintenance and diagnostics may use explicit source/cache/runtime probes,
+historical audit repair, stale payload cleanup, runtime activation, and
+diagnostic dry-run or `preview` evidence. They do not define normal target
+ticket mutation.
+
+Host-facing autonomy commands are diagnostic or maintenance inventory here:
+`ticket_autonomy.py pause`, `ticket_autonomy.py recover`,
+`ticket_autonomy.py apply-turn`, `ticket_autonomy.py doctor-ledger`, and
+`ticket_autonomy.py migrate-change-history`.
+
+`scripts/ticket_doctor.py` | User | Explicit-only diagnostics.
+
+Runtime activation is maintenance-only:
+
+```bash
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKETS_DIR> --marketplace-path <MARKETPLACE_PATH>
+```
+
+`ticket_doctor.py diagnose` reports source/cache parity, runtime-proof status,
+installed Ticket runtime facts when supplied, and stale `.codex/ticket-tmp/`
+payloads older than 24 hours. It may mention target statuses such as
+`in_progress` only while diagnosing existing files.
+
+The backend/diagnostic path
+`ticket_triage.py doctor` is not the preferred user-facing doctor entrypoint.
+Use:
+
+```bash
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_triage.py doctor <tickets_dir> --plugin-root <PLUGIN_ROOT> --cache-root <CACHE_ROOT> [--runtime-probe-output <path>]
+```
+
+`ticket_engine_activation_smoke.py` is a private activation-smoke entrypoint.
+
+`ticket_engine_runner.py execute` may honor `TICKET_RUNTIME_PROOF_PATH`.
+`TICKET_RUNTIME_ACTIVATION_BOOTSTRAP=1` is an internal activation/test
+override. classify, plan, preflight, and ingest ignore it. At execute and
+ingest stages, the engine re-validates the trust triple.
+
+Use `uv run python -B <PLUGIN_ROOT>/scripts/<script>.py ...` for documented
+source commands. Any remaining `python3` hook acceptance is legacy
+compatibility.
+
+`ticket_doctor.py clean-stale-payloads <TICKETS_DIR>` reports stale
+`.codex/ticket-tmp/` payloads. Cleanup requires
+`--confirm-clean-stale-payloads` after review. Existing `docs/tickets/.audit/`
+files are historical artifacts; `ticket_doctor.py repair-audit <TICKETS_DIR>`
+and `ticket_doctor.py repair-audit <TICKETS_DIR> --confirm-repair` are
+maintenance-only repair paths.
+
+Ticket guard and runtime paths fail closed on blocked or malformed mutation
+evidence.
 
 ---
 

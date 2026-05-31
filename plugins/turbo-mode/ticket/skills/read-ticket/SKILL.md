@@ -24,12 +24,18 @@ Resolve paths before running commands:
 If `PROJECT_ROOT` or `TICKETS_DIR` cannot be resolved, explain the missing path
 and stop.
 
+## Target Post-Cutover Ticket Shape
+
+Target statuses are `open`, `in_progress`, `done`, and `wontfix`. Target
+priorities are `high`, `normal`, and `low`. Blockedness derives from
+`blocked_by`; it is not a persisted lifecycle status.
+
 ## Commands
 
 List tickets:
 
 ```bash
-uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <TICKETS_DIR> [--status open|blocked|in_progress] [--priority critical|high|medium|low] [--tag <tag>]
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <TICKETS_DIR> [--status open|in_progress|done|wontfix] [--priority high|normal|low] [--tag <tag>]
 ```
 
 Search or open by ticket ID prefix:
@@ -47,10 +53,12 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py check <TICKETS_DIR> <ticke
 ## Output Rules
 
 - Present ticket ID first, then title, status, priority, and path.
-- For ordinary open-work results, group tickets whose capture metadata has
-  `refinement_status: needs_refinement` under a separate
-  `Needs Refinement` heading before ready open work.
-- Treat `needs_refinement` as metadata, not a lifecycle status.
 - Use `check` before answering whether a ticket can close.
 - Do not call mutation scripts, triage scripts, audit repair, or doctor
   diagnostics from this skill.
+
+## Legacy Cutover Input
+
+Old filters such as blocked lifecycle status and critical or medium priorities
+may appear in legacy source data before cutover. Treat them as read-only
+compatibility facts, not target schema.

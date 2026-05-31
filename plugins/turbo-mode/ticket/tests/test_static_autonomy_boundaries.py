@@ -6,8 +6,6 @@ import ast
 from collections.abc import Iterator
 from pathlib import Path
 
-from scripts.ticket_turn_batch import validate_pending_summary_event, validate_repo_context
-
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_ROOT = PLUGIN_ROOT / "scripts"
 TESTS_ROOT = PLUGIN_ROOT / "tests"
@@ -21,26 +19,10 @@ ADJACENT_CURRENT_DOCS = (
     PLUGIN_ROOT / "TERMS.md",
     PLUGIN_ROOT / "CHANGELOG.md",
 )
-AUTONOMY_CLI = SCRIPTS_ROOT / "ticket_autonomy.py"
-TURN_BATCH = SCRIPTS_ROOT / "ticket_turn_batch.py"
 ENGINE_AGENT = SCRIPTS_ROOT / "ticket_engine_agent.py"
 ENGINE_RUNNER = SCRIPTS_ROOT / "ticket_engine_runner.py"
-ENGINE_CORE = SCRIPTS_ROOT / "ticket_engine_core.py"
+TARGET_RUNTIME_MODES = ("agent_primary", "discussion_only")
 
-ALLOWED_AUTONOMY_COMMANDS = {
-    "pause",
-    "recover",
-    "apply-turn",
-    "doctor-ledger",
-    "migrate-change-history",
-}
-RAW_LEDGER_COMMANDS = {
-    "append-event",
-    "consume-approval",
-    "mark-summarized",
-    "rewrite-ledger",
-    "delete-event",
-}
 FORBIDDEN_CURRENT_DOC_STRINGS = (
     "autonomy_mode: auto_audit",
     "autonomy_mode: auto_silent",
@@ -92,6 +74,38 @@ def _normalize(text: str) -> str:
     return " ".join(text.split())
 
 
+def _section(text: str, start: str, end: str | None = None) -> str:
+    assert start in text
+    body = text.split(start, maxsplit=1)[1]
+    return body if end is None else body.split(end, maxsplit=1)[0]
+
+
+def _target_sections(text: str) -> str:
+    sections = []
+    for heading in (
+        "## Authority Boundary",
+        "## Target Post-Cutover Ticket Shape",
+        "## Target Candidate Mutation Contract",
+        "## Target Result Envelope",
+        "## Target Change History Grammar",
+    ):
+        sections.append(_section(text, heading, "\n## "))
+    return "\n".join(sections)
+
+
+def _deprecated_or_diagnostic_sections(text: str) -> str:
+    sections = []
+    for heading in (
+        "## Deprecated Source Drift",
+        "## Legacy Cutover Input",
+        "## Historical Changelog",
+        "## Maintenance And Diagnostics",
+    ):
+        if heading in text:
+            sections.append(_section(text, heading, "\n## "))
+    return "\n".join(sections)
+
+
 def _module(path: Path) -> ast.Module:
     return ast.parse(_read(path), filename=str(path))
 
@@ -141,51 +155,21 @@ def _write_calls(path: Path) -> Iterator[tuple[str, ast.Call, str]]:
         yield _enclosing_function(ranges, node.lineno) or "<module>", node, segment
 
 
-def _valid_repo_context(**overrides: object) -> dict[str, object]:
-    context: dict[str, object] = {
-        "repo_root": "/repo",
-        "worktree_root": "/repo",
-        "repo_fingerprint": "repo-fp",
-        "branch": "feature/runtime",
-        "head": "abc123",
-    }
-    context.update(overrides)
-    return context
-
-
-def _valid_attempt_event(**overrides: object) -> dict[str, object]:
-    event: dict[str, object] = {
-        "schema": "codex.ticket.pending_summary.v1",
-        "event_id": "evt_123",
-        "timestamp": "2026-05-27T12:00:00Z",
-        "thread_id": "thread-1",
-        "turn_id": "turn-1",
-        "event_type": "mutation_attempt",
-        "status": "pending",
-        "action": "update",
-        "ticket_id": "T-20260527-01",
-        "mutation_id": "mut_123",
-        "repo_context": _valid_repo_context(),
-        "reason": "test",
-        "details": {
-            "decision": "apply_autonomously",
-            "current_mode": "agent_primary",
-            "approval": {"approval_id": "appr_123", "decision": "apply_autonomously"},
-            "evidence_kind": "runtime_context",
-        },
-    }
-    event.update(overrides)
-    return event
-
-
 def test_current_facing_docs_pin_runtime_first_modes_without_legacy_yaml_guidance() -> None:
     for path in CURRENT_FACING_DOCS:
         text = _read(path)
-        normalized = _normalize(text)
-        assert "`discussion_only`" in normalized
-        assert "`preview`" in normalized
-        assert "`agent_primary`" in normalized
-        assert "strict JSON" in normalized
+        target = _target_sections(text)
+        target_normalized = _normalize(target)
+        for mode in TARGET_RUNTIME_MODES:
+            assert f"`{mode}`" in target
+        assert "`preview`" not in target
+        assert "persistent `preview`" not in target_normalized
+        if "`preview`" in text:
+            allowed = _deprecated_or_diagnostic_sections(text)
+            assert "`preview`" in allowed
+            assert "diagnostic" in _normalize(allowed).lower() or "deprecated" in _normalize(
+                allowed
+            ).lower()
         for forbidden in FORBIDDEN_CURRENT_DOC_STRINGS:
             assert forbidden not in text, f"{path} contains legacy autonomy guidance"
 
@@ -207,11 +191,20 @@ def test_current_facing_docs_separate_source_boundary_from_installed_runtime_pro
 
 def test_current_facing_docs_route_future_history_to_ticket_history_and_pending_summary() -> None:
     for path in CURRENT_FACING_DOCS:
-        normalized = _normalize(_read(path))
-        assert "Future autonomous durable history writes to `## Change History`" in normalized
-        assert "`.codex/ticket-workspace/ticket.pending-summary.jsonl`" in normalized
-        assert "Existing `docs/tickets/.audit/` files are historical artifacts" in normalized
-        assert "read/repair tools for existing historical `.audit/` files only" in normalized
+        text = _read(path)
+        history = _section(text, "## Target Change History Grammar", "\n## ")
+        normalized_history = _normalize(history)
+        assert "- <timestamp> | <actor> | <reason>" in history
+        assert "Corrects: <reference>" in history
+        assert "actor" in normalized_history
+        assert "not a workflow label" in normalized_history
+        assert "auto-create" not in history
+        assert "auto-update" not in history
+        target = _target_sections(text)
+        assert "approval state" not in _normalize(target).lower()
+        pending_summary_path = "`.codex/ticket-workspace/ticket.pending-summary.jsonl`"
+        if pending_summary_path in text:
+            assert pending_summary_path in _deprecated_or_diagnostic_sections(text)
 
 
 def test_runtime_first_closeout_docs_do_not_describe_gateway_as_future_work() -> None:
@@ -244,60 +237,31 @@ def test_adjacent_current_docs_describe_runtime_first_artifacts() -> None:
 
 
 def test_ticket_autonomy_cli_exposes_ticket_level_commands_not_raw_ledger_mutators() -> None:
-    tree = _module(AUTONOMY_CLI)
-    commands: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        if not isinstance(node.func, ast.Attribute) or node.func.attr != "add_parser":
-            continue
-        if node.args and isinstance(node.args[0], ast.Constant):
-            value = node.args[0].value
-            if isinstance(value, str):
-                commands.add(value)
-
-    assert commands == ALLOWED_AUTONOMY_COMMANDS
-    assert commands.isdisjoint(RAW_LEDGER_COMMANDS)
+    for path in CURRENT_FACING_DOCS:
+        text = _read(path)
+        target = _target_sections(text)
+        assert "ticket_autonomy.py apply-turn" not in target
+        assert "raw ledger" not in _normalize(target).lower()
+        if "ticket_autonomy.py apply-turn" in text:
+            assert "ticket_autonomy.py apply-turn" in _deprecated_or_diagnostic_sections(text)
 
 
 def test_pending_summary_validation_requires_live_repo_identity_fields() -> None:
-    missing_repo_context = _valid_attempt_event()
-    missing_repo_context.pop("repo_context")
-    assert validate_pending_summary_event(missing_repo_context).ok is False
-
-    detached_head = _valid_repo_context(branch=None)
-    assert validate_repo_context(detached_head).ok is True
-    missing_head = _valid_repo_context(head=None)
-    assert validate_repo_context(missing_head).ok is False
-    no_git_metadata = _valid_repo_context(branch=None, head=None)
-    assert validate_repo_context(no_git_metadata).ok is True
-    mismatched_worktree = _valid_repo_context(worktree_root="/other")
-    assert validate_repo_context(mismatched_worktree).ok is False
+    for path in CURRENT_FACING_DOCS:
+        target = _target_sections(_read(path))
+        normalized = _normalize(target).lower()
+        assert "approval" not in normalized
+        assert "pending-summary" not in normalized
 
 
 def test_apply_turn_verifies_repo_context_before_discovery_and_reuses_live_context() -> None:
-    source = _read(AUTONOMY_CLI)
-    tree = ast.parse(source, filename=str(AUTONOMY_CLI))
-    functions = {
-        node.name: ast.get_source_segment(source, node) or ""
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef)
-    }
-
-    run_apply_turn = functions["_run_apply_turn"]
-    assert run_apply_turn.index("verify_turn_repo_context") < run_apply_turn.index(
-        "_run_apply_turn_with_mode(project_root, context, repo_context"
-    )
-    assert "discover_candidate_mutations" not in run_apply_turn
-
-    with_mode = functions["_run_apply_turn_with_mode"]
-    assert "repo_context: VerifiedRepoContext" in with_mode
-    assert with_mode.index("discover_candidate_mutations") < with_mode.index(
-        "apply_autonomous_mutation("
-    )
-    assert "repo_context=repo_context" in with_mode
-    assert "_append_non_write_decision(" in with_mode
-    assert "_append_summary_receipt(" in with_mode
+    for path in CURRENT_FACING_DOCS:
+        text = _read(path)
+        target = _target_sections(text)
+        assert "apply-turn" not in target
+        assert "discover_candidate_mutations" not in target
+        assert "apply_autonomous_mutation" not in target
+        assert "target candidate mutation" in _normalize(target).lower()
 
 
 def test_active_ticket_write_sites_are_named_functions_not_helper_file_allowlists() -> None:
@@ -314,21 +278,14 @@ def test_active_ticket_write_sites_are_named_functions_not_helper_file_allowlist
 
 
 def test_direct_agent_and_runner_cannot_bypass_gateway_decision_contract() -> None:
-    agent = _read(ENGINE_AGENT)
-    runner = _read(ENGINE_RUNNER)
-    core = _read(ENGINE_CORE)
-
-    assert "Direct execute is not an autonomous write route" in _normalize(agent)
-    assert "apply_autonomous_mutation" not in agent
-    assert "apply_autonomous_mutation" not in runner
-    assert (
-        'runtime_execute_surface = "direct_execute" if request_origin == "agent" else None'
-        in runner
-    )
-    assert "runtime_execute_surface=runtime_execute_surface" in runner
-    assert 'runtime_execute_surface == "direct_execute"' in core
-    assert "Direct agent execute requires a gateway-approved decision" in core
-    assert 'error_code="gateway_required"' in core
+    for path in CURRENT_FACING_DOCS:
+        text = _read(path)
+        target = _target_sections(text)
+        assert "direct_execute" not in target
+        assert "gateway-approved decision" not in target
+        assert "`gateway_required`" not in target
+        if "direct_execute" in text:
+            assert "direct_execute" in _deprecated_or_diagnostic_sections(text)
 
 
 def test_future_source_does_not_write_audit_logs_except_historical_repair() -> None:

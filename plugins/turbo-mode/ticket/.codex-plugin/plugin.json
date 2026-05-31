@@ -1,7 +1,7 @@
 {
   "name": "ticket",
   "version": "1.4.0",
-  "description": "Repo-local ticket management with lifecycle operations, smart routing, and autonomous creation",
+  "description": "Repo-local ticket reading, backlog triage, and explicit maintenance diagnostics",
   "author": {
     "name": "JP"
   },
@@ -17,8 +17,8 @@
   "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Ticket",
-    "shortDescription": "Manage repo-local tickets and lifecycle workflows",
-    "longDescription": "Create, read, validate, triage, and execute repo-local tickets with lifecycle checks, trust-aware routing, deduplication, and autonomous follow-up support.",
+    "shortDescription": "Read, triage, and diagnose repo-local tickets",
+    "longDescription": "Read, validate, triage, and diagnose repo-local Ticket state while write mutation is rebaselined onto the target candidate contract.",
     "developerName": "JP",
     "category": "Productivity",
     "capabilities": [
@@ -27,7 +27,7 @@
       "Write"
     ],
     "defaultPrompt": [
-      "Track this follow-up",
+      "Check ticket capture availability",
       "Find open ticket work",
       "Review ticket backlog health"
     ],
