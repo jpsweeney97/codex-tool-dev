@@ -73,6 +73,7 @@ Current source touchpoints for this slice:
 | `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py:113-125` | Integration tests expect new successful writes to record `approval_consumed`. |
 | `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py:197-204` | Integration tests still write durable `AutomationMode.PREVIEW` and expect product `preview` output. |
 | `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py:257` | Integration tests expect gateway attempt details to contain an approval object. |
+| `plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py:41-52` | Correction integration helper builds decisions with empty source context, so target-fingerprint identity changes need a helper update before full-suite verification. |
 
 ## File Structure
 
@@ -90,6 +91,9 @@ Modify these files only in this plan:
 - `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py`
   - Covers evaluator behavior.
   - Rewrite approval and preview expectations.
+- `plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py`
+  - Covers user-triggered correction decisions through the gateway.
+  - Update correction helper source context so correction decisions include the Ticket-derived target fingerprint.
 - `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py`
   - Owns pending-summary event validation and recovery projection.
   - Remove new `preview_only` taxonomy and automatic approval requirement. Keep `approval_consumed` readable as legacy recovery input until the later operation-log collapse plan removes it deliberately.
@@ -564,6 +568,7 @@ git commit -m "fix(ticket): remove preview runtime decision state"
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py:390-445`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py:525-550`
 - Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py:74-230`
+- Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py:41-80`
 
 - [ ] **Step 1: Rewrite evaluator approval tests**
 
@@ -674,6 +679,36 @@ def test_ticket_change_scope_still_binds_mutation_identity_until_scope_slice() -
 ```
 
 The renamed test is intentionally temporary: it documents that `ticket_change_scope` survives only until its separate removal slice.
+
+In `plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py`, update `_correction_decision()` so correction integration tests pass the Ticket-derived target fingerprint through source context when a ticket path is available:
+
+```python
+def _correction_decision(candidate: CandidateMutation, *, ticket_path: Path | None = None):
+    source_context: dict[str, object] = {}
+    if ticket_path is not None and candidate.ticket_id is not None:
+        source_context["ticket_state_fingerprints"] = {
+            candidate.ticket_id: target_fingerprint(ticket_path)
+        }
+    return evaluate_autonomy_intent(
+        AutonomyIntent(
+            action_kind="correct_ticket_mutation",
+            candidates=(candidate,),
+            source_context=source_context,
+        ),
+        current_mode="agent_primary",
+        thread_id="thread-1",
+        turn_id="turn-1",
+        now=datetime.now(UTC),
+    )[0]
+```
+
+Then update `_apply_correction()` to pass the ticket path:
+
+```python
+    decision = _correction_decision(candidate, ticket_path=ticket_path)
+```
+
+Leave unsafe-correction and missing-detail tests without `ticket_path`; those branches must still fail before target-fingerprint identity is required.
 
 - [ ] **Step 2: Run evaluator approval tests to verify failure**
 
@@ -819,12 +854,20 @@ In `evaluate_autonomy_intent()`, replace the autonomous-apply tail with:
 
 Do not delete the `approval` field from `AutonomyDecision` in this slice. It remains available for the later explicit `discussion_only` user-approval fact.
 
-- [ ] **Step 4: Run focused evaluator tests**
+Remove approval-only runtime leftovers in the same edit:
+
+- Drop `timedelta` from the datetime import if no caller remains.
+- Delete `_iso_z()` if `_make_approval()` was its only caller.
+- Remove `decision_time = now or datetime.now(UTC)` if no branch uses it after approval creation is removed.
+- Update the `now` docstring from approval creation wording to a compatibility note, or remove the parameter only if all call sites and tests are updated deliberately in this task.
+
+- [ ] **Step 4: Run focused evaluator and correction tests**
 
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_runtime.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py
 ```
 
 Expected: PASS.
@@ -834,7 +877,7 @@ Expected: PASS.
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py
+git add plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py
 git commit -m "fix(ticket): stop creating agent-primary approvals"
 ```
 
@@ -1050,6 +1093,12 @@ Remove the second `decision.mutation_id is None` check immediately after it beca
 
 - [ ] **Step 4: Stop writing approval details and `approval_consumed` events**
 
+In `apply_autonomous_mutation()`, change the docstring from approval wording to neutral decision wording:
+
+```python
+    """Apply one autonomous mutation through the gateway."""
+```
+
 In `_apply_autonomous_mutation_locked()`, replace the mutation-attempt details block with:
 
 ```python
@@ -1059,6 +1108,16 @@ In `_apply_autonomous_mutation_locked()`, replace the mutation-attempt details b
             "evidence_kind": "runtime_context",
             **_fingerprint_details(mutation=mutation, decision=decision),
         },
+```
+
+In the same mutation-attempt event, replace the stale approval-shaped reason with neutral wording:
+
+```python
+        reason=(
+            "Apply autonomous Ticket mutation."
+            if decision.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY
+            else "Apply user-triggered autonomous Ticket correction."
+        ),
 ```
 
 Delete this whole block:
@@ -1143,7 +1202,7 @@ and change the final event-status assertion to:
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_engine_gateway.py::test_gateway_rejects_non_autonomous_or_mismatched_decisions tests/test_engine_gateway.py::test_gateway_applies_update_records_events_and_writes_change_history tests/test_engine_gateway.py::test_gateway_rechecks_pause_after_attempt_record_before_dispatch -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_engine_gateway.py::test_gateway_rejects_non_autonomous_or_mismatched_decisions tests/test_engine_gateway.py::test_gateway_applies_update_records_events_and_writes_change_history tests/test_engine_gateway.py::test_gateway_rechecks_pause_after_attempt_record_before_dispatch tests/test_autonomy_corrections.py::test_user_triggered_update_correction_applies_without_new_approval tests/test_autonomy_corrections.py::test_wrongly_created_ticket_is_corrected_with_wontfix_not_deleted -q
 ```
 
 Expected: PASS.
@@ -1272,7 +1331,7 @@ git commit -m "fix(ticket): drop pending-summary approval requirement"
 Run:
 
 ```bash
-rg -n "approval_consumed|details\\[\\\"approval\\\"\\]|decision\\.approval|approval_id|AutomationMode\\.PREVIEW|preview_payload|\\\"preview\\\"" plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py
+rg -n "approval_consumed|details\\[\\\"approval\\\"\\]|decision\\.approval|approval_id|AutomationMode\\.PREVIEW|preview_payload|\\\"preview\\\"" plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py
 ```
 
 Expected after Tasks 3-5: remaining matches should be either legacy recovery fixtures or tests that still need source-slice rewrite. New successful write paths must not expect `approval_consumed`; no test should write durable `AutomationMode.PREVIEW`.
@@ -1384,7 +1443,7 @@ Expected after implementation:
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_engine_gateway.py tests/test_turn_batch.py tests/test_autonomy_runtime.py tests/test_autonomy_config.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_engine_gateway.py tests/test_turn_batch.py tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py tests/test_autonomy_config.py -q
 ```
 
 Expected: PASS.
@@ -1408,7 +1467,7 @@ git commit -m "test(ticket): update autonomy recovery expectations"
 Run:
 
 ```bash
-rg -n 'AutomationMode\.PREVIEW|RuntimeDecisionKind\.PREVIEW_ONLY|preview_only|details\.approval|details\["approval"\]|approval_required|make_approval|codex\.ticket\.approval|decision\.approval|current_mode": "preview"' plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
+rg -n 'AutomationMode\.PREVIEW|RuntimeDecisionKind\.PREVIEW_ONLY|preview_only|details\.approval|details\["approval"\]|approval_required|make_approval|codex\.ticket\.approval|decision\.approval|current_mode": "preview"|approved autonomous|gateway-approved decision' plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 ```
 
 Expected: every match is classified before closeout. Allowed matches are only:
@@ -1418,14 +1477,14 @@ Expected: every match is classified before closeout. Allowed matches are only:
 - Defensive rejection checks that read `decision.approval` only to reject stale or forged approval data before accepting a write, such as `if decision.approval is not None: return "approval_unexpected"`.
 - `make_approval_id` and `codex.ticket.approval.v1` definitions/tests if no production caller uses them and the helper is being retained for the later explicit `discussion_only` approval fact.
 
-Any product/runtime support for durable `preview`, new `preview_only` events, automatic `agent_primary` approvals, `decision.approval` reads that authorize, consume, serialize, or derive fields from approval objects in gateway/runtime write paths, or `details.approval` requirements is a failure. Record the allowed-match list in the implementation closeout. If the ID helper remains unused, decide in this task whether to delete it with its tests or leave it for the later explicit `discussion_only` user-approval fact. If deleting it changes broad ID tests, keep deletion for a separate cleanup.
+Any product/runtime support for durable `preview`, new `preview_only` events, automatic `agent_primary` approvals, approval-shaped event reasons or docstrings such as "approved autonomous", `decision.approval` reads that authorize, consume, serialize, or derive fields from approval objects in gateway/runtime write paths, or `details.approval` requirements is a failure. Record the allowed-match list in the implementation closeout. If the ID helper remains unused, decide in this task whether to delete it with its tests or leave it for the later explicit `discussion_only` user-approval fact. If deleting it changes broad ID tests, keep deletion for a separate cleanup.
 
 - [ ] **Step 2: Run focused source tests**
 
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_config.py tests/test_autonomy_runtime.py tests/test_turn_batch.py tests/test_engine_gateway.py tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_config.py tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py tests/test_turn_batch.py tests/test_engine_gateway.py tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py -q
 ```
 
 Expected: PASS.
@@ -1445,7 +1504,7 @@ Expected: PASS. If failures occur outside the touched surfaces, classify them as
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py
 ```
 
 Expected: PASS.
@@ -1499,6 +1558,7 @@ git diff --stat -- \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_config.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
+  plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py \
   plugins/turbo-mode/ticket/tests/test_turn_batch.py \
   plugins/turbo-mode/ticket/tests/test_engine_gateway.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_cli.py \
@@ -1511,6 +1571,7 @@ git diff -- \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_config.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
+  plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py \
   plugins/turbo-mode/ticket/tests/test_turn_batch.py \
   plugins/turbo-mode/ticket/tests/test_engine_gateway.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_cli.py \
@@ -1523,6 +1584,7 @@ git add \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_config.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
+  plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py \
   plugins/turbo-mode/ticket/tests/test_turn_batch.py \
   plugins/turbo-mode/ticket/tests/test_engine_gateway.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_cli.py \
@@ -1536,6 +1598,7 @@ git diff --cached -- \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_config.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
+  plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py \
   plugins/turbo-mode/ticket/tests/test_turn_batch.py \
   plugins/turbo-mode/ticket/tests/test_engine_gateway.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_cli.py \
@@ -1560,6 +1623,7 @@ git diff "$BASE_COMMIT"..HEAD -- \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_config.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
+  plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py \
   plugins/turbo-mode/ticket/tests/test_turn_batch.py \
   plugins/turbo-mode/ticket/tests/test_engine_gateway.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_cli.py \
@@ -1575,6 +1639,7 @@ Spec coverage:
 - Durable `preview` config is removed in Task 1.
 - Runtime `PREVIEW_ONLY` decisions and apply-turn product preview projections are removed in Task 2.
 - Automatic `agent_primary` approval envelope creation is removed in Task 3.
+- Correction integration tests pass target fingerprints through source context before expecting `APPLY_CORRECTION`.
 - Gateway approval validation and new `approval_consumed` writes are removed in Task 4.
 - Pending-summary no longer requires automatic approval details or accepts new preview decisions in Task 5.
 - Apply-turn integration expectations are updated in Task 6 so full-suite verification does not fail late on removed approval/preview behavior.
