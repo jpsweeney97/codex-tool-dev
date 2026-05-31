@@ -4,7 +4,7 @@
 
 **Goal:** Remove durable `preview` mode and automatic `agent_primary` approval envelopes from Ticket source while keeping deterministic gateway write safety.
 
-**Architecture:** This is the first source implementation slice from the Ticket source-runtime drift ledger. It changes the local mode model, runtime evaluator, pending-summary validation, gateway validation, apply-turn projection, and integration expectations together so one producer is not removed while consumers still require it. Diagnostic dry-run remains a future explicit maintenance affordance; this slice removes durable/product `preview` but does not yet implement the target diagnostic dry-run path.
+**Architecture:** This is a narrow modes/approval source slice selected from the Ticket source-runtime drift ledger. It is not the ledger's complete recommended first runtime cut because end-to-end `ticket_change_scope` removal is intentionally deferred. While scope remains live, this slice must preserve its existing write-safety binding. It changes the local mode model, runtime evaluator, pending-summary validation, gateway validation, apply-turn projection, and integration expectations together so one producer is not removed while consumers still require it. Diagnostic dry-run remains a future explicit maintenance affordance; this slice removes durable/product `preview` but does not yet implement the target diagnostic dry-run path.
 
 **Tech Stack:** Python >=3.11, pytest, dataclasses, strict JSON, append-only JSONL, existing Ticket scripts, bytecode-safe `uv run` verification.
 
@@ -16,7 +16,7 @@ The drift ledger names six areas: `preview`, approval envelopes, `ticket_change_
 
 Out of scope for this plan:
 
-- `ticket_change_scope` removal from candidate identity, discovery, gateway fingerprints, autonomous apply, and commit disposition.
+- End-to-end `ticket_change_scope` removal from candidate identity, discovery, gateway fingerprints, autonomous apply, and commit disposition.
 - Prepare/execute wrapper demotion in `ticket_capture.py` and `ticket_update.py`.
 - Full pending-summary taxonomy collapse beyond removing new `preview_only` and automatic-approval requirements.
 - Persisted `blocks` removal and reverse-blocker derived views.
@@ -24,9 +24,11 @@ Out of scope for this plan:
 
 Write separate plans for those surfaces. Do not fold them into this slice unless this plan is explicitly revised.
 
+Still in scope for this slice: gateway validation must reject mismatches between `decision.candidate.ticket_change_scope` and `GatewayMutation.ticket_change_scope` while scope remains live. Removing approval envelopes cannot also remove that binding.
+
 Known remaining product drift after this slice:
 
-- `ticket_change_scope` remains live and still influences commit-disposition behavior. The closeout must name this as remaining drift, not as target compliance.
+- `ticket_change_scope` remains live and still influences commit-disposition behavior. Gateway validation must temporarily bind candidate scope to gateway mutation scope. The closeout must name this as remaining drift, not as target compliance.
 - Diagnostic dry-run/preview remains unavailable as a target affordance. The closeout must name this as temporary non-compliance with the ADR/control diagnostic-preview requirement, not as a completed preview implementation.
 
 ## Authority And Current Source Facts
@@ -37,6 +39,12 @@ Source authority:
 - `docs/decisions/0006-ticket-runtime-first-state-kernel.md` removes automatic approval objects from `agent_primary`; explicit approval survives only for `discussion_only` follow-up.
 - `docs/superpowers/specs/2026-05-30-ticket-runtime-first-state-kernel-control.md` says hard stops include no persistent `preview` mode and no approval state in the private operation log.
 - `docs/audits/2026-05-31-ticket-source-runtime-drift-ledger.md` is a source-only classification and inventory input, not runtime proof.
+
+Contract impact:
+
+- `plugins/turbo-mode/ticket/references/ticket-contract.md:172-184` already states the target durable modes and diagnostic-preview boundary. No mode contract patch is expected for this slice unless execution finds conflicting language.
+- `plugins/turbo-mode/ticket/references/ticket-contract.md:186-190` states Ticket owns candidate identity and callers do not supply authoritative identity values. This slice preserves that by recomputing mutation ID from the decision candidate and temporarily binding live `ticket_change_scope` to the gateway mutation.
+- No contract patch is expected before source edits. If implementation finds conflicting contract text for approval envelopes, diagnostic preview, or scope binding, stop and patch this plan plus the contract before continuing.
 
 Current source touchpoints for this slice:
 
@@ -98,7 +106,7 @@ Modify these files only in this plan:
   - Covers end-to-end apply-turn orchestration.
   - Rewrite success event sequences, durable preview expectations, and forged approval assertions.
 
-Do not modify docs, plugin manifests, cache files, or installed runtime state in this implementation slice unless a test cannot be made truthful without a source-contract note. If that happens, stop and revise this plan first.
+Do not modify docs, plugin manifests, cache files, or installed runtime state in this implementation slice unless Task 0's contract-impact checkpoint finds conflicting contract text. If that happens, stop and revise this plan first, then patch the contract deliberately.
 
 ## Stop Conditions
 
@@ -113,6 +121,7 @@ Stop during implementation if:
 
 - A gateway write can proceed without a mutation ID, expected target fingerprint for non-create writes, or deterministic candidate/mutation match.
 - Gateway validation accepts a mutation ID that does not match the ID recomputed from `thread_id`, `turn_id`, and `decision.candidate`.
+- Gateway validation accepts a decision candidate whose `ticket_change_scope` differs from `GatewayMutation.ticket_change_scope` while scope remains live.
 - Any new pending-summary event writes `details.approval`, `approval_id`, `preview_only`, or `current_mode: preview`.
 - Any focused test requires preserving durable `preview` as a config mode to pass.
 - Any focused test requires automatic `agent_primary` approvals to pass.
@@ -136,7 +145,7 @@ git rev-parse HEAD > /tmp/ticket-modes-approval-base.txt
 
 Expected: branch is the intended implementation branch, no unrelated tracked changes appear in files named by this plan, and `/tmp/ticket-modes-approval-base.txt` contains the base commit for final diff review.
 
-- [ ] **Step 2: Confirm this slice is still the ledger-recommended first source cut**
+- [ ] **Step 2: Confirm this slice is still a valid narrowed ledger cut**
 
 Run:
 
@@ -144,7 +153,7 @@ Run:
 rg -n "preview|Approval envelopes|Recommended Next Steps|source-only" docs/audits/2026-05-31-ticket-source-runtime-drift-ledger.md
 ```
 
-Expected: output still says the ledger is source-only and still names `preview` plus approval envelopes as drift needing source implementation.
+Expected: output still says the ledger is source-only and still names `preview` plus approval envelopes as drift needing source implementation. If the ledger now requires end-to-end `ticket_change_scope` removal before approval-envelope work, stop and revise this plan instead of executing it mechanically.
 
 - [ ] **Step 3: Confirm current source still has the drift this plan removes**
 
@@ -165,6 +174,16 @@ rg -n "AutomationMode\\.PREVIEW|RuntimeDecisionKind\\.PREVIEW_ONLY|preview_only|
 ```
 
 Expected before implementation: matches in the focused tests named by this plan.
+
+- [ ] **Step 5: Confirm contract impact before source edits**
+
+Run:
+
+```bash
+rg -n "Autonomy Model|Fingerprints And Write Safety|preview|approval|ticket_change_scope|candidate identity|authoritative identity" plugins/turbo-mode/ticket/references/ticket-contract.md
+```
+
+Expected: `ticket-contract.md` already matches the target durable-mode boundary and does not require a source-contract patch for this slice. Record that `plugins/turbo-mode/ticket/references/ticket-contract.md:172-190` remains the governing contract section. If the search finds conflicting approval-envelope, preview, or scope-binding language, stop and patch the contract plus this plan before source implementation.
 
 ## Task 1: Remove Durable `preview` From Local Config
 
@@ -605,7 +624,6 @@ def test_gateway_rejects_non_autonomous_or_mismatched_decisions(
         decision=replace(
             decision,
             kind=RuntimeDecisionKind.REQUIRE_USER_DISCUSSION,
-            mutation_id=None,
             reason="discussion_required",
             pending_summary_status="discussion_required",
         ),
@@ -645,6 +663,15 @@ def test_gateway_rejects_non_autonomous_or_mismatched_decisions(
         ),
         pending_summary=store,
     )
+    mismatched_scope = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=replace(mutation, ticket_change_scope="unrelated_backlog"),
+        decision=decision,
+        pending_summary=store,
+    )
     forged_mutation_id = apply_autonomous_mutation(
         project_root=project_root,
         thread_id="thread-1",
@@ -661,6 +688,8 @@ def test_gateway_rejects_non_autonomous_or_mismatched_decisions(
     assert "ticket_mismatch" in mismatched_ticket.message
     assert mismatched_fields.error_code == "gateway_required"
     assert "mutation_fingerprint_mismatch" in mismatched_fields.message
+    assert mismatched_scope.error_code == "gateway_required"
+    assert "ticket_change_scope_mismatch" in mismatched_scope.message
     assert forged_mutation_id.error_code == "gateway_required"
     assert "mutation_id_mismatch" in forged_mutation_id.message
     assert "priority: high" in ticket_path.read_text(encoding="utf-8")
@@ -679,7 +708,7 @@ Expected before implementation: FAIL because gateway still requires approval env
 
 - [ ] **Step 3: Replace approval validation helper**
 
-In `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`, delete `_approval_ticket_id()` and `_parse_z()`. After this task, neither helper has a caller.
+In `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`, delete `_approval_ticket_id()`. Do not delete `_parse_z()`; approval validation stops using it, but `_mutation_attempt_timestamp()` still needs it for recovery timestamp validation.
 
 Add `_mutation_id_for_candidate` to the existing import from `scripts.ticket_autonomy_runtime`:
 
@@ -695,6 +724,8 @@ from scripts.ticket_autonomy_runtime import (
 )
 ```
 
+This private helper import is a temporary shared invariant between runtime decision construction and gateway validation. If implementation needs broader reuse than this slice, promote the mutation-ID calculation to a small public helper instead of expanding private imports further.
+
 Replace `_approval_error()` with:
 
 ```python
@@ -705,8 +736,6 @@ def _decision_error(
     mutation: GatewayMutation,
     decision: AutonomyDecision,
 ) -> str | None:
-    if decision.mutation_id is None:
-        return "mutation_id_required"
     if decision.approval is not None:
         return "approval_unexpected"
     if decision.kind == RuntimeDecisionKind.APPLY_CORRECTION:
@@ -714,10 +743,14 @@ def _decision_error(
             return "decision_mismatch"
     elif decision.kind != RuntimeDecisionKind.APPLY_AUTONOMOUSLY:
         return "autonomous_decision_required"
+    if decision.mutation_id is None:
+        return "mutation_id_required"
     if decision.candidate.ticket_id != mutation.ticket_id:
         return "ticket_mismatch"
     if decision.candidate.action != mutation.action:
         return "action_mismatch"
+    if decision.candidate.ticket_change_scope != mutation.ticket_change_scope:
+        return "ticket_change_scope_mismatch"
     if dict(decision.candidate.proposed_change) != dict(mutation.fields):
         return "mutation_fingerprint_mismatch"
     expected_mutation_id, _mutation_fingerprint, _evidence_fingerprint = (
@@ -1102,15 +1135,21 @@ git commit -m "test(ticket): update autonomy recovery expectations"
 **Files:**
 - Verify all modified files from Tasks 1-6.
 
-- [ ] **Step 1: Run source search guard**
+- [ ] **Step 1: Run boundary inventory guard**
 
 Run:
 
 ```bash
-rg -n "AutomationMode\\.PREVIEW|RuntimeDecisionKind\\.PREVIEW_ONLY|preview_only|details\\.approval|approval_required|make_approval|codex\\.ticket\\.approval|decision\\.approval\\[|current_mode\\\": \\\"preview\\\"" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
+rg -n 'AutomationMode\.PREVIEW|RuntimeDecisionKind\.PREVIEW_ONLY|preview_only|details\.approval|details\["approval"\]|approval_required|make_approval|codex\.ticket\.approval|decision\.approval|current_mode": "preview"' plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 ```
 
-Expected: no matches, except `make_approval_id` may remain in `plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py` if no source caller uses it. If it remains unused, decide in this task whether to delete it with its tests or leave it for the later explicit `discussion_only` user-approval fact. If deleting it changes broad ID tests, keep deletion for a separate cleanup.
+Expected: every match is classified before closeout. Allowed matches are only:
+
+- Negative rejection fixtures that prove removed values such as `preview_only` or `current_mode: "preview"` are rejected.
+- Legacy recovery fixtures or validators that intentionally keep reading `approval_consumed` / `approval_id` until the later operation-log collapse plan.
+- `make_approval_id` and `codex.ticket.approval.v1` definitions/tests if no production caller uses them and the helper is being retained for the later explicit `discussion_only` approval fact.
+
+Any product/runtime support for durable `preview`, new `preview_only` events, automatic `agent_primary` approvals, `decision.approval` reads in gateway/runtime write paths, or `details.approval` requirements is a failure. Record the allowed-match list in the implementation closeout. If the ID helper remains unused, decide in this task whether to delete it with its tests or leave it for the later explicit `discussion_only` user-approval fact. If deleting it changes broad ID tests, keep deletion for a separate cleanup.
 
 - [ ] **Step 2: Run focused source tests**
 
@@ -1170,6 +1209,7 @@ The implementation closeout message must include these exact proof-boundary fact
 
 ```text
 Remaining product drift: `ticket_change_scope` still exists in candidate identity, gateway fingerprints, autonomous apply, and commit-disposition behavior; it is intentionally deferred to a separate source slice.
+Temporary safety binding: while `ticket_change_scope` remains live, gateway validation rejects mismatches between `decision.candidate.ticket_change_scope` and `GatewayMutation.ticket_change_scope`.
 Remaining product drift: diagnostic dry-run/preview is not implemented by this slice; this slice only removes durable/product `preview` mode and preview-only runtime states.
 ```
 
