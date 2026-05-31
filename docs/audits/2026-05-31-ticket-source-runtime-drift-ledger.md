@@ -5,6 +5,7 @@ Target: `plugins/turbo-mode/ticket/`
 Branch: `chore/ticket-runtime-first-rebaseline-adr`
 Evidence HEAD: `48e5670`
 Review Adjudication HEAD: `85f06cc`
+Provenance Patch Base: `6d92e7b`
 
 ## Audit Result
 
@@ -37,6 +38,9 @@ disposition.
 - Post-Review Revision: review adjudication at `85f06cc` verified that
   `48e5670..85f06cc` changed only this audit file. Runtime source and authority
   files named here remained unchanged from the original evidence snapshot.
+- Provenance Patch: current check at `6d92e7b` verified that
+  `48e5670..6d92e7b` still changes only this audit file. This patch updates
+  audit provenance only; it does not move the Ticket source evidence boundary.
 - Correction Path: Rerun with a broader target if the next step needs all
   runtime files classified before implementation.
 
