@@ -78,7 +78,6 @@ Current source touchpoints for this slice:
 | `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py:85-95` | Pending-summary accepts `preview_only` and `preview` as durable taxonomy. |
 | `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py:292-298` | Pending-summary requires `details.approval` for `apply_autonomously`. |
 | `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py:45-65` | Pending-summary has no non-mutation `autonomy_health` event type for turn-local blocked Ticket updates. |
-| `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py:101-112` | Pending-summary pause reasons do not include `source_context_unhealthy`. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:273-286` | Apply-turn projects `preview` as a product state. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:185-199` | Paused output has no `source_context_unhealthy` message. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:419-431` | `_ticket_state_fingerprints()` cannot distinguish per-candidate misses from collector-level failure. |
@@ -120,7 +119,7 @@ Modify or add these files only in this plan:
   - Update correction helper source context so correction decisions include the Ticket-derived target fingerprint.
 - `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py`
   - Owns pending-summary event validation and recovery projection.
-  - Remove new `preview_only` taxonomy and automatic approval requirement. Add a non-mutation `autonomy_health` / `ticket_update_blocked` event for turn-local write-authority blocks and add `source_context_unhealthy` as a pause reason, explicitly as temporary-but-required scaffolding. Keep `approval_consumed` readable only as historical recovery input until the later operation-log collapse plan removes it deliberately.
+  - Remove new `preview_only` taxonomy and automatic approval requirement. Add a non-mutation `autonomy_health` / `ticket_update_blocked` event for turn-local write-authority blocks, explicitly as temporary-but-required scaffolding. Do not add `source_context_unhealthy` to pending-summary pause reason validation unless a consistent runtime `automation_pause` event path is proven first. Keep `approval_consumed` readable only as historical recovery input until the later operation-log collapse plan removes it deliberately.
 - `plugins/turbo-mode/ticket/tests/test_turn_batch.py`
   - Covers pending-summary schema and validation.
   - Rewrite valid attempt fixtures, neutralize approval-shaped helper defaults, add health-event validation, and update preview decision tests.
@@ -1468,7 +1467,7 @@ def test_autonomy_health_records_ticket_update_block_without_mutation_payload() 
 
 Add negative coverage that an `autonomy_health` event with a mutation ID or without `details.blocked_reason` is invalid. This keeps the repeat signal separate from mutation attempts and gateway write evidence.
 
-In `test_status_values_match_event_type`, keep `("automation_pause", "paused")` valid. In `test_finite_detail_values_are_enforced`, add `source_context_unhealthy` as a valid `pause_reason` and keep unknown pause reasons invalid. This pause reason is for source-context collector health only; do not reuse `setup_required`.
+In `test_status_values_match_event_type`, keep `("automation_pause", "paused")` valid and keep existing pause-reason validation focused on event shapes already written today. Do not add `source_context_unhealthy` to pending-summary pause-reason tests unless implementation first proves runtime pauses already append `automation_pause` events consistently.
 
 - [ ] **Step 2: Run pending-summary tests to verify failure**
 
@@ -1478,7 +1477,7 @@ Run:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_turn_batch.py::test_preview_only_decision_is_not_a_supported_pending_summary_decision tests/test_turn_batch.py::test_status_details_requirements -q
 ```
 
-Expected before implementation: FAIL because `preview_only` and `current_mode: preview` are still accepted, `details.approval` is still required for `apply_autonomously`, `autonomy_health` is not yet a supported event type, and `source_context_unhealthy` is not yet a supported pause reason.
+Expected before implementation: FAIL because `preview_only` and `current_mode: preview` are still accepted, `details.approval` is still required for `apply_autonomously`, and `autonomy_health` is not yet a supported event type.
 
 - [ ] **Step 3: Remove new preview and approval requirements from validation**
 
@@ -1496,12 +1495,6 @@ _DECISIONS = frozenset(
     }
 )
 _MODES = frozenset({"discussion_only", "agent_primary"})
-```
-
-Add `source_context_unhealthy` to `_PAUSE_REASONS`:
-
-```python
-        "source_context_unhealthy",
 ```
 
 Add `autonomy_health` to `_EVENT_STATUSES`:
@@ -1873,7 +1866,7 @@ Expected after implementation:
 - `approval_consumed` may still match only in `ticket_turn_batch.py` historical recovery validation and projection.
 - `target_fingerprint_required` matches must use `RuntimeDecisionKind.TICKET_UPDATE_BLOCKED`, `status: "ticket_update_blocked"`, or gateway policy-blocked validation. No match may classify missing target fingerprint as `discussion_required` or emit a discussion question.
 - `autonomy_health` matches must write or validate only temporary `ticket_update_blocked` scaffolding events and must not carry mutation IDs, proposed fields, gateway fingerprints, or approval data.
-- `source_context_unhealthy` matches must be pause-message, pause-reason validation, collector-level pause, or explicit resume-proof code. No match may report source-context failure as `setup_required` or clear the pause without a collector/probe pass.
+- `source_context_unhealthy` matches must be pause-marker/output handling, collector-level pause, or explicit resume-proof code. No match may report source-context failure as `setup_required`, clear the pause without a collector/probe pass, or add pending-summary pause-reason validation without a proven consistent `automation_pause` event path.
 - `automation_pause` matches must remain validation or pre-existing pause behavior. A new source-context pause must not be the only runtime pause that writes an `automation_pause` pending-summary event.
 
 - [ ] **Step 11: Run focused apply-turn, integration, recovery, and gateway suites**
@@ -2141,7 +2134,7 @@ Type consistency:
 - `AutomationMode` has only `DISCUSSION_ONLY` and `AGENT_PRIMARY` after Task 1.
 - `RuntimeDecisionKind` has no `PREVIEW_ONLY` after Task 2.
 - `RuntimeDecisionKind.TICKET_UPDATE_BLOCKED` is the only runtime decision kind for missing target fingerprints; `target_fingerprint_required` is not represented as discussion.
-- `_PAUSE_REASONS` includes `source_context_unhealthy` only for collector-level source-context health failures; local config or mode setup continues to use setup-required paths.
+- `source_context_unhealthy` is not added to `_PAUSE_REASONS` unless a consistent runtime `automation_pause` event path is proven first; local config or mode setup continues to use setup-required paths.
 - `AutonomyDecision.approval` remains `dict[str, object] | None` for future explicit `discussion_only` approval facts, but this plan requires it to be `None` for `agent_primary`.
 - Gateway validation uses `AutonomyDecision`, `CandidateMutation`, `GatewayMutation`, `thread_id`, and `turn_id` fields already present in current source.
 - Gateway validation recomputes the expected mutation ID from `thread_id`, `turn_id`, `decision.candidate`, and `GatewayMutation.target_fingerprint`; non-null mutation IDs are not treated as proof.
