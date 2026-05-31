@@ -4,7 +4,7 @@
 
 **Goal:** Remove durable `preview` mode and automatic `agent_primary` approval envelopes from Ticket source while keeping deterministic gateway write safety.
 
-**Architecture:** This is a narrow modes/approval source slice selected from the Ticket source-runtime drift ledger. It is not the ledger's complete recommended first runtime cut because end-to-end `ticket_change_scope` removal is intentionally deferred. While scope remains live, this slice must preserve its existing write-safety binding. Mutation identity must also include the Ticket-derived expected target fingerprint for non-create writes; removing approval envelopes cannot drop that target-state binding. This slice changes the local mode model, runtime evaluator, pending-summary validation, gateway validation, apply-turn projection, and integration expectations together so one producer is not removed while consumers still require it. Runtime approval removal and gateway decision validation are one atomic behavior boundary; do not commit a checkpoint where runtime no longer emits approvals while gateway still requires them. Diagnostic dry-run remains a future explicit maintenance affordance; this slice removes durable/product `preview` but does not yet implement the target diagnostic dry-run path.
+**Architecture:** This is a narrow modes/approval source slice selected from the Ticket source-runtime drift ledger. It is not the ledger's complete recommended first runtime cut because end-to-end `ticket_change_scope` removal is intentionally deferred. While scope remains live, this slice must preserve its existing write-safety binding. Mutation identity must also include the Ticket-derived expected target fingerprint for non-create writes; removing approval envelopes cannot drop that target-state binding. Promote mutation identity calculation to a neutral helper in this slice so runtime decision construction and gateway validation share the same deterministic identity function without private runtime imports. This slice changes the local mode model, runtime evaluator, pending-summary validation, gateway validation, apply-turn projection, and integration expectations together so one producer is not removed while consumers still require it. Runtime approval removal and gateway decision validation are one atomic behavior boundary; do not commit a checkpoint where runtime no longer emits approvals while gateway still requires them. Diagnostic dry-run remains a future explicit maintenance affordance; this slice removes durable/product `preview` but does not yet implement the target diagnostic dry-run path.
 
 **Tech Stack:** Python >=3.11, pytest, dataclasses, strict JSON, append-only JSONL, existing Ticket scripts, bytecode-safe `uv run` verification.
 
@@ -81,7 +81,7 @@ Current source touchpoints for this slice:
 
 ## File Structure
 
-Modify these files only in this plan:
+Modify or add these files only in this plan:
 
 - `plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py`
   - Owns strict local config modes and snapshots.
@@ -90,11 +90,16 @@ Modify these files only in this plan:
   - Covers config parsing, setup choices, pause/resume, and snapshots.
   - Rewrite preview config coverage to assert `preview` requires setup.
 - `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py`
-  - Owns candidate decisions and mutation IDs.
-  - Remove `PREVIEW_ONLY` and stop creating automatic approval envelopes.
+  - Owns candidate decisions and runtime authorization policy.
+  - Remove `PREVIEW_ONLY`, stop creating automatic approval envelopes, and call the shared mutation identity helper.
 - `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py`
   - Covers evaluator behavior.
   - Rewrite approval and preview expectations.
+- `plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py`
+  - New neutral helper for canonical mutation identity calculation.
+  - Keep it independent of runtime and gateway dataclasses; callers adapt their local types into primitive fields.
+- `plugins/turbo-mode/ticket/tests/test_mutation_identity.py`
+  - New focused tests for target-fingerprint and current `ticket_change_scope` identity binding.
 - `plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py`
   - Covers user-triggered correction decisions through the gateway.
   - Update correction helper source context so correction decisions include the Ticket-derived target fingerprint.
@@ -571,13 +576,66 @@ git commit -m "fix(ticket): remove preview runtime decision state"
 ## Task 3: Stop Creating Automatic `agent_primary` Approval Envelopes
 
 **Files:**
+- Add: `plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py`
+- Add: `plugins/turbo-mode/ticket/tests/test_mutation_identity.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py:1-202`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py:390-445`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py:525-550`
 - Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py:74-230`
 - Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py:41-80`
 
-- [ ] **Step 1: Rewrite evaluator approval tests**
+- [ ] **Step 1: Rewrite evaluator approval tests and add identity-helper tests**
+
+Create `plugins/turbo-mode/ticket/tests/test_mutation_identity.py` with focused calculation tests:
+
+```python
+from scripts.ticket_mutation_identity import make_candidate_mutation_identity
+
+
+def _identity(
+    *,
+    target_fingerprint: str | None = "ticket-state-a",
+    ticket_change_scope: str = "current_branch",
+):
+    return make_candidate_mutation_identity(
+        thread_id="thread-1",
+        turn_id="turn-1",
+        ticket_id="T-20260527-01",
+        action="update",
+        proposed_change={"priority": "high"},
+        ticket_change_scope=ticket_change_scope,
+        target_fingerprint=target_fingerprint,
+        evidence=(
+            {"kind": "current_thread_reason", "ref": "test", "freshness": "fresh"},
+        ),
+    )
+
+
+def test_target_fingerprint_binds_mutation_identity() -> None:
+    first = _identity(target_fingerprint="ticket-state-a")
+    second = _identity(target_fingerprint="ticket-state-b")
+
+    assert first.mutation_id != second.mutation_id
+    assert first.mutation_fingerprint != second.mutation_fingerprint
+    assert first.evidence_fingerprint == second.evidence_fingerprint
+
+
+def test_helper_hashes_missing_target_fingerprint_without_policy_decision() -> None:
+    missing = _identity(target_fingerprint=None)
+    present = _identity(target_fingerprint="ticket-state-a")
+
+    assert missing.mutation_id != present.mutation_id
+    assert missing.mutation_fingerprint != present.mutation_fingerprint
+
+
+def test_ticket_change_scope_binds_identity_until_scope_slice() -> None:
+    current_branch = _identity(ticket_change_scope="current_branch")
+    unrelated_backlog = _identity(ticket_change_scope="unrelated_backlog")
+
+    assert current_branch.mutation_id != unrelated_backlog.mutation_id
+```
+
+The helper test for missing target fingerprint must stay calculation-only. Runtime and gateway tests own the non-create hard stop. The `ticket_change_scope` test is intentionally temporary coverage for the existing live scope binding until the separate scope-removal slice.
 
 In `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py`, change the loop assertion in `test_ordinary_candidates_apply_autonomously_with_agent_primary_and_evidence` to:
 
@@ -722,19 +780,104 @@ Leave unsafe-correction and missing-detail tests without `ticket_path`; those br
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_runtime.py::test_agent_primary_decision_uses_mutation_id_without_approval_envelope tests/test_autonomy_runtime.py::test_target_fingerprint_binds_mutation_identity_for_non_create tests/test_autonomy_runtime.py::test_non_create_candidate_requires_target_fingerprint_for_identity tests/test_autonomy_runtime.py::test_correction_target_fingerprint_binds_mutation_identity tests/test_autonomy_runtime.py::test_correction_requires_target_fingerprint_for_identity -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_autonomy_runtime.py::test_agent_primary_decision_uses_mutation_id_without_approval_envelope tests/test_autonomy_runtime.py::test_target_fingerprint_binds_mutation_identity_for_non_create tests/test_autonomy_runtime.py::test_non_create_candidate_requires_target_fingerprint_for_identity tests/test_autonomy_runtime.py::test_correction_target_fingerprint_binds_mutation_identity tests/test_autonomy_runtime.py::test_correction_requires_target_fingerprint_for_identity -q
 ```
 
-Expected before implementation: FAIL because evaluator still returns an approval envelope, mutation IDs do not yet bind the target fingerprint, and the correction branch still calls the old helper signature.
+Expected before implementation: FAIL because the identity helper does not exist yet, evaluator still returns an approval envelope, mutation IDs do not yet bind the target fingerprint, and the correction branch still calls the old helper signature.
 
-- [ ] **Step 3: Remove approval creation from runtime evaluator**
+- [ ] **Step 3: Add neutral identity helper and remove approval creation from runtime evaluator**
 
-In `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py`, remove `make_approval_id` from the import:
+Create `plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py`:
 
 ```python
-from scripts.ticket_autonomy_ids import (
-    make_mutation_id,
-    sha256_fingerprint,
+"""Canonical mutation identity helpers for Ticket autonomy."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+
+from scripts.ticket_autonomy_ids import make_mutation_id, sha256_fingerprint
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateMutationIdentity:
+    """Deterministic identity for one candidate mutation."""
+
+    mutation_id: str
+    mutation_fingerprint: str
+    evidence_fingerprint: str
+
+
+def candidate_mutation_payload(
+    *,
+    ticket_id: str | None,
+    action: str,
+    proposed_change: Mapping[str, object],
+    ticket_change_scope: str,
+    target_fingerprint: str | None,
+) -> dict[str, object]:
+    """Return the canonical payload used for mutation identity."""
+    return {
+        "ticket_id": ticket_id,
+        "action": action,
+        "proposed_change": dict(proposed_change),
+        "ticket_change_scope": ticket_change_scope,
+        "target_fingerprint": target_fingerprint,
+    }
+
+
+def make_candidate_mutation_identity(
+    *,
+    thread_id: str,
+    turn_id: str,
+    ticket_id: str | None,
+    action: str,
+    proposed_change: Mapping[str, object],
+    ticket_change_scope: str,
+    target_fingerprint: str | None,
+    evidence: object,
+) -> CandidateMutationIdentity:
+    """Calculate deterministic identity for one candidate mutation.
+
+    This helper is calculation-only. It hashes the supplied target fingerprint
+    but does not decide whether a missing target fingerprint is acceptable.
+    Runtime and gateway callers own that policy.
+    """
+    mutation_fingerprint = sha256_fingerprint(
+        candidate_mutation_payload(
+            ticket_id=ticket_id,
+            action=action,
+            proposed_change=proposed_change,
+            ticket_change_scope=ticket_change_scope,
+            target_fingerprint=target_fingerprint,
+        )
+    )
+    evidence_fingerprint = sha256_fingerprint(evidence)
+    mutation_id = make_mutation_id(
+        schema="codex.ticket.mutation.v1",
+        thread_id=thread_id,
+        turn_id=turn_id,
+        action=action,
+        ticket_id=ticket_id,
+        mutation_fingerprint=mutation_fingerprint,
+        evidence_fingerprint=evidence_fingerprint,
+    )
+    return CandidateMutationIdentity(
+        mutation_id=mutation_id,
+        mutation_fingerprint=mutation_fingerprint,
+        evidence_fingerprint=evidence_fingerprint,
+    )
+```
+
+Do not import `CandidateMutation`, `GatewayMutation`, `AutonomyDecision`, or other runtime/gateway dataclasses into this helper. The helper must stay independent of runtime types.
+
+In `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py`, remove `make_approval_id`, `make_mutation_id`, and `sha256_fingerprint` from imports once no direct callers remain. Add:
+
+```python
+from scripts.ticket_mutation_identity import (
+    CandidateMutationIdentity,
+    make_candidate_mutation_identity,
 )
 ```
 
@@ -755,44 +898,26 @@ def _target_fingerprint_for_candidate(
     return None
 ```
 
-Change `_candidate_payload()` and `_mutation_id_for_candidate()` so mutation identity includes the target fingerprint:
+Delete `_candidate_payload()` and replace `_mutation_id_for_candidate()` with a runtime-local adapter around the neutral helper:
 
 ```python
-def _candidate_payload(
-    candidate: CandidateMutation,
-    *,
-    target_fingerprint: str | None,
-) -> dict[str, object]:
-    return {
-        "ticket_id": candidate.ticket_id,
-        "action": candidate.action,
-        "proposed_change": dict(candidate.proposed_change),
-        "ticket_change_scope": candidate.ticket_change_scope,
-        "target_fingerprint": target_fingerprint,
-    }
-
-
-def _mutation_id_for_candidate(
+def _identity_for_candidate(
     *,
     candidate: CandidateMutation,
     thread_id: str,
     turn_id: str,
     target_fingerprint: str | None,
-) -> tuple[str, str, str]:
-    mutation_fingerprint = sha256_fingerprint(
-        _candidate_payload(candidate, target_fingerprint=target_fingerprint)
-    )
-    evidence_fingerprint = sha256_fingerprint(_evidence_payload(candidate))
-    mutation_id = make_mutation_id(
-        schema="codex.ticket.mutation.v1",
+) -> CandidateMutationIdentity:
+    return make_candidate_mutation_identity(
         thread_id=thread_id,
         turn_id=turn_id,
         action=candidate.action,
         ticket_id=candidate.ticket_id,
-        mutation_fingerprint=mutation_fingerprint,
-        evidence_fingerprint=evidence_fingerprint,
+        proposed_change=candidate.proposed_change,
+        ticket_change_scope=candidate.ticket_change_scope,
+        target_fingerprint=target_fingerprint,
+        evidence=_evidence_payload(candidate),
     )
-    return mutation_id, mutation_fingerprint, evidence_fingerprint
 ```
 
 In the `candidate.action == "correction"` branch of `evaluate_autonomy_intent()`, after `dispatch.state == "ok"` and before computing `mutation_id`, add the same target-fingerprint identity requirement used by ordinary non-create writes:
@@ -812,13 +937,11 @@ In the `candidate.action == "correction"` branch of `evaluate_autonomy_intent()`
                     )
                 )
                 continue
-            mutation_id, _mutation_fingerprint, _evidence_fingerprint = (
-                _mutation_id_for_candidate(
-                    candidate=candidate,
-                    thread_id=thread_id,
-                    turn_id=turn_id,
-                    target_fingerprint=target_fingerprint,
-                )
+            identity = _identity_for_candidate(
+                candidate=candidate,
+                thread_id=thread_id,
+                turn_id=turn_id,
+                target_fingerprint=target_fingerprint,
             )
 ```
 
@@ -839,7 +962,7 @@ In `evaluate_autonomy_intent()`, replace the autonomous-apply tail with:
                 )
             )
             continue
-        mutation_id, _mutation_fingerprint, _evidence_fingerprint = _mutation_id_for_candidate(
+        identity = _identity_for_candidate(
             candidate=candidate,
             thread_id=thread_id,
             turn_id=turn_id,
@@ -852,12 +975,14 @@ In `evaluate_autonomy_intent()`, replace the autonomous-apply tail with:
                 RuntimeDecisionKind.APPLY_AUTONOMOUSLY,
                 reason="authorized",
                 pending_summary_status="pending",
-                mutation_id=mutation_id,
+                mutation_id=identity.mutation_id,
                 approval=None,
                 engine_dispatch=dispatch,
             )
         )
 ```
+
+For correction decisions, pass `identity.mutation_id` into `_decision()` in the same way. Runtime still owns the hard stop for non-create writes without a target fingerprint; `ticket_mutation_identity.py` must not enforce that policy.
 
 Do not delete the `approval` field from `AutonomyDecision` in this slice. It remains available for the later explicit `discussion_only` user-approval fact.
 
@@ -873,8 +998,8 @@ Remove approval-only runtime leftovers in the same edit:
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py -q
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py
 ```
 
 Expected: PASS.
@@ -1020,7 +1145,7 @@ Expected before implementation: FAIL because gateway still requires approval env
 
 In `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`, delete `_approval_ticket_id()`. Do not delete `_parse_z()`; approval validation stops using it, but `_mutation_attempt_timestamp()` still needs it for recovery timestamp validation.
 
-Add `_mutation_id_for_candidate` to the existing import from `scripts.ticket_autonomy_runtime`:
+Keep the existing runtime imports limited to runtime dataclasses and dispatch helpers:
 
 ```python
 from scripts.ticket_autonomy_runtime import (
@@ -1029,16 +1154,28 @@ from scripts.ticket_autonomy_runtime import (
     EngineAction,
     EngineDispatch,
     RuntimeDecisionKind,
-    _mutation_id_for_candidate,
     map_candidate_to_engine,
 )
 ```
 
-This private helper import is a temporary shared invariant between runtime decision construction and gateway validation. If implementation needs broader reuse than this slice, promote the mutation-ID calculation to a small public helper instead of expanding private imports further.
+Add a public helper import from the new neutral identity module:
+
+```python
+from scripts.ticket_mutation_identity import make_candidate_mutation_identity
+```
+
+Do not import `_identity_for_candidate`, `_evidence_payload`, or any other private runtime helper into the gateway. The gateway adapts `decision.candidate` into primitive fields and calls `make_candidate_mutation_identity()` directly.
 
 Replace `_approval_error()` with:
 
 ```python
+def _candidate_evidence_payload(candidate: CandidateMutation) -> list[dict[str, str]]:
+    return [
+        {"kind": evidence.kind, "ref": evidence.ref, "freshness": evidence.freshness}
+        for evidence in candidate.evidence
+    ]
+
+
 def _decision_error(
     *,
     thread_id: str,
@@ -1065,15 +1202,17 @@ def _decision_error(
         return "mutation_fingerprint_mismatch"
     if mutation.action != "create" and mutation.target_fingerprint is None:
         return "target_fingerprint_required"
-    expected_mutation_id, _mutation_fingerprint, _evidence_fingerprint = (
-        _mutation_id_for_candidate(
-            candidate=decision.candidate,
-            thread_id=thread_id,
-            turn_id=turn_id,
-            target_fingerprint=mutation.target_fingerprint,
-        )
+    identity = make_candidate_mutation_identity(
+        thread_id=thread_id,
+        turn_id=turn_id,
+        ticket_id=decision.candidate.ticket_id,
+        action=decision.candidate.action,
+        proposed_change=decision.candidate.proposed_change,
+        ticket_change_scope=decision.candidate.ticket_change_scope,
+        target_fingerprint=mutation.target_fingerprint,
+        evidence=_candidate_evidence_payload(decision.candidate),
     )
-    if decision.mutation_id != expected_mutation_id:
+    if decision.mutation_id != identity.mutation_id:
         return "mutation_id_mismatch"
     return None
 ```
@@ -1204,8 +1343,8 @@ and change the final event-status assertion to:
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py tests/test_engine_gateway.py::test_gateway_rejects_non_autonomous_or_mismatched_decisions tests/test_engine_gateway.py::test_gateway_applies_update_records_events_and_writes_change_history tests/test_engine_gateway.py::test_gateway_rechecks_pause_after_attempt_record_before_dispatch -q
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py tests/test_engine_gateway.py::test_gateway_rejects_non_autonomous_or_mismatched_decisions tests/test_engine_gateway.py::test_gateway_applies_update_records_events_and_writes_change_history tests/test_engine_gateway.py::test_gateway_rechecks_pause_after_attempt_record_before_dispatch -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py
 ```
 
 Expected: PASS. This is the first runnable checkpoint after removing runtime approvals.
@@ -1215,7 +1354,7 @@ Expected: PASS. This is the first runnable checkpoint after removing runtime app
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py
+git add plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py
 git commit -m "fix(ticket): remove agent-primary approval gate"
 ```
 
@@ -1305,6 +1444,14 @@ In `_validate_details()`, remove these checks:
 ```
 
 Do not remove `approval_consumed` from `_EVENT_STATUSES`, `required_by_status`, `derive_mutation_state()`, or `project_mutation_recovery()` in this task. Those branches are read-only historical recovery support for already-written private logs and remain temporary drift until the later operation-log collapse plan.
+
+When retaining a source branch or helper that exists only for old `approval_consumed` logs, label it with this exact comment near the retained logic:
+
+```python
+# Historical approval recovery only: new gateway writes no approval_consumed events.
+```
+
+Do not add that label to new write paths. If implementation finds that a retained approval branch cannot be labeled honestly as historical recovery input, stop and revise this plan before proceeding.
 
 - [ ] **Step 4: Run focused pending-summary tests**
 
@@ -1464,7 +1611,7 @@ Expected after implementation:
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_autonomy_recovery.py tests/test_engine_gateway.py tests/test_turn_batch.py tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py tests/test_autonomy_config.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_autonomy_recovery.py tests/test_engine_gateway.py tests/test_turn_batch.py tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py tests/test_autonomy_config.py -q
 ```
 
 Expected: PASS.
@@ -1505,7 +1652,7 @@ Any product/runtime support for durable `preview`, new `preview_only` events, au
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_config.py tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py tests/test_turn_batch.py tests/test_engine_gateway.py tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_autonomy_recovery.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_autonomy_config.py tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py tests/test_turn_batch.py tests/test_engine_gateway.py tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_autonomy_recovery.py -q
 ```
 
 Expected: PASS.
@@ -1525,7 +1672,7 @@ Expected: PASS. If failures occur outside the touched surfaces, classify them as
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 ```
 
 Expected: PASS.
@@ -1555,7 +1702,7 @@ git diff --stat "$BASE_COMMIT"..HEAD
 git diff "$BASE_COMMIT"..HEAD -- plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 ```
 
-Expected: diff is limited to the mode, runtime evaluator, pending-summary, gateway, apply-turn, and focused tests named in this plan. No docs, cache, installed runtime, local workspace state, or handoff files are staged.
+Expected: diff is limited to the mode, mutation identity helper, runtime evaluator, pending-summary, gateway, apply-turn, and focused tests named in this plan. No docs, cache, installed runtime, local workspace state, or handoff files are staged.
 
 - [ ] **Step 7: Record remaining drift in closeout notes**
 
@@ -1568,6 +1715,7 @@ Remaining product drift: the full target candidate mutation contract remains uns
 Remaining product drift: diagnostic dry-run/preview is not implemented by this slice; this slice only removes durable/product `preview` mode and preview-only runtime states.
 Breaking-change posture: this source slice does not preserve removed Ticket behavior for compatibility; retained legacy private-log reads are historical recovery support only and remain drift until the operation-log collapse slice.
 Remaining product drift: pending-summary/private operation-log collapse is deferred; historical `approval_consumed` recovery input and commit-disposition details may remain only as classified drift until a separate operation-log slice removes them.
+Follow-up required: the closeout must name deletion of retained historical approval recovery support as a follow-up for the operation-log collapse slice; do not let retained `approval_consumed` readers become a supported product surface.
 Deferred approval scaffolding: `make_approval_id` may remain only as unused explicit `discussion_only` approval scaffolding with no production callers.
 ```
 
@@ -1581,10 +1729,12 @@ If Task 7 produces cleanup edits, run:
 git status --short --branch
 git diff --stat -- \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py \
+  plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py \
   plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy.py \
+  plugins/turbo-mode/ticket/tests/test_mutation_identity.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_config.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py \
@@ -1595,10 +1745,12 @@ git diff --stat -- \
   plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 git diff -- \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py \
+  plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py \
   plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy.py \
+  plugins/turbo-mode/ticket/tests/test_mutation_identity.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_config.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py \
@@ -1609,10 +1761,12 @@ git diff -- \
   plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 git add \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py \
+  plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py \
   plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy.py \
+  plugins/turbo-mode/ticket/tests/test_mutation_identity.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_config.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py \
@@ -1624,10 +1778,12 @@ git add \
 git diff --cached --stat
 git diff --cached -- \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py \
+  plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py \
   plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy.py \
+  plugins/turbo-mode/ticket/tests/test_mutation_identity.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_config.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py \
@@ -1650,10 +1806,12 @@ BASE_COMMIT="$(cat /tmp/ticket-modes-approval-base.txt)"
 git diff --stat "$BASE_COMMIT"..HEAD
 git diff "$BASE_COMMIT"..HEAD -- \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py \
+  plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py \
   plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy.py \
+  plugins/turbo-mode/ticket/tests/test_mutation_identity.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_config.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py \
@@ -1664,7 +1822,7 @@ git diff "$BASE_COMMIT"..HEAD -- \
   plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 ```
 
-Expected: diff is still limited to the mode, runtime evaluator, pending-summary, gateway, apply-turn, and focused tests named in this plan. No docs, cache, installed runtime, local workspace state, handoff files, or unrelated cleanup are included.
+Expected: diff is still limited to the mode, mutation identity helper, runtime evaluator, pending-summary, gateway, apply-turn, and focused tests named in this plan. No docs, cache, installed runtime, local workspace state, handoff files, or unrelated cleanup are included.
 
 ## Self-Review Checklist
 
@@ -1674,8 +1832,12 @@ Spec coverage:
 - Runtime `PREVIEW_ONLY` decisions and apply-turn product preview projections are removed in Task 2.
 - Automatic `agent_primary` approval envelope creation is removed in Task 3, but Task 3 is not committed until Task 4 replaces gateway approval validation.
 - Correction integration tests pass target fingerprints through source context before expecting `APPLY_CORRECTION`.
+- `ticket_mutation_identity.py` is calculation-only, independent of runtime/gateway dataclasses, and covered by focused helper tests.
+- Runtime and gateway separately reject non-create writes without target fingerprints; the identity helper hashes missing target fingerprints but does not make that policy decision.
+- Gateway validation recomputes mutation identity through `make_candidate_mutation_identity()` and does not import private runtime identity helpers.
 - Gateway approval validation and new `approval_consumed` writes are removed in Task 4.
 - Pending-summary no longer requires automatic approval details or accepts new preview decisions in Task 5.
+- Retained `approval_consumed` source branches and tests are labeled as historical approval recovery only.
 - Apply-turn integration expectations are updated in Task 6 so full-suite verification does not fail late on removed approval/preview behavior.
 - Historical `approval_consumed` recovery input is explicitly retained only until the later operation-log collapse plan, preventing this slice from silently widening into full pending-summary redesign or compatibility support.
 - At least one approval-free `ticket_written` recovery test is updated in `test_autonomy_recovery.py`.
@@ -1695,6 +1857,7 @@ Type consistency:
 - `AutonomyDecision.approval` remains `dict[str, object] | None` for future explicit `discussion_only` approval facts, but this plan requires it to be `None` for `agent_primary`.
 - Gateway validation uses `AutonomyDecision`, `CandidateMutation`, `GatewayMutation`, `thread_id`, and `turn_id` fields already present in current source.
 - Gateway validation recomputes the expected mutation ID from `thread_id`, `turn_id`, `decision.candidate`, and `GatewayMutation.target_fingerprint`; non-null mutation IDs are not treated as proof.
+- `make_candidate_mutation_identity()` accepts primitive fields and JSON-compatible evidence, not runtime or gateway dataclasses.
 
 ## Handoff Notes For Executors
 
