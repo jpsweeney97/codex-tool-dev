@@ -4,7 +4,7 @@
 
 **Goal:** Remove durable `preview` mode and automatic `agent_primary` approval envelopes from Ticket source while keeping deterministic gateway write safety.
 
-**Architecture:** This is a narrow modes/approval source slice selected from the Ticket source-runtime drift ledger. It is not the ledger's complete recommended first runtime cut because end-to-end `ticket_change_scope` removal is intentionally deferred. While scope remains live, this slice must preserve its existing write-safety binding. It changes the local mode model, runtime evaluator, pending-summary validation, gateway validation, apply-turn projection, and integration expectations together so one producer is not removed while consumers still require it. Diagnostic dry-run remains a future explicit maintenance affordance; this slice removes durable/product `preview` but does not yet implement the target diagnostic dry-run path.
+**Architecture:** This is a narrow modes/approval source slice selected from the Ticket source-runtime drift ledger. It is not the ledger's complete recommended first runtime cut because end-to-end `ticket_change_scope` removal is intentionally deferred. While scope remains live, this slice must preserve its existing write-safety binding. Mutation identity must also include the Ticket-derived expected target fingerprint for non-create writes; removing approval envelopes cannot drop that target-state binding. This slice changes the local mode model, runtime evaluator, pending-summary validation, gateway validation, apply-turn projection, and integration expectations together so one producer is not removed while consumers still require it. Diagnostic dry-run remains a future explicit maintenance affordance; this slice removes durable/product `preview` but does not yet implement the target diagnostic dry-run path.
 
 **Tech Stack:** Python >=3.11, pytest, dataclasses, strict JSON, append-only JSONL, existing Ticket scripts, bytecode-safe `uv run` verification.
 
@@ -24,7 +24,11 @@ Out of scope for this plan:
 
 Write separate plans for those surfaces. Do not fold them into this slice unless this plan is explicitly revised.
 
-Still in scope for this slice: gateway validation must reject mismatches between `decision.candidate.ticket_change_scope` and `GatewayMutation.ticket_change_scope` while scope remains live. Removing approval envelopes cannot also remove that binding.
+Still in scope for this slice:
+
+- Gateway validation must reject mismatches between `decision.candidate.ticket_change_scope` and `GatewayMutation.ticket_change_scope` while scope remains live. Removing approval envelopes cannot also remove that binding.
+- Mutation identity must bind the expected target fingerprint for non-create writes. Runtime decision construction may derive that fingerprint from Ticket-owned source context, and gateway validation must recompute identity with `GatewayMutation.target_fingerprint`.
+- Existing mode snapshots that contain removed durable modes such as `preview` must fail closed with setup required. They must not be treated as missing snapshots and replaced from `agent_primary` config.
 
 Known remaining product drift after this slice:
 
@@ -43,7 +47,7 @@ Source authority:
 Contract impact:
 
 - `plugins/turbo-mode/ticket/references/ticket-contract.md:172-184` already states the target durable modes and diagnostic-preview boundary. No mode contract patch is expected for this slice unless execution finds conflicting language.
-- `plugins/turbo-mode/ticket/references/ticket-contract.md:186-190` states Ticket owns candidate identity and callers do not supply authoritative identity values. This slice preserves that by recomputing mutation ID from the decision candidate and temporarily binding live `ticket_change_scope` to the gateway mutation.
+- `plugins/turbo-mode/ticket/references/ticket-contract.md:186-190` states Ticket owns candidate identity and callers do not supply authoritative identity values. This slice preserves that by computing mutation ID from canonical decision candidate content plus the Ticket-derived expected target fingerprint, then recomputing that ID in gateway validation with `GatewayMutation.target_fingerprint`. While `ticket_change_scope` remains live, gateway validation also temporarily binds candidate scope to gateway mutation scope.
 - No contract patch is expected before source edits. If implementation finds conflicting contract text for approval envelopes, diagnostic preview, or scope binding, stop and patch this plan plus the contract before continuing.
 
 Current source touchpoints for this slice:
@@ -51,8 +55,10 @@ Current source touchpoints for this slice:
 | Surface | Current drift |
 |---|---|
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py:29-34` | `AutomationMode.PREVIEW` is a durable config mode. |
+| `plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py:317-424` | Invalid mode snapshots return `None`, so stale `preview` snapshots can fall through to fresh config resolution. |
 | `plugins/turbo-mode/ticket/tests/test_autonomy_config.py:102-108` | Tests assert manual durable preview config is valid. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py:22-27` | `RuntimeDecisionKind.PREVIEW_ONLY` is a runtime decision kind. |
+| `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py:339-356` | `_mutation_id_for_candidate()` does not include the expected target fingerprint in mutation identity. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py:162-202` | `_make_approval()` creates automatic approval envelopes. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py:479-488` | Runtime evaluator emits `PREVIEW_ONLY` for current mode `preview`. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py:531-550` | Runtime evaluator attaches approval envelopes to `APPLY_AUTONOMOUSLY`. |
@@ -120,8 +126,9 @@ Stop before source edits if:
 Stop during implementation if:
 
 - A gateway write can proceed without a mutation ID, expected target fingerprint for non-create writes, or deterministic candidate/mutation match.
-- Gateway validation accepts a mutation ID that does not match the ID recomputed from `thread_id`, `turn_id`, and `decision.candidate`.
+- Gateway validation accepts a mutation ID that does not match the ID recomputed from `thread_id`, `turn_id`, `decision.candidate`, and `GatewayMutation.target_fingerprint`.
 - Gateway validation accepts a decision candidate whose `ticket_change_scope` differs from `GatewayMutation.ticket_change_scope` while scope remains live.
+- Runtime mode resolution treats an existing invalid mode snapshot as missing and falls back to `agent_primary` config.
 - Any new pending-summary event writes `details.approval`, `approval_id`, `preview_only`, or `current_mode: preview`.
 - Any focused test requires preserving durable `preview` as a config mode to pass.
 - Any focused test requires automatic `agent_primary` approvals to pass.
@@ -180,10 +187,10 @@ Expected before implementation: matches in the focused tests named by this plan.
 Run:
 
 ```bash
-rg -n "Autonomy Model|Fingerprints And Write Safety|preview|approval|ticket_change_scope|candidate identity|authoritative identity" plugins/turbo-mode/ticket/references/ticket-contract.md
+rg -n "Autonomy Model|Fingerprints And Write Safety|preview|approval|ticket_change_scope|expected_ticket_fingerprint|target fingerprint|candidate identity|authoritative identity" plugins/turbo-mode/ticket/references/ticket-contract.md
 ```
 
-Expected: `ticket-contract.md` already matches the target durable-mode boundary and does not require a source-contract patch for this slice. Record that `plugins/turbo-mode/ticket/references/ticket-contract.md:172-190` remains the governing contract section. If the search finds conflicting approval-envelope, preview, or scope-binding language, stop and patch the contract plus this plan before source implementation.
+Expected: `ticket-contract.md` already matches the target durable-mode and target-fingerprint identity boundary and does not require a source-contract patch for this slice. Record that `plugins/turbo-mode/ticket/references/ticket-contract.md:172-190` remains the governing contract section. If the search finds conflicting approval-envelope, preview, target-fingerprint, or scope-binding language, stop and patch the contract plus this plan before source implementation.
 
 ## Task 1: Remove Durable `preview` From Local Config
 
@@ -193,7 +200,13 @@ Expected: `ticket-contract.md` already matches the target durable-mode boundary 
 
 - [ ] **Step 1: Write the failing config tests**
 
-In `plugins/turbo-mode/ticket/tests/test_autonomy_config.py`, replace the mode parametrization and preview test with this code:
+In `plugins/turbo-mode/ticket/tests/test_autonomy_config.py`, add this import:
+
+```python
+import json
+```
+
+Replace the mode parametrization and preview tests with this code:
 
 ```python
 DURABLE_MODES = (
@@ -232,6 +245,43 @@ def test_preview_config_requires_setup(tmp_path: Path) -> None:
     assert result.state == LocalConfigState.SETUP_REQUIRED
     assert result.mode is None
     assert result.reason == "invalid_mode"
+
+
+def test_preview_mode_snapshot_requires_setup_instead_of_config_fallback(
+    tmp_path: Path,
+) -> None:
+    _declare_workspace_ignored(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    snapshot_path = (
+        tmp_path
+        / ".codex"
+        / "ticket-workspace"
+        / "mode-snapshots"
+        / f"{mode_snapshot_key(tmp_path, 'thread-1')}.json"
+    )
+    snapshot_path.parent.mkdir(parents=True)
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "schema": "codex.ticket.mode-snapshot.v1",
+                "project_root": str(tmp_path.resolve(strict=False)),
+                "thread_id": "thread-1",
+                "mode": "preview",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    resolved = resolve_thread_mode(tmp_path, "thread-1")
+
+    assert resolved.state == LocalConfigState.SETUP_REQUIRED
+    assert resolved.mode is None
+    assert resolved.source == "setup_required"
+    assert resolved.path == snapshot_path
+    assert resolved.reason == "invalid_snapshot_mode"
 ```
 
 - [ ] **Step 2: Run the config tests to verify failure**
@@ -239,10 +289,10 @@ def test_preview_config_requires_setup(tmp_path: Path) -> None:
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_config.py::test_preview_config_requires_setup -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_config.py::test_preview_config_requires_setup tests/test_autonomy_config.py::test_preview_mode_snapshot_requires_setup_instead_of_config_fallback -q
 ```
 
-Expected before implementation: FAIL because `preview` is still accepted as `AutomationMode.PREVIEW`.
+Expected before implementation: FAIL because `preview` is still accepted as `AutomationMode.PREVIEW`, and a valid `preview` snapshot currently resolves as a writable snapshot instead of setup-required state.
 
 - [ ] **Step 3: Remove `PREVIEW` from `AutomationMode`**
 
@@ -257,6 +307,48 @@ class AutomationMode(StrEnum):
 ```
 
 Do not add a replacement enum member for diagnostic dry-run. Diagnostic dry-run is not durable config.
+
+Then add an invalid-snapshot check before config fallback. Keep `read_mode_snapshot()` returning `ModeSnapshot | None` for callers that only need valid snapshots, but make `resolve_thread_mode()` distinguish a missing snapshot from a present invalid snapshot:
+
+```python
+def _mode_snapshot_error(project_root: Path, thread_id: str) -> tuple[Path, str] | None:
+    if not thread_id.strip():
+        return None
+    path = _snapshot_path(project_root, thread_id)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return path, "invalid_snapshot"
+    if not isinstance(data, dict):
+        return path, "invalid_snapshot"
+    if set(data) != {"schema", "project_root", "thread_id", "mode"}:
+        return path, "invalid_snapshot"
+    if data.get("schema") != MODE_SNAPSHOT_SCHEMA:
+        return path, "invalid_snapshot"
+    if data.get("project_root") != _normalized_project_root(project_root):
+        return path, "invalid_snapshot"
+    if data.get("thread_id") != thread_id:
+        return path, "invalid_snapshot"
+    if _parse_mode(data.get("mode")) is None:
+        return path, "invalid_snapshot_mode"
+    return None
+```
+
+In `resolve_thread_mode()`, call `_mode_snapshot_error()` after `read_mode_snapshot()` returns `None` and before `read_local_config()`. If it returns `(path, reason)`, return:
+
+```python
+        return ResolvedMode(
+            LocalConfigState.SETUP_REQUIRED,
+            None,
+            "setup_required",
+            path,
+            reason,
+        )
+```
+
+Do not silently delete, rewrite, or overwrite an invalid snapshot in this task. The setup/resume path already owns deliberate snapshot invalidation.
 
 - [ ] **Step 4: Run focused config tests**
 
@@ -500,9 +592,37 @@ def test_agent_primary_decision_uses_mutation_id_without_approval_envelope() -> 
     assert decision.reason == "authorized"
 ```
 
-Change `test_ticket_change_scope_binds_mutation_identity_and_approval_fingerprint` to:
+Add target-fingerprint identity coverage, and change `test_ticket_change_scope_binds_mutation_identity_and_approval_fingerprint` to:
 
 ```python
+def test_target_fingerprint_binds_mutation_identity_for_non_create() -> None:
+    candidate = _candidate("update")
+    first = _decisions(
+        candidate,
+        ticket_state_fingerprints={candidate.ticket_id: "ticket-state-a"},
+    )[0]
+    second = _decisions(
+        candidate,
+        ticket_state_fingerprints={candidate.ticket_id: "ticket-state-b"},
+    )[0]
+
+    assert first.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY
+    assert second.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY
+    assert first.mutation_id != second.mutation_id
+
+
+def test_non_create_candidate_requires_target_fingerprint_for_identity() -> None:
+    decision = _decisions(
+        _candidate("update"),
+        ticket_state_fingerprints={},
+    )[0]
+
+    assert decision.kind == RuntimeDecisionKind.REQUIRE_USER_DISCUSSION
+    assert decision.reason == "target_fingerprint_required"
+    assert decision.mutation_id is None
+    assert decision.approval is None
+
+
 def test_ticket_change_scope_still_binds_mutation_identity_until_scope_slice() -> None:
     current_branch = _decisions(
         _candidate("update", ticket_change_scope="current_branch"),
@@ -523,10 +643,10 @@ The renamed test is intentionally temporary: it documents that `ticket_change_sc
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_runtime.py::test_agent_primary_decision_uses_mutation_id_without_approval_envelope -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_runtime.py::test_agent_primary_decision_uses_mutation_id_without_approval_envelope tests/test_autonomy_runtime.py::test_target_fingerprint_binds_mutation_identity_for_non_create tests/test_autonomy_runtime.py::test_non_create_candidate_requires_target_fingerprint_for_identity -q
 ```
 
-Expected before implementation: FAIL because evaluator still returns an approval envelope.
+Expected before implementation: FAIL because evaluator still returns an approval envelope and mutation IDs do not yet bind the target fingerprint.
 
 - [ ] **Step 3: Remove approval creation from runtime evaluator**
 
@@ -539,15 +659,85 @@ from scripts.ticket_autonomy_ids import (
 )
 ```
 
-Delete the `_ticket_state_fingerprint()` function and `_make_approval()` function. They are automatic approval machinery in this file.
+Delete `_make_approval()`. Replace `_ticket_state_fingerprint()` with a target-fingerprint helper that only reads Ticket-owned source context; do not fall back to `candidate.proposed_change["ticket_state_fingerprint"]` because callers do not supply authoritative identity values:
+
+```python
+def _target_fingerprint_for_candidate(
+    candidate: CandidateMutation,
+    source_context: Mapping[str, object],
+) -> str | None:
+    if candidate.action == "create":
+        return None
+    fingerprints = source_context.get("ticket_state_fingerprints")
+    if isinstance(fingerprints, Mapping) and isinstance(candidate.ticket_id, str):
+        value = fingerprints.get(candidate.ticket_id)
+        if isinstance(value, str) and value:
+            return value
+    return None
+```
+
+Change `_candidate_payload()` and `_mutation_id_for_candidate()` so mutation identity includes the target fingerprint:
+
+```python
+def _candidate_payload(
+    candidate: CandidateMutation,
+    *,
+    target_fingerprint: str | None,
+) -> dict[str, object]:
+    return {
+        "ticket_id": candidate.ticket_id,
+        "action": candidate.action,
+        "proposed_change": dict(candidate.proposed_change),
+        "ticket_change_scope": candidate.ticket_change_scope,
+        "target_fingerprint": target_fingerprint,
+    }
+
+
+def _mutation_id_for_candidate(
+    *,
+    candidate: CandidateMutation,
+    thread_id: str,
+    turn_id: str,
+    target_fingerprint: str | None,
+) -> tuple[str, str, str]:
+    mutation_fingerprint = sha256_fingerprint(
+        _candidate_payload(candidate, target_fingerprint=target_fingerprint)
+    )
+    evidence_fingerprint = sha256_fingerprint(_evidence_payload(candidate))
+    mutation_id = make_mutation_id(
+        schema="codex.ticket.mutation.v1",
+        thread_id=thread_id,
+        turn_id=turn_id,
+        action=candidate.action,
+        ticket_id=candidate.ticket_id,
+        mutation_fingerprint=mutation_fingerprint,
+        evidence_fingerprint=evidence_fingerprint,
+    )
+    return mutation_id, mutation_fingerprint, evidence_fingerprint
+```
 
 In `evaluate_autonomy_intent()`, replace the autonomous-apply tail with:
 
 ```python
+        target_fingerprint = _target_fingerprint_for_candidate(candidate, intent.source_context)
+        if candidate.action != "create" and target_fingerprint is None:
+            decisions.append(
+                _decision(
+                    candidate,
+                    RuntimeDecisionKind.REQUIRE_USER_DISCUSSION,
+                    reason="target_fingerprint_required",
+                    pending_summary_status="discussion_required",
+                    mutation_id=None,
+                    approval=None,
+                    engine_dispatch=dispatch,
+                )
+            )
+            continue
         mutation_id, _mutation_fingerprint, _evidence_fingerprint = _mutation_id_for_candidate(
             candidate=candidate,
             thread_id=thread_id,
             turn_id=turn_id,
+            target_fingerprint=target_fingerprint,
         )
         applied_counts[fanout_key] += 1
         decisions.append(
@@ -672,6 +862,15 @@ def test_gateway_rejects_non_autonomous_or_mismatched_decisions(
         decision=decision,
         pending_summary=store,
     )
+    mismatched_target_fingerprint = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=replace(mutation, target_fingerprint="different-ticket-state"),
+        decision=decision,
+        pending_summary=store,
+    )
     forged_mutation_id = apply_autonomous_mutation(
         project_root=project_root,
         thread_id="thread-1",
@@ -690,6 +889,8 @@ def test_gateway_rejects_non_autonomous_or_mismatched_decisions(
     assert "mutation_fingerprint_mismatch" in mismatched_fields.message
     assert mismatched_scope.error_code == "gateway_required"
     assert "ticket_change_scope_mismatch" in mismatched_scope.message
+    assert mismatched_target_fingerprint.error_code == "gateway_required"
+    assert "mutation_id_mismatch" in mismatched_target_fingerprint.message
     assert forged_mutation_id.error_code == "gateway_required"
     assert "mutation_id_mismatch" in forged_mutation_id.message
     assert "priority: high" in ticket_path.read_text(encoding="utf-8")
@@ -753,11 +954,14 @@ def _decision_error(
         return "ticket_change_scope_mismatch"
     if dict(decision.candidate.proposed_change) != dict(mutation.fields):
         return "mutation_fingerprint_mismatch"
+    if mutation.action != "create" and mutation.target_fingerprint is None:
+        return "target_fingerprint_required"
     expected_mutation_id, _mutation_fingerprint, _evidence_fingerprint = (
         _mutation_id_for_candidate(
             candidate=decision.candidate,
             thread_id=thread_id,
             turn_id=turn_id,
+            target_fingerprint=mutation.target_fingerprint,
         )
     )
     if decision.mutation_id != expected_mutation_id:
@@ -1211,6 +1415,7 @@ The implementation closeout message must include these exact proof-boundary fact
 Remaining product drift: `ticket_change_scope` still exists in candidate identity, gateway fingerprints, autonomous apply, and commit-disposition behavior; it is intentionally deferred to a separate source slice.
 Temporary safety binding: while `ticket_change_scope` remains live, gateway validation rejects mismatches between `decision.candidate.ticket_change_scope` and `GatewayMutation.ticket_change_scope`.
 Remaining product drift: diagnostic dry-run/preview is not implemented by this slice; this slice only removes durable/product `preview` mode and preview-only runtime states.
+Remaining product drift: pending-summary/private operation-log collapse is deferred; legacy `approval_consumed` recovery input and commit-disposition details may remain only as classified drift until a separate operation-log slice removes them.
 ```
 
 Do not claim full ADR 0006 runtime compliance from this slice.
@@ -1237,7 +1442,9 @@ Spec coverage:
 - Pending-summary no longer requires automatic approval details or accepts new preview decisions in Task 5.
 - Apply-turn integration expectations are updated in Task 6 so full-suite verification does not fail late on removed approval/preview behavior.
 - Existing legacy `approval_consumed` recovery input is explicitly retained only until the later operation-log collapse plan, preventing this slice from silently widening into full pending-summary redesign.
-- Closeout language explicitly names remaining `ticket_change_scope` and diagnostic-preview drift instead of claiming full ADR compliance.
+- Closeout language explicitly names remaining `ticket_change_scope`, diagnostic-preview, and private operation-log drift instead of claiming full ADR compliance.
+- Mutation identity includes the Ticket-derived target fingerprint for non-create writes after Task 3, and gateway validation recomputes that identity with `GatewayMutation.target_fingerprint` after Task 4.
+- Invalid durable-mode snapshots fail closed instead of falling back to writable config.
 
 Placeholder scan:
 
