@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make ADR 0006 and the May 30 control doc the visible authority for Ticket docs/tests without claiming current source, ticket files, installed cache, or live runtime already enforce the target model.
+**Goal:** Make ADR 0006 and the May 30 control doc the visible authority for current-facing Ticket docs and docs/static assertions without claiming current source, source-runtime tests, ticket files, installed cache, or live runtime already enforce the target model.
 
-**Architecture:** This is a docs/tests authority-boundary patch. Target architecture, current source compatibility, cutover inventory, and installed-runtime proof stay separate. Old behavior may be mentioned only as narrow current-source compatibility, cutover input, or historical changelog context.
+**Architecture:** This is a current-facing docs plus docs/static test authority-boundary patch. Target architecture, current source compatibility, source-runtime behavior tests, cutover inventory, and installed-runtime proof stay separate. Old behavior may be mentioned only as narrow current-source compatibility, cutover input, or historical changelog context.
 
 **Tech Stack:** Markdown docs, Codex `SKILL.md` instruction files, Python `pytest` static docs tests.
 
@@ -16,12 +16,22 @@ ADR 0006 is accepted architecture authority for the Ticket runtime-first
 state-kernel rebaseline. The May 30 control doc is the implementation and
 cutover control surface.
 
-This slice is docs/tests only. It does not satisfy the ADR/control read-only
-`docs/tickets/` cutover inventory gate, normalize ticket files, refresh the
-installed plugin cache, or prove live runtime behavior.
+This slice is docs/static-tests only. It does not satisfy the ADR/control
+read-only `docs/tickets/` cutover inventory gate, normalize ticket files,
+refresh the installed plugin cache, change runtime source behavior, rewrite
+source-runtime expectations, or prove live runtime behavior.
 
 The implementation must prevent old architecture from surviving by relabeling.
 Compatibility sections may not become a second contract for the old pipeline.
+
+Runtime/source tests are out of implementation scope for this slice except as
+inspection evidence. Tests such as `test_autonomy_runtime.py` and
+`test_turn_batch.py` may still assert current-source behavior for approval
+objects, durable `preview` mode, pending-summary approval, commit disposition,
+and `ticket_change_scope`. Do not rewrite those expectations in this slice.
+When docs/static tests mention those surfaces, they must identify them as
+current-source compatibility until the source implementation slice changes the
+runtime.
 
 ## Surface Matrix
 
@@ -41,6 +51,10 @@ Compatibility sections may not become a second contract for the old pipeline.
 | `plugins/turbo-mode/ticket/.codex-plugin/plugin.json` | Inspect interface text; patch only if it advertises old architecture as current product behavior. |
 | `plugins/turbo-mode/ticket/tests/test_docs_contract.py` | Replace old-positive docs assertions with authority-boundary tests. |
 | `plugins/turbo-mode/ticket/tests/test_static_autonomy_boundaries.py` | Replace old-positive autonomy docs assertions with authority-boundary tests. |
+| `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py` | Inspect only; leave current-source behavior assertions unchanged in this slice. |
+| `plugins/turbo-mode/ticket/tests/test_turn_batch.py` | Inspect only; leave pending-summary/runtime validation assertions unchanged in this slice. |
+| `plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py` | Inspect only if needed to label durable `preview` as current-source compatibility; do not edit. |
+| `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py` | Inspect only if needed to label pending-summary approval as current-source compatibility; do not edit. |
 
 ## Acceptance Rules
 
@@ -62,9 +76,28 @@ Compatibility sections may not become a second contract for the old pipeline.
   - Banned as target: persistent `preview` mode or durable config.
   - Permitted: diagnostic dry-run/preview and transitional confirmation UX,
     clearly labeled.
+- Target candidate mutation sections must expose the control-doc shape:
+  `action`, `ticket_id`, `target.fields`, `target.sections`,
+  `proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`.
+  They must state that non-create writes require an expected ticket fingerprint,
+  proposed changes may contain only named target fields or sections, Ticket
+  computes candidate identity from canonical candidate content plus live target
+  fingerprint, and callers do not supply authoritative identity values.
+- Target result-envelope sections must expose only the control-doc mechanical
+  states: `ok`, `blocked`, `needs_discussion`, `invalid_state`, and
+  `no_change`. They must not preserve old semantic response taxonomies as
+  target authority.
+- Target `Change History` sections must replace controlled labels with the
+  control-doc grammar:
+  `- <timestamp> | <actor> | <reason>` and optional
+  `Corrects: <reference>.` Actor is a source value such as `codex`,
+  `user-approved`, or `migration`; it is not a workflow label and must not
+  encode action type.
 - Four-stage pipeline, prepare/execute wrappers, machine-state taxonomy, commit
   disposition, `ticket_change_scope`, controlled Change History labels, and old
-  error-code taxonomy must not appear as current product architecture.
+  error-code taxonomy must not appear as current product architecture. If they
+  remain documented at all, the section must be named as current-source
+  compatibility and must point to ADR 0006 plus the May 30 control doc.
 - The closeout must explicitly say this slice did not perform the read-only
   `docs/tickets/` cutover inventory gate.
 
@@ -76,6 +109,8 @@ Compatibility sections may not become a second contract for the old pipeline.
 
 - Modify: `plugins/turbo-mode/ticket/tests/test_docs_contract.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_static_autonomy_boundaries.py`
+- Inspect only: `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py`
+- Inspect only: `plugins/turbo-mode/ticket/tests/test_turn_batch.py`
 
 - [ ] Replace the three mutation-surface tests with authority-boundary tests:
   `test_readme_states_supported_high_level_mutation_surfaces`,
@@ -103,9 +138,22 @@ Compatibility sections may not become a second contract for the old pipeline.
   `test_static_autonomy_boundaries.py::test_current_facing_docs_pin_runtime_first_modes_without_legacy_yaml_guidance`
   so durable modes are exactly `agent_primary` and `discussion_only`, with
   `preview` allowed only in diagnostic/transitional sections.
-- [ ] Inspect pending-summary fixture assertions that mention `approval`. Keep
-  only tests that protect source compatibility or the permitted
-  `discussion_only` user-approval fact tied to candidate identity.
+- [ ] Add docs/static assertions for the target candidate mutation contract:
+  candidate fields, exact target field/section boundary, fingerprint
+  requirement for non-create writes, candidate identity ownership, and unknown
+  field rejection.
+- [ ] Add docs/static assertions for the target result envelope states:
+  `ok`, `blocked`, `needs_discussion`, `invalid_state`, and `no_change`.
+- [ ] Add docs/static assertions for the target `Change History` grammar:
+  timestamp, actor/source, reason, optional `Corrects:`, no controlled semantic
+  labels as post-cutover grammar.
+- [ ] Inspect pending-summary fixture assertions that mention `approval` only to
+  understand current-source compatibility. Do not edit
+  `test_autonomy_runtime.py`, `test_turn_batch.py`, or other runtime/source
+  behavior tests in this slice except to add comments only if later explicitly
+  requested. The current approval-object, preview-mode, commit-disposition,
+  pending-summary, and `ticket_change_scope` assertions remain source
+  compatibility evidence until runtime implementation changes them.
 
 Suggested helper structure:
 
@@ -147,6 +195,21 @@ in compatibility/cutover/historical sections only when the section points to ADR
 0006 and the control doc, and does not make old shapes normative target
 authority.
 
+Suggested target section names for docs/static tests:
+
+- `## Authority Boundary`
+- `## Target Post-Cutover Ticket Shape`
+- `## Target Candidate Mutation Contract`
+- `## Target Result Envelope`
+- `## Target Change History Grammar`
+- `## Current Source Compatibility`
+- `## Legacy Cutover Input`
+- `## Historical Changelog`
+
+Tests should look inside the matching target sections for target requirements
+and inside compatibility/cutover/historical sections for allowed old terms. Do
+not test by banning words globally across whole files.
+
 ### Task 2: Patch core docs
 
 **Files:**
@@ -164,6 +227,19 @@ authority.
   source-facing reference subordinate to ADR 0006/control doc" or equivalent.
 - [ ] Make target post-cutover schema primary, qualified as architecture/cutover
   authority rather than current runtime enforcement.
+- [ ] Add a target candidate mutation contract section that names `action`,
+  `ticket_id`, `target.fields`, `target.sections`, `proposed_change`,
+  `expected_ticket_fingerprint`, and `evidence_summary`; states that non-create
+  writes require an expected fingerprint; and states that Ticket computes
+  candidate identity from canonical candidate content and the live target
+  fingerprint.
+- [ ] Add a target result envelope section with only `ok`, `blocked`,
+  `needs_discussion`, `invalid_state`, and `no_change` as mechanical result
+  states.
+- [ ] Add a target `Change History` grammar section with
+  `- <timestamp> | <actor> | <reason>` and optional
+  `Corrects: <reference>.` Make clear that actor/source is not a workflow
+  action label.
 - [ ] Move old fenced-YAML schema, old statuses/priorities, slug filenames,
   archived closed lifecycle, and old metadata fields into narrow
   compatibility/cutover notes.
@@ -230,11 +306,16 @@ authority.
 - [ ] Run `git diff --check`.
 - [ ] Run a fence checker that fails on unbalanced fences for every changed
   Markdown file.
+- [ ] Review `git diff --stat` and confirm no runtime source files,
+  source-runtime tests, `docs/tickets/`, installed cache files, or live runtime
+  state were changed.
 - [ ] Report whether ignored residue remains, especially
   `plugins/turbo-mode/ticket/.venv/` and
   `plugins/turbo-mode/ticket/.pytest_cache/`.
 - [ ] State explicitly in closeout that this docs/tests slice did not perform the
-  read-only `docs/tickets/` cutover inventory gate.
+  read-only `docs/tickets/` cutover inventory gate, did not normalize tickets,
+  did not change runtime/source behavior tests, and did not prove installed or
+  live runtime behavior.
 
 ## Verification Commands
 
@@ -264,6 +345,7 @@ Adjust the `git add` set to include only files actually changed.
 ## Assumptions
 
 - No runtime source implementation in this slice.
+- No source-runtime test rebaseline in this slice.
 - No mutation of `docs/tickets/`.
 - No installed cache refresh or live runtime inventory proof.
 - Current source compatibility can remain documented only where needed to keep
