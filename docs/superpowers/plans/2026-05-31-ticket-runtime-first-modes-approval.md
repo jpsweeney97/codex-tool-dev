@@ -4,7 +4,7 @@
 
 **Goal:** Remove durable `preview` mode and automatic `agent_primary` approval envelopes from Ticket source while keeping deterministic gateway write safety.
 
-**Architecture:** This is a narrow modes/approval source slice selected from the Ticket source-runtime drift ledger. It is not the ledger's complete recommended first runtime cut because end-to-end `ticket_change_scope` removal is intentionally deferred. While scope remains live, this slice must preserve its existing write-safety binding. Mutation identity must also include the Ticket-derived expected target fingerprint for non-create writes; removing approval envelopes cannot drop that target-state binding. A missing target fingerprint is a deterministic write-authority block, not a user-discussion state: runtime must report `ticket_update_blocked`, apply other candidates whose write authority is valid, and append only a non-mutation `autonomy_health` event for the blocked candidate. Promote mutation identity calculation to a neutral helper in this slice so runtime decision construction and gateway validation share the same deterministic identity function without private runtime imports. This slice changes the local mode model, runtime evaluator, pending-summary validation, gateway validation, apply-turn projection, and integration expectations together so one producer is not removed while consumers still require it. Runtime approval removal and gateway decision validation are one atomic behavior boundary; do not commit a checkpoint where runtime no longer emits approvals while gateway still requires them. Diagnostic dry-run remains a future explicit maintenance affordance; this slice removes durable/product `preview` but does not yet implement the target diagnostic dry-run path.
+**Architecture:** This is a narrow modes/approval source slice selected from the Ticket source-runtime drift ledger. It is not the ledger's complete recommended first runtime cut because end-to-end `ticket_change_scope` removal is intentionally deferred. While scope remains live, this slice must preserve its existing write-safety binding. Mutation identity must also include the Ticket-derived expected target fingerprint for non-create writes; removing approval envelopes cannot drop that target-state binding. A missing target fingerprint is a deterministic write-authority block, not a user-discussion state: runtime must report `ticket_update_blocked`, apply other candidates whose write authority is valid, and append only a non-mutation `autonomy_health` event for the blocked candidate. That health event is temporary-but-required scaffolding: it prevents silent repeat failures until repeat-driven maintenance-ticket creation exists, but it is not the target long-term operation log. Promote mutation identity calculation to a neutral helper in this slice so runtime decision construction and gateway validation share the same deterministic identity function without private runtime imports. This slice changes the local mode model, runtime evaluator, pending-summary validation, gateway validation, apply-turn projection, and integration expectations together so one producer is not removed while consumers still require it. Runtime approval removal and gateway decision validation are one atomic behavior boundary; do not commit a checkpoint where runtime no longer emits approvals while gateway still requires them. Diagnostic dry-run remains a future explicit maintenance affordance; this slice removes durable/product `preview` but does not yet implement the target diagnostic dry-run path.
 
 **Tech Stack:** Python >=3.11, pytest, dataclasses, strict JSON, append-only JSONL, existing Ticket scripts, bytecode-safe `uv run` verification.
 
@@ -19,7 +19,7 @@ Out of scope for this plan:
 - End-to-end `ticket_change_scope` removal from candidate identity, discovery, gateway fingerprints, autonomous apply, and commit disposition.
 - Prepare/execute wrapper demotion in `ticket_capture.py` and `ticket_update.py`.
 - Full pending-summary taxonomy collapse beyond removing new `preview_only` and automatic-approval requirements.
-- Repeat-driven maintenance-ticket creation for recurring autonomy health blocks. This slice creates the non-mutation health signal that a later maintenance-ticket slice can consume; it does not auto-create the follow-up ticket.
+- Repeat-driven maintenance-ticket creation for recurring autonomy health blocks. This slice creates temporary-but-required non-mutation health scaffolding that a later maintenance-ticket slice can consume; it does not auto-create the follow-up ticket.
 - Persisted `blocks` removal and reverse-blocker derived views.
 - Installed cache refresh, `hooks/list`, `skills/list`, `plugin/read`, or other runtime inventory.
 
@@ -32,7 +32,7 @@ Still in scope for this slice:
 - Gateway validation must reject mismatches between `decision.candidate.ticket_change_scope` and `GatewayMutation.ticket_change_scope` while scope remains live. Removing approval envelopes cannot also remove that binding.
 - Mutation identity must bind the expected target fingerprint for non-create writes. Runtime decision construction may derive that fingerprint from Ticket-owned source context, and gateway validation must recompute identity with `GatewayMutation.target_fingerprint`.
 - Missing Ticket-derived target fingerprints must produce a turn-local `ticket_update_blocked` result for that candidate, not `discussion_required`. The apply-turn path must still apply other valid candidates in the same batch and report a partial result when both applied and blocked candidates exist.
-- Blocked target-fingerprint cases must append a narrow `autonomy_health` event with `status: "ticket_update_blocked"` for repeat detection. The event must be keyed by thread, turn, ticket id, action, and reason, and must not carry proposed fields, mutation IDs, gateway fingerprints, or approval-shaped data.
+- Blocked target-fingerprint cases must append a narrow `autonomy_health` event with `status: "ticket_update_blocked"` for repeat detection. The event must be keyed by thread, turn, ticket id, action, and reason, and must not carry proposed fields, mutation IDs, gateway fingerprints, or approval-shaped data. Treat this event as temporary-but-required scaffolding, not the durable product state once maintenance tickets can represent recurring failures.
 - Existing mode snapshots that contain removed durable modes such as `preview` must fail closed with setup required. They must not be treated as missing snapshots and replaced from `agent_primary` config.
 
 Known remaining product drift after this slice:
@@ -40,7 +40,7 @@ Known remaining product drift after this slice:
 - `ticket_change_scope` remains live and still influences commit-disposition behavior. Gateway validation must temporarily bind candidate scope to gateway mutation scope. The closeout must name this as remaining drift, not as target compliance.
 - Diagnostic dry-run/preview remains unavailable as a target affordance. The closeout must name this as temporary non-compliance with the ADR/control diagnostic-preview requirement, not as a completed preview implementation.
 - The full target candidate mutation contract remains drift. This slice only preserves and adds the narrower target-fingerprint identity binding; it does not make live `CandidateMutation` match the full `target.fields`, `target.sections`, `expected_ticket_fingerprint`, and `evidence_summary` contract shape.
-- Repeat-to-maintenance-ticket escalation remains drift. This slice emits the health signal needed for that follow-up but deliberately does not add a new autonomous create trigger.
+- Repeat-to-maintenance-ticket escalation remains drift. This slice emits the temporary health signal needed for that follow-up but deliberately does not add a new autonomous create trigger. After that follow-up exists, the maintenance ticket should be the durable product state, not an accumulating private health stream.
 
 ## Authority And Current Source Facts
 
@@ -112,7 +112,7 @@ Modify or add these files only in this plan:
   - Update correction helper source context so correction decisions include the Ticket-derived target fingerprint.
 - `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py`
   - Owns pending-summary event validation and recovery projection.
-  - Remove new `preview_only` taxonomy and automatic approval requirement. Add a non-mutation `autonomy_health` / `ticket_update_blocked` event for turn-local write-authority blocks. Keep `approval_consumed` readable only as historical recovery input until the later operation-log collapse plan removes it deliberately.
+  - Remove new `preview_only` taxonomy and automatic approval requirement. Add a non-mutation `autonomy_health` / `ticket_update_blocked` event for turn-local write-authority blocks, explicitly as temporary-but-required scaffolding. Keep `approval_consumed` readable only as historical recovery input until the later operation-log collapse plan removes it deliberately.
 - `plugins/turbo-mode/ticket/tests/test_turn_batch.py`
   - Covers pending-summary schema and validation.
   - Rewrite valid attempt fixtures, neutralize approval-shaped helper defaults, add health-event validation, and update preview decision tests.
@@ -1524,7 +1524,7 @@ In `validate_pending_summary_event()` or a small helper it calls, add health-eve
             return _invalid(f"autonomy_health cannot carry {blocked[0]}")
 ```
 
-This validation is intentionally narrow. It gives later repeat detection a durable signal keyed by thread, turn, ticket id, action, and reason without treating the blocked candidate as a write attempt.
+This validation is intentionally narrow. It gives later repeat detection a durable-enough temporary signal keyed by thread, turn, ticket id, action, and reason without treating the blocked candidate as a write attempt. Do not describe `autonomy_health` as the target long-term operation log; once repeat-driven maintenance-ticket creation exists, the maintenance ticket is the durable project state and this private health stream should collapse or disappear.
 
 Do not remove `approval_consumed` from `_EVENT_STATUSES`, `required_by_status`, `derive_mutation_state()`, or `project_mutation_recovery()` in this task. Those branches are read-only historical recovery support for already-written private logs and remain temporary drift until the later operation-log collapse plan.
 
@@ -1787,7 +1787,7 @@ Expected after implementation:
 - No matches for `AutomationMode.PREVIEW`, `RuntimeDecisionKind.PREVIEW_ONLY`, `preview_only`, `details.approval`, `approval_required`, `make_approval`, or `codex.ticket.approval` outside `ticket_autonomy_ids.py`.
 - `approval_consumed` may still match only in `ticket_turn_batch.py` historical recovery validation and projection.
 - `target_fingerprint_required` matches must use `RuntimeDecisionKind.TICKET_UPDATE_BLOCKED`, `status: "ticket_update_blocked"`, or gateway policy-blocked validation. No match may classify missing target fingerprint as `discussion_required` or emit a discussion question.
-- `autonomy_health` matches must write or validate only `ticket_update_blocked` events and must not carry mutation IDs, proposed fields, gateway fingerprints, or approval data.
+- `autonomy_health` matches must write or validate only temporary `ticket_update_blocked` scaffolding events and must not carry mutation IDs, proposed fields, gateway fingerprints, or approval data.
 
 - [ ] **Step 11: Run focused apply-turn, integration, recovery, and gateway suites**
 
@@ -1827,7 +1827,7 @@ Expected: every match is classified before closeout. Allowed matches are only:
 - Historical recovery fixtures or validators that intentionally keep reading `approval_consumed` / `approval_id` for already-written private logs until the later operation-log collapse plan.
 - Defensive rejection checks that read `decision.approval` only to reject stale or forged approval data before accepting a write, such as `if decision.approval is not None: return "approval_unexpected"`.
 - Runtime and apply-turn branches that classify `target_fingerprint_required` as `ticket_update_blocked`, append `autonomy_health`, and preserve partial apply for other valid candidates.
-- Pending-summary validators and fixtures for `autonomy_health` / `ticket_update_blocked` that carry no mutation ID, proposed fields, gateway fingerprints, or approval data.
+- Pending-summary validators and fixtures for temporary `autonomy_health` / `ticket_update_blocked` scaffolding that carry no mutation ID, proposed fields, gateway fingerprints, or approval data.
 - `make_approval_id` and `codex.ticket.approval.v1` definitions/tests if no production caller uses them and the helper is being retained for the later explicit `discussion_only` approval fact.
 
 Any product/runtime support for durable `preview`, new `preview_only` events, automatic `agent_primary` approvals, approval-shaped event reasons or docstrings such as "approved autonomous" or "approved ticket update", `decision.approval` reads that authorize, consume, serialize, or derive fields from approval objects in gateway/runtime write paths, `details.approval` requirements, target-fingerprint blocks classified as discussion, or `autonomy_health` events that look like mutation attempts is a failure. Record the allowed-match list in the implementation closeout. Retain `make_approval_id` as explicit deferred `discussion_only` approval scaffolding only if no production caller uses it. Do not delete it in this slice.
@@ -1901,7 +1901,8 @@ Remaining product drift: diagnostic dry-run/preview is not implemented by this s
 Breaking-change posture: this source slice does not preserve removed Ticket behavior for compatibility; retained legacy private-log reads are historical recovery support only and remain drift until the operation-log collapse slice.
 Remaining product drift: pending-summary/private operation-log collapse is deferred; historical `approval_consumed` recovery input and commit-disposition details may remain only as classified drift until a separate operation-log slice removes them.
 Implemented safety boundary: missing Ticket-derived target fingerprints are turn-local `ticket_update_blocked` health events, not user-discussion states or mutation attempts; other valid candidates in the same turn may still apply.
-Follow-up required: repeat-driven maintenance-ticket creation for recurring `ticket_update_blocked` health events is deferred to a separate source slice; this slice only creates the non-mutation signal.
+Temporary scaffolding: `autonomy_health` / `ticket_update_blocked` is required in this slice to prevent silent repeat failures, but it is not the target long-term operation log.
+Follow-up required: repeat-driven maintenance-ticket creation for recurring `ticket_update_blocked` health events is deferred to a separate source slice; after that exists, the maintenance ticket should be the durable product state, not an accumulating private health stream.
 Follow-up required: the closeout must name deletion of retained historical approval recovery support as a follow-up for the operation-log collapse slice; do not let retained `approval_consumed` readers become a supported product surface.
 Deferred approval scaffolding: `make_approval_id` may remain only as unused explicit `discussion_only` approval scaffolding with no production callers.
 ```
@@ -2022,7 +2023,7 @@ Spec coverage:
 - `ticket_mutation_identity.py` is calculation-only, independent of runtime/gateway dataclasses, and covered by focused helper tests.
 - Runtime and gateway separately reject non-create writes without target fingerprints; runtime classifies the per-candidate miss as `TICKET_UPDATE_BLOCKED`, not `REQUIRE_USER_DISCUSSION`, and the identity helper hashes missing target fingerprints but does not make that policy decision.
 - Apply-turn handles `TICKET_UPDATE_BLOCKED` with a non-mutation `autonomy_health` event, no mutation attempt, no discussion question, and partial-apply summary behavior when other candidates are valid.
-- Pending-summary validates `autonomy_health` / `ticket_update_blocked` as a narrow health signal with no mutation ID, proposed fields, gateway fingerprints, or approval data.
+- Pending-summary validates `autonomy_health` / `ticket_update_blocked` as temporary-but-required scaffolding with no mutation ID, proposed fields, gateway fingerprints, or approval data.
 - Gateway validation recomputes mutation identity through `make_candidate_mutation_identity()` and does not import private runtime identity helpers.
 - Gateway approval validation and new `approval_consumed` writes are removed in Task 4.
 - Pending-summary no longer requires automatic approval details or accepts new preview decisions in Task 5.
@@ -2031,7 +2032,7 @@ Spec coverage:
 - Historical `approval_consumed` recovery input is explicitly retained only until the later operation-log collapse plan, preventing this slice from silently widening into full pending-summary redesign or compatibility support.
 - At least one approval-free `ticket_written` recovery test is updated in `test_autonomy_recovery.py`.
 - Closeout language explicitly names remaining `ticket_change_scope`, target candidate-shape, diagnostic-preview, and private operation-log drift instead of claiming full ADR compliance.
-- Closeout language includes the breaking-change posture, the deferred repeat-to-maintenance-ticket follow-up, and the deferred `make_approval_id` scaffolding boundary.
+- Closeout language includes the breaking-change posture, the temporary `autonomy_health` scaffolding boundary, the deferred repeat-to-maintenance-ticket follow-up, and the deferred `make_approval_id` scaffolding boundary.
 - Mutation identity includes the Ticket-derived target fingerprint for non-create writes after Task 3, and gateway validation recomputes that identity with `GatewayMutation.target_fingerprint` after Task 4.
 - Invalid durable-mode snapshots fail closed instead of falling back to writable config.
 
