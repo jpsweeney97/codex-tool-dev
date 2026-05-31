@@ -39,8 +39,8 @@ Active docs and skills should not preserve `ticket_capture.py prepare/execute`,
 `ticket_update.py prepare/execute`, current `capture.*`/focused-update payloads,
 old priority/status vocabularies, preview-first mutation UX, or old response
 taxonomies as usable operating guidance. If target mutation cannot run until the
-runtime/source rebaseline lands, say mutation is temporarily unavailable and
-point to ADR 0006 plus the May 30 control doc.
+runtime/source rebaseline lands, default active mutation guidance to
+"temporarily unavailable" and point to ADR 0006 plus the May 30 control doc.
 
 ## Surface Matrix
 
@@ -48,16 +48,16 @@ point to ADR 0006 plus the May 30 control doc.
 |---|---|
 | `plugins/turbo-mode/ticket/references/ticket-contract.md` | Add authority boundary; make target post-cutover schema primary; move old schema into deprecated source-drift, legacy cutover, or historical notes only. |
 | `plugins/turbo-mode/ticket/README.md` | Add authority boundary; stop presenting fenced YAML, preview mode, three mutation surfaces, and four-stage pipeline as current product authority. |
-| `plugins/turbo-mode/ticket/HANDBOOK.md` | Add authority boundary; remove prepare/execute runbook guidance and pipeline diagrams as product architecture. Old commands may appear only as deprecated source drift, legacy cutover input, or maintenance/diagnostic evidence. |
-| `plugins/turbo-mode/ticket/skills/capture-ticket/SKILL.md` | Do not preserve prepare/execute capture guidance. Describe the target candidate mutation contract, or state that create mutation is temporarily unavailable until source/runtime rebaseline lands. |
+| `plugins/turbo-mode/ticket/HANDBOOK.md` | Add authority boundary; remove prepare/execute runbook guidance and pipeline diagrams as product architecture. Old capture/update commands may appear only as deprecated source drift or legacy cutover input, not maintenance/diagnostic runbook guidance. |
+| `plugins/turbo-mode/ticket/skills/capture-ticket/SKILL.md` | Do not preserve prepare/execute capture guidance. State that create mutation is temporarily unavailable unless this slice identifies a live source target-candidate entrypoint. |
 | `plugins/turbo-mode/ticket/skills/read-ticket/SKILL.md` | Keep read/query guidance only where it does not bless old target schema. Treat filters such as `blocked`, `critical`, and `medium` as deprecated source drift or legacy cutover input, not target vocabulary. |
-| `plugins/turbo-mode/ticket/skills/update-ticket/SKILL.md` | Do not preserve prepare/execute update guidance. Describe target candidate mutation writes, or state that update mutation is temporarily unavailable until source/runtime rebaseline lands. |
+| `plugins/turbo-mode/ticket/skills/update-ticket/SKILL.md` | Do not preserve prepare/execute update guidance. State that update mutation is temporarily unavailable unless this slice identifies a live source target-candidate entrypoint. |
 | `plugins/turbo-mode/ticket/skills/ticket-backlog-triage/SKILL.md` | Inspect and patch stale/blocked-chain wording only where it implies persisted `blocked` status or `blocks` reverse edges as target schema. |
 | `plugins/turbo-mode/ticket/skills/ticket-doctor/SKILL.md` | Inspect and patch preview/audit/activation wording only where it implies current target authority. |
 | `plugins/turbo-mode/ticket/PRIVACY.md` | Inspect; patch only current-facing contradictions. |
 | `plugins/turbo-mode/ticket/TERMS.md` | Inspect; patch only current-facing contradictions. |
 | `plugins/turbo-mode/ticket/CHANGELOG.md` | Fix current/unreleased skill-name mismatch to live names. Keep historical entries historical. |
-| `plugins/turbo-mode/ticket/.codex-plugin/plugin.json` | Inspect interface text; patch only if it advertises old architecture as current product behavior. |
+| `plugins/turbo-mode/ticket/.codex-plugin/plugin.json` | Inspect descriptions, capabilities, and default prompts as product surface. Patch if they advertise unavailable writes, old lifecycle execution, or old architecture as current behavior. |
 | `plugins/turbo-mode/ticket/tests/test_docs_contract.py` | Replace old-positive docs assertions with authority-boundary tests. |
 | `plugins/turbo-mode/ticket/tests/test_static_autonomy_boundaries.py` | Replace old-positive autonomy docs assertions with authority-boundary tests. |
 | `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py` | Inspect only; leave source-runtime behavior assertions unchanged in this slice and name them as known source drift where docs/static tests reference them. |
@@ -79,6 +79,10 @@ point to ADR 0006 plus the May 30 control doc.
   guidance. Normative words such as "must", "supported", or "required" may
   describe only deprecation/removal, historical accuracy, read-only inventory,
   or maintenance/diagnostic constraints, not ordinary mutation operation.
+- `Maintenance And Diagnostics` may cover doctor activation, stale payload
+  cleanup, runtime proof, and historical audit repair. It must not contain
+  ordinary capture/update `prepare/execute` mutation examples. Those examples may
+  appear only in `Deprecated Source Drift` or `Legacy Cutover Input` sections.
 - Approval language must be split:
   - Banned as target: automatic approval objects for `agent_primary`.
   - Permitted as target: `discussion_only` user-approval facts tied to candidate
@@ -117,8 +121,16 @@ point to ADR 0006 plus the May 30 control doc.
   preview/execute commands, put a sentence immediately before it that says it is
   deprecated source drift, legacy cutover input, historical changelog, or
   maintenance/diagnostic evidence, not active target mutation guidance. Active
-  `SKILL.md` mutation sections must use the target candidate mutation contract
-  or say mutation is temporarily unavailable until source/runtime rebaseline.
+  `SKILL.md` mutation sections must say mutation is temporarily unavailable
+  unless this slice identifies a live source entrypoint that accepts target
+  candidate mutations. If such an entrypoint is found, the skill must name it
+  and document the target candidate contract without preserving prepare/execute.
+- Manifest interface descriptions, capabilities, and default prompts are product
+  surface. If active create/update mutation is unavailable, metadata must not
+  invite general ticket writes, autonomous creation, lifecycle execution, or old
+  mutation flows. Prompts such as "Track this follow-up" may remain only if the
+  implementation finds and names a runnable target-candidate entrypoint; otherwise
+  rephrase them to read/query/triage/maintenance behavior or remove them.
 - The closeout must explicitly say this slice did not perform the read-only
   `docs/tickets/` cutover inventory gate.
 
@@ -180,7 +192,7 @@ point to ADR 0006 plus the May 30 control doc.
 | `test_future_source_does_not_write_audit_logs_except_historical_repair` | target-compatible invariant | Keep; it supports the private-log/no-active-audit boundary. |
 | `test_legacy_test_strings_are_only_negative_or_historical_fixtures` | deprecated-source boundary invariant | Keep or adapt to also cover old state-kernel terms. |
 | `test_runtime_readiness_source_does_not_stage_legacy_yaml_autonomy_config` | safety invariant | Keep unless scope changes to runtime-readiness source. |
-| `test_readme_states_supported_high_level_mutation_surfaces` | delete/rewrite | Replace with target candidate mutation path test; old command surfaces may appear only as deprecated source drift, cutover, historical, or maintenance/diagnostic material. |
+| `test_readme_states_supported_high_level_mutation_surfaces` | delete/rewrite | Replace with target candidate mutation path test; old capture/update command surfaces may appear only as deprecated source drift or legacy cutover input. |
 | `test_handbook_states_supported_high_level_mutation_surfaces` | delete/rewrite | Replace with target candidate mutation path test; do not preserve prepare/execute runbook guidance. |
 | `test_contract_states_supported_high_level_mutation_surfaces` | delete/rewrite | Replace with target candidate mutation path test and old-surface negatives. |
 | `test_readme_ticket_schema_matches_yaml_contract_boundary` | target authority | Rewrite around ADR 0006 post-cutover schema and section-scoped old-shape negatives. |
@@ -203,14 +215,14 @@ point to ADR 0006 plus the May 30 control doc.
 | `test_ticket_capture_skill_frontmatter_matches_task3_contract` | frontmatter operational trigger | Adapt frontmatter expectations to operational trigger text only; do not encode target architecture in frontmatter. |
 | `test_ticket_capture_skill_contains_exact_compact_preview_labels` | delete/invert | Remove positive preview-label requirements from active skill docs or invert them to prove preview is not a durable target mode. |
 | `test_ticket_capture_skill_forbids_raw_user_wording` | privacy/safety invariant | Keep. |
-| `test_ticket_capture_skill_requires_explicit_confirmation_before_writing` | delete/rewrite | Replace with target candidate identity plus `discussion_only` approval facts, or state mutation is temporarily unavailable. |
+| `test_ticket_capture_skill_requires_explicit_confirmation_before_writing` | delete/rewrite | Default to temporarily unavailable mutation guidance unless a live source target-candidate entrypoint is found; otherwise replace with target candidate identity plus `discussion_only` approval facts. |
 | `test_ticket_capture_skill_uses_canonical_prepare_and_execute_commands` | delete/invert | Remove active prepare/execute guidance; invert if needed to prove the active skill no longer advertises those commands. |
 | `test_ticket_capture_skill_documents_path_resolution_contract` | operational invariant | Keep. |
 | `test_ticket_capture_skill_documents_required_synthesized_fields` | delete/rewrite | Replace `capture.*` payload requirements with target candidate mutation fields or temporary-unavailable wording. |
 | `test_ticket_capture_skill_keeps_provenance_hook_owned` | safety invariant | Keep. |
 | `test_ticket_capture_skill_documents_deterministic_inference_boundaries` | delete/rewrite | Remove `medium`, `critical`, and `component` as active guidance; target priorities are `high`, `normal`, and `low`. |
 | `test_ticket_capture_skill_documents_refinement_and_preview_rules` | delete/rewrite | Remove refinement/preview rules as active mutation guidance; keep only deprecated drift or target candidate contract. |
-| `test_ticket_capture_skill_documents_create_edit_cancel_handling` | delete/rewrite | Remove create/edit/cancel prepare/execute UX as active guidance; use target candidate mutation or temporary-unavailable wording. |
+| `test_ticket_capture_skill_documents_create_edit_cancel_handling` | delete/rewrite | Remove create/edit/cancel prepare/execute UX as active guidance; default to temporary-unavailable wording unless a live source target-candidate entrypoint is found. |
 | `test_ticket_capture_skill_documents_split_deferral_behavior` | operational invariant | Keep unless docs no longer cover split captures. |
 | `test_ticket_capture_skill_preserves_hook_guard_boundary` | safety invariant | Keep. |
 | `test_user_facing_ticket_skills_prefer_recovery_hint` | deprecated source drift | Delete or rewrite so recovery hints are not target result-envelope taxonomy. |
@@ -370,9 +382,12 @@ Frontmatter and code-block rules for tests:
 - Target examples must use the candidate mutation contract shape, not
   prepare/execute payloads. They must include `target.fields` or
   `target.sections` and must reject unknown target fields.
-- Command snippets are diagnostic or maintenance evidence unless they call the
-  future candidate mutation path described by ADR 0006/control doc. Active
-  mutation docs must not use old prepare/execute snippets as user instructions.
+- Command snippets are diagnostic or maintenance evidence only when they are not
+  ordinary capture/update mutation commands, unless they call the future
+  candidate mutation path described by ADR 0006/control doc. Old capture/update
+  prepare/execute snippets may appear only as deprecated source drift or legacy
+  cutover input. Active mutation docs must not use old prepare/execute snippets
+  as user instructions.
 
 ### Task 2: Patch core docs
 
@@ -434,9 +449,9 @@ Frontmatter and code-block rules for tests:
 
 | Skill | Deprecated material may say | Target or active section must say |
 |---|---|---|
-| `capture-ticket` | Prepare/execute capture, compact confirmation preview, old `capture.*` payload fields (`title`, `captured_request`, `problem`, `next_action`, `capture_confidence`, `priority`, `tags`, `component`, `related_paths`, `acceptance_criteria`), and old priority inference (`critical`, `high`, `medium`, `low`) are deprecated source drift or legacy cutover input only. | Target create becomes one candidate mutation through the runtime path; target priorities are `high`, `normal`, and `low`; `component`, `capture_confidence`, `refinement_status`, and `acceptance_criteria` are not target frontmatter fields. If the target path is not implemented, the skill must say mutation is temporarily unavailable. |
+| `capture-ticket` | Prepare/execute capture, compact confirmation preview, old `capture.*` payload fields (`title`, `captured_request`, `problem`, `next_action`, `capture_confidence`, `priority`, `tags`, `component`, `related_paths`, `acceptance_criteria`), and old priority inference (`critical`, `high`, `medium`, `low`) are deprecated source drift or legacy cutover input only. | Default active create guidance to temporarily unavailable. Document the target candidate mutation contract as runnable only if this slice identifies and names a live source target-candidate entrypoint. Target priorities are `high`, `normal`, and `low`; `component`, `capture_confidence`, `refinement_status`, and `acceptance_criteria` are not target frontmatter fields. |
 | `read-ticket` | Old filters such as `blocked`, `critical`, and `medium` are deprecated source drift or legacy cutover input only. | Target schema uses statuses `open`, `in_progress`, `done`, `wontfix`; blockedness derives from `blocked_by`; target priorities are `high`, `normal`, `low`. Read/query guidance may remain when it does not present old schema as target authority. |
-| `update-ticket` | Prepare/execute update, preview confirmation UX, and old focused update fields (`problem`, `next_action`, `acceptance_criteria`, `priority`, `tags`, `component`, `related_paths`, `blocked_by`, `blocks`, `status`, `reopen_reason`) are deprecated source drift or legacy cutover input only. | Target writes are candidate mutations with `target.fields`, `target.sections`, `proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`; `blocks`, `component`, `refinement_status`, and `acceptance_criteria` are not target frontmatter fields. If the target path is not implemented, the skill must say mutation is temporarily unavailable. |
+| `update-ticket` | Prepare/execute update, preview confirmation UX, and old focused update fields (`problem`, `next_action`, `acceptance_criteria`, `priority`, `tags`, `component`, `related_paths`, `blocked_by`, `blocks`, `status`, `reopen_reason`) are deprecated source drift or legacy cutover input only. | Default active update guidance to temporarily unavailable. Document target writes as runnable only if this slice identifies and names a live source target-candidate entrypoint. Target writes use `target.fields`, `target.sections`, `proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`; `blocks`, `component`, `refinement_status`, and `acceptance_criteria` are not target frontmatter fields. |
 | `ticket-backlog-triage` | Old stale, blocked-chain, or command-output wording is deprecated source drift unless used only for read-only inventory. | Target triage is read/query/reporting unless it produces candidate mutations for the runtime path; persisted `blocked` status and reverse `blocks` edges are not target schema. |
 | `ticket-doctor` | Explicit maintenance, diagnostics, activation, stale payload cleanup, historical audit repair, and runtime-readiness commands are maintenance/diagnostic material only. | Target doctor docs must not make preview, audit logs, activation proof, or cache refresh part of normal target ticket mutation authority. |
 
@@ -444,16 +459,19 @@ Frontmatter and code-block rules for tests:
   look like contract authority: ADR 0006/control doc own the target model; old
   command paths are deprecated source drift, legacy cutover input, historical
   changelog, or maintenance/diagnostic material.
-- [ ] Remove old backend command examples from active mutation instructions. If
-  they remain for maintenance, diagnostics, cutover inventory, or historical
-  accuracy, label that boundary immediately before the example.
+- [ ] Remove old backend command examples from active mutation instructions. Old
+  capture/update `prepare/execute` examples may remain only for deprecated
+  source drift, legacy cutover inventory, or historical accuracy, and the
+  boundary must be labeled immediately before the example. Do not place ordinary
+  capture/update mutation examples in maintenance/diagnostic runbooks.
 - [ ] Remove or quarantine old payload fields and examples: `component`,
   `blocks`, `refinement_status`, `acceptance_criteria`, `blocked`, `critical`,
   `medium`, and persistent preview.
-- [ ] For `capture-ticket` and `update-ticket`, either document the target
-  candidate mutation contract or state that mutation is temporarily unavailable
-  until the source/runtime rebaseline implements it. Do not preserve
-  prepare/execute as operational guidance.
+- [ ] For `capture-ticket` and `update-ticket`, state that mutation is
+  temporarily unavailable unless this slice identifies a live source entrypoint
+  that accepts the target candidate mutation contract. If such an entrypoint is
+  identified, name the exact entrypoint and document the target candidate
+  contract. Do not preserve prepare/execute as operational guidance.
 - [ ] For `read-ticket`, keep read/query instructions only if they avoid old
   target schema; old `blocked`, `critical`, and `medium` filters may remain only
   as deprecated source drift or legacy cutover input.
@@ -474,6 +492,13 @@ Frontmatter and code-block rules for tests:
   history just because it describes past architecture.
 - [ ] Patch PRIVACY, TERMS, and manifest only for current-facing old-architecture
   claims. Leave accurate privacy, terms, and historical artifact wording intact.
+- [ ] For `.codex-plugin/plugin.json`, inspect `description`,
+  `interface.shortDescription`, `interface.longDescription`,
+  `interface.capabilities`, and `interface.defaultPrompt`. If active create or
+  update mutation is temporarily unavailable, remove or rephrase metadata that
+  advertises general writes, autonomous creation, lifecycle execution, or old
+  mutation flows. Keep write-like prompts such as `Track this follow-up` only if
+  the implementation names a runnable target-candidate entrypoint.
 
 ### Task 5: Verify and close out
 
