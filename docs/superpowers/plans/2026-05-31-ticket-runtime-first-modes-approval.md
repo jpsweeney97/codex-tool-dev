@@ -33,7 +33,7 @@ Still in scope for this slice:
 - Mutation identity must bind the expected target fingerprint for non-create writes. Runtime decision construction may derive that fingerprint from Ticket-owned source context, and gateway validation must recompute identity with `GatewayMutation.target_fingerprint`.
 - Missing Ticket-derived target fingerprints must produce a turn-local `ticket_update_blocked` result for that candidate, not `discussion_required`. The apply-turn path must still apply other valid candidates in the same batch and report a partial result when both applied and blocked candidates exist.
 - Blocked target-fingerprint cases must append a narrow `autonomy_health` event with `status: "ticket_update_blocked"` for repeat detection. The event must be keyed by thread, turn, ticket id, action, and reason, and must not carry proposed fields, mutation IDs, gateway fingerprints, or approval-shaped data. Treat this event as temporary-but-required scaffolding, not the durable product state once maintenance tickets can represent recurring failures.
-- A globally unhealthy fingerprint collector must pause Ticket autonomy with `pause_reason: "source_context_unhealthy"`. Resume must be explicit and must prove source-context collection by rerunning the collector against the current candidate set or a small known-ticket probe before clearing the pause.
+- A globally unhealthy fingerprint collector must pause Ticket autonomy with `pause_reason: "source_context_unhealthy"`. Resume must be explicit and must prove source-context collection by rerunning the collector against the current candidate set or a small known-ticket probe before clearing the pause. The live pause authority is the workspace `pause.json` marker; do not add a one-off pending-summary `automation_pause` event unless implementation first proves runtime pauses are already recorded that way consistently.
 - Existing mode snapshots that contain removed durable modes such as `preview` must fail closed with setup required. They must not be treated as missing snapshots and replaced from `agent_primary` config.
 
 Known remaining product drift after this slice:
@@ -81,6 +81,7 @@ Current source touchpoints for this slice:
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:273-286` | Apply-turn projects `preview` as a product state. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:185-199` | Paused output has no `source_context_unhealthy` message. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:419-431` | `_ticket_state_fingerprints()` cannot distinguish per-candidate misses from collector-level failure. |
+| `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:725-736` | Existing runtime pause command writes `pause.json` and paused output, not pending-summary `automation_pause` events. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:345-361` | Apply-turn writes `preview_only` non-write events. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:818-846` | `--resume-paused` clears pauses without proving source-context collection is healthy. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:821` | Apply-turn references `AutomationMode.PREVIEW.value` while validating `--setup-choice preview`. |
@@ -163,6 +164,7 @@ Stop during implementation if:
 - A collector-level fingerprint failure returns a normal turn-local blocked result instead of pausing with `source_context_unhealthy`.
 - `--resume-paused` clears a `source_context_unhealthy` pause without rerunning and passing the source-context collector or known-ticket probe.
 - `source_context_unhealthy` is reported as `setup_required` or reused for local config/mode setup failures.
+- `source_context_unhealthy` adds a new pending-summary `automation_pause` write when runtime pauses are not otherwise recorded there consistently.
 - Any new pending-summary event writes `details.approval`, `approval_id`, `preview_only`, or `current_mode: preview`.
 - Any focused test requires preserving durable `preview` as a config mode to pass.
 - Any focused test requires automatic `agent_primary` approvals to pass.
@@ -1649,7 +1651,7 @@ In `_run_apply_turn_with_mode()`, replace the bare fingerprint map use with a pa
     fingerprints = fingerprint_collection.fingerprints
 ```
 
-Do not write `autonomy_health`, `mutation_attempt`, or summary events for this global failure. A collector-level source-context failure is a workspace pause, not a candidate result.
+Do not write `autonomy_health`, `mutation_attempt`, `mutation_status`, `summary_receipt`, or a new pending-summary `automation_pause` event for this global failure. A collector-level source-context failure is a workspace pause, not a candidate result, and current runtime pause paths use `pause.json` plus the paused response as their authority. If an executor discovers an existing consistent runtime-pause-to-`automation_pause` event path before implementation, stop and revise this plan deliberately instead of adding a one-off event for `source_context_unhealthy`.
 
 For `--resume-paused`, add a guard before `resume_workspace_automation()` when `_read_pause_reason(project_root) == "source_context_unhealthy"`. The guard must rerun source-context collection against the current candidate set if one exists, or a small known-ticket probe otherwise. If the probe cannot prove collection is healthy, keep the pause and emit `_paused_response("source_context_unhealthy")`.
 
@@ -1753,6 +1755,7 @@ Also add a single-candidate blocked case that returns `state: "ticket_update_blo
 Add source-context pause and resume tests:
 
 - A collector-level failure pauses the workspace with `state: "paused"`, `pause_reason: "source_context_unhealthy"`, and writes no mutation or health events.
+- The same collector-level failure creates or preserves the workspace `pause.json` marker and does not append a pending-summary `automation_pause` event unless the implementation has first proven all comparable runtime pauses already append one consistently.
 - A normal later `apply-turn` without `--resume-paused` remains paused with `source_context_unhealthy`; it must not silently clear the marker.
 - `--resume-paused` for `source_context_unhealthy` fails closed when the current candidate-set collection or known-ticket probe cannot prove source-context health.
 - `--resume-paused` clears `source_context_unhealthy` only after the collector/probe succeeds, then continues through the normal mode-specific apply-turn path.
@@ -1856,6 +1859,7 @@ Expected after implementation:
 - `target_fingerprint_required` matches must use `RuntimeDecisionKind.TICKET_UPDATE_BLOCKED`, `status: "ticket_update_blocked"`, or gateway policy-blocked validation. No match may classify missing target fingerprint as `discussion_required` or emit a discussion question.
 - `autonomy_health` matches must write or validate only temporary `ticket_update_blocked` scaffolding events and must not carry mutation IDs, proposed fields, gateway fingerprints, or approval data.
 - `source_context_unhealthy` matches must be pause-message, pause-reason validation, collector-level pause, or explicit resume-proof code. No match may report source-context failure as `setup_required` or clear the pause without a collector/probe pass.
+- `automation_pause` matches must remain validation or pre-existing pause behavior. A new source-context pause must not be the only runtime pause that writes an `automation_pause` pending-summary event.
 
 - [ ] **Step 11: Run focused apply-turn, integration, recovery, and gateway suites**
 
@@ -1897,9 +1901,10 @@ Expected: every match is classified before closeout. Allowed matches are only:
 - Runtime and apply-turn branches that classify `target_fingerprint_required` as `ticket_update_blocked`, append `autonomy_health`, and preserve partial apply for other valid candidates.
 - Pending-summary validators and fixtures for temporary `autonomy_health` / `ticket_update_blocked` scaffolding that carry no mutation ID, proposed fields, gateway fingerprints, or approval data.
 - Pause and resume branches for `source_context_unhealthy` that require explicit source-context proof before clearing the pause.
+- Assertions that `source_context_unhealthy` uses `pause.json` as the live authority and does not introduce a one-off `automation_pause` event.
 - `make_approval_id` and `codex.ticket.approval.v1` definitions/tests if no production caller uses them and the helper is being retained for the later explicit `discussion_only` approval fact.
 
-Any product/runtime support for durable `preview`, new `preview_only` events, automatic `agent_primary` approvals, approval-shaped event reasons or docstrings such as "approved autonomous" or "approved ticket update", `decision.approval` reads that authorize, consume, serialize, or derive fields from approval objects in gateway/runtime write paths, `details.approval` requirements, target-fingerprint blocks classified as discussion, `autonomy_health` events that look like mutation attempts, or normal-turn clearing of `source_context_unhealthy` without explicit repair proof is a failure. Record the allowed-match list in the implementation closeout. Retain `make_approval_id` as explicit deferred `discussion_only` approval scaffolding only if no production caller uses it. Do not delete it in this slice.
+Any product/runtime support for durable `preview`, new `preview_only` events, automatic `agent_primary` approvals, approval-shaped event reasons or docstrings such as "approved autonomous" or "approved ticket update", `decision.approval` reads that authorize, consume, serialize, or derive fields from approval objects in gateway/runtime write paths, `details.approval` requirements, target-fingerprint blocks classified as discussion, `autonomy_health` events that look like mutation attempts, normal-turn clearing of `source_context_unhealthy` without explicit repair proof, or a one-off `automation_pause` event for `source_context_unhealthy` is a failure. Record the allowed-match list in the implementation closeout. Retain `make_approval_id` as explicit deferred `discussion_only` approval scaffolding only if no production caller uses it. Do not delete it in this slice.
 
 - [ ] **Step 2: Run focused source tests**
 
@@ -1970,7 +1975,7 @@ Remaining product drift: diagnostic dry-run/preview is not implemented by this s
 Breaking-change posture: this source slice does not preserve removed Ticket behavior for compatibility; retained legacy private-log reads are historical recovery support only and remain drift until the operation-log collapse slice.
 Remaining product drift: pending-summary/private operation-log collapse is deferred; historical `approval_consumed` recovery input and commit-disposition details may remain only as classified drift until a separate operation-log slice removes them.
 Implemented safety boundary: missing Ticket-derived target fingerprints are turn-local `ticket_update_blocked` health events, not user-discussion states or mutation attempts; other valid candidates in the same turn may still apply.
-Implemented pause boundary: collector-level source-context failure pauses Ticket autonomy with `source_context_unhealthy`, not `setup_required`, and resume requires a passing current-candidate collection or known-ticket probe.
+Implemented pause boundary: collector-level source-context failure pauses Ticket autonomy with `source_context_unhealthy`, not `setup_required`, uses `pause.json` as the live authority without adding a one-off `automation_pause` event, and resume requires a passing current-candidate collection or known-ticket probe.
 Temporary scaffolding: `autonomy_health` / `ticket_update_blocked` is required in this slice to prevent silent repeat failures, but it is not the target long-term operation log.
 Follow-up required: repeat-driven maintenance-ticket creation for recurring `ticket_update_blocked` health events is deferred to a separate source slice; after that exists, the maintenance ticket should be the durable product state, not an accumulating private health stream.
 Follow-up required: the closeout must name deletion of retained historical approval recovery support as a follow-up for the operation-log collapse slice; do not let retained `approval_consumed` readers become a supported product surface.
@@ -2096,6 +2101,7 @@ Spec coverage:
 - Pending-summary validates `autonomy_health` / `ticket_update_blocked` as temporary-but-required scaffolding with no mutation ID, proposed fields, gateway fingerprints, or approval data.
 - Apply-turn pauses collector-level source-context failures with `source_context_unhealthy` and does not classify them as `setup_required`.
 - `--resume-paused` cannot clear `source_context_unhealthy` unless current-candidate collection or a known-ticket probe proves source-context collection is healthy.
+- `source_context_unhealthy` uses `pause.json` plus the paused response as the live proof; it does not add a unique pending-summary `automation_pause` event unless runtime pauses are proven to use that event path consistently.
 - Gateway validation recomputes mutation identity through `make_candidate_mutation_identity()` and does not import private runtime identity helpers.
 - Gateway approval validation and new `approval_consumed` writes are removed in Task 4.
 - Pending-summary no longer requires automatic approval details or accepts new preview decisions in Task 5.
