@@ -149,18 +149,20 @@ Do not modify docs, plugin manifests, cache files, or installed runtime state in
 
 ## Removed-Machinery Consumer Inventory (Authoritative Affected-File Set)
 
-The per-task `Files`, `git add`, selector, and ruff lists below were derived from a source-drift table that under-sampled **test** consumers. This section is the single source of truth for which files every removal touches. **Run the inventory grep before editing and fold every hit into each task's edits, staging, selector, and ruff list.** If a per-task list below omits a file named here that the task actually touches, this section governs and the per-task list must be widened to match.
+The per-task `Files`, `git add`, selector, and ruff lists below were derived from a source-drift table that under-sampled **test** consumers. This section is the single source of truth for which files every removal touches. **Run the inventory grep before editing and assign every hit to the task boundary that owns that removal; then fold that file into the boundary's edits, staging, selector, and ruff list.** If a per-task list below omits a file named here that the task actually touches, this section governs and the per-task list must be widened to match.
 
 Run before Task 1:
 
 ```bash
-rg -n "make_approval_id|codex\\.ticket\\.approval|decision\\.approval|approval_consumed|approval_id|details\\.approval|details\\[\"approval\"\\]|AutomationMode\\.PREVIEW|preview_only|PREVIEW_ONLY|\"preview\"" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
+rg -n 'make_approval_id|codex\.ticket\.approval|decision\.approval|approval_consumed|approval_id|details\.approval|details\["approval"\]|AutomationMode\.PREVIEW|RuntimeDecisionKind\.PREVIEW_ONLY|preview_only|PREVIEW_ONLY|\bPREVIEW\s*=\s*"preview"|current_mode\s*==\s*"preview"|mode="preview"|"mode"\s*:\s*"preview"|"current_mode"\s*:\s*"preview"|_MODES.*"preview"|\["state"\]\s*==\s*"preview"|"state"\s*:\s*"preview"' plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 ```
 
-Authoritative affected-file set (every file with a real hit must be in the atomic approval-boundary commit and every later verification selector):
+Authoritative affected-file set (every file with a real hit must be assigned to the correct behavior boundary and every later verification selector; approval/gateway/pending-summary consumers must be in the atomic approval-boundary commit):
 
 - Scripts: `ticket_autonomy_config.py`, `ticket_autonomy_runtime.py`, `ticket_autonomy_ids.py`, `ticket_mutation_identity.py` (new), `ticket_turn_batch.py`, `ticket_engine_gateway.py`, `ticket_autonomy.py`.
 - Tests: `test_autonomy_config.py`, `test_autonomy_runtime.py`, `test_mutation_identity.py` (new), `test_autonomy_corrections.py`, `test_turn_batch.py`, `test_engine_gateway.py`, `test_autonomy_cli.py`, `test_autonomy_integration_v1.py`, `test_autonomy_recovery.py`, **`test_autonomy_ids.py`** (omitted by every per-task list in the original draft — see below).
+
+Do not use a bare `"preview"` grep for this inventory. Ticket capture/update/workflow commands still have non-autonomy preview payloads outside this slice; those are not durable `AutomationMode.PREVIEW`, runtime `PREVIEW_ONLY`, pending-summary `preview_only`, or apply-turn product preview consumers. If a broader grep finds those unrelated surfaces, classify them as out of scope instead of widening this source slice.
 
 Non-obvious per-file rewrites the grep will surface as sites but will not tell you how to fix. These are the judgment calls; a literal find-and-delete breaks the suite:
 
@@ -1593,7 +1595,7 @@ Run:
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py tests/test_engine_gateway.py tests/test_turn_batch.py -q
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest -q
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_ids.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 ```
 
 Expected: the focused selector passes **and the whole suite (`pytest -q`) is green**. The atomic approval-boundary commit removes `make_approval_id`, `AutonomyDecision.approval`, the `approval_consumed` status, and durable `preview` from source — which breaks every consumer test in the Consumer Inventory, not just the five focused modules. The boundary is not actually verified until the whole suite collects and passes. Reaching green requires completing **all** removed-machinery consumer rewrites in this commit: `test_autonomy_ids.py` (whose import otherwise fails collection) and the approval/preview test cleanup physically described in Task 6 Steps 2, 5, 6, 7, and 8. Do those rewrites now, as part of this boundary. Task 6's **new** apply-turn behavior (Steps 3-4: blocked buckets, partial apply, `source_context_unhealthy`) is additive, does not gate this commit, and commits separately.
@@ -2052,7 +2054,7 @@ rg -n "target_fingerprint_required|ticket_update_blocked|autonomy_health|partial
 
 Expected after Tasks 1-6:
 
-- No matches for `AutomationMode.PREVIEW`, `RuntimeDecisionKind.PREVIEW_ONLY`, `preview_only`, `details.approval`, `approval_required`, `make_approval`, `codex.ticket.approval`, `decision.approval`, `approval_consumed`, or `approval_id` in executable source or active tests.
+- Every match for `AutomationMode.PREVIEW`, `RuntimeDecisionKind.PREVIEW_ONLY`, `preview_only`, `details.approval`, `approval_required`, `make_approval`, `codex.ticket.approval`, `decision.approval`, `approval_consumed`, or `approval_id` is classified before commit. Allowed matches are only negative rejection fixtures for removed values. There must be no executable source path, helper default, current write expectation, validation branch, recovery branch, or event-sequence expectation that still supports those removed values.
 - `target_fingerprint_required` matches must use `RuntimeDecisionKind.TICKET_UPDATE_BLOCKED`, concise blocked-output assertions, or gateway policy-blocked validation. No match may classify missing target fingerprint as `discussion_required` or emit a discussion question.
 - `autonomy_health`, `maintenance_tickets`, `MAINTENANCE_REPEAT_THRESHOLD`, and `ticket_autonomy_maintenance` must have no matches in executable source or active tests in this slice.
 - `source_context_unhealthy` matches must be pause-marker/output handling, collector-level pause, or explicit resume-proof code. No match may report source-context failure as `setup_required`, clear the pause without a collector/probe pass, or add pending-summary pause-reason validation without a proven consistent `automation_pause` event path.
@@ -2101,7 +2103,7 @@ health, recovery, or pending-summary event for the blocked candidate.
 Run:
 
 ```bash
-rg -n 'AutomationMode\.PREVIEW|RuntimeDecisionKind\.PREVIEW_ONLY|preview_only|details\.approval|details\["approval"\]|approval_required|make_approval|codex\.ticket\.approval|decision\.approval|current_mode": "preview"|approved autonomous|gateway-approved decision|approved ticket update|Apply approved|target_fingerprint_required|ticket_update_blocked|autonomy_health|partially_applied|source_context_unhealthy|maintenance_tickets|MAINTENANCE_REPEAT_THRESHOLD|ticket_autonomy_maintenance' plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
+rg -n 'AutomationMode\.PREVIEW|RuntimeDecisionKind\.PREVIEW_ONLY|preview_only|details\.approval|details\["approval"\]|approval_required|make_approval|codex\.ticket\.approval|decision\.approval|approval_consumed|approval_id|current_mode": "preview"|approved autonomous|gateway-approved decision|approved ticket update|Apply approved|target_fingerprint_required|ticket_update_blocked|autonomy_health|partially_applied|source_context_unhealthy|maintenance_tickets|MAINTENANCE_REPEAT_THRESHOLD|ticket_autonomy_maintenance' plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 ```
 
 Expected: every match is classified before closeout. Allowed matches are only:
