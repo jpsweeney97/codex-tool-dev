@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Remove durable `preview` mode and automatic `agent_primary` approval envelopes from Ticket source while keeping deterministic gateway write safety, then escalate repeated target-fingerprint blocks into ordinary maintenance tickets so private health events do not become the durable product state.
+**Goal:** Remove durable `preview` mode and automatic `agent_primary` approval-envelope machinery from Ticket source while keeping deterministic gateway write safety and the minimum target-fingerprint binding needed for non-create writes.
 
-**Architecture:** This is a narrow modes/approval source slice selected from the Ticket source-runtime drift ledger. It is not the ledger's complete recommended first runtime cut because end-to-end `ticket_change_scope` removal is intentionally deferred. While scope remains live, this slice must preserve its existing write-safety binding. Mutation identity must also include the Ticket-derived expected target fingerprint for non-create writes; removing approval envelopes cannot drop that target-state binding. A missing target fingerprint is a deterministic write-authority block, not a user-discussion state: runtime must report `ticket_update_blocked`, apply other candidates whose write authority is valid, and append one narrow non-mutation `autonomy_health` event only for the first observed occurrence of an exact block group while no matching open maintenance ticket exists. A collector-level fingerprint failure is different: apply-turn must pause autonomy with `source_context_unhealthy`, not `setup_required`, and normal future turns must not silently clear that pause. The health event is bridge scaffolding only: this slice also implements repeat-driven maintenance-ticket escalation with threshold 2, counts the current blocked decision in memory on the second matching occurrence, and creates or reuses an ordinary maintenance ticket through the evaluator plus autonomous gateway create path without appending a second matching health event. Promote mutation identity calculation to a neutral helper in this slice so runtime decision construction and gateway validation share the same deterministic identity function without private runtime imports. This slice changes the local mode model, runtime evaluator, pending-summary validation, gateway validation, apply-turn projection, maintenance-ticket escalation, and integration expectations together so one producer is not removed while consumers still require it. Runtime approval removal and gateway decision validation are one atomic behavior boundary; do not commit a checkpoint where runtime no longer emits approvals while gateway still requires them. The health-event bridge and maintenance-ticket escalation are also one behavior boundary; do not leave a source-slice closeout where recurring target-fingerprint blocks only accumulate private health events. Diagnostic dry-run remains a future explicit maintenance affordance; this slice removes durable/product `preview` but does not implement or replace the target diagnostic dry-run path.
+**Architecture:** This is a narrow modes/approval source slice selected from the Ticket source-runtime drift ledger. It is not the ledger's complete recommended first runtime cut because end-to-end `ticket_change_scope` removal is intentionally deferred. While scope remains live, this slice must preserve its existing write-safety binding. Mutation identity must also include the Ticket-derived expected target fingerprint for non-create writes; removing approval envelopes cannot drop that target-state binding. A missing target fingerprint is a deterministic write-authority block, not a user-discussion state: runtime must report `ticket_update_blocked`, apply other candidates whose write authority is valid, and keep that blocked candidate turn-local. It must not append `autonomy_health`, mutation, recovery, or other private-log events for the blocked candidate. A collector-level fingerprint failure is different: apply-turn must pause autonomy with `source_context_unhealthy`, not `setup_required`, and normal future turns must not silently clear that pause. Promote mutation identity calculation to a neutral helper in this slice so runtime decision construction and gateway validation share the same deterministic identity function without private runtime imports. This slice changes the local mode model, runtime evaluator, pending-summary validation, gateway validation, apply-turn projection, and integration expectations together so one producer is not removed while consumers still require it. Runtime approval removal, gateway decision validation, pending-summary approval/preview deletion, and all gateway event-sequence rewrites are one atomic behavior boundary; do not commit a checkpoint where runtime no longer emits approvals while gateway or pending-summary still requires them. Diagnostic dry-run remains a future explicit maintenance affordance; this slice removes durable/product `preview` but does not implement or replace the target diagnostic dry-run path.
 
 **Tech Stack:** Python >=3.11, pytest, dataclasses, strict JSON, append-only JSONL, existing Ticket scripts, bytecode-safe `uv run` verification.
 
@@ -20,31 +20,30 @@ Out of scope for this plan:
 - Prepare/execute wrapper demotion in `ticket_capture.py` and `ticket_update.py`.
 - Full pending-summary taxonomy collapse beyond removing new `preview_only` and automatic-approval requirements.
 - Persisted `blocks` removal and reverse-blocker derived views.
+- Repeat-block tracking, `autonomy_health`, and automatic maintenance-ticket escalation for recurring target-fingerprint blocks.
 - Installed cache refresh, `hooks/list`, `skills/list`, `plugin/read`, or other runtime inventory.
 
 Write separate plans for those surfaces. Do not fold them into this slice unless this plan is explicitly revised.
 
-This is a breaking-change source slice. It does not preserve removed Ticket behavior for compatibility. Any retained `approval_consumed` handling is read-only historical recovery support for already-written private logs and must be labeled temporary drift.
+This is a breaking-change source slice. It does not preserve removed Ticket behavior for compatibility. Current local verification found no project-local pending-summary logs in this checkout, so this slice deletes executable `approval_consumed` validation/recovery support instead of retaining a historical compatibility reader.
 
 Still in scope for this slice:
 
 - Gateway validation must reject mismatches between `decision.candidate.ticket_change_scope` and `GatewayMutation.ticket_change_scope` while scope remains live. Removing approval envelopes cannot also remove that binding.
 - Mutation identity must bind the expected target fingerprint for non-create writes. Runtime decision construction may derive that fingerprint from Ticket-owned source context, and gateway validation must recompute identity with `GatewayMutation.target_fingerprint`. `create` candidates intentionally use `target_fingerprint=None` in the canonical identity payload; every non-create action must fail closed before runtime mutation ID creation and before gateway dispatch when the Ticket-derived target fingerprint is missing or mismatched.
-- New autonomous gateway attempts must reject approval-shaped authorization fields such as `approval`, `approval_id`, or `details.approval`. Retained approval reads are historical recovery support only for already-written private logs.
+- New autonomous gateway attempts must not accept, write, validate, recover, or branch on approval-shaped authorization fields such as `approval`, `approval_id`, `approval_consumed`, `details.approval`, `codex.ticket.approval`, or `make_approval_id`.
 - Missing Ticket-derived target fingerprints must produce a turn-local `ticket_update_blocked` result for that candidate, not `discussion_required`. The apply-turn path must still apply other valid candidates in the same batch and report a partial result when both applied and blocked candidates exist.
-- Partial-result user output must stay concise: applied ticket ids, blocked ticket ids, blocker reasons such as `target_fingerprint_required`, and maintenance ticket ids created by escalation. Do not include proposed fields, fingerprints, mutation ids, event ids, or `autonomy_health` internals in the end-of-turn report.
-- Blocked target-fingerprint cases may append a narrow `autonomy_health` event with `status: "ticket_update_blocked"` only for the first observed occurrence of an exact block group and only while no matching open maintenance ticket exists. This is the only allowed temporary pending-summary event-schema growth in this slice. Unlike `source_context_unhealthy`, it records candidate-local repeat signals that would otherwise disappear between turns. The event must be keyed by thread, turn, ticket id, action, and reason, and must not carry proposed fields, mutation IDs, gateway fingerprints, workspace paths, or approval-shaped data. Treat this event as bridge scaffolding, not durable product state.
-- Repeat-driven maintenance-ticket creation is in scope for this plan. It must group `ticket_update_blocked` blocks by normalized workspace, thread, ticket id, action, and blocked reason. The repeat threshold is exactly 2. The first occurrence appends one narrow health event. The second matching occurrence counts prior health events plus the current blocked decision in memory, then creates or reuses an ordinary open maintenance ticket through the evaluator plus autonomous gateway create path without appending a second health event. If the maintenance create fails, keep the original blocked result, report a concise `maintenance_escalation_failed` reason, leave the single prior health event as the repeat seed, and try escalation again on the next matching block. The maintenance ticket, not the private health stream, is the durable product state.
-- Retirement gate in this same slice: once a matching open maintenance ticket exists, new `autonomy_health` writes for that block group must stop. Historical `autonomy_health` reads may remain only to detect the threshold, recover, or clean up; they must not feed mutation recovery, write lifecycle projection, compaction-derived mutation state, or user-facing summaries.
+- Partial-result user output must stay concise: applied ticket IDs, skipped ticket IDs, blocked ticket IDs, and blocker reasons such as `target_fingerprint_required`. Do not include proposed fields, fingerprints, mutation IDs, event IDs, health-event internals, or maintenance-ticket IDs in the end-of-turn report for this slice.
 - A globally unhealthy fingerprint collector must pause Ticket autonomy with `pause_reason: "source_context_unhealthy"`. Classify by collector trust, not candidate count: explicit per-ticket misses from a trustworthy collection are per-candidate `ticket_update_blocked` results, while I/O errors, parse failures, lock or health failures, ambiguous ticket roots, or any inability to prove a complete map for the attempted candidate set are collector-level failures. Resume must be explicit and must prove source-context collection by rerunning the collector against the current candidate set or a fail-closed known-ticket probe before clearing the pause. The live pause authority is the workspace `pause.json` marker; do not add a one-off pending-summary `automation_pause` event unless implementation first proves runtime pauses are already recorded that way consistently.
 - Existing mode snapshots that contain removed durable modes such as `preview` must fail closed with setup required. They must not be treated as missing snapshots and replaced from `agent_primary` config.
 
 Known remaining product drift after this slice:
 
 - `ticket_change_scope` remains live and still influences commit-disposition behavior. Gateway validation must temporarily bind candidate scope to gateway mutation scope. The closeout must name this as remaining drift, not as target compliance.
-- Diagnostic dry-run/preview remains unavailable as a target affordance. This slice must not add a replacement dry-run flag, command, event, or renamed preview path. The closeout must name this as temporary non-compliance with the ADR/control diagnostic-preview requirement, not as a completed preview implementation.
+- Deferred diagnostic-preview affordance: diagnostic dry-run/preview remains unavailable after this slice. This slice must not add a replacement dry-run flag, command, event, or renamed preview path. The closeout must say durable preview is removed, diagnostic dry-run remains unimplemented, and diagnostic preview is intentionally deferred to a later maintenance/design slice.
 - The full target candidate mutation contract remains drift. This slice only preserves and adds the narrower target-fingerprint identity binding; it does not make live `CandidateMutation` match the full `target.fields`, `target.sections`, `expected_ticket_fingerprint`, and `evidence_summary` contract shape.
-- Private operation-log collapse remains drift, but repeat-to-maintenance-ticket escalation is implemented in this slice so recurring target-fingerprint blocks do not remain represented only by private health events.
+- Private operation-log collapse remains drift, but approval-state validation/recovery support is removed now because no local pending-summary logs exist in this checkout.
+- Repeat-block-to-maintenance-ticket escalation is split out. A separate design/control plan must authorize any future recurrence tracking, private-log bridge event, or automatic maintenance-ticket creation.
 
 ## Authority And Current Source Facts
 
@@ -79,7 +78,6 @@ Current source touchpoints for this slice:
 | `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py:619-645` | Gateway writes approval details and `approval_consumed` events. |
 | `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py:85-95` | Pending-summary accepts `preview_only` and `preview` as durable taxonomy. |
 | `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py:292-298` | Pending-summary requires `details.approval` for `apply_autonomously`. |
-| `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py:45-65` | Pending-summary has no non-mutation `autonomy_health` event type for turn-local blocked Ticket updates. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:273-286` | Apply-turn projects `preview` as a product state. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:185-199` | Paused output has no `source_context_unhealthy` message. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:419-431` | `_ticket_state_fingerprints()` cannot distinguish per-candidate misses from collector-level failure. |
@@ -90,7 +88,6 @@ Current source touchpoints for this slice:
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:970` | Apply-turn treats `PREVIEW_ONLY` decisions as skipped product output. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:434-459` | Apply-turn summary has no `Blocked` bucket or `partially_applied` / `ticket_update_blocked` states. |
 | `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py:434-459` | Apply-turn summary has no concise blocked-reason projection for partial results. |
-| `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py` | Apply-turn has no repeat-driven maintenance-ticket escalation for recurring target-fingerprint blocks. |
 | `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py:113-125` | Integration tests expect new successful writes to record `approval_consumed`. |
 | `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py:197-204` | Integration tests still write durable `AutomationMode.PREVIEW` and expect product `preview` output. |
 | `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py:257` | Integration tests expect gateway attempt details to contain an approval object. |
@@ -122,10 +119,10 @@ Modify or add these files only in this plan:
   - Update correction helper source context so correction decisions include the Ticket-derived target fingerprint.
 - `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py`
   - Owns pending-summary event validation and recovery projection.
-  - Remove new `preview_only` taxonomy and automatic approval requirement. Add `autonomy_health` / `ticket_update_blocked` as the only allowed temporary pending-summary schema growth for turn-local write-authority blocks. Keep `autonomy_health` out of `derive_mutation_state()`, `project_mutation_recovery()`, and any write lifecycle projection; retention or compaction may preserve or prune it only as health metadata. Do not add `source_context_unhealthy` to pending-summary pause reason validation unless a consistent runtime `automation_pause` event path is proven first. Keep `approval_consumed` readable only as historical recovery input until the later operation-log collapse plan removes it deliberately.
+  - Remove `preview_only`, `current_mode: preview`, `details.approval`, `approval_consumed`, and `approval_id` from executable validation and recovery. Do not add `autonomy_health`, `ticket_update_blocked`, or any other blocked-candidate pending-summary event in this slice. Do not add `source_context_unhealthy` to pending-summary pause-reason validation unless a consistent runtime `automation_pause` event path is proven first.
 - `plugins/turbo-mode/ticket/tests/test_turn_batch.py`
   - Covers pending-summary schema and validation.
-  - Rewrite valid attempt fixtures, neutralize approval-shaped helper defaults, add health-event validation, and update preview decision tests.
+  - Rewrite valid attempt fixtures, neutralize approval-shaped helper defaults, and update preview/approval rejection tests.
 - `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`
   - Owns deterministic autonomous write validation and event recording.
   - Replace approval-envelope validation with decision/mutation validation.
@@ -134,21 +131,16 @@ Modify or add these files only in this plan:
   - Rewrite approval tests and remove new-event expectations for `approval_consumed`.
 - `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py`
   - Owns apply-turn CLI projection and pending-summary append calls.
-  - Remove product `preview` projection and `PREVIEW_ONLY` handling. Add blocked-ticket summary buckets, partial-apply projection, non-mutation health-event appends, source-context-unhealthy pause handling, explicit resume proof, and maintenance-ticket escalation for recurring target-fingerprint blocks.
-- `plugins/turbo-mode/ticket/scripts/ticket_autonomy_maintenance.py`
-  - New helper for grouping blocked target-fingerprint health events, detecting existing open maintenance tickets, and building gateway-create maintenance candidates.
-  - Keep it independent of pending-summary mutation recovery. It may read `PendingSummaryStore.read_events()` output and ordinary ticket files, but must not introduce a new private dedupe table or hidden state file.
-- `plugins/turbo-mode/ticket/tests/test_autonomy_maintenance.py`
-  - New focused tests for health-event grouping, maintenance-ticket dedupe, repeat threshold behavior, and maintenance candidate shape.
+  - Remove product `preview` projection and `PREVIEW_ONLY` handling. Add blocked-ticket summary buckets, partial-apply projection, source-context-unhealthy pause handling, and explicit resume proof. Do not write private blocked-candidate events or maintenance tickets in this slice.
 - `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`
   - Covers apply-turn CLI behavior and recovery.
-  - Rewrite preview setup-choice messaging, event sequences, blocked-ticket summary behavior, and maintenance-ticket escalation output.
+  - Rewrite preview setup-choice messaging, event sequences, and blocked-ticket summary behavior.
 - `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`
   - Covers end-to-end apply-turn orchestration.
-  - Rewrite success event sequences, durable preview expectations, forged approval assertions, partial apply with blocked candidates, and recurring block escalation into a maintenance ticket.
+  - Rewrite success event sequences, durable preview expectations, approval-residue assertions, and partial apply with blocked candidates.
 - `plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py`
   - Covers pending-summary recovery projection.
-  - Add at least one approval-free `ticket_written` recovery case and label retained `approval_consumed` cases as historical recovery input only.
+  - Remove `approval_consumed` recovery fixtures and keep approval-free `ticket_written` recovery coverage.
 
 Do not modify docs, plugin manifests, cache files, or installed runtime state in this implementation slice unless Task 0's contract-impact checkpoint finds conflicting contract text. If that happens, stop and revise this plan first, then patch the contract deliberately.
 
@@ -173,18 +165,14 @@ Stop during implementation if:
 - Runtime classifies `target_fingerprint_required` as `discussion_required` or emits a discussion question for it.
 - A missing target fingerprint for one candidate prevents other candidates with valid write authority from applying in the same turn.
 - A blocked target-fingerprint candidate writes a `mutation_attempt`, `mutation_status`, mutation ID, proposed fields, gateway fingerprint, approval detail, preview payload, or second matching `autonomy_health` event.
-- A partial-result response exposes proposed fields, fingerprints, mutation IDs, event IDs, or health-event internals instead of only ticket IDs, blocker reasons, and maintenance ticket IDs created by escalation.
-- A recurring target-fingerprint block reaches the repeat threshold without creating or reusing an ordinary open maintenance ticket.
-- A recurring target-fingerprint block reaches the repeat threshold by appending a second matching `autonomy_health` event instead of counting the current blocked decision in memory.
-- Maintenance-ticket escalation writes ticket files directly instead of using the evaluator plus autonomous gateway create path.
-- A matching open maintenance ticket already exists and apply-turn keeps appending new `autonomy_health` events for the same workspace/thread/ticket/action/reason group.
-- Maintenance-ticket dedupe depends on exact title matching, a hidden private state file, opaque marker, or mutation-recovery state instead of ordinary open ticket content/frontmatter with the human-readable block line.
-- A maintenance-ticket create failure appends another `autonomy_health` event or creates a private failure ledger instead of reporting `maintenance_escalation_failed`.
+- A partial-result response exposes proposed fields, fingerprints, mutation IDs, event IDs, health-event internals, or maintenance-ticket IDs instead of only ticket IDs and blocker reasons.
+- A blocked target-fingerprint candidate appends `autonomy_health`, `ticket_update_blocked`, or any other private pending-summary event.
+- This slice adds repeat-block tracking, automatic maintenance-ticket escalation, `MAINTENANCE_REPEAT_THRESHOLD`, `ticket_autonomy_maintenance.py`, or maintenance-ticket output fields.
 - A collector-level fingerprint failure returns a normal turn-local blocked result instead of pausing with `source_context_unhealthy`.
 - `--resume-paused` clears a `source_context_unhealthy` pause without rerunning and passing the source-context collector or the fail-closed known-ticket probe through the same collector path.
 - `source_context_unhealthy` is reported as `setup_required` or reused for local config/mode setup failures.
 - `source_context_unhealthy` adds a new pending-summary `automation_pause` write when runtime pauses are not otherwise recorded there consistently.
-- Any new pending-summary event writes `details.approval`, `approval_id`, `preview_only`, or `current_mode: preview`.
+- Any pending-summary validation, recovery, fixture, or event write keeps accepting `details.approval`, `approval_id`, `approval_consumed`, `preview_only`, or `current_mode: preview`.
 - Any implementation adds a replacement diagnostic dry-run flag, command, event, or renamed preview path in this slice.
 - Any focused test requires preserving durable `preview` as a config mode to pass.
 - Any focused test requires automatic `agent_primary` approvals to pass.
@@ -226,7 +214,7 @@ Run:
 rg -n "AutomationMode\\.PREVIEW|RuntimeDecisionKind\\.PREVIEW_ONLY|preview_only|approval_consumed|details\\.approval|approval_required|make_approval|codex\\.ticket\\.approval|decision\\.approval|approval_id" plugins/turbo-mode/ticket/scripts
 ```
 
-Expected before implementation: matches in `ticket_autonomy_config.py`, `ticket_autonomy_runtime.py`, `ticket_autonomy.py`, `ticket_engine_gateway.py`, `ticket_turn_batch.py`, and `ticket_autonomy_ids.py`. `ticket_autonomy_ids.py` may still define `make_approval_id`; this slice retains it only as deferred explicit `discussion_only` approval scaffolding if no production callers remain.
+Expected before implementation: matches in `ticket_autonomy_config.py`, `ticket_autonomy_runtime.py`, `ticket_autonomy.py`, `ticket_engine_gateway.py`, `ticket_turn_batch.py`, and `ticket_autonomy_ids.py`. `ticket_autonomy_ids.py` may still define `make_approval_id`; this slice deletes it instead of preserving unused approval-envelope scaffolding.
 
 - [ ] **Step 4: Confirm focused tests currently encode old behavior**
 
@@ -247,6 +235,17 @@ rg -n "Autonomy Model|Fingerprints And Write Safety|preview|approval|ticket_chan
 ```
 
 Expected: `ticket-contract.md` already matches the target durable-mode and target-fingerprint identity boundary and does not require a source-contract patch for this slice. Record that `plugins/turbo-mode/ticket/references/ticket-contract.md:172-190` remains the governing contract section for this slice. If the search also finds `plugins/turbo-mode/ticket/references/ticket-contract.md:34-45`, record it as known remaining target candidate-shape drift, not as a stop condition. Stop only if contract text conflicts with approval-envelope removal, durable-preview removal, target-fingerprint identity binding, or temporary scope binding.
+
+- [ ] **Step 6: Confirm no local pending-summary logs need recovery compatibility**
+
+Run:
+
+```bash
+find .codex -path '*/ticket.pending-summary.jsonl' -print
+find .codex -path '*/ticket-workspace' -print
+```
+
+Expected before implementation: no output. If any current project-local pending-summary log exists, stop and decide whether to migrate it or retain a bounded reader before deleting `approval_consumed` validation/recovery. Historical handoff text does not count as a pending-summary log.
 
 ## Task 1: Remove Durable `preview` From Local Config
 
@@ -416,14 +415,9 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit durable-mode config cleanup**
+- [ ] **Step 5: Keep durable-mode config cleanup uncommitted until Task 2**
 
-Run:
-
-```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py
-git commit -m "fix(ticket): remove durable preview config mode"
-```
+Do not commit after Task 1. `AutomationMode.PREVIEW` still has live consumers in apply-turn until Task 2 removes runtime preview decisions and setup-choice handling. Leave the config changes in the working tree and continue directly to Task 2.
 
 ## Task 2: Remove Runtime `PREVIEW_ONLY` Decisions
 
@@ -449,7 +443,6 @@ def test_discussion_only_does_not_authorize_writes() -> None:
 
     assert discussion.kind == RuntimeDecisionKind.REQUIRE_USER_DISCUSSION
     assert discussion.reason == "discussion_only"
-    assert discussion.approval is None
 
 
 def test_unsupported_preview_mode_requires_discussion_without_preview_decision() -> None:
@@ -460,7 +453,6 @@ def test_unsupported_preview_mode_requires_discussion_without_preview_decision()
     assert decision.kind == RuntimeDecisionKind.REQUIRE_USER_DISCUSSION
     assert decision.reason == "unsupported_mode"
     assert decision.pending_summary_status == "discussion_required"
-    assert decision.approval is None
 ```
 
 - [ ] **Step 2: Run the new evaluator test to verify failure**
@@ -548,11 +540,13 @@ In `_append_non_write_decision()`, remove the `RuntimeDecisionKind.PREVIEW_ONLY`
         reason = decision.reason or "Ticket mutation requires discussion."
 ```
 
-In `_summary_payload()`, replace the final state selection with:
+In `_summary_payload()`, preserve conflict skips as a real user-visible result and replace the final state selection with:
 
 ```python
     if applied:
         state = "applied"
+    elif skipped:
+        state = "skipped"
     elif discussion:
         state = "discussion_required"
     else:
@@ -605,27 +599,30 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit runtime preview removal**
+- [ ] **Step 8: Commit durable and runtime preview removal together**
 
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py
-git commit -m "fix(ticket): remove preview runtime decision state"
+git add plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py
+git commit -m "fix(ticket): remove durable preview mode"
 ```
+
+Expected: commit includes Task 1 config cleanup plus Task 2 runtime/apply-turn preview removal. Do not leave a commit where `AutomationMode.PREVIEW` is removed while apply-turn still references it.
 
 ## Task 3: Stop Creating Automatic `agent_primary` Approval Envelopes
 
 **Files:**
 - Add: `plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py`
 - Add: `plugins/turbo-mode/ticket/tests/test_mutation_identity.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py:1-202`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py:390-445`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py:525-550`
 - Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py:74-230`
 - Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py:41-80`
 
-- [ ] **Step 1: Rewrite evaluator approval tests and add identity-helper tests**
+- [ ] **Step 1: Rewrite evaluator authorization tests and add identity-helper tests**
 
 Create `plugins/turbo-mode/ticket/tests/test_mutation_identity.py` with focused calculation tests:
 
@@ -683,14 +680,13 @@ In `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py`, change the loop a
 ```python
         assert decision.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY
         assert decision.mutation_id is not None
-        assert decision.approval is None
         assert decision.reason == "authorized"
 ```
 
 Replace `test_approval_envelope_binds_decision_context_and_expires_within_ten_minutes` with:
 
 ```python
-def test_agent_primary_decision_uses_mutation_id_without_approval_envelope() -> None:
+def test_agent_primary_decision_uses_mutation_id() -> None:
     candidate = _candidate("update", evidence=_evidence("current_thread_reason"))
 
     decision = _decisions(candidate)[0]
@@ -698,7 +694,6 @@ def test_agent_primary_decision_uses_mutation_id_without_approval_envelope() -> 
     assert decision.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY
     assert decision.mutation_id is not None
     assert decision.mutation_id.startswith("mut_")
-    assert decision.approval is None
     assert decision.engine_dispatch is not None
     assert decision.engine_dispatch.state == "ok"
     assert decision.reason == "authorized"
@@ -733,7 +728,6 @@ def test_non_create_candidate_requires_target_fingerprint_for_identity() -> None
     assert decision.reason == "target_fingerprint_required"
     assert decision.pending_summary_status == "ticket_update_blocked"
     assert decision.mutation_id is None
-    assert decision.approval is None
 
 
 def test_correction_target_fingerprint_binds_mutation_identity() -> None:
@@ -770,7 +764,6 @@ def test_correction_requires_target_fingerprint_for_identity() -> None:
     assert decision.reason == "target_fingerprint_required"
     assert decision.pending_summary_status == "ticket_update_blocked"
     assert decision.mutation_id is None
-    assert decision.approval is None
 
 
 def test_ticket_change_scope_still_binds_mutation_identity_until_scope_slice() -> None:
@@ -782,8 +775,6 @@ def test_ticket_change_scope_still_binds_mutation_identity_until_scope_slice() -
     )[0]
 
     assert current_branch.mutation_id != unrelated_backlog.mutation_id
-    assert current_branch.approval is None
-    assert unrelated_backlog.approval is None
 ```
 
 The renamed test is intentionally temporary: it documents that `ticket_change_scope` survives only until its separate removal slice.
@@ -818,17 +809,24 @@ Then update `_apply_correction()` to pass the ticket path:
 
 Leave unsafe-correction and missing-detail tests without `ticket_path`; those branches must still fail before target-fingerprint identity is required.
 
-- [ ] **Step 2: Run evaluator approval tests to verify failure**
+- [ ] **Step 2: Add a tiny identity-helper stub, then run evaluator tests to verify behavioral failure**
+
+Before running the RED tests, create the smallest importable stub at
+`plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py` if the file does
+not exist. The stub may define `CandidateMutationIdentity`,
+`candidate_mutation_payload()`, and `make_candidate_mutation_identity()` with
+placeholder behavior, but it must not satisfy the target identity tests. Do not
+commit the stub by itself; it is part of the later approval-boundary commit.
 
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_autonomy_runtime.py::test_agent_primary_decision_uses_mutation_id_without_approval_envelope tests/test_autonomy_runtime.py::test_target_fingerprint_binds_mutation_identity_for_non_create tests/test_autonomy_runtime.py::test_non_create_candidate_requires_target_fingerprint_for_identity tests/test_autonomy_runtime.py::test_correction_target_fingerprint_binds_mutation_identity tests/test_autonomy_runtime.py::test_correction_requires_target_fingerprint_for_identity -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_autonomy_runtime.py::test_agent_primary_decision_uses_mutation_id tests/test_autonomy_runtime.py::test_target_fingerprint_binds_mutation_identity_for_non_create tests/test_autonomy_runtime.py::test_non_create_candidate_requires_target_fingerprint_for_identity tests/test_autonomy_runtime.py::test_correction_target_fingerprint_binds_mutation_identity tests/test_autonomy_runtime.py::test_correction_requires_target_fingerprint_for_identity -q
 ```
 
-Expected before implementation: FAIL because the identity helper does not exist yet, evaluator still returns an approval envelope, mutation IDs do not yet bind the target fingerprint, and the correction branch still calls the old helper signature.
+Expected before implementation: FAIL on behavior, not collection. The helper may import, but mutation IDs do not yet bind the target fingerprint and the correction branch still calls the old helper signature.
 
-- [ ] **Step 3: Add neutral identity helper and remove approval creation from runtime evaluator**
+- [ ] **Step 3: Add neutral identity helper and remove approval machinery from runtime evaluator**
 
 Create `plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py`:
 
@@ -915,6 +913,8 @@ def make_candidate_mutation_identity(
 
 Do not import `CandidateMutation`, `GatewayMutation`, `AutonomyDecision`, or other runtime/gateway dataclasses into this helper. The helper must stay independent of runtime types.
 
+In `plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py`, delete `make_approval_id` and the `codex.ticket.approval.v1` schema constant or literal that only supports automatic approval envelopes. Keep `make_mutation_id` and `sha256_fingerprint`.
+
 In `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py`, remove `make_approval_id`, `make_mutation_id`, and `sha256_fingerprint` from imports once no direct callers remain. Add:
 
 ```python
@@ -924,7 +924,9 @@ from scripts.ticket_mutation_identity import (
 )
 ```
 
-Delete `_make_approval()`. Replace `_ticket_state_fingerprint()` with a target-fingerprint helper that only reads Ticket-owned source context; do not fall back to `candidate.proposed_change["ticket_state_fingerprint"]` because callers do not supply authoritative identity values:
+Delete `_make_approval()`. Delete the `approval` field from `AutonomyDecision` and update `_decision()` plus all construction sites accordingly. Future explicit `discussion_only` approval is deferred design, not executable scaffolding in this slice.
+
+Replace `_ticket_state_fingerprint()` with a target-fingerprint helper that only reads Ticket-owned source context; do not fall back to `candidate.proposed_change["ticket_state_fingerprint"]` because callers do not supply authoritative identity values:
 
 ```python
 def _target_fingerprint_for_candidate(
@@ -975,7 +977,6 @@ In the `candidate.action == "correction"` branch of `evaluate_autonomy_intent()`
                         reason="target_fingerprint_required",
                         pending_summary_status="ticket_update_blocked",
                         mutation_id=None,
-                        approval=None,
                         engine_dispatch=dispatch,
                     )
                 )
@@ -1000,7 +1001,6 @@ In `evaluate_autonomy_intent()`, replace the autonomous-apply tail with:
                     reason="target_fingerprint_required",
                     pending_summary_status="ticket_update_blocked",
                     mutation_id=None,
-                    approval=None,
                     engine_dispatch=dispatch,
                 )
             )
@@ -1019,15 +1019,12 @@ In `evaluate_autonomy_intent()`, replace the autonomous-apply tail with:
                 reason="authorized",
                 pending_summary_status="pending",
                 mutation_id=identity.mutation_id,
-                approval=None,
                 engine_dispatch=dispatch,
             )
         )
 ```
 
 For correction decisions, pass `identity.mutation_id` into `_decision()` in the same way. Runtime still owns the turn-local hard stop for non-create writes without a target fingerprint; it must use `TICKET_UPDATE_BLOCKED`, not `REQUIRE_USER_DISCUSSION`. `ticket_mutation_identity.py` must not enforce that policy.
-
-Do not delete the `approval` field from `AutonomyDecision` in this slice. It remains available for the later explicit `discussion_only` user-approval fact.
 
 Remove approval-only runtime leftovers in the same edit:
 
@@ -1057,9 +1054,12 @@ Do not commit after Task 3. A runtime-only commit would be a known broken checkp
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py:76-188`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py:230-245`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py:610-650`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py:45-95`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py:277-315`
 - Modify: `plugins/turbo-mode/ticket/tests/test_engine_gateway.py:1-220`
 - Modify: `plugins/turbo-mode/ticket/tests/test_engine_gateway.py:240-270`
 - Modify: `plugins/turbo-mode/ticket/tests/test_engine_gateway.py:650-810`
+- Modify: `plugins/turbo-mode/ticket/tests/test_turn_batch.py:25-275`
 
 - [ ] **Step 1: Add gateway decision-validation tests**
 
@@ -1226,8 +1226,6 @@ def _decision_error(
     mutation: GatewayMutation,
     decision: AutonomyDecision,
 ) -> str | None:
-    if decision.approval is not None:
-        return "approval_unexpected"
     if decision.kind == RuntimeDecisionKind.APPLY_CORRECTION:
         if mutation.action != "correction" or decision.candidate.action != "correction":
             return "decision_mismatch"
@@ -1364,7 +1362,7 @@ to:
     ]
 ```
 
-Apply the same replacement in this file anywhere a new successful gateway write is expected. Do not change historical recovery fixtures that intentionally append `approval_consumed` to model already-written pending-summary logs.
+Apply the same replacement in this file anywhere a new successful gateway write is expected. Also update failed gateway write expectations, including `test_gateway_treats_success_without_ticket_path_as_failed_mutation`, from `["pending", "approval_consumed", "failed"]` to `["pending", "failed"]`.
 
 In `test_gateway_rechecks_pause_after_approval_consumption_before_dispatch`, rename the test to:
 
@@ -1381,27 +1379,11 @@ and change the final event-status assertion to:
     assert [event["status"] for event in _events(project_root)] == ["pending"]
 ```
 
-- [ ] **Step 6: Run focused runtime and gateway tests**
+- [ ] **Step 6: Keep gateway changes uncommitted until pending-summary validation is updated**
 
-Run:
+Do not commit after Task 4. Gateway success paths append through pending-summary validation, so this boundary is runnable only after Task 5 removes approval/preview taxonomy from `ticket_turn_batch.py` and rewrites all affected gateway and turn-batch expectations.
 
-```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py tests/test_engine_gateway.py::test_gateway_rejects_non_autonomous_or_mismatched_decisions tests/test_engine_gateway.py::test_gateway_applies_update_records_events_and_writes_change_history tests/test_engine_gateway.py::test_gateway_rechecks_pause_after_attempt_record_before_dispatch -q
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py
-```
-
-Expected: PASS. This is the first runnable checkpoint after removing runtime approvals.
-
-- [ ] **Step 7: Commit atomic approval-gate removal**
-
-Run:
-
-```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py
-git commit -m "fix(ticket): remove agent-primary approval gate"
-```
-
-## Task 5: Update Pending-Summary Validation For No New Approvals And Health Blocks
+## Task 5: Delete Pending-Summary Preview And Approval Support
 
 **Files:**
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py:45-95`
@@ -1409,9 +1391,10 @@ git commit -m "fix(ticket): remove agent-primary approval gate"
 - Modify: `plugins/turbo-mode/ticket/tests/test_turn_batch.py:25-70`
 - Modify: `plugins/turbo-mode/ticket/tests/test_turn_batch.py:170-275`
 
-- [ ] **Step 1: Rewrite pending-summary fixtures and tests**
+- [ ] **Step 1: Rewrite pending-summary fixtures and deletion tests**
 
-In `plugins/turbo-mode/ticket/tests/test_turn_batch.py`, replace the `details` dictionary in `valid_attempt_event()` with:
+In `plugins/turbo-mode/ticket/tests/test_turn_batch.py`, replace the `details`
+dictionary in `valid_attempt_event()` with:
 
 ```python
     details: dict[str, object] = {
@@ -1427,7 +1410,8 @@ In the same helper, replace the default attempt reason:
         "reason": "Apply autonomous Ticket mutation.",
 ```
 
-Replace `test_preview_records_use_skipped_status_with_preview_only_decision` with:
+Replace `test_preview_records_use_skipped_status_with_preview_only_decision`
+with a rejection test for removed preview taxonomy:
 
 ```python
 def test_preview_only_decision_is_not_a_supported_pending_summary_decision() -> None:
@@ -1439,67 +1423,43 @@ def test_preview_only_decision_is_not_a_supported_pending_summary_decision() -> 
     assert_invalid(event, "decision")
 ```
 
-Remove this tuple from `test_status_details_requirements`:
+Add rejection coverage for removed approval state:
 
 ```python
-(
-    without_detail(valid_attempt_event(), "approval"),
-    "approval",
-),
+def test_approval_consumed_status_is_not_supported() -> None:
+    event = valid_status_event("ticket_written")
+    event["status"] = "approval_consumed"
+    event["details"] = {"approval_id": "old-approval"}
+
+    assert_invalid(event, "status")
 ```
 
-Keep `valid_status_event("approval_consumed")` and the `approval_id` requirement only for historical recovery input in this slice. Do not describe this as backwards compatibility and do not add new product behavior around `approval_consumed`.
+Remove approval-shaped detail requirement tests. Do not add `autonomy_health`,
+`ticket_update_blocked`, or any other blocked-candidate event to pending-summary
+validation in this slice.
 
-Add a focused health-event fixture and validation test:
-
-```python
-def valid_health_event() -> dict[str, object]:
-    event = valid_attempt_event(
-        event_type="autonomy_health",
-        status="ticket_update_blocked",
-        action="update",
-        ticket_id="T-20260527-01",
-        mutation_id=None,
-        reason="target_fingerprint_required",
-    )
-    event["details"] = {
-        "blocked_reason": "target_fingerprint_required",
-        "current_mode": "agent_primary",
-        "evidence_kind": "runtime_context",
-    }
-    return event
-
-
-def test_autonomy_health_records_ticket_update_block_without_mutation_payload() -> None:
-    event = valid_health_event()
-
-    assert validate_pending_summary_event(event).ok
-    assert event["event_type"] == "autonomy_health"
-    assert event["status"] == "ticket_update_blocked"
-    assert event["mutation_id"] is None
-    assert "approval" not in event["details"]
-    assert "proposed_change" not in event["details"]
-    assert "expected_pre_write_fingerprint" not in event["details"]
-    assert "expected_post_write_fingerprint" not in event["details"]
-```
-
-Add negative coverage that an `autonomy_health` event with a mutation ID or without `details.blocked_reason` is invalid. This keeps the repeat signal separate from mutation attempts and gateway write evidence.
-
-In `test_status_values_match_event_type`, keep `("automation_pause", "paused")` valid and keep existing pause-reason validation focused on event shapes already written today. Do not add `source_context_unhealthy` to pending-summary pause-reason tests unless implementation first proves runtime pauses already append `automation_pause` events consistently.
+In `test_valid_event_status_matrix`, keep `("automation_pause", "paused")`
+valid and keep existing pause-reason validation focused on event shapes already
+written today. Do not add `source_context_unhealthy` to pending-summary
+pause-reason tests unless implementation first proves runtime pauses already
+append `automation_pause` events consistently.
 
 - [ ] **Step 2: Run pending-summary tests to verify failure**
 
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_turn_batch.py::test_preview_only_decision_is_not_a_supported_pending_summary_decision tests/test_turn_batch.py::test_status_details_requirements -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_turn_batch.py::test_preview_only_decision_is_not_a_supported_pending_summary_decision tests/test_turn_batch.py::test_approval_consumed_status_is_not_supported tests/test_turn_batch.py::test_status_details_requirements -q
 ```
 
-Expected before implementation: FAIL because `preview_only` and `current_mode: preview` are still accepted, `details.approval` is still required for `apply_autonomously`, and `autonomy_health` is not yet a supported event type.
+Expected before implementation: FAIL because `preview_only`,
+`current_mode: preview`, `details.approval`, `approval_consumed`, and
+`approval_id` are still accepted or required.
 
-- [ ] **Step 3: Remove new preview and approval requirements from validation**
+- [ ] **Step 3: Delete preview and approval taxonomy from validation and recovery**
 
-In `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py`, replace `_DECISIONS` and `_MODES` with:
+In `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py`, replace `_DECISIONS`
+and `_MODES` with:
 
 ```python
 _DECISIONS = frozenset(
@@ -1509,19 +1469,13 @@ _DECISIONS = frozenset(
         "require_user_discussion",
         "skip_due_to_conflict",
         "defer_until_retry_condition",
-        "ticket_update_blocked",
     }
 )
 _MODES = frozenset({"discussion_only", "agent_primary"})
 ```
 
-Add `autonomy_health` to `_EVENT_STATUSES`:
-
-```python
-    "autonomy_health": {"ticket_update_blocked"},
-```
-
-In `_validate_details()`, remove these checks:
+Remove `approval_consumed` from `_EVENT_STATUSES` and remove `approval_id` from
+status-specific detail requirements. Remove these `_validate_details()` checks:
 
 ```python
         if decision == "apply_autonomously" and not isinstance(details.get("approval"), Mapping):
@@ -1530,62 +1484,41 @@ In `_validate_details()`, remove these checks:
             return _invalid("preview_only decisions must use skipped status")
 ```
 
-In `validate_pending_summary_event()` or a small helper it calls, add health-event validation:
+Delete `approval_consumed` branches from `derive_mutation_state()`,
+`project_mutation_recovery()`, compaction/recovery helpers, and tests. This
+slice intentionally has no compatibility reader for old approval logs because
+Task 0 verified no project-local pending-summary logs exist in this checkout.
+If Task 0 found a current log, this step must not run until the migration/reader
+decision is made.
 
-```python
-    if event_type == "autonomy_health":
-        if status != "ticket_update_blocked":
-            return _invalid("status is not supported for event_type")
-        if event["mutation_id"] is not None:
-            return _invalid("autonomy_health must not carry mutation_id")
-        if not _nonempty_string(event["ticket_id"]):
-            return _invalid("autonomy_health requires ticket_id")
-        if not _nonempty_string(details.get("blocked_reason")):
-            return _invalid("details.blocked_reason is required")
-        forbidden = {
-            "approval",
-            "approval_id",
-            "proposed_change",
-            "mutation_fingerprint",
-            "expected_pre_write_fingerprint",
-            "expected_post_write_fingerprint",
-            "post_write_fingerprint",
-        }
-        blocked = sorted(forbidden & set(details))
-        if blocked:
-            return _invalid(f"autonomy_health cannot carry {blocked[0]}")
-```
+Do not add `autonomy_health`, `ticket_update_blocked`, or other blocked-candidate
+pending-summary event validation here. Missing target fingerprints are
+turn-local output only in this slice.
 
-This validation is intentionally narrow. It is the only allowed temporary pending-summary schema growth in this slice. Do not add any other event type, event status, pending-summary finite value, or pause-reason validation for this slice. It gives Task 7 a repeat signal keyed by thread, turn, ticket id, action, and reason without treating the blocked candidate as a write attempt. Keep `autonomy_health` out of mutation recovery entirely: `derive_mutation_state()`, `project_mutation_recovery()`, and any recovery projection or compaction path must not let it affect write lifecycle state. Retention and compaction may preserve or prune it only as health metadata. Do not describe `autonomy_health` as the target long-term operation log; Task 7 must make the maintenance ticket the durable project state and must stop new health-event writes for matching groups once an open maintenance ticket exists.
-
-Do not remove `approval_consumed` from `_EVENT_STATUSES`, `required_by_status`, `derive_mutation_state()`, or `project_mutation_recovery()` in this task. Those branches are read-only historical recovery support for already-written private logs and remain temporary drift until the later operation-log collapse plan.
-
-When retaining a source branch or helper that exists only for old `approval_consumed` logs, label it with this exact comment near the retained logic:
-
-```python
-# Historical approval recovery only: new gateway writes no approval_consumed events.
-```
-
-Do not add that label to new write paths. If implementation finds that a retained approval branch cannot be labeled honestly as historical recovery input, stop and revise this plan before proceeding.
-
-- [ ] **Step 4: Run focused pending-summary tests**
+- [ ] **Step 4: Run the atomic approval-boundary tests**
 
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_turn_batch.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py tests/test_engine_gateway.py tests/test_turn_batch.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py
 ```
 
-Expected: PASS.
+Expected: PASS. This is the first runnable checkpoint after removing automatic
+runtime approvals. It proves runtime decision construction, gateway validation,
+gateway event sequences, and pending-summary validation changed together.
 
-- [ ] **Step 5: Commit pending-summary validation cleanup**
+- [ ] **Step 5: Commit atomic approval-boundary removal**
 
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/tests/test_turn_batch.py
-git commit -m "fix(ticket): drop pending-summary approval requirement"
+git add plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py
+git commit -m "fix(ticket): remove agent-primary approval gate"
 ```
+
+Expected: commit includes Task 3, Task 4, and Task 5 changes. Do not create a
+Task 3-only or Task 4-only commit.
 
 ## Task 6: Update Apply-Turn Recovery And Integration Tests
 
@@ -1606,7 +1539,7 @@ Run:
 rg -n "approval_consumed|details\\[\\\"approval\\\"\\]|decision\\.approval|approval_id|AutomationMode\\.PREVIEW|preview_payload|\\\"preview\\\"" plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 ```
 
-Expected after Tasks 3-5: remaining matches should be either historical recovery fixtures or tests that still need source-slice rewrite. New successful write paths must not expect `approval_consumed`; no test should write durable `AutomationMode.PREVIEW`.
+Expected after Tasks 3-5: remaining matches should be deletion-only negative fixtures or tests that still need source-slice rewrite. No current write, validation, recovery, or event-sequence test should expect `approval_consumed`; no test should write durable `AutomationMode.PREVIEW`.
 
 - [ ] **Step 2: Rewrite apply-turn recovery helper approval mutation**
 
@@ -1684,50 +1617,29 @@ read errors, or the probe bypasses the collector helper, do not clear the pause;
 report `source_context_unhealthy` so the user sees that explicit repair evidence
 is missing.
 
-In `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py`, add a dedicated health-event helper instead of routing blocked target-fingerprint decisions through `_append_non_write_decision()`:
+Do not add a blocked-candidate pending-summary helper. A missing target
+fingerprint is turn-local output only in this slice.
+
+Update `_summary_payload()` to accept `blocked: list[str]` and
+`blocked_reasons: dict[str, str]` arguments, add a `"Blocked"` bucket, preserve
+conflict skips as `state: "skipped"` when all candidates are skipped, expose
+only concise blocker reasons, and select states with partial-apply semantics:
 
 ```python
-def _append_ticket_update_blocked_event(
-    *,
-    store: PendingSummaryStore,
-    decision: Any,
-    thread_id: str,
-    turn_id: str,
-    repo_context: VerifiedRepoContext,
-    current_mode: AutomationMode,
-) -> None:
-    event = _event_payload(
-        event_type="autonomy_health",
-        status="ticket_update_blocked",
-        action=decision.candidate.action,
-        ticket_id=decision.candidate.ticket_id,
-        mutation_id=None,
-        thread_id=thread_id,
-        turn_id=turn_id,
-        repo_context=repo_context,
-        reason=decision.reason or "Ticket update blocked.",
-        details={
-            "blocked_reason": decision.reason or "ticket_update_blocked",
-            "current_mode": current_mode.value,
-            "evidence_kind": "runtime_context",
-        },
-    )
-    store.append_event(event)
-```
-
-Update `_summary_payload()` to accept `blocked: list[str]` and `blocked_reasons: dict[str, str]` arguments, add a `"Blocked"` bucket, expose only concise blocker reasons, and select states with partial-apply semantics:
-
-```python
+    if skipped:
+        ticket_updates["Skipped"] = skipped
     if blocked:
         ticket_updates["Blocked"] = blocked
-    if applied and blocked:
+    if applied and (blocked or skipped):
         state = "partially_applied"
     elif applied:
         state = "applied"
-    elif blocked:
-        state = "ticket_update_blocked"
     elif discussion:
         state = "discussion_required"
+    elif blocked:
+        state = "ticket_update_blocked"
+    elif skipped:
+        state = "skipped"
     else:
         state = "no_change"
 ```
@@ -1739,25 +1651,17 @@ After the payload dictionary is created, add only the concise reason map when bl
         payload["blocked_reasons"] = blocked_reasons
 ```
 
-Do not include a `discussion_question` for `ticket_update_blocked` unless another candidate independently requires discussion. Do not include proposed fields, fingerprints, mutation IDs, event IDs, or health-event internals in the summary payload. Those details belong only in the temporary `autonomy_health` event.
+Do not include a `discussion_question` for `ticket_update_blocked` unless another candidate independently requires discussion. Do not include proposed fields, fingerprints, mutation IDs, event IDs, health-event internals, or maintenance-ticket IDs in the summary payload.
 
 In the apply-turn decision loop, add `blocked: list[str] = []` and `blocked_reasons: dict[str, str] = {}` beside the existing result buckets. Add this branch before the generic non-write branch:
 
 ```python
         elif decision.kind == RuntimeDecisionKind.TICKET_UPDATE_BLOCKED:
-            _append_ticket_update_blocked_event(
-                store=store,
-                decision=decision,
-                thread_id=str(context["thread_id"]),
-                turn_id=str(context["turn_id"]),
-                repo_context=repo_context,
-                current_mode=mode,
-            )
             blocked.append(ticket_id)
             blocked_reasons[ticket_id] = decision.reason or "ticket_update_blocked"
 ```
 
-Pass `blocked=blocked` and `blocked_reasons=blocked_reasons` into `_summary_payload()`. This branch must not call `apply_autonomous_mutation()`, must not append a `mutation_attempt`, and must not add a mutation ID to `summary_mutation_ids`.
+Pass `blocked=blocked` and `blocked_reasons=blocked_reasons` into `_summary_payload()`. This branch must not call `apply_autonomous_mutation()`, must not append any pending-summary event, and must not add a mutation ID to `summary_mutation_ids`.
 
 - [ ] **Step 4: Add blocked-ticket apply-turn tests**
 
@@ -1774,28 +1678,25 @@ assert "event_id" not in payload
 assert "fingerprints" not in payload
 
 events = _events(tmp_path)
-health_events = [event for event in events if event["event_type"] == "autonomy_health"]
-assert len(health_events) == 1
-assert health_events[0]["status"] == "ticket_update_blocked"
-assert health_events[0]["ticket_id"] == "T-20260527-02"
-assert health_events[0]["mutation_id"] is None
-assert health_events[0]["reason"] == "target_fingerprint_required"
-assert health_events[0]["details"] == {
-    "blocked_reason": "target_fingerprint_required",
-    "current_mode": "agent_primary",
-    "evidence_kind": "runtime_context",
-}
-assert "approval" not in health_events[0]["details"]
-assert "proposed_change" not in health_events[0]["details"]
+blocked_events = [
+    event
+    for event in events
+    if event.get("ticket_id") == "T-20260527-02"
+]
+assert blocked_events == []
 ```
 
-Also add a single-candidate blocked case that returns `state: "ticket_update_blocked"` and writes exactly one `autonomy_health` event with no mutation-attempt event. If the easiest focused test is at the `_summary_payload()` / `_append_ticket_update_blocked_event()` level, keep the integration test smaller but still prove the no-mutation-event boundary.
+Also add a single-candidate blocked case that returns
+`state: "ticket_update_blocked"` and writes no pending-summary event for the
+blocked candidate. If the easiest focused test is at the `_summary_payload()`
+level, keep the integration test smaller but still prove the no-mutation-event
+boundary.
 
 Add source-context pause and resume tests:
 
 - A collector-level failure pauses the workspace with `state: "paused"`, `pause_reason: "source_context_unhealthy"`, and writes no mutation or health events.
 - The same collector-level failure creates or preserves the workspace `pause.json` marker and does not append a pending-summary `automation_pause` event unless the implementation has first proven all comparable runtime pauses already append one consistently.
-- A trustworthy collection with explicit per-ticket misses produces per-candidate `ticket_update_blocked` decisions and still allows other valid candidates to apply.
+- A trustworthy collection with explicit per-ticket misses produces per-candidate `ticket_update_blocked` decisions, writes no private event for those blocked candidates, and still allows other valid candidates to apply.
 - A normal later `apply-turn` without `--resume-paused` remains paused with `source_context_unhealthy`; it must not silently clear the marker.
 - `--resume-paused` for `source_context_unhealthy` fails closed when the current candidate-set collection or fail-closed known-ticket probe cannot prove source-context health through the same collector path.
 - `--resume-paused` clears `source_context_unhealthy` only after the collector/probe succeeds, then continues through the normal mode-specific apply-turn path.
@@ -1852,56 +1753,51 @@ Replace the preview block with:
 
 Keep the existing `discussion_only` block after it. This asserts durable `preview` is invalid and does not implement diagnostic dry-run.
 
-- [ ] **Step 7: Rewrite integration forged approval assertion**
+- [ ] **Step 7: Rewrite integration forged-authorization assertion**
 
-In `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`, update the final assertions in `test_apply_turn_consumes_adapter_candidate_keys_and_ignores_forged_approval` to:
+In `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`, rename
+`test_apply_turn_consumes_adapter_candidate_keys_and_ignores_forged_approval`
+to a neutral authorization-residue test. Keep the final assertion focused on the
+mutation identity, without approval-shaped strings:
 
 ```python
     events = _events(tmp_path)
-    assert "approval" not in events[0]["details"]
     assert events[0]["mutation_id"] != "forged"
 ```
 
-- [ ] **Step 8: Add approval-free recovery coverage**
+- [ ] **Step 8: Keep approval-free recovery coverage**
 
-In `plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py`, update `test_ticket_written_without_terminal_status_appends_outcome` so it models the new approval-free crash boundary. The setup must append a `pending` attempt event and then a `ticket_written` event without an intermediate `approval_consumed` event. Keep the expected projection:
+In `plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py`,
+`test_ticket_written_without_terminal_status_appends_outcome` must model the
+current crash boundary with a `pending` attempt event followed by a
+`ticket_written` event. Keep the expected projection:
 
 ```python
     assert projection.state == "append_missing_terminal_status"
     assert [event["status"] for event in projection.events_to_append] == ["applied"]
 ```
 
-This proves a write-completed-before-terminal-event recovery path without relying on the removed approval-consumed middle state.
+This proves a write-completed-before-terminal-event recovery path using only
+current event states.
 
-- [ ] **Step 9: Keep historical `approval_consumed` fixtures marked as historical recovery input**
-
-For tests that append `valid_status_event("approval_consumed", ...)` to model an old partial log, add this local comment immediately before the append:
-
-```python
-# Historical recovery input only: new gateway writes no approval_consumed events.
-```
-
-Do not add new product behavior or backwards-compatibility behavior around `approval_consumed`.
-
-- [ ] **Step 10: Confirm no new source writes approval envelopes or preview decisions**
+- [ ] **Step 9: Confirm no source writes approval envelopes, preview decisions, or blocked private events**
 
 Run:
 
 ```bash
-rg -n "AutomationMode\\.PREVIEW|RuntimeDecisionKind\\.PREVIEW_ONLY|preview_only|details\\.approval|approval_required|make_approval|codex\\.ticket\\.approval|decision\\.approval\\[|approval_consumed" plugins/turbo-mode/ticket/scripts
-rg -n "target_fingerprint_required|ticket_update_blocked|autonomy_health|partially_applied|source_context_unhealthy" plugins/turbo-mode/ticket/scripts
+rg -n "AutomationMode\\.PREVIEW|RuntimeDecisionKind\\.PREVIEW_ONLY|preview_only|details\\.approval|approval_required|make_approval|codex\\.ticket\\.approval|decision\\.approval|approval_consumed|approval_id" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
+rg -n "target_fingerprint_required|ticket_update_blocked|autonomy_health|partially_applied|source_context_unhealthy|maintenance_tickets|MAINTENANCE_REPEAT_THRESHOLD|ticket_autonomy_maintenance" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 ```
 
 Expected after Tasks 1-6:
 
-- No matches for `AutomationMode.PREVIEW`, `RuntimeDecisionKind.PREVIEW_ONLY`, `preview_only`, `details.approval`, `approval_required`, `make_approval`, or `codex.ticket.approval` outside `ticket_autonomy_ids.py`.
-- `approval_consumed` may still match only in `ticket_turn_batch.py` historical recovery validation and projection.
-- `target_fingerprint_required` matches must use `RuntimeDecisionKind.TICKET_UPDATE_BLOCKED`, `status: "ticket_update_blocked"`, or gateway policy-blocked validation. No match may classify missing target fingerprint as `discussion_required` or emit a discussion question.
-- `autonomy_health` matches must write or validate only bridge `ticket_update_blocked` scaffolding events and must not carry mutation IDs, proposed fields, gateway fingerprints, or approval data. This is the only allowed pending-summary schema addition in this slice. No match may feed mutation recovery, write lifecycle projection, or compaction-derived mutation state. Task 7 tightens this further so matching groups stop writing health events after an open maintenance ticket exists.
+- No matches for `AutomationMode.PREVIEW`, `RuntimeDecisionKind.PREVIEW_ONLY`, `preview_only`, `details.approval`, `approval_required`, `make_approval`, `codex.ticket.approval`, `decision.approval`, `approval_consumed`, or `approval_id` in executable source or active tests.
+- `target_fingerprint_required` matches must use `RuntimeDecisionKind.TICKET_UPDATE_BLOCKED`, concise blocked-output assertions, or gateway policy-blocked validation. No match may classify missing target fingerprint as `discussion_required` or emit a discussion question.
+- `autonomy_health`, `maintenance_tickets`, `MAINTENANCE_REPEAT_THRESHOLD`, and `ticket_autonomy_maintenance` must have no matches in executable source or active tests in this slice.
 - `source_context_unhealthy` matches must be pause-marker/output handling, collector-level pause, or explicit resume-proof code. No match may report source-context failure as `setup_required`, clear the pause without a collector/probe pass, or add pending-summary pause-reason validation without a proven consistent `automation_pause` event path.
 - `automation_pause` matches must remain validation or pre-existing pause behavior. A new source-context pause must not be the only runtime pause that writes an `automation_pause` pending-summary event.
 
-- [ ] **Step 11: Run focused apply-turn, integration, recovery, and gateway suites**
+- [ ] **Step 10: Run focused apply-turn, integration, recovery, and gateway suites**
 
 Run:
 
@@ -1911,306 +1807,33 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 Expected: PASS.
 
-- [ ] **Step 12: Keep apply-turn health scaffolding uncommitted until maintenance escalation lands**
+- [ ] **Step 11: Commit apply-turn and integration cleanup**
 
-Do not commit Task 6 by itself. Task 6 introduces the temporary `autonomy_health`
-bridge, and Task 7 must consume that bridge before the behavior boundary is
-complete. Keep the Task 6 source and test changes in the worktree, then commit
-Tasks 6 and 7 together after Task 7 verification passes.
+Run:
 
-## Task 7: Escalate Recurring Target-Fingerprint Blocks Into Maintenance Tickets
+```bash
+git add plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
+git commit -m "fix(ticket): update apply-turn modes approval output"
+```
+
+Expected: commit contains only apply-turn, CLI, integration, and recovery updates
+needed after the preview/approval boundaries. It must not add maintenance
+escalation, `autonomy_health`, or any blocked-candidate private event.
+
+## Deferred Maintenance Escalation Design
+
+Repeat-block tracking and maintenance-ticket escalation are intentionally split
+out of this source slice. A future control plan must explicitly authorize any
+recurrence tracking, `autonomy_health` bridge, repeat threshold, maintenance
+helper, maintenance-ticket output, dedupe identity, recovery behavior, and tests.
+This slice must keep missing target fingerprints turn-local: report the blocked
+candidate, apply other valid candidates in the same batch, and write no mutation,
+health, recovery, or pending-summary event for the blocked candidate.
+
+## Task 7: Final Verification And Closeout
 
 **Files:**
-- Add: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_maintenance.py`
-- Add: `plugins/turbo-mode/ticket/tests/test_autonomy_maintenance.py`
-- Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py`
-- Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`
-- Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`
-- Inspect: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py`
-- Inspect: `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`
-- Inspect: `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py`
-- Inspect: `plugins/turbo-mode/ticket/scripts/ticket_read.py`
-
-- [ ] **Step 1: Write failing maintenance-escalation helper tests**
-
-In `plugins/turbo-mode/ticket/tests/test_autonomy_maintenance.py`, add focused
-tests for the helper contract before wiring apply-turn:
-
-- `autonomy_health` events with `status: "ticket_update_blocked"` plus the
-  normalized project root passed by apply-turn produce a block group keyed by
-  workspace, thread id, ticket id, action, and `details.blocked_reason`. The
-  turn id is event evidence, not part of the repeat grouping key, because
-  different turns are what prove repetition. Do not add workspace to
-  `autonomy_health.details`.
-- Events missing thread id, ticket id, action, or blocked reason do not form an
-  escalation group.
-- No prior matching event plus the current blocked decision does not create a
-  ticket because the repeat threshold is not met.
-- One prior matching event plus the current blocked decision reaches the repeat
-  threshold without appending a second `autonomy_health` event. Use
-  `MAINTENANCE_REPEAT_THRESHOLD = 2`; do not replace this with a higher
-  threshold in this slice.
-- An existing open maintenance ticket with component `ticket` and the
-  human-readable block line in ordinary ticket content suppresses new
-  `autonomy_health` writes and returns that ticket id even when its title has
-  been edited.
-- Closed or `wontfix` maintenance tickets do not suppress a new escalation.
-- The maintenance candidate is a normal create candidate with no target
-  fingerprint requirement, explicit fresh evidence for ordinary
-  `agent_primary` runtime evaluation, and no approval-shaped fields.
-
-Use ordinary ticket content/frontmatter for dedupe. Do not introduce hidden
-state files, private marker JSON, or mutation-recovery state for escalation
-dedupe.
-
-- [ ] **Step 2: Add the maintenance helper**
-
-Create `plugins/turbo-mode/ticket/scripts/ticket_autonomy_maintenance.py` with
-small deterministic helpers. Keep the helper focused on grouping, dedupe, and
-candidate construction:
-
-```python
-MAINTENANCE_REPEAT_THRESHOLD = 2
-
-
-@dataclass(frozen=True, slots=True)
-class TargetFingerprintBlockGroup:
-    workspace: str
-    thread_id: str
-    ticket_id: str
-    action: str
-    blocked_reason: str
-```
-
-Required helper behavior:
-
-- `group_from_health_event(event, *, workspace)` returns a group only for
-  validated `autonomy_health` / `ticket_update_blocked` events with a string
-  ticket id, action, thread id, and `details.blocked_reason`. `workspace` is
-  the normalized project root supplied by apply-turn. It is part of the
-  in-memory group key and must not be added to `autonomy_health.details`.
-- `matching_health_event_count(events, group)` counts prior matching health
-  events from `PendingSummaryStore.read_events()` output. It does not look at
-  mutation attempts, mutation status, summary receipts, `approval_consumed`, or
-  compaction state.
-- `occurrence_count_for_current_block(events, group)` or equivalent behavior
-  must count prior matching health events plus the current blocked decision in
-  memory. It must not require appending the current decision as another health
-  event before escalation.
-- `maintenance_title(group)` returns a deterministic title such as:
-
-  ```text
-  Fix Ticket autonomy source-context block for <ticket_id>
-  ```
-
-- `maintenance_block_line(group)` returns a deterministic human-readable line
-  such as:
-
-  ```text
-  Autonomy block: thread=<thread_id>, ticket=<ticket_id>, action=<action>, reason=<blocked_reason>
-  ```
-
-  Do not include the normalized workspace path in this line; workspace locality
-  comes from scanning that workspace's `docs/tickets/`.
-- `find_open_maintenance_ticket(tickets_dir, group)` scans ordinary open ticket
-  files with `list_tickets(..., include_closed=False)` and returns a matching
-  ticket when `component` is `ticket` and ordinary ticket content contains
-  `maintenance_block_line(group)`. The deterministic title is used for creation
-  but not required for dedupe, so dedupe survives human title edits. The scan
-  must ignore `done` and `wontfix` tickets.
-- `build_maintenance_candidate(group, occurrence_count, recent_turn_ids)` returns
-  fields that can be adapted into a normal `CandidateMutation(action="create")`.
-  Use only existing ticket fields:
-
-  ```python
-  {
-      "title": maintenance_title(group),
-      "captured_request": (
-          "Create a maintenance ticket for repeated Ticket autonomy "
-          "target_fingerprint_required blocks."
-      ),
-      "problem": (
-          "Ticket autonomy repeatedly blocked a non-create write because the "
-          "Ticket-derived target fingerprint was missing."
-      ),
-      "next_action": (
-          "Repair source-context collection so the target ticket fingerprint is "
-          "available before autonomous non-create writes."
-      ),
-      "priority": "medium",
-      "component": "ticket",
-      "tags": ["maintenance"],
-      "related_paths": ["plugins/turbo-mode/ticket/scripts/ticket_autonomy.py"],
-      "capture_confidence": "high",
-      "capture_source": "autonomy",
-      "source": {"type": "autonomy", "ref": group.ticket_id, "session": group.thread_id},
-      "approach": (
-          "Inspect source-context collection for the target ticket and repair the "
-          "path that failed to provide the expected target fingerprint."
-      ),
-      "acceptance_criteria": [
-          "Recurring target_fingerprint_required blocks create or reuse a maintenance ticket instead of accumulating private health events.",
-          "Autonomous non-create writes still fail closed when the target fingerprint is unavailable.",
-      ],
-      "verification": (
-          "Add or run focused autonomy tests that reproduce the blocked update and "
-          "show source-context collection returning the target fingerprint."
-      ),
-  }
-  ```
-
-  Include the target ticket id, action, blocked reason, occurrence count, and
-  recent turn ids in human-readable sections such as `context` or
-  `prior_investigation`, not in a new private schema field.
-  Include `maintenance_block_line(group)` in ordinary ticket content so future
-  dedupe does not depend on the title. The generated `CandidateMutation` must
-  have explicit fresh evidence and must pass ordinary `agent_primary` evaluator
-  gates under focused tests. If create fanout caps would otherwise block the
-  maintenance ticket, add the smallest dedicated action/fanout key needed for
-  maintenance creates; do not bypass `evaluate_autonomy_intent()`.
-
-The helper may import `CandidateMutation` and `EvidenceLink` from
-`ticket_autonomy_runtime` if that keeps apply-turn simpler. It must not import
-gateway internals or pending-summary recovery helpers.
-
-- [ ] **Step 3: Wire escalation into apply-turn without making health events durable state**
-
-In `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py`, replace the direct
-blocked-event append branch from Task 6 with a small flow:
-
-1. Build the block group for the current `TICKET_UPDATE_BLOCKED` decision.
-2. If `find_open_maintenance_ticket()` returns a ticket, do not append a new
-   `autonomy_health` event for this group. Record the existing maintenance
-   ticket id for concise output.
-3. Re-read or reuse valid pending-summary events and count prior matching health
-   events plus the current blocked decision in memory.
-4. If the count is below `MAINTENANCE_REPEAT_THRESHOLD`, append the narrow
-   `autonomy_health` event from Task 6. This is the first occurrence path.
-5. If the count reaches `MAINTENANCE_REPEAT_THRESHOLD`, build a maintenance
-   create candidate with explicit fresh evidence and apply it through the same
-   `evaluate_autonomy_intent()` plus `apply_autonomous_mutation()` gateway path
-   used for other autonomous creates. Do not write the maintenance ticket
-   directly and do not append another `autonomy_health` event.
-6. If the maintenance create succeeds, record the created maintenance ticket id
-   for concise output. If it fails, keep the original blocked result, surface a
-   concise `maintenance_escalation_failed` message or reason from the runtime or
-   gateway response, leave the single prior health event as the repeat seed, and
-   do not retry in a loop.
-
-The original blocked candidate must still write no mutation attempt, no mutation
-status, and no mutation id. The generated maintenance create candidate may write
-ordinary create `mutation_attempt`, `ticket_written`, `applied`, and
-`summary_receipt` events through existing gateway/recovery paths. The generated
-maintenance create candidate must use `target_fingerprint=None` in identity as a
-normal create, while non-create original candidates remain target-fingerprint
-required.
-
-Update `_summary_payload()` so maintenance escalation does not hide the original
-block:
-
-- Original applied tickets still populate `"Applied"`.
-- Original blocked tickets still populate `"Blocked"` and `blocked_reasons`.
-- Maintenance ticket creations populate a separate concise field such as:
-
-  ```python
-  "maintenance_tickets": {"T-20260527-02": "T-20260531-01"}
-  ```
-
-- State selection remains based on original candidate outcomes:
-  `partially_applied` when original applied and blocked candidates both exist,
-  `ticket_update_blocked` when only original blocked candidates exist, and
-  `applied` only when original candidates applied without blocks.
-- `changed` may be true when a maintenance ticket was created, but state must
-  still name the original block.
-
-Do not expose health event ids, maintenance mutation ids, proposed fields,
-fingerprints, or gateway internals in the summary payload.
-
-- [ ] **Step 4: Add apply-turn and integration escalation tests**
-
-Add focused CLI or integration coverage for these cases:
-
-- First occurrence: a single target-fingerprint block appends exactly one
-  `autonomy_health` event, creates no maintenance ticket, writes no mutation
-  attempt for the blocked candidate, and reports `state: "ticket_update_blocked"`.
-- Second occurrence for the same workspace/thread/ticket/action/reason: apply-turn
-  appends no second health event, counts the current blocked decision in memory,
-  creates exactly one maintenance ticket through the evaluator plus gateway
-  create path, reports the original blocked ticket under `"Blocked"`, and
-  reports the maintenance ticket id under `maintenance_tickets`.
-- Third occurrence with the matching maintenance ticket still open: apply-turn
-  reports the block and existing maintenance ticket id but appends no new
-  `autonomy_health` event for that group.
-- A matching open maintenance ticket still suppresses new health writes after a
-  human edits its title, because dedupe uses the plain block line in ordinary
-  ticket content.
-- A second occurrence whose maintenance create is blocked or fails reports
-  `maintenance_escalation_failed`, appends no second health event, and creates
-  no private failure ledger.
-- A closed matching maintenance ticket does not suppress escalation; the next
-  repeated block may create a new maintenance ticket.
-- A mixed batch with one valid original update and one repeated blocked update
-  remains `state: "partially_applied"`, applies the valid original update, and
-  creates or reuses the maintenance ticket for the blocked update.
-- The generated maintenance create candidate passes ordinary `agent_primary`
-  runtime evaluation with explicit fresh evidence; tests must not bypass the
-  evaluator to write the maintenance ticket.
-
-Assertions must prove no hidden private state is introduced: no new file under
-`.codex/ticket-workspace/` besides the existing pending-summary and lock files,
-and no new pending-summary event type or status beyond
-`autonomy_health` / `ticket_update_blocked`.
-
-- [ ] **Step 5: Run focused maintenance escalation tests**
-
-Run:
-
-```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_maintenance.py tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_turn_batch.py -q
-```
-
-Expected: PASS.
-
-- [ ] **Step 6: Confirm the health bridge is not a durable product state**
-
-Run:
-
-```bash
-rg -n "autonomy_health|ticket_update_blocked|maintenance_tickets|MAINTENANCE_REPEAT_THRESHOLD|source_context_unhealthy" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
-```
-
-Expected:
-
-- `autonomy_health` writes occur only for first occurrences of block groups that
-  do not yet have a matching open maintenance ticket. Second and later matching
-  occurrences count the current blocked decision in memory and do not append
-  another health event.
-- `autonomy_health` reads are limited to repeat-threshold detection, recovery,
-  cleanup, or validation. They do not feed mutation recovery, write lifecycle
-  projection, compaction-derived mutation state, or user-facing health streams.
-- Maintenance escalation uses ordinary ticket create mutation attempts and
-- ordinary ticket files as the durable state, and maintenance-ticket dedupe uses
-  the plain block line in ordinary ticket content rather than exact title
-  matching or hidden state.
-- No new pending-summary event type or status is added for escalation.
-
-- [ ] **Step 7: Commit apply-turn health and maintenance escalation together**
-
-Run:
-
-```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_maintenance.py plugins/turbo-mode/ticket/tests/test_autonomy_maintenance.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py
-git commit -m "feat(ticket): escalate recurring autonomy blocks"
-```
-
-Expected: commit includes Task 6 apply-turn health handling plus Task 7
-maintenance escalation. Do not leave a committed behavior boundary where
-recurring target-fingerprint blocks only accumulate private health events.
-
-## Task 8: Final Verification And Closeout
-
-**Files:**
-- Verify all modified files from Tasks 1-7.
+- Verify all modified files from Tasks 1-6 and this final closeout.
 
 - [ ] **Step 1: Run boundary inventory guard**
 
@@ -2223,24 +1846,20 @@ rg -n 'AutomationMode\.PREVIEW|RuntimeDecisionKind\.PREVIEW_ONLY|preview_only|de
 Expected: every match is classified before closeout. Allowed matches are only:
 
 - Negative rejection fixtures that prove removed values such as `preview_only` or `current_mode: "preview"` are rejected.
-- Historical recovery fixtures or validators that intentionally keep reading `approval_consumed` / `approval_id` for already-written private logs until the later operation-log collapse plan.
-- Defensive rejection checks that read `decision.approval` only to reject stale or forged approval data before accepting a write, such as `if decision.approval is not None: return "approval_unexpected"`.
-- Runtime and apply-turn branches that classify `target_fingerprint_required` as `ticket_update_blocked`, append `autonomy_health` only for the first occurrence of a block group while no matching open maintenance ticket exists, count later current blocked decisions in memory, and preserve partial apply for other valid candidates.
-- Partial-result response tests that expose applied ticket IDs, blocked ticket IDs, blocker reasons, and maintenance ticket IDs only.
-- Pending-summary validators and fixtures for bridge `autonomy_health` / `ticket_update_blocked` scaffolding that carry no mutation ID, proposed fields, gateway fingerprints, or approval data; this is the only allowed pending-summary event-schema growth and must be ignored by mutation recovery.
-- Maintenance-escalation helper and tests that group health events plus current blocked decisions by normalized workspace/thread/ticket/action/reason, detect existing open maintenance tickets from ordinary ticket content using the human-readable block line, and build ordinary evaluator-plus-gateway create maintenance candidates without hidden state.
+- Negative rejection fixtures that prove removed values such as `approval_consumed`, `approval_id`, or `details.approval` are rejected.
+- Runtime and apply-turn branches that classify `target_fingerprint_required` as `ticket_update_blocked`, write no private event for the blocked candidate, and preserve partial apply for other valid candidates.
+- Partial-result response tests that expose applied ticket IDs, skipped ticket IDs, blocked ticket IDs, and blocker reasons only.
 - Pause and resume branches for `source_context_unhealthy` that require explicit source-context proof before clearing the pause, including the fail-closed known-ticket probe that uses the same collector path when no current candidates exist.
 - Assertions that `source_context_unhealthy` uses `pause.json` as the live authority and does not introduce a one-off `automation_pause` event.
-- `make_approval_id` and `codex.ticket.approval.v1` definitions/tests if no production caller uses them and the helper is being retained for the later explicit `discussion_only` approval fact.
 
-Any product/runtime support for durable `preview`, new `preview_only` events, replacement diagnostic dry-run flags/commands/events, automatic `agent_primary` approvals, approval-shaped event reasons or docstrings such as "approved autonomous" or "approved ticket update", `decision.approval` reads that authorize, consume, serialize, or derive fields from approval objects in gateway/runtime write paths, `details.approval` requirements, target-fingerprint blocks classified as discussion, non-create mutation IDs or gateway dispatch without a Ticket-derived target fingerprint, create mutations blocked only because `target_fingerprint` is `None`, `autonomy_health` events that look like mutation attempts, `autonomy_health` affecting mutation recovery or write lifecycle state, a second matching `autonomy_health` write for the same block group, continued `autonomy_health` writes after a matching open maintenance ticket exists, maintenance-ticket escalation that writes ticket files directly instead of using the evaluator plus gateway create path, maintenance-ticket dedupe that depends on exact title matching or hidden state, maintenance-create failures that append extra health events or private failure records, partial-result responses that expose proposed fields/fingerprints/mutation IDs/event IDs, normal-turn clearing of `source_context_unhealthy` without explicit repair proof, a known-ticket probe that bypasses the collector path or clears a pause without exactly one readable open Ticket-owned probe file, or a one-off `automation_pause` event for `source_context_unhealthy` is a failure. Record the allowed-match list in the implementation closeout. Retain `make_approval_id` as explicit deferred `discussion_only` approval scaffolding only if no production caller uses it. Do not delete it in this slice.
+Any product/runtime support for durable `preview`, new `preview_only` events, replacement diagnostic dry-run flags/commands/events, automatic `agent_primary` approvals, approval-shaped event reasons or docstrings such as "approved autonomous" or "approved ticket update", `decision.approval` reads in executable write paths, `details.approval` requirements, retained `approval_consumed` or `approval_id` validation/recovery support, target-fingerprint blocks classified as discussion, non-create mutation IDs or gateway dispatch without a Ticket-derived target fingerprint, create mutations blocked only because `target_fingerprint` is `None`, `autonomy_health`, repeat-block tracking, maintenance-ticket escalation, partial-result responses that expose proposed fields/fingerprints/mutation IDs/event IDs, normal-turn clearing of `source_context_unhealthy` without explicit repair proof, a known-ticket probe that bypasses the collector path or clears a pause without exactly one readable open Ticket-owned probe file, or a one-off `automation_pause` event for `source_context_unhealthy` is a failure. Record the allowed-match list in the implementation closeout.
 
 - [ ] **Step 2: Run focused source tests**
 
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_autonomy_config.py tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py tests/test_turn_batch.py tests/test_engine_gateway.py tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_autonomy_recovery.py tests/test_autonomy_maintenance.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_autonomy_config.py tests/test_autonomy_runtime.py tests/test_autonomy_corrections.py tests/test_turn_batch.py tests/test_engine_gateway.py tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_autonomy_recovery.py -q
 ```
 
 Expected: PASS.
@@ -2260,7 +1879,7 @@ Expected: PASS. If failures occur outside the touched surfaces, classify them as
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_maintenance.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py plugins/turbo-mode/ticket/tests/test_autonomy_maintenance.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_autonomy_config.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 ```
 
 Expected: PASS.
@@ -2290,7 +1909,7 @@ git diff --stat "$BASE_COMMIT"..HEAD
 git diff "$BASE_COMMIT"..HEAD -- plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 ```
 
-Expected: diff is limited to the mode, mutation identity helper, runtime evaluator, pending-summary, gateway, apply-turn, maintenance-escalation helper, and focused tests named in this plan. No docs outside this control-plan revision, cache, installed runtime, local workspace state, or handoff files are staged.
+Expected: diff is limited to mode cleanup, approval ID cleanup, mutation identity helper, runtime evaluator, pending-summary, gateway, apply-turn, and focused tests named in this plan. No maintenance helper, docs outside this control-plan revision, cache, installed runtime, local workspace state, or handoff files are staged.
 
 - [ ] **Step 7: Record remaining drift in closeout notes**
 
@@ -2300,39 +1919,34 @@ The implementation closeout message must include these exact proof-boundary fact
 Remaining product drift: `ticket_change_scope` still exists in candidate identity, gateway fingerprints, autonomous apply, and commit-disposition behavior; it is intentionally deferred to a separate source slice.
 Temporary safety binding: while `ticket_change_scope` remains live, gateway validation rejects mismatches between `decision.candidate.ticket_change_scope` and `GatewayMutation.ticket_change_scope`.
 Remaining product drift: the full target candidate mutation contract remains unsatisfied except for the narrower target-fingerprint identity binding implemented by this slice.
-Remaining product drift: diagnostic dry-run/preview is not implemented by this slice; this slice only removes durable/product `preview` mode and preview-only runtime states and adds no replacement dry-run flag, command, event, or renamed preview path.
-Breaking-change posture: this source slice does not preserve removed Ticket behavior for compatibility; retained legacy private-log reads are historical recovery support only and remain drift until the operation-log collapse slice.
-Remaining product drift: pending-summary/private operation-log collapse is deferred; historical `approval_consumed` recovery input and commit-disposition details may remain only as classified drift until a separate operation-log slice removes them.
+Deferred diagnostic-preview affordance: durable preview is removed; diagnostic dry-run remains unimplemented and intentionally deferred to a later maintenance/design slice. This slice adds no replacement dry-run flag, command, event, or renamed preview path.
+Breaking-change posture: this source slice does not preserve removed Ticket behavior for compatibility.
+Local pending-summary proof: no project-local `.codex/ticket-workspace/ticket.pending-summary.jsonl` existed at preflight; `approval_consumed` validation/recovery was deleted rather than retained.
 Implemented safety boundary: `create` candidates intentionally use `target_fingerprint=None`; non-create candidates require a Ticket-derived target fingerprint before runtime mutation ID creation and before gateway dispatch.
-Implemented approval boundary: new autonomous gateway attempts reject approval-shaped authorization fields such as `approval`, `approval_id`, and `details.approval`; retained approval support is read-only historical recovery input only.
-Implemented safety boundary: missing Ticket-derived target fingerprints are turn-local `ticket_update_blocked` health events, not user-discussion states or mutation attempts; other valid candidates in the same turn may still apply.
-Implemented reporting boundary: partial-result output reports applied ticket IDs, blocked ticket IDs, blocker reasons, and maintenance ticket IDs only; proposed fields, fingerprints, mutation IDs, event IDs, and health-event internals stay out of the end-of-turn report.
+Implemented approval boundary: executable approval envelope machinery is removed, including `make_approval_id`, `codex.ticket.approval`, `AutonomyDecision.approval`, gateway approval validation, `details.approval`, `approval_id`, and `approval_consumed` validation/recovery/tests.
+Implemented turn-local block boundary: missing Ticket-derived target fingerprints are user-visible `ticket_update_blocked` results only, not user-discussion states or mutation attempts; other valid candidates in the same turn may still apply.
+Implemented reporting boundary: end-of-turn output reports applied ticket IDs, skipped ticket IDs, blocked ticket IDs, and blocked reasons only; proposed fields, fingerprints, mutation IDs, event IDs, health-event internals, and maintenance ticket IDs stay out of the report.
+Implemented skipped boundary: conflict-only skip remains `state: "skipped"` with a `Skipped` bucket; mixed applied plus skipped or blocked candidates reports `partially_applied`.
 Implemented pause boundary: collector-level source-context failure pauses Ticket autonomy with `source_context_unhealthy`, not `setup_required`, uses `pause.json` as the live authority without adding a one-off `automation_pause` event, and resume requires a passing current-candidate collection or fail-closed known-ticket probe through the same collector path.
-Bridge scaffolding: `autonomy_health` / `ticket_update_blocked` exists only as the first-occurrence repeat seed before a matching open maintenance ticket exists; second and later matching blocks count the current blocked decision in memory and do not append another health event.
-Temporary schema boundary: `autonomy_health` / `ticket_update_blocked` is the only allowed pending-summary event-schema growth in this slice; maintenance escalation adds no new pending-summary event type or status, and `source_context_unhealthy` stays in pause marker/output handling unless a consistent runtime `automation_pause` path is proven first.
-Recovery boundary: `autonomy_health` is health metadata only; mutation recovery, write lifecycle projection, and compaction-derived mutation state ignore it entirely.
-Implemented maintenance boundary: recurring `ticket_update_blocked` blocks create or reuse an ordinary open maintenance ticket through the evaluator plus autonomous gateway create path; matching is scoped by normalized workspace/thread/ticket/action/reason and dedupes open maintenance tickets by a human-readable block line in ordinary ticket content, not by exact title or hidden state.
-Implemented maintenance failure boundary: if maintenance-ticket creation fails after the repeat threshold is reached, apply-turn reports `maintenance_escalation_failed`, appends no extra `autonomy_health` event, creates no private failure ledger, and retries escalation on the next matching block.
-Follow-up required: the closeout must name deletion of retained historical approval recovery support as a follow-up for the operation-log collapse slice; do not let retained `approval_consumed` readers become a supported product surface.
-Deferred approval scaffolding: `make_approval_id` may remain only as unused explicit `discussion_only` approval scaffolding with no production callers.
+Deferred design required: recurring block maintenance escalation, `autonomy_health`, repeat thresholds, maintenance-ticket dedupe/output, and repeat-block tracking require a separate consciously authorized design before implementation.
 ```
 
 Do not claim full ADR 0006 runtime compliance from this slice.
 
 - [ ] **Step 8: Record closeout commit if final cleanup changed files**
 
-If Task 8 produces cleanup edits, run:
+If final verification produces cleanup edits, run:
 
 ```bash
 git status --short --branch
 git diff --stat -- \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py \
+  plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py \
   plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py \
   plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy.py \
-  plugins/turbo-mode/ticket/scripts/ticket_autonomy_maintenance.py \
   plugins/turbo-mode/ticket/tests/test_mutation_identity.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_config.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
@@ -2341,16 +1955,15 @@ git diff --stat -- \
   plugins/turbo-mode/ticket/tests/test_engine_gateway.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_cli.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py \
-  plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py \
-  plugins/turbo-mode/ticket/tests/test_autonomy_maintenance.py
+  plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 git diff -- \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py \
+  plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py \
   plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py \
   plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy.py \
-  plugins/turbo-mode/ticket/scripts/ticket_autonomy_maintenance.py \
   plugins/turbo-mode/ticket/tests/test_mutation_identity.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_config.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
@@ -2359,16 +1972,15 @@ git diff -- \
   plugins/turbo-mode/ticket/tests/test_engine_gateway.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_cli.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py \
-  plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py \
-  plugins/turbo-mode/ticket/tests/test_autonomy_maintenance.py
+  plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 git add \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py \
+  plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py \
   plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py \
   plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy.py \
-  plugins/turbo-mode/ticket/scripts/ticket_autonomy_maintenance.py \
   plugins/turbo-mode/ticket/tests/test_mutation_identity.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_config.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
@@ -2377,17 +1989,16 @@ git add \
   plugins/turbo-mode/ticket/tests/test_engine_gateway.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_cli.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py \
-  plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py \
-  plugins/turbo-mode/ticket/tests/test_autonomy_maintenance.py
+  plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 git diff --cached --stat
 git diff --cached -- \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py \
+  plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py \
   plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py \
   plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy.py \
-  plugins/turbo-mode/ticket/scripts/ticket_autonomy_maintenance.py \
   plugins/turbo-mode/ticket/tests/test_mutation_identity.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_config.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
@@ -2396,8 +2007,7 @@ git diff --cached -- \
   plugins/turbo-mode/ticket/tests/test_engine_gateway.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_cli.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py \
-  plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py \
-  plugins/turbo-mode/ticket/tests/test_autonomy_maintenance.py
+  plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 git commit -m "chore(ticket): verify modes approval source slice"
 ```
 
@@ -2412,12 +2022,12 @@ BASE_COMMIT="$(cat /tmp/ticket-modes-approval-base.txt)"
 git diff --stat "$BASE_COMMIT"..HEAD
 git diff "$BASE_COMMIT"..HEAD -- \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_config.py \
+  plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py \
   plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py \
   plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py \
   plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy.py \
-  plugins/turbo-mode/ticket/scripts/ticket_autonomy_maintenance.py \
   plugins/turbo-mode/ticket/tests/test_mutation_identity.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_config.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
@@ -2426,11 +2036,10 @@ git diff "$BASE_COMMIT"..HEAD -- \
   plugins/turbo-mode/ticket/tests/test_engine_gateway.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_cli.py \
   plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py \
-  plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py \
-  plugins/turbo-mode/ticket/tests/test_autonomy_maintenance.py
+  plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 ```
 
-Expected: diff is still limited to the mode, mutation identity helper, runtime evaluator, pending-summary, gateway, apply-turn, maintenance-escalation helper, and focused tests named in this plan. No docs outside this control-plan revision, cache, installed runtime, local workspace state, handoff files, or unrelated cleanup are included.
+Expected: diff is still limited to mode cleanup, approval ID cleanup, mutation identity helper, runtime evaluator, pending-summary, gateway, apply-turn, and focused tests named in this plan. No maintenance helper, docs outside this control-plan revision, cache, installed runtime, local workspace state, handoff files, or unrelated cleanup are included.
 
 ## Self-Review Checklist
 
@@ -2439,35 +2048,32 @@ Spec coverage:
 - Durable `preview` config is removed in Task 1.
 - Runtime `PREVIEW_ONLY` decisions and apply-turn product preview projections are removed in Task 2.
 - No replacement diagnostic dry-run flag, command, event, or renamed preview path is added in this slice.
-- Automatic `agent_primary` approval envelope creation is removed in Task 3, but Task 3 is not committed until Task 4 replaces gateway approval validation.
-- New gateway write paths reject approval-shaped authorization fields; retained approval readers are historical recovery only.
+- Automatic `agent_primary` approval envelope creation is removed in Task 3, but Task 3 is not committed until Tasks 4 and 5 remove gateway and pending-summary approval consumers.
+- Gateway write paths and pending-summary validation do not accept, branch on, recover, or write approval-shaped authorization fields.
 - Correction integration tests pass target fingerprints through source context before expecting `APPLY_CORRECTION`.
 - `ticket_mutation_identity.py` is calculation-only, independent of runtime/gateway dataclasses, and covered by focused helper tests.
 - Runtime and gateway separately reject non-create writes without target fingerprints; `create` candidates intentionally use `target_fingerprint=None`; runtime classifies the per-candidate miss as `TICKET_UPDATE_BLOCKED`, not `REQUIRE_USER_DISCUSSION`, and the identity helper hashes missing target fingerprints but does not make that policy decision.
-- Apply-turn handles `TICKET_UPDATE_BLOCKED` with a non-mutation `autonomy_health` event only for the first occurrence of an exact block group while no matching open maintenance ticket exists, no mutation attempt for the blocked candidate, no discussion question, and partial-apply summary behavior when other original candidates are valid.
-- Partial-apply summary output includes applied ticket IDs, blocked ticket IDs, blocker reasons, and maintenance ticket IDs only; it excludes proposed fields, fingerprints, mutation IDs, event IDs, and health-event internals.
-- Pending-summary validates `autonomy_health` / `ticket_update_blocked` as the only allowed temporary event-schema growth, with no mutation ID, proposed fields, gateway fingerprints, or approval data, and mutation recovery ignores those health events entirely.
-- Maintenance escalation groups repeated blocks by normalized workspace/thread/ticket/action/reason, counts prior health events plus the current blocked decision in memory, creates or reuses an ordinary open maintenance ticket through the evaluator plus autonomous gateway create path, and never appends a second matching `autonomy_health` event.
-- Maintenance-ticket dedupe uses the human-readable block line in ordinary ticket content, not exact title matching, a hidden private state file, or mutation-recovery state.
-- Maintenance-ticket create failure reports `maintenance_escalation_failed`, appends no extra health event, creates no private failure ledger, and retries on the next matching block.
+- Apply-turn handles `TICKET_UPDATE_BLOCKED` with no mutation attempt, no mutation status, no mutation ID, no pending-summary event, no health event, no discussion question, and partial-apply summary behavior when other candidates are valid.
+- Partial-apply summary output includes applied ticket IDs, skipped ticket IDs, blocked ticket IDs, and blocker reasons only; it excludes proposed fields, fingerprints, mutation IDs, event IDs, health-event internals, and maintenance ticket IDs.
+- Pending-summary deletes approval and preview acceptance without adding blocked-candidate event shapes.
+- Repeat-block tracking, `autonomy_health`, maintenance-ticket escalation, repeat thresholds, and maintenance-ticket output are deferred to a separate authorized design.
 - Apply-turn pauses collector-level source-context failures with `source_context_unhealthy` and does not classify them as `setup_required`.
 - `--resume-paused` cannot clear `source_context_unhealthy` unless current-candidate collection or a fail-closed known-ticket probe through the same collector path proves source-context collection is healthy.
 - `source_context_unhealthy` uses `pause.json` plus the paused response as the live proof; it does not add a unique pending-summary `automation_pause` event unless runtime pauses are proven to use that event path consistently.
 - Gateway validation recomputes mutation identity through `make_candidate_mutation_identity()` and does not import private runtime identity helpers.
 - Gateway approval validation and new `approval_consumed` writes are removed in Task 4.
 - Pending-summary no longer requires automatic approval details or accepts new preview decisions in Task 5.
-- Retained `approval_consumed` source branches and tests are labeled as historical approval recovery only.
+- Pending-summary no longer accepts `details.approval`, `approval_id`, `approval_consumed`, `preview_only`, or `current_mode: preview`.
 - Apply-turn integration expectations are updated in Task 6 so full-suite verification does not fail late on removed approval/preview behavior.
-- Historical `approval_consumed` recovery input is explicitly retained only until the later operation-log collapse plan, preventing this slice from silently widening into full pending-summary redesign or compatibility support.
 - At least one approval-free `ticket_written` recovery test is updated in `test_autonomy_recovery.py`.
 - Closeout language explicitly names remaining `ticket_change_scope`, target candidate-shape, diagnostic-preview, and private operation-log drift instead of claiming full ADR compliance.
-- Closeout language includes the breaking-change posture, the bridge `autonomy_health` event-schema boundary, the implemented maintenance escalation boundary, and the deferred `make_approval_id` scaffolding boundary.
+- Closeout language includes the breaking-change posture, local pending-summary proof, turn-local block boundary, skipped boundary, and deferred maintenance-escalation design boundary.
 - Mutation identity includes the Ticket-derived target fingerprint for non-create writes after Task 3, and gateway validation recomputes that identity with `GatewayMutation.target_fingerprint` after Task 4.
 - Invalid durable-mode snapshots fail closed instead of falling back to writable config.
 
 Placeholder scan:
 
-- The plan has no open-ended implementation placeholders. Every code-changing task includes concrete snippets and focused commands. `make_approval_id` retention is a fixed instruction, not a final-verification decision.
+- The plan has no open-ended implementation placeholders. Every code-changing task includes concrete snippets and focused commands. Future explicit `discussion_only` approval and recurring-block maintenance escalation are named only as deferred design work, not implemented behavior.
 
 Type consistency:
 
@@ -2475,16 +2081,14 @@ Type consistency:
 - `RuntimeDecisionKind` has no `PREVIEW_ONLY` after Task 2.
 - `RuntimeDecisionKind.TICKET_UPDATE_BLOCKED` is the only runtime decision kind for missing target fingerprints; `target_fingerprint_required` is not represented as discussion.
 - `source_context_unhealthy` is not added to `_PAUSE_REASONS` unless a consistent runtime `automation_pause` event path is proven first; local config or mode setup continues to use setup-required paths.
-- `AutonomyDecision.approval` remains `dict[str, object] | None` for future explicit `discussion_only` approval facts, but this plan requires it to be `None` for `agent_primary`.
+- `AutonomyDecision.approval` is deleted in this slice; active docs may mention future explicit `discussion_only` approval only as deferred design, not as executable behavior.
 - Gateway validation uses `AutonomyDecision`, `CandidateMutation`, `GatewayMutation`, `thread_id`, and `turn_id` fields already present in current source.
 - Gateway validation recomputes the expected mutation ID from `thread_id`, `turn_id`, `decision.candidate`, and `GatewayMutation.target_fingerprint`; non-null mutation IDs are not treated as proof.
 - `make_candidate_mutation_identity()` accepts primitive fields and JSON-compatible evidence, not runtime or gateway dataclasses.
-- `MAINTENANCE_REPEAT_THRESHOLD = 2` is a small constant owned by `ticket_autonomy_maintenance.py`; no additional pending-summary statuses or durable private fields are added for escalation.
-- `TargetFingerprintBlockGroup.workspace` is an in-memory normalized project-root value supplied by apply-turn and is not serialized into `autonomy_health.details` or maintenance ticket content.
 
 ## Handoff Notes For Executors
 
 - Use `superpowers:subagent-driven-development` for implementation unless the user chooses inline execution.
 - Use a fresh branch or worktree for source implementation. If creating a worktree, use `superpowers:using-git-worktrees`.
-- Commit after each runnable behavior boundary when tests pass. Do not commit Task 3 by itself; runtime approval removal and gateway decision validation commit together after Task 4. Do not commit Task 6 by itself; health-event bridge handling and Task 7 maintenance escalation commit together.
+- Commit after each runnable behavior boundary when tests pass. Commit Tasks 1 and 2 together. Do not commit Task 3 by itself; runtime approval removal, gateway decision validation, pending-summary approval/preview deletion, and gateway event-sequence rewrites commit together after Task 5. Task 6 can commit separately after its focused tests. Recurring-block maintenance escalation is a separate future design.
 - Do not refresh installed runtime or cache state. Source tests are the proof class for this plan.
