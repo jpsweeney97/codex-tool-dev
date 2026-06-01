@@ -53,6 +53,7 @@ Source authority:
 - `docs/decisions/0006-ticket-runtime-first-state-kernel.md` removes automatic approval objects from `agent_primary`; explicit approval survives only for `discussion_only` follow-up.
 - `docs/superpowers/specs/2026-05-30-ticket-runtime-first-state-kernel-control.md` says hard stops include no persistent `preview` mode and no approval state in the private operation log.
 - `docs/audits/2026-05-31-ticket-source-runtime-drift-ledger.md` is a source-only classification and inventory input, not runtime proof.
+- The drift ledger has a real sequencing tension for this slice. Recommended Next Step 3 says the first runtime slice should remove `ticket_change_scope` end-to-end or replace its commit-disposition behavior; Recommended Next Step 6 sequences modes/approval identity first. This plan deliberately chooses the modes/approval-first slice while preserving a temporary scope safety binding. Do not describe that as complete ledger compliance. The implementation closeout must name retained `ticket_change_scope` and commit-disposition private-log drift.
 
 Contract impact:
 
@@ -140,7 +141,7 @@ Modify or add these files only in this plan:
   - Rewrite success event sequences, durable preview expectations, approval-residue assertions, and partial apply with blocked candidates.
 - `plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py`
   - Covers pending-summary recovery projection.
-  - Remove `approval_consumed` recovery fixtures and keep approval-free `ticket_written` recovery coverage. Delete (do not re-fixture) the post-write `approval_consumed` recovery test, whose projection state is unreachable after removal; correct the `_event_with_bound_fingerprints` helper (real name) by name. See the Consumer Inventory section.
+  - Remove `approval_consumed` recovery fixtures and keep approval-free recovery coverage. Replace the post-write `approval_consumed` recovery test with an approval-free `attempt_recorded` post-write repair test; keep the `ticket_written` terminal-status recovery test; correct the `_event_with_bound_fingerprints` helper (real name) by name. See the Consumer Inventory section.
 - `plugins/turbo-mode/ticket/tests/test_autonomy_ids.py`
   - Covers deterministic ID helpers (`make_mutation_id`, `make_event_id`, `make_approval_id`, `sha256_fingerprint`).
   - Deleting `make_approval_id` from source breaks this file's import at collection. Remove `make_approval_id` from the import, delete the two pure-approval tests, surgically edit the two mixed ID tests, and keep all mutation/event/fingerprint coverage. See the Consumer Inventory section. Add this file to Task 3's edits, the Task 5 commit, and every later selector/ruff list.
@@ -169,11 +170,12 @@ Non-obvious per-file rewrites the grep will surface as sites but will not tell y
 - **`test_autonomy_ids.py` (entirely unlisted in the original draft).** Imports `make_approval_id` (line 14) and exercises it. Deleting `make_approval_id` from source raises `ImportError` at collection, taking the whole suite red at the first unfiltered run. Remove `make_approval_id` from the import block (keep `canonical_json`, `make_event_id`, `make_mutation_id`, `sha256_fingerprint`). Delete the two pure-approval tests (`test_approval_id_uses_expected_prefix_and_digest` ~100-116; `test_approval_id_changes_when_inputs_change` ~188-215). **Surgically** edit the two mixed tests — `test_thread_id_scopes_ids_even_when_turn_id_matches` (drop the `approval_common` dict and the final `make_approval_id` assertion; keep the mutation/event halves) and `test_timestamp_is_not_an_id_input` (drop `make_approval_id` from the `(make_mutation_id, make_event_id, make_approval_id)` tuple). Delete every `codex.ticket.approval.v1` literal (lines 102/203/240). Keep all `make_mutation_id`/`make_event_id`/`sha256_fingerprint` coverage.
 - **`test_autonomy_corrections.py:108`** asserts `decision.approval is None` — **outside** the plan's cited 41-80 range. After the slots-field deletion this raises `AttributeError`, not `None`. Delete line 108. Line 115 (`"approval" not in events[0]["details"]`) is a valid negative fixture and stays.
 - **Recovery fingerprint helper name.** Task 6 Step 2's "apply the same rewrite in `test_autonomy_recovery.py`" is wrong on the name: the real helper is `_event_with_bound_fingerprints(event, *, pre="pre-fp", post="post-fp")`. Keep the real name **and** its defaults (no call site passes `pre=`/`post=`) and its `isinstance(approval, Mapping)` shape before stripping the approval branch.
-- **`test_autonomy_recovery.py` is not "remove fixtures."** `project_mutation_recovery`'s `append_missing_ticket_written` post-write jump is gated **exclusively** on `state == "approval_consumed"` (ticket_turn_batch.py ~915), so after removal that recovery state is **unreachable** — the post-write `approval_consumed` test must be **deleted**, not re-fixtured. Strip the embedded `approval_consumed` step from the retained Step-8 test (`test_ticket_written_without_terminal_status_appends_outcome`) and the two derive-ladder tests. After edits, re-run ruff: confirm no now-unused imports (e.g. `from collections.abc import Mapping`) trigger F401.
-- **`test_autonomy_cli.py` doctor-ledger contradiction.** `test_doctor_ledger_repairs_deterministic_recovery_gaps` (~1050-1056) asserts the repaired sequence **still contains** `approval_consumed`; rewrite that expected list (and the `evt_prior_approval` event_id assertion ~442-445). These corrected sequences are valid **only after** the Task 5 source change moves the `append_missing_ticket_written` repair from the `approval_consumed` state to `attempt_recorded` — they cannot be validated by editing the test file alone, so they belong in the atomic boundary. Keep the `consume-approval` CLI negative fixture (~947).
-- **`test_engine_gateway.py` recovery test (~628-693) is unnamed by the draft.** Delete its `approval_consumed` seed (~659-673) and drop `approval_consumed` from the expected recovery list (~685-693), then re-confirm `recovery_state == "append_missing_ticket_written"` against the changed `project_mutation_recovery`. The new decision-validation test needs `from dataclasses import replace` (not currently imported).
+- **`test_autonomy_recovery.py` is not "remove fixtures."** `project_mutation_recovery`'s `append_missing_ticket_written` post-write jump is gated **exclusively** on `state == "approval_consumed"` today (ticket_turn_batch.py ~915). The Task 5 source edit must relocate that repair to the approval-free `attempt_recorded` state before deleting `approval_consumed` support. Delete the old approval-seeded post-write, pre-write, and unknown-ticket-state tests (`test_approval_consumed_with_post_write_state_appends_missing_write_events`, `test_approval_consumed_with_pre_write_state_retries_same_mutation`, and `test_approval_consumed_with_unknown_ticket_state_pauses_for_reconciliation`). Replace the post-write case with an approval-free attempt-recorded test that seeds a `mutation_attempt` event containing `expected_pre_write_fingerprint` and `expected_post_write_fingerprint`, passes the live current fingerprint equal to the expected post-write fingerprint, and expects `append_missing_ticket_written` with `ticket_written` then `applied`. Strip the embedded `approval_consumed` step from the retained Step-8 test (`test_ticket_written_without_terminal_status_appends_outcome`). In `test_recovery_derives_mutation_state_from_events`, remove the whole `approval_consumed` append-and-assertion block, not just the append. After edits, re-run ruff: confirm no now-unused imports (e.g. `from collections.abc import Mapping`) trigger F401.
+- **`test_autonomy_cli.py` doctor-ledger contradiction.** `test_doctor_ledger_repairs_deterministic_recovery_gaps` (~1050-1056) asserts the repaired sequence **still contains** `approval_consumed`; rewrite the expected status list to `pending`, `ticket_written`, `applied`, `summarized`, and remove or rewrite the `evt_prior_approval` event_id assertion (~442-445). These corrected sequences are valid **only after** the Task 5 source change moves the `append_missing_ticket_written` repair from the `approval_consumed` state to `attempt_recorded` — they cannot be validated by editing the test file alone, so they belong in the atomic boundary. Keep the `consume-approval` CLI negative fixture (~947).
+- **`test_engine_gateway.py` recovery test (~628-693) is unnamed by the draft.** Delete its `approval_consumed` seed (~659-673) and drop `approval_consumed` from the expected recovery list (~685-693), leaving `pending`, `ticket_written`, `applied`. Re-confirm `recovery_state == "append_missing_ticket_written"` against the changed `project_mutation_recovery`. The new decision-validation test needs `from dataclasses import replace` (not currently imported).
 - **`test_autonomy_integration_v1.py` reindex hazard (most likely missed break).** Dropping `approval_consumed` collapses the success sequence from 4 events to 3, so the index-based assertions `events[3]→events[2]` (~119-125) must be reindexed or they `IndexError`/assert the wrong event. Keep the line-11 `AutomationMode` import and the line-176 negative approval fixture (both stay valid).
 - **Two distinct `_expected_pre_write_fingerprint` functions.** Besides the gateway one in Task 4 Step 4 (`*, mutation, decision`), `ticket_turn_batch.py` has a **module-level** `_expected_pre_write_fingerprint(events, ...)` (~753-763) that reads `details["approval"]["ticket_state_fingerprint"]`. Remove the approval branch from **both**. The `from collections.abc import Mapping` import in `ticket_turn_batch.py` **stays** (still used by other signatures). In `test_turn_batch.py`, the `without_detail` helper becomes unused once the approval row is deleted — flag, do not silently delete unless unused-symbol cleanup is in scope.
+- **`test_turn_batch.py` status matrix.** Remove the `("mutation_status", "approval_consumed")` row from `test_valid_event_status_matrix`. Keep the explicit negative test `test_approval_consumed_status_is_not_supported()` so removed approval state remains covered as rejected input.
 
 ## Stop Conditions
 
@@ -1531,11 +1533,13 @@ Remove approval-shaped detail requirement tests. Do not add `autonomy_health`,
 `ticket_update_blocked`, or any other blocked-candidate event to pending-summary
 validation in this slice.
 
-In `test_valid_event_status_matrix`, keep `("automation_pause", "paused")`
-valid and keep existing pause-reason validation focused on event shapes already
-written today. Do not add `source_context_unhealthy` to pending-summary
-pause-reason tests unless implementation first proves runtime pauses already
-append `automation_pause` events consistently.
+In `test_valid_event_status_matrix`, remove the
+`("mutation_status", "approval_consumed")` row. Keep
+`("automation_pause", "paused")` valid and keep existing pause-reason validation
+focused on event shapes already written today. Do not add
+`source_context_unhealthy` to pending-summary pause-reason tests unless
+implementation first proves runtime pauses already append `automation_pause`
+events consistently.
 
 - [ ] **Step 2: Run pending-summary tests to verify failure**
 
@@ -1577,12 +1581,92 @@ status-specific detail requirements. Remove these `_validate_details()` checks:
             return _invalid("preview_only decisions must use skipped status")
 ```
 
-Delete `approval_consumed` branches from `derive_mutation_state()`,
-`project_mutation_recovery()`, compaction/recovery helpers, and tests. This
-slice intentionally has no compatibility reader for old approval logs because
-Task 0 verified no project-local pending-summary logs exist in this checkout.
-If Task 0 found a current log, this step must not run until the migration/reader
-decision is made.
+Delete `approval_consumed` as a supported event state, but do **not** delete the
+post-write recovery behavior. Relocate that behavior to the approval-free
+`attempt_recorded` state.
+
+In `derive_mutation_state()`, remove the `approval_consumed` rank entry and the
+`elif status == "approval_consumed"` ladder branch. Keep `attempt_recorded`,
+`ticket_written`, `status_recorded`, and `summary_recorded` as the only mutation
+progress states.
+
+In `project_mutation_recovery()`, replace the current
+`state in {"attempt_recorded", "approval_consumed"}` block with an
+approval-free `state == "attempt_recorded"` block shaped like this:
+
+```python
+    if state == "attempt_recorded":
+        if expected_pre is None:
+            return _pause_projection(
+                thread_id=thread_id,
+                mutation_id=mutation_id,
+                current_ticket_fingerprint=current_ticket_fingerprint,
+                expected_pre_write_fingerprint=expected_pre,
+                expected_post_write_fingerprint=expected_post,
+                reason="missing_pre_write_fingerprint",
+            )
+        if current_ticket_fingerprint == expected_pre:
+            return RecoveryProjection(
+                "retry_with_same_mutation",
+                thread_id,
+                mutation_id,
+                current_ticket_fingerprint,
+                expected_pre,
+                expected_post,
+            )
+        if expected_post is None:
+            return _pause_projection(
+                thread_id=thread_id,
+                mutation_id=mutation_id,
+                current_ticket_fingerprint=current_ticket_fingerprint,
+                expected_pre_write_fingerprint=expected_pre,
+                expected_post_write_fingerprint=expected_post,
+                reason="missing_post_write_fingerprint",
+            )
+        if current_ticket_fingerprint == expected_post:
+            events_to_append = (
+                _recovery_event(
+                    reference=reference,
+                    event_type="mutation_status",
+                    status="ticket_written",
+                    reason="Recovered missing autonomous Ticket write event.",
+                    details={"post_write_fingerprint": expected_post},
+                ),
+                _recovery_event(
+                    reference=reference,
+                    event_type="mutation_status",
+                    status="applied",
+                    reason="Recovered autonomous Ticket terminal status.",
+                    details={
+                        "commit_disposition": "commit_deferred",
+                        "commit_reason": "Recovered from pending-summary projection.",
+                    },
+                ),
+            )
+            return RecoveryProjection(
+                "append_missing_ticket_written",
+                thread_id,
+                mutation_id,
+                current_ticket_fingerprint,
+                expected_pre,
+                expected_post,
+                events_to_append,
+            )
+        return _pause_projection(
+            thread_id=thread_id,
+            mutation_id=mutation_id,
+            current_ticket_fingerprint=current_ticket_fingerprint,
+            expected_pre_write_fingerprint=expected_pre,
+            expected_post_write_fingerprint=expected_post,
+            reason="ticket_state_mismatch",
+        )
+```
+
+Apply the same approval-state deletion to compaction/recovery helpers and tests.
+This slice intentionally has no compatibility reader for old approval logs
+because Task 0 verified no project-local pending-summary logs exist in this
+checkout. If Task 0 found a current log, this step must not run until the
+migration/reader decision is made.
 
 Do not add `autonomy_health`, `ticket_update_blocked`, or other blocked-candidate
 pending-summary event validation here. Missing target fingerprints are
@@ -1750,13 +1834,25 @@ In the apply-turn decision loop, add `blocked: list[str] = []` and `blocked_reas
         elif decision.kind == RuntimeDecisionKind.TICKET_UPDATE_BLOCKED:
             blocked.append(ticket_id)
             blocked_reasons[ticket_id] = decision.reason or "ticket_update_blocked"
+            continue
 ```
 
-Pass `blocked=blocked` and `blocked_reasons=blocked_reasons` into `_summary_payload()`. This branch must not call `apply_autonomous_mutation()`, must not append any pending-summary event, and must not add a mutation ID to `summary_mutation_ids`.
+The `continue` is mandatory. Without it, the existing generic non-write branch
+still calls `_append_non_write_decision()` and writes a private
+`mutation_attempt`, violating the no-event stop condition for blocked target
+fingerprints. Pass `blocked=blocked` and `blocked_reasons=blocked_reasons` into
+`_summary_payload()`. This branch must not call `apply_autonomous_mutation()`,
+must not append any pending-summary event, and must not add a mutation ID to
+`summary_mutation_ids`.
 
 - [ ] **Step 4: Add blocked-ticket apply-turn tests**
 
-In `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py` or `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`, add focused coverage for a mixed batch where one update has a target fingerprint and one non-create candidate lacks one. Expected behavior:
+In `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`, add
+focused coverage for a mixed batch where one update has a target fingerprint and
+one non-create candidate lacks one. This file already has `_events(project_root)`.
+Do not paste this `_events(...)` snippet into `test_autonomy_cli.py`; that file
+uses `PendingSummaryStore(project_root).read_events()` directly. Expected
+behavior:
 
 ```python
 assert payload["state"] == "partially_applied"
@@ -1792,30 +1888,22 @@ Add source-context pause and resume tests:
 - `--resume-paused` for `source_context_unhealthy` fails closed when the current candidate-set collection or fail-closed known-ticket probe cannot prove source-context health through the same collector path.
 - `--resume-paused` clears `source_context_unhealthy` only after the collector/probe succeeds, then continues through the normal mode-specific apply-turn path.
 
-These are the slice's most safety-relevant new behaviors (a wrong resume silently clears a fail-closed pause), so write them as concrete tests, not prose. Because `apply-turn` runs as a subprocess, the collector cannot be reached by `monkeypatch`. **Fault-injection decision (make it consciously):** prefer triggering a *real* collector-level failure from a fixture (e.g. an unreadable or unparseable ticket file the Step-3 collector classifies as `unhealthy`) so the test exercises the real classification path. Only if a real fault is not reliably reproducible, fall back to a narrow test-only env seam wired into the Step-3 collector — and treat that seam as production surface the Development Tenet would scrutinize, not a free affordance. The bodies below use the env-seam form; convert to a real-fault fixture if feasible. Insert the four functions (and the `_run_autonomy_env` / `_source_context_candidate` / `FORCE_SOURCE_CONTEXT_UNHEALTHY_ENV` helpers near `_run_autonomy`) into `test_autonomy_cli.py`:
+These are the slice's most safety-relevant new behaviors (a wrong resume
+silently clears a fail-closed pause), so write them as concrete tests, not
+prose. Because `apply-turn` runs as a subprocess, the collector cannot be
+reached by `monkeypatch`. Use a real collector-level fault fixture as the
+prescribed path: for example, create a normal Ticket file for the candidate,
+then mutate that file into a parse/read failure that the Step-3 collector
+classifies as `TicketStateFingerprintCollection("unhealthy", {}, "source_context_unhealthy")`.
+Do **not** add `TICKET_AUTONOMY_FORCE_SOURCE_CONTEXT_UNHEALTHY` or any other
+production env-var seam in this slice. If a reliable real-fault fixture is not
+possible on the supported test platforms, stop and patch this plan before adding
+a test-only seam.
+
+In `test_autonomy_cli.py`, add a candidate helper and a real-fault helper near
+`_run_autonomy`:
 
 ```python
-FORCE_SOURCE_CONTEXT_UNHEALTHY_ENV = "TICKET_AUTONOMY_FORCE_SOURCE_CONTEXT_UNHEALTHY"
-
-
-def _run_autonomy_env(
-    project_root: Path,
-    *args: str,
-    env: dict[str, str] | None = None,
-) -> subprocess.CompletedProcess[str]:
-    merged = dict(os.environ)
-    if env:
-        merged.update(env)
-    return subprocess.run(
-        [sys.executable, str(SCRIPT), *args],
-        cwd=project_root,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        env=merged,
-    )
-
-
 def _source_context_candidate(ticket_id: str = "T-20260527-01") -> list[dict[str, object]]:
     return [
         {
@@ -1827,6 +1915,19 @@ def _source_context_candidate(ticket_id: str = "T-20260527-01") -> list[dict[str
     ]
 
 
+def _break_source_context_ticket(ticket: Path) -> None:
+    ticket.write_text("```yaml\nid: [not-valid\n```\n", encoding="utf-8")
+```
+
+If that malformed-ticket fixture does not make the collector return
+`source_context_unhealthy`, replace it with another real read/parse failure and
+record the reason in the test name or a short test comment. The helper must
+exercise the same collector path that production uses; it must not set an env
+flag, monkeypatch production internals, or write a synthetic pause marker.
+
+Add the four CLI tests with this shape:
+
+```python
 def test_apply_turn_collector_unhealthy_pauses_without_mutation_or_health_events(
     tmp_path: Path,
 ) -> None:
@@ -1835,10 +1936,11 @@ def test_apply_turn_collector_unhealthy_pauses_without_mutation_or_health_events
     tickets_dir = tmp_path / "docs" / "tickets"
     tickets_dir.mkdir(parents=True, exist_ok=True)
     ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
-    before_ticket = ticket.read_text(encoding="utf-8")
     context = _write_context(tmp_path, candidate_mutations=_source_context_candidate())
+    _break_source_context_ticket(ticket)
+    broken_ticket = ticket.read_text(encoding="utf-8")
 
-    result = _run_autonomy_env(
+    result = _run_autonomy(
         tmp_path,
         "apply-turn",
         "--project-root",
@@ -1847,7 +1949,6 @@ def test_apply_turn_collector_unhealthy_pauses_without_mutation_or_health_events
         "turn-1",
         "--context-file",
         str(context),
-        env={FORCE_SOURCE_CONTEXT_UNHEALTHY_ENV: "1"},
     )
 
     assert result.returncode == 3
@@ -1863,106 +1964,24 @@ def test_apply_turn_collector_unhealthy_pauses_without_mutation_or_health_events
     assert not (
         tmp_path / ".codex" / "ticket-workspace" / "ticket.pending-summary.jsonl"
     ).exists()
-    assert ticket.read_text(encoding="utf-8") == before_ticket
-
-
-def test_apply_turn_after_source_context_pause_stays_paused_without_resume_flag(
-    tmp_path: Path,
-) -> None:
-    _init_ticket_project(tmp_path)
-    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
-    tickets_dir = tmp_path / "docs" / "tickets"
-    tickets_dir.mkdir(parents=True, exist_ok=True)
-    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
-    context = _write_context(tmp_path, candidate_mutations=_source_context_candidate())
-
-    paused = _run_autonomy_env(
-        tmp_path, "apply-turn", "--project-root", str(tmp_path),
-        "--turn-id", "turn-1", "--context-file", str(context),
-        env={FORCE_SOURCE_CONTEXT_UNHEALTHY_ENV: "1"},
-    )
-    assert paused.returncode == 3
-    assert json.loads(paused.stdout)["pause_reason"] == "source_context_unhealthy"
-
-    later_context = _write_context(
-        tmp_path, turn_id="turn-2", candidate_mutations=_source_context_candidate(),
-    )
-    blocked = _run_autonomy(
-        tmp_path, "apply-turn", "--project-root", str(tmp_path),
-        "--turn-id", "turn-2", "--context-file", str(later_context),
-    )
-
-    assert blocked.returncode == 3
-    assert json.loads(blocked.stdout)["pause_reason"] == "source_context_unhealthy"
-    assert (tmp_path / ".codex" / "ticket-workspace" / "pause.json").is_file()
-    assert "priority: high" in ticket.read_text(encoding="utf-8")
-    assert PendingSummaryStore(tmp_path).read_events() == ()
-
-
-def test_apply_turn_resume_paused_fails_closed_when_probe_cannot_prove_health(
-    tmp_path: Path,
-) -> None:
-    _init_ticket_project(tmp_path)
-    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
-    tickets_dir = tmp_path / "docs" / "tickets"
-    tickets_dir.mkdir(parents=True, exist_ok=True)
-    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
-    context = _write_context(tmp_path, candidate_mutations=_source_context_candidate())
-
-    paused = _run_autonomy_env(
-        tmp_path, "apply-turn", "--project-root", str(tmp_path),
-        "--turn-id", "turn-1", "--context-file", str(context),
-        env={FORCE_SOURCE_CONTEXT_UNHEALTHY_ENV: "1"},
-    )
-    assert paused.returncode == 3
-
-    resume_blocked = _run_autonomy_env(
-        tmp_path, "apply-turn", "--project-root", str(tmp_path),
-        "--turn-id", "turn-1", "--context-file", str(context),
-        "--setup-choice", "automatic", "--resume-paused",
-        env={FORCE_SOURCE_CONTEXT_UNHEALTHY_ENV: "1"},
-    )
-
-    assert resume_blocked.returncode == 3
-    assert json.loads(resume_blocked.stdout)["pause_reason"] == "source_context_unhealthy"
-    assert (tmp_path / ".codex" / "ticket-workspace" / "pause.json").is_file()
-    assert "priority: high" in ticket.read_text(encoding="utf-8")
-    assert PendingSummaryStore(tmp_path).read_events() == ()
-
-
-def test_apply_turn_resume_paused_clears_only_after_probe_passes(
-    tmp_path: Path,
-) -> None:
-    _init_ticket_project(tmp_path)
-    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
-    tickets_dir = tmp_path / "docs" / "tickets"
-    tickets_dir.mkdir(parents=True, exist_ok=True)
-    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
-    context = _write_context(tmp_path, candidate_mutations=_source_context_candidate())
-
-    paused = _run_autonomy_env(
-        tmp_path, "apply-turn", "--project-root", str(tmp_path),
-        "--turn-id", "turn-1", "--context-file", str(context),
-        env={FORCE_SOURCE_CONTEXT_UNHEALTHY_ENV: "1"},
-    )
-    assert paused.returncode == 3
-    assert (tmp_path / ".codex" / "ticket-workspace" / "pause.json").is_file()
-
-    resumed = _run_autonomy(
-        tmp_path, "apply-turn", "--project-root", str(tmp_path),
-        "--turn-id", "turn-1", "--context-file", str(context),
-        "--setup-choice", "automatic", "--resume-paused",
-    )
-
-    assert resumed.returncode == 0
-    payload = json.loads(resumed.stdout)
-    assert payload["state"] == "applied"
-    assert payload["ticket_updates"]["Applied"] == ["T-20260527-01"]
-    assert not (tmp_path / ".codex" / "ticket-workspace" / "pause.json").exists()
-    assert "priority: low" in ticket.read_text(encoding="utf-8")
+    assert ticket.read_text(encoding="utf-8") == broken_ticket
 ```
 
-Confirm `_init_ticket_project`, `_write_context`, `_run_autonomy`, `SCRIPT`, `os`, `sys`, and `subprocess` are already imported/defined in `test_autonomy_cli.py`; adapt `_write_context`'s candidate-mutations argument name to the live helper. The per-candidate `ticket_update_blocked` and partial-apply assertions stay in the blocked-ticket payload coverage above; these four tests cover only the collector-level pause and resume gate.
+The other three tests must use the same real-fault helper:
+
+- normal later `apply-turn` without `--resume-paused` stays paused and writes no events;
+- `--resume-paused` fails closed while the same real fault remains;
+- after storing the original Ticket content before breaking the file, then
+  rewriting the ticket back to that valid content, `--resume-paused`
+  clears the marker only after the collector/probe passes and then continues the
+  normal mode-specific apply-turn path.
+
+Confirm `_init_ticket_project`, `_write_context`, `_run_autonomy`, and `SCRIPT`
+are already defined in `test_autonomy_cli.py`; adapt `_write_context`'s
+candidate-mutations argument name to the live helper. The per-candidate
+`ticket_update_blocked` and partial-apply assertions stay in the blocked-ticket
+payload coverage above; these four tests cover only the collector-level pause
+and resume gate.
 
 Do not assert `state: "setup_required"` for source-context failures. `setup_required` remains local config or mode setup only.
 
@@ -2180,6 +2199,7 @@ The implementation closeout message must include these exact proof-boundary fact
 
 ```text
 Remaining product drift: `ticket_change_scope` still exists in candidate identity, gateway fingerprints, autonomous apply, and commit-disposition behavior; it is intentionally deferred to a separate source slice.
+Remaining private-log drift: pending-summary and gateway events still retain `commit_disposition` and `ticket_change_scope`-derived behavior even though the control doc says the private operation log must not retain commit disposition or `ticket_change_scope` as durable facts. This slice preserves them only as known temporary drift while removing preview and approval machinery.
 Temporary safety binding: while `ticket_change_scope` remains live, gateway validation rejects mismatches between `decision.candidate.ticket_change_scope` and `GatewayMutation.ticket_change_scope`.
 Remaining product drift: the full target candidate mutation contract remains unsatisfied except for the narrower target-fingerprint identity binding implemented by this slice.
 Deferred diagnostic-preview affordance: durable preview is removed; diagnostic dry-run remains unimplemented and intentionally deferred to a later maintenance/design slice. This slice adds no replacement dry-run flag, command, event, or renamed preview path.
@@ -2337,7 +2357,7 @@ Spec coverage:
 - The Consumer Inventory section is the authoritative affected-file set; every removed-machinery hit (run the inventory grep) is folded into the atomic-boundary commit, selectors, staging, and ruff lists — including `test_autonomy_ids.py`, which the original per-task lists omitted.
 - The atomic approval-boundary commit (Task 5) is whole-suite green (`pytest -q`), not green-by-selector; it contains every removed-machinery consumer rewrite, and no checkpoint commits a `pytest -q`-red tree.
 - A positive gateway test proves a non-duplicate `create` with `target_fingerprint=None` passes `_decision_error` and writes (Task 4), and the `source_context_unhealthy` pause/resume/known-ticket-probe behaviors have concrete test bodies (Task 6 Step 4), not prose.
-- The recovery fingerprint helper is referenced by its real name `_event_with_bound_fingerprints` (with defaults preserved); the post-write `approval_consumed` recovery test is deleted as unreachable, not re-fixtured; the integration success sequence is reindexed from 4 to 3 events; both `_expected_pre_write_fingerprint` functions drop their approval reads.
+- The recovery fingerprint helper is referenced by its real name `_event_with_bound_fingerprints` (with defaults preserved); the post-write `approval_consumed` recovery test is replaced with an approval-free `attempt_recorded` repair test; the integration success sequence is reindexed from 4 to 3 events; both `_expected_pre_write_fingerprint` functions drop their approval reads.
 - Follow-up named, not folded: de-duplicating `_mode_snapshot_error()` against `read_mode_snapshot()`'s validation, and any installed-runtime `approval_consumed` migration, are left as deferred work.
 
 Placeholder scan:
