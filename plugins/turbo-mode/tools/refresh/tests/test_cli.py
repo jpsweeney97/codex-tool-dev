@@ -428,6 +428,12 @@ for line in sys.stdin:
                     "scrutinize",
                 ),
                 skill(
+                    "review-family:scrutinize-skill",
+                    "review-family",
+                    "0.1.0",
+                    "scrutinize-skill",
+                ),
+                skill(
                     "review-family:system-design-review",
                     "review-family",
                     "0.1.0",

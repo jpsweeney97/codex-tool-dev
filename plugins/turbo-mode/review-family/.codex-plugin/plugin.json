@@ -9,6 +9,7 @@
   "keywords": [
     "review",
     "scrutiny",
+    "skills",
     "implementation",
     "architecture",
     "adjudication"
@@ -17,7 +18,7 @@
   "interface": {
     "displayName": "Review Family",
     "shortDescription": "Evidence-first review and review-adjudication skills",
-    "longDescription": "Run bounded, evidence-first Codex reviews across implementation, architecture, execution-readiness, adversarial scrutiny, pasted claims, supplied-review adjudication, and Claude PR-review prompt drafting.",
+    "longDescription": "Run bounded, evidence-first Codex reviews across implementation, architecture, skill behavior, execution-readiness, adversarial scrutiny, pasted claims, supplied-review adjudication, and Claude PR-review prompt drafting.",
     "developerName": "JP",
     "category": "Productivity",
     "capabilities": [
@@ -26,6 +27,7 @@
     ],
     "defaultPrompt": [
       "Scrutinize this plan before implementation",
+      "Review this skill as a behavior contract",
       "Review this implementation against the spec",
       "Adjudicate this review before I act"
     ],

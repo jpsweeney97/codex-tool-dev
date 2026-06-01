@@ -41,6 +41,7 @@ EXPECTED_REVIEW_FAMILY_SKILLS = (
     "review-family:review-claude-claims",
     "review-family:review-reviewer",
     "review-family:scrutinize",
+    "review-family:scrutinize-skill",
     "review-family:system-design-review",
 )
 EXPECTED_RESPONSE_IDS = frozenset({0, 1, 2, 3, 4, 5, 6})

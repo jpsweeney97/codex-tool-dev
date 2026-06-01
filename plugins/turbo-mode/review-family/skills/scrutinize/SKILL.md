@@ -15,6 +15,8 @@ as `review-family:scrutinize`.
 - Use this skill for natural-language adversarial review requests such as
   "scrutinize", "be brutal", "tear this apart", "assume this is wrong", or
   "reject until proven otherwise" when no narrower explicit skill applies.
+- Use `scrutinize-skill` only when explicitly invoked for adversarial review of
+  a Codex skill as a behavior contract.
 - Use `implementation-review` for completed code or artifacts against a
   plan/spec, even when the user asks for an adversarial implementation pass.
 - Use `system-design-review` for architecture tradeoffs, boundaries, data

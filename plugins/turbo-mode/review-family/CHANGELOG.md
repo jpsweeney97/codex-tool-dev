@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `scrutinize-skill` for explicit adversarial review of Codex skills as
+  behavior contracts, including UX, composability, overlap, and proof gaps.
 - Source package documentation for README, privacy notice, terms, and changelog.
 - Source manifest readiness URLs for website, privacy policy, and terms of
   service. This is source metadata only, not installed runtime proof.
