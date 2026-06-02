@@ -63,6 +63,11 @@ Important live source hits:
 - `plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py` hashes `ticket_change_scope` into candidate mutation identity.
 - `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py` stores `ticket_change_scope` on `CandidateMutation`.
 - `plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py` reads structured candidate `ticket_change_scope`.
+- `plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py` is a default-reliant
+  live correction-flow consumer: it constructs `CandidateMutation` and
+  `GatewayMutation` without deprecated kwargs, then drives
+  `apply_autonomous_mutation()` with `action="correction"`. It will not appear in
+  simple removed-token greps but belongs in the affected selectors.
 - `plugins/turbo-mode/ticket/tests/test_ticket_commit_coordinator.py` preserves commit coordination as a feature and should be deleted.
 
 Expected side effect:
@@ -112,6 +117,10 @@ Modify:
   - Remove `commit_dispositions` success-output assertions.
 - `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`
   - Remove event/output commit-disposition assertions.
+- `plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py`
+  - Include in the atomic and focused verification selectors as a default-reliant
+    correction gateway consumer. Do not edit it unless the selector exposes a
+    real correction-flow break.
 - `plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py`
   - Replace recovery commit-disposition assertions with empty applied-detail assertions.
 - `plugins/turbo-mode/ticket/tests/test_docs_contract.py`
@@ -143,8 +152,10 @@ depend on fields or behavior removed earlier in the task order. In particular:
   parameter in Task 1 must land in the same commit as the gateway and apply-turn
   consumer updates in Tasks 2 and 4.
 - Removing gateway commit coordination in Task 2 must land in the same commit as
-  integration-test output rewrites in Task 4, because the old integration test
-  asserts that the gateway creates a git commit.
+  pending-summary validation changes in Task 3 and integration-test output
+  rewrites in Task 4, because Task 2 changes gateway `applied` events to
+  `details={}` while the old pending-summary validator still rejects applied
+  events without `commit_disposition`.
 - Removing pending-summary commit-disposition validation in Task 3 must land in
   the same commit as gateway/apply-turn output removal, so recovery, event
   validation, and user output agree.
@@ -223,7 +234,7 @@ Expected: hits are assignable to source behavior, tests preserving deprecated be
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_candidate_discovery.py tests/test_autonomy_runtime.py tests/test_engine_gateway.py tests/test_turn_batch.py tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_autonomy_recovery.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_candidate_discovery.py tests/test_autonomy_runtime.py tests/test_engine_gateway.py tests/test_turn_batch.py tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_autonomy_corrections.py tests/test_autonomy_recovery.py -q
 ```
 
 Expected: PASS on current source. If it fails, stop and diagnose before making this slice look responsible for pre-existing failures.
@@ -652,7 +663,7 @@ trash plugins/turbo-mode/ticket/scripts/ticket_commit_coordinator.py plugins/tur
 
 Expected: files move to Trash and `git status --short` shows them as deleted.
 
-- [ ] **Step 5: Run the Task 2 selector**
+- [ ] **Step 5: Run the Task 2 interim selector**
 
 Run:
 
@@ -660,9 +671,12 @@ Run:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_engine_gateway.py -q
 ```
 
-Expected: PASS for `tests/test_engine_gateway.py`. Do not commit yet. The
-integration tests still contain old git-commit/output assertions until Task 4
-lands in the same atomic source behavior commit.
+Expected: FAIL after Task 2 source edits because `tests/test_engine_gateway.py`
+now expects the gateway to append `applied` events with `details={}`, while
+`plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py` still requires
+`details.commit_disposition` until Task 3. Do not treat this as a blocker, and
+do not weaken the gateway assertion. Leave the worktree dirty and continue to
+Task 3, where the combined gateway/pending-summary selector becomes green.
 
 - [ ] **Step 6: Checkpoint Task 2 without committing**
 
@@ -687,7 +701,13 @@ continue to Task 3.
 
 - [ ] **Step 1: Write failing pending-summary tests**
 
-In `plugins/turbo-mode/ticket/tests/test_turn_batch.py`, change the applied fixture to:
+In `plugins/turbo-mode/ticket/tests/test_turn_batch.py`, change the applied fixture from the current commit-disposition-bearing row:
+
+```python
+        "applied": {"commit_disposition": "commit_deferred"},
+```
+
+to:
 
 ```python
     details_by_status: dict[str, dict[str, object]] = {
@@ -699,7 +719,21 @@ In `plugins/turbo-mode/ticket/tests/test_turn_batch.py`, change the applied fixt
     }
 ```
 
-Replace existing commit-disposition validation rows with:
+Delete the old `test_finite_values()` row that treats `commit_disposition` as a
+finite value:
+
+```python
+        ("details", {"commit_disposition": "unknown"}, "commit_disposition"),
+```
+
+Delete the old `test_status_details_requirements()` row that treats
+`commit_disposition` as required applied-event detail:
+
+```python
+        (valid_status_event("applied", commit_disposition=""), "commit_disposition"),
+```
+
+Then add this dedicated prohibited-detail test:
 
 ```python
 @pytest.mark.parametrize(
@@ -796,17 +830,19 @@ In `project_mutation_recovery()`, change both recovered `applied` events to use 
                 ),
 ```
 
-- [ ] **Step 6: Run the Task 3 selector**
+- [ ] **Step 6: Run the Task 2+3 selector**
 
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_turn_batch.py tests/test_autonomy_recovery.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_engine_gateway.py tests/test_turn_batch.py tests/test_autonomy_recovery.py -q
 ```
 
-Expected: PASS for the Task 3-local selector. Do not commit yet. Gateway,
-pending-summary recovery, and apply-turn output must land together in the Task
-4 atomic source behavior commit.
+Expected: PASS for the combined Task 2+3 selector. This is the first checkpoint
+where Task 2's gateway `details={}` assertion can be green because Task 3 has
+removed the old pending-summary `commit_disposition` requirement. Do not commit
+yet. Gateway, pending-summary recovery, and apply-turn output must land together
+in the Task 4 atomic source behavior commit.
 
 - [ ] **Step 7: Checkpoint Task 3 without committing**
 
@@ -826,6 +862,7 @@ worktree dirty and continue to Task 4.
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`
+- Test only: `plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py`
 
 - [ ] **Step 1: Write failing output tests**
 
@@ -863,6 +900,20 @@ In `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`, replace any assertion
     assert "commit_dispositions" not in payload
 ```
 
+After the integration assertion rewrite, delete the now-unused `_git()` helper
+from `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`:
+
+```python
+def _git(project_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+```
+
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run:
@@ -871,7 +922,9 @@ Run:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py -q
 ```
 
-Expected: FAIL before source edits because apply-turn still emits `commit_dispositions`.
+Expected: FAIL before source edits because apply-turn still passes the removed
+`ticket_change_scope` field into `GatewayMutation` and still emits
+`commit_dispositions`.
 
 - [ ] **Step 3: Remove commit-disposition output code**
 
@@ -906,11 +959,23 @@ In `_run_apply_turn_with_mode()`, delete:
 
 When constructing `GatewayMutation`, remove `ticket_change_scope=decision.candidate.ticket_change_scope`.
 
-On successful gateway response, leave only:
+Inside the existing successful gateway response branch, delete only the
+`commit_summary` lines:
+
+```python
+                commit_summary = _commit_disposition_summary(ticket_id, response.data)
+                if commit_summary is not None:
+                    commit_dispositions.append(commit_summary)
+```
+
+Keep the surrounding `if` and `else` flow intact:
 
 ```python
             if response.state.startswith("ok_"):
                 applied.append(ticket_id)
+            else:
+                discussion.append(ticket_id)
+                discussion_question = discussion_question or response.message
 ```
 
 When emitting summary payload, call:
@@ -931,7 +996,7 @@ When emitting summary payload, call:
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_candidate_discovery.py tests/test_autonomy_runtime.py tests/test_engine_gateway.py tests/test_turn_batch.py tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_autonomy_recovery.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_candidate_discovery.py tests/test_autonomy_runtime.py tests/test_engine_gateway.py tests/test_turn_batch.py tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_autonomy_corrections.py tests/test_autonomy_recovery.py -q
 ```
 
 Expected: PASS. This is the first source behavior commit gate for Tasks 1
@@ -943,7 +1008,7 @@ Run:
 
 ```bash
 git add plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py
-git add plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_candidate_discovery.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
+git add plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_candidate_discovery.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 git add -u plugins/turbo-mode/ticket/scripts/ticket_commit_coordinator.py plugins/turbo-mode/ticket/tests/test_ticket_commit_coordinator.py
 git commit -m "fix(ticket): remove git branch bookkeeping from mutation paths"
 ```
@@ -974,6 +1039,12 @@ rg -n "ticket_change_scope|commit_disposition|commit_hash|commit_reason|commit_d
 ```
 
 Expected: no active target/current-behavior doc presents branch scope or commit coordination as supported behavior. If a hit appears in `Deprecated Source Drift`, `Legacy Cutover Input`, `Historical Changelog`, or `Maintenance And Diagnostics`, classify it as historical/diagnostic and leave it unless the wording presents old behavior as current target behavior.
+
+Known gap to classify, not silently ignore: active target-candidate docs may
+still say unknown fields are invalid while this source slice intentionally only
+ignores deprecated `ticket_change_scope` input and defers full unknown-field
+rejection. If those docs remain otherwise current, mention this as part of the
+remaining full target candidate contract drift instead of expanding this slice.
 
 - [ ] **Step 2: Add static active-doc negative coverage**
 
@@ -1052,7 +1123,9 @@ rg -n "ticket_change_scope|commit_disposition|commit_hash|commit_reason|record_t
 
 Expected:
 
-- No hits in `plugins/turbo-mode/ticket/scripts`.
+- No hits in `plugins/turbo-mode/ticket/scripts` except the deliberate
+  `_PROHIBITED_DETAILS` guard literals in
+  `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py`.
 - No feature-preserving hits in `plugins/turbo-mode/ticket/tests`.
 - Allowed hits only in ADR/control docs, this plan, superseded historical docs,
   historical audits, completed plans, or deliberate negative tests.
@@ -1062,7 +1135,7 @@ Expected:
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_candidate_discovery.py tests/test_autonomy_runtime.py tests/test_engine_gateway.py tests/test_turn_batch.py tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_autonomy_recovery.py tests/test_docs_contract.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_candidate_discovery.py tests/test_autonomy_runtime.py tests/test_engine_gateway.py tests/test_turn_batch.py tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_autonomy_corrections.py tests/test_autonomy_recovery.py tests/test_docs_contract.py -q
 ```
 
 Expected: PASS.
@@ -1138,7 +1211,11 @@ The implementation closeout must include:
 - Verification commands and pass/fail results.
 - Residue inventory result, with allowed historical hits named.
 - Explicit statement that Ticket no longer performs commit coordination, records commit disposition, or binds branch scope in source mutation paths.
-- Explicit remaining ADR drift list: full target candidate contract, ticket-file cutover/normalization, diagnostic dry-run, response-envelope cleanup beyond this source slice, Change History grammar, and old workflow architecture not touched by this slice.
+- Explicit remaining ADR drift list: full target candidate contract, including
+  unknown-field rejection versus this slice's deprecated-field ignore behavior,
+  ticket-file cutover/normalization, diagnostic dry-run, response-envelope
+  cleanup beyond this source slice, Change History grammar, and old workflow
+  architecture not touched by this slice.
 
 ## Self-Review
 
