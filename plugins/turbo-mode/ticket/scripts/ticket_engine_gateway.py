@@ -36,6 +36,7 @@ from scripts.ticket_engine_core import (
     _execute_update,
     _plan_create,
 )
+from scripts.ticket_mutation_identity import make_candidate_mutation_identity
 from scripts.ticket_read import find_ticket_by_id
 from scripts.ticket_turn_batch import (
     PENDING_SUMMARY_SCHEMA,
@@ -97,10 +98,6 @@ def _workspace_is_paused(project_root: Path) -> bool:
     return (project_root / WORKSPACE_RELATIVE_PATH / "pause.json").is_file()
 
 
-def _approval_ticket_id(mutation: GatewayMutation) -> str | None:
-    return mutation.ticket_id
-
-
 def _mutation_fingerprint(mutation: GatewayMutation) -> str:
     return sha256_fingerprint(
         {
@@ -151,40 +148,49 @@ def build_engine_dispatch(mutation: GatewayMutation) -> EngineDispatch:
     return map_candidate_to_engine(candidate)
 
 
-def _approval_error(
+def _candidate_evidence_payload(candidate: CandidateMutation) -> list[dict[str, str]]:
+    return [
+        {"kind": evidence.kind, "ref": evidence.ref, "freshness": evidence.freshness}
+        for evidence in candidate.evidence
+    ]
+
+
+def _decision_error(
     *,
     thread_id: str,
+    turn_id: str,
     mutation: GatewayMutation,
     decision: AutonomyDecision,
 ) -> str | None:
-    approval = decision.approval
     if decision.kind == RuntimeDecisionKind.APPLY_CORRECTION:
-        if decision.mutation_id is None:
-            return "mutation_id_required"
-        if approval is not None:
-            return "approval_unexpected"
         if mutation.action != "correction" or decision.candidate.action != "correction":
             return "decision_mismatch"
-        if decision.candidate.ticket_id != mutation.ticket_id:
-            return "ticket_mismatch"
-        return None
-    if decision.kind != RuntimeDecisionKind.APPLY_AUTONOMOUSLY or approval is None:
-        return "approval_required"
+    elif decision.kind != RuntimeDecisionKind.APPLY_AUTONOMOUSLY:
+        return "autonomous_decision_required"
     if decision.mutation_id is None:
         return "mutation_id_required"
-    if approval.get("thread_id") != thread_id:
-        return "thread_mismatch"
-    if approval.get("ticket_id") != _approval_ticket_id(mutation):
+    if decision.candidate.ticket_id != mutation.ticket_id:
         return "ticket_mismatch"
-    if approval.get("mutation_id") != decision.mutation_id:
-        return "mutation_mismatch"
-    if approval.get("mutation_fingerprint") != _mutation_fingerprint(mutation):
+    if decision.candidate.action != mutation.action:
+        return "action_mismatch"
+    if decision.candidate.ticket_change_scope != mutation.ticket_change_scope:
+        return "ticket_change_scope_mismatch"
+    if dict(decision.candidate.proposed_change) != dict(mutation.fields):
         return "mutation_fingerprint_mismatch"
-    if approval.get("decision") != RuntimeDecisionKind.APPLY_AUTONOMOUSLY.value:
-        return "decision_mismatch"
-    expires_at = _parse_z(approval.get("expires_at"))
-    if expires_at is None or expires_at <= datetime.now(UTC):
-        return "approval_expired"
+    if mutation.action != "create" and mutation.target_fingerprint is None:
+        return "target_fingerprint_required"
+    identity = make_candidate_mutation_identity(
+        thread_id=thread_id,
+        turn_id=turn_id,
+        ticket_id=decision.candidate.ticket_id,
+        action=decision.candidate.action,
+        proposed_change=decision.candidate.proposed_change,
+        ticket_change_scope=decision.candidate.ticket_change_scope,
+        target_fingerprint=mutation.target_fingerprint,
+        evidence=_candidate_evidence_payload(decision.candidate),
+    )
+    if decision.mutation_id != identity.mutation_id:
+        return "mutation_id_mismatch"
     return None
 
 
@@ -211,7 +217,7 @@ def _validate_target_fingerprint(mutation: GatewayMutation) -> EngineResponse | 
     if current != mutation.target_fingerprint:
         return EngineResponse(
             state="preflight_failed",
-            message="Stale fingerprint - ticket was modified since approval.",
+            message="Stale fingerprint - ticket was modified since validation.",
             ticket_id=mutation.ticket_id,
             error_code="stale_plan",
         )
@@ -232,14 +238,8 @@ def _expected_pre_write_fingerprint(
     mutation: GatewayMutation,
     decision: AutonomyDecision,
 ) -> str | None:
-    if mutation.target_fingerprint:
-        return mutation.target_fingerprint
-    approval = decision.approval
-    if isinstance(approval, Mapping):
-        value = approval.get("ticket_state_fingerprint")
-        if isinstance(value, str) and value and value != "unknown":
-            return value
-    return None
+    del decision
+    return mutation.target_fingerprint
 
 
 def _fingerprint_details(
@@ -341,7 +341,7 @@ def _existing_mutation_recovery_response(
     thread_id: str,
 ) -> EngineResponse | None:
     if decision.mutation_id is None:
-        return _policy_blocked("Approval validation failed: mutation_id_required")
+        return _policy_blocked("Decision validation failed: mutation_id_required")
     existing_state = pending_summary.derive_mutation_state(
         thread_id=thread_id,
         mutation_id=decision.mutation_id,
@@ -523,12 +523,15 @@ def apply_autonomous_mutation(
     decision: AutonomyDecision,
     pending_summary: PendingSummaryStore,
 ) -> EngineResponse:
-    """Apply one approved autonomous mutation through the gateway."""
-    approval_error = _approval_error(thread_id=thread_id, mutation=mutation, decision=decision)
-    if approval_error is not None:
-        return _policy_blocked(f"Approval validation failed: {approval_error}")
-    if decision.mutation_id is None:
-        return _policy_blocked("Approval validation failed: mutation_id_required")
+    """Apply one autonomous mutation through the gateway."""
+    decision_error = _decision_error(
+        thread_id=thread_id,
+        turn_id=turn_id,
+        mutation=mutation,
+        decision=decision,
+    )
+    if decision_error is not None:
+        return _policy_blocked(f"Decision validation failed: {decision_error}")
     try:
         lock_path = _acquire_gateway_write_lock(project_root, mutation)
     except RuntimeError as exc:
@@ -609,45 +612,19 @@ def _apply_autonomous_mutation_locked(
         turn_id=turn_id,
         repo_context=repo_context,
         reason=(
-            "Apply approved autonomous Ticket mutation."
+            "Apply autonomous Ticket mutation."
             if decision.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY
             else "Apply user-triggered autonomous Ticket correction."
         ),
         details={
             "decision": decision.kind.value,
-            "current_mode": (
-                str(decision.approval.get("current_mode", "agent_primary"))
-                if decision.approval is not None
-                else "agent_primary"
-            ),
+            "current_mode": "agent_primary",
             "evidence_kind": "runtime_context",
             **_fingerprint_details(mutation=mutation, decision=decision),
-            **({"approval": decision.approval} if decision.approval is not None else {}),
         },
     )
     if attempt_error is not None:
         return attempt_error
-
-    if decision.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY:
-        if decision.approval is None:
-            return _policy_blocked("Approval validation failed: approval_required")
-        consumed_error = _append_gateway_event(
-            pending_summary=pending_summary,
-            event_type="mutation_status",
-            status="approval_consumed",
-            mutation=mutation,
-            decision=decision,
-            thread_id=thread_id,
-            turn_id=turn_id,
-            repo_context=repo_context,
-            reason="Autonomous approval consumed.",
-            details={
-                "approval_id": str(decision.approval["approval_id"]),
-                **_fingerprint_details(mutation=mutation, decision=decision),
-            },
-        )
-        if consumed_error is not None:
-            return consumed_error
 
     if _workspace_is_paused(project_root):
         return _policy_blocked(

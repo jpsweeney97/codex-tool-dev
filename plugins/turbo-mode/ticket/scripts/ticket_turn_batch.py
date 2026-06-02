@@ -51,7 +51,6 @@ _EVENT_STATUSES = {
         "failed",
     },
     "mutation_status": {
-        "approval_consumed",
         "ticket_written",
         "applied",
         "failed",
@@ -89,10 +88,9 @@ _DECISIONS = frozenset(
         "require_user_discussion",
         "skip_due_to_conflict",
         "defer_until_retry_condition",
-        "preview_only",
     }
 )
-_MODES = frozenset({"discussion_only", "preview", "agent_primary"})
+_MODES = frozenset({"discussion_only", "agent_primary"})
 _EVIDENCE_KINDS = frozenset(
     {
         "runtime_context",
@@ -289,13 +287,8 @@ def _validate_details(
     if event_type == "mutation_attempt":
         if decision not in _DECISIONS:
             return _invalid("details.decision is required")
-        if decision == "apply_autonomously" and not isinstance(details.get("approval"), Mapping):
-            return _invalid("details.approval is required")
-        if decision == "preview_only" and status != "skipped":
-            return _invalid("preview_only decisions must use skipped status")
 
     required_by_status = {
-        "approval_consumed": "approval_id",
         "ticket_written": "post_write_fingerprint",
         "discussion_required": "question",
         "deferred": "retry_condition",
@@ -622,10 +615,9 @@ class PendingSummaryStore:
         rank = {
             "no_attempt": 0,
             "attempt_recorded": 1,
-            "approval_consumed": 2,
-            "ticket_written": 3,
-            "status_recorded": 4,
-            "summary_recorded": 5,
+            "ticket_written": 2,
+            "status_recorded": 3,
+            "summary_recorded": 4,
         }
         state = "no_attempt"
         for event in self.read_events():
@@ -636,8 +628,6 @@ class PendingSummaryStore:
             candidate = None
             if event_type == "mutation_attempt":
                 candidate = "attempt_recorded"
-            elif status == "approval_consumed":
-                candidate = "approval_consumed"
             elif status == "ticket_written":
                 candidate = "ticket_written"
             elif status in {"applied", "failed", "corrected", "inactive"}:
@@ -755,11 +745,6 @@ def _expected_pre_write_fingerprint(events: tuple[Mapping[str, object], ...]) ->
         explicit = _string_detail(event, "expected_pre_write_fingerprint")
         if explicit is not None:
             return explicit
-        approval = _details(event).get("approval")
-        if isinstance(approval, Mapping):
-            value = approval.get("ticket_state_fingerprint")
-            if isinstance(value, str) and value and value != "unknown":
-                return value
     return None
 
 
@@ -893,7 +878,7 @@ def project_mutation_recovery(
             expected_post,
         )
 
-    if state in {"attempt_recorded", "approval_consumed"}:
+    if state == "attempt_recorded":
         if expected_pre is None:
             return _pause_projection(
                 thread_id=thread_id,
@@ -912,16 +897,16 @@ def project_mutation_recovery(
                 expected_pre,
                 expected_post,
             )
-        if state == "approval_consumed" and current_ticket_fingerprint == expected_post:
-            if expected_post is None:
-                return _pause_projection(
-                    thread_id=thread_id,
-                    mutation_id=mutation_id,
-                    current_ticket_fingerprint=current_ticket_fingerprint,
-                    expected_pre_write_fingerprint=expected_pre,
-                    expected_post_write_fingerprint=expected_post,
-                    reason="missing_post_write_fingerprint",
-                )
+        if expected_post is None:
+            return _pause_projection(
+                thread_id=thread_id,
+                mutation_id=mutation_id,
+                current_ticket_fingerprint=current_ticket_fingerprint,
+                expected_pre_write_fingerprint=expected_pre,
+                expected_post_write_fingerprint=expected_post,
+                reason="missing_post_write_fingerprint",
+            )
+        if current_ticket_fingerprint == expected_post:
             events_to_append = (
                 _recovery_event(
                     reference=reference,

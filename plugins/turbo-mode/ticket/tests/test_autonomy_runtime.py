@@ -87,7 +87,8 @@ def test_ordinary_candidates_apply_autonomously_with_agent_primary_and_evidence(
     for candidate in candidates:
         decision = _decisions(candidate, shared_decision_evidence=True)[0]
         assert decision.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY
-        assert decision.approval is not None
+        assert decision.mutation_id is not None
+        assert decision.reason == "authorized"
 
 
 def test_destructive_and_history_actions_require_user_discussion() -> None:
@@ -211,28 +212,84 @@ def test_fanout_caps_keep_above_cap_candidates_as_pending_summary_records() -> N
     )
 
 
-def test_approval_envelope_binds_decision_context_and_expires_within_ten_minutes() -> None:
+def test_agent_primary_decision_uses_mutation_id() -> None:
     candidate = _candidate("update", evidence=_evidence("current_thread_reason"))
 
     decision = _decisions(candidate)[0]
 
     assert decision.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY
-    assert decision.approval is not None
-    approval = decision.approval
-    assert approval["thread_id"] == "thread-1"
-    assert approval["ticket_id"] == candidate.ticket_id
-    assert approval["mutation_id"] == decision.mutation_id
-    assert approval["current_mode"] == "agent_primary"
-    assert approval["decision"] == "apply_autonomously"
-    assert approval["ticket_state_fingerprint"] == f"state-{candidate.ticket_id}"
-    assert approval["mutation_fingerprint"]
-    assert approval["evidence_fingerprint"]
-    assert approval["approval_id"].startswith("appr_")
-    assert approval["created_at"] == "2026-05-27T12:00:00Z"
-    assert approval["expires_at"] == "2026-05-27T12:10:00Z"
+    assert decision.mutation_id is not None
+    assert decision.mutation_id.startswith("mut_")
+    assert decision.engine_dispatch is not None
+    assert decision.engine_dispatch.state == "ok"
+    assert decision.reason == "authorized"
 
 
-def test_ticket_change_scope_binds_mutation_identity_and_approval_fingerprint() -> None:
+def test_target_fingerprint_binds_mutation_identity_for_non_create() -> None:
+    candidate = _candidate("update")
+    first = _decisions(
+        candidate,
+        ticket_state_fingerprints={candidate.ticket_id: "ticket-state-a"},
+    )[0]
+    second = _decisions(
+        candidate,
+        ticket_state_fingerprints={candidate.ticket_id: "ticket-state-b"},
+    )[0]
+
+    assert first.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY
+    assert second.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY
+    assert first.mutation_id != second.mutation_id
+
+
+def test_non_create_candidate_requires_target_fingerprint_for_identity() -> None:
+    decision = _decisions(
+        _candidate("update"),
+        ticket_state_fingerprints={},
+    )[0]
+
+    assert decision.kind == RuntimeDecisionKind.TICKET_UPDATE_BLOCKED
+    assert decision.reason == "target_fingerprint_required"
+    assert decision.pending_summary_status == "ticket_update_blocked"
+    assert decision.mutation_id is None
+
+
+def test_correction_target_fingerprint_binds_mutation_identity() -> None:
+    candidate = _candidate(
+        "correction",
+        proposed_change={"resolution": "done"},
+        evidence=_evidence("correction_detail"),
+    )
+    first = _decisions(
+        candidate,
+        ticket_state_fingerprints={candidate.ticket_id: "ticket-state-a"},
+    )[0]
+    second = _decisions(
+        candidate,
+        ticket_state_fingerprints={candidate.ticket_id: "ticket-state-b"},
+    )[0]
+
+    assert first.kind == RuntimeDecisionKind.APPLY_CORRECTION
+    assert second.kind == RuntimeDecisionKind.APPLY_CORRECTION
+    assert first.mutation_id != second.mutation_id
+
+
+def test_correction_requires_target_fingerprint_for_identity() -> None:
+    decision = _decisions(
+        _candidate(
+            "correction",
+            proposed_change={"resolution": "done"},
+            evidence=_evidence("correction_detail"),
+        ),
+        ticket_state_fingerprints={},
+    )[0]
+
+    assert decision.kind == RuntimeDecisionKind.TICKET_UPDATE_BLOCKED
+    assert decision.reason == "target_fingerprint_required"
+    assert decision.pending_summary_status == "ticket_update_blocked"
+    assert decision.mutation_id is None
+
+
+def test_ticket_change_scope_still_binds_mutation_identity_until_scope_slice() -> None:
     current_branch = _decisions(
         _candidate("update", ticket_change_scope="current_branch"),
     )[0]
@@ -241,12 +298,7 @@ def test_ticket_change_scope_binds_mutation_identity_and_approval_fingerprint() 
     )[0]
 
     assert current_branch.mutation_id != unrelated_backlog.mutation_id
-    assert current_branch.approval is not None
-    assert unrelated_backlog.approval is not None
-    assert (
-        current_branch.approval["mutation_fingerprint"]
-        != unrelated_backlog.approval["mutation_fingerprint"]
-    )
+    assert current_branch.mutation_id != unrelated_backlog.mutation_id
 
 
 def test_ticket_actions_map_to_engine_dispatch_exactly() -> None:

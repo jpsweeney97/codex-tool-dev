@@ -5,14 +5,13 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from scripts.ticket_autonomy_ids import (
-    make_approval_id,
-    make_mutation_id,
-    sha256_fingerprint,
+from scripts.ticket_mutation_identity import (
+    CandidateMutationIdentity,
+    make_candidate_mutation_identity,
 )
 
 
@@ -86,7 +85,6 @@ class AutonomyDecision:
     candidate: CandidateMutation
     kind: RuntimeDecisionKind
     mutation_id: str | None
-    approval: dict[str, object] | None
     engine_dispatch: EngineDispatch | None
     reason: str | None
     pending_summary_status: str
@@ -112,10 +110,6 @@ _UNSAFE_CORRECTION_KEYS = frozenset(
 )
 
 
-def _iso_z(value: datetime) -> str:
-    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def _evidence_payload(candidate: CandidateMutation) -> list[dict[str, str]]:
     return [
         {"kind": evidence.kind, "ref": evidence.ref, "freshness": evidence.freshness}
@@ -135,68 +129,18 @@ def _has_evidence_kind(candidate: CandidateMutation, *kinds: str) -> bool:
     )
 
 
-def _ticket_state_fingerprint(
+def _target_fingerprint_for_candidate(
     candidate: CandidateMutation,
     source_context: Mapping[str, object],
-) -> str:
+) -> str | None:
+    if candidate.action == "create":
+        return None
     fingerprints = source_context.get("ticket_state_fingerprints")
     if isinstance(fingerprints, Mapping) and isinstance(candidate.ticket_id, str):
         value = fingerprints.get(candidate.ticket_id)
         if isinstance(value, str) and value:
             return value
-    value = candidate.proposed_change.get("ticket_state_fingerprint")
-    if isinstance(value, str) and value:
-        return value
-    return "unknown"
-
-
-def _candidate_payload(candidate: CandidateMutation) -> dict[str, object]:
-    return {
-        "ticket_id": candidate.ticket_id,
-        "action": candidate.action,
-        "proposed_change": dict(candidate.proposed_change),
-        "ticket_change_scope": candidate.ticket_change_scope,
-    }
-
-
-def _make_approval(
-    *,
-    candidate: CandidateMutation,
-    decision_kind: RuntimeDecisionKind,
-    mutation_id: str,
-    mutation_fingerprint: str,
-    evidence_fingerprint: str,
-    ticket_state_fingerprint: str,
-    current_mode: str,
-    thread_id: str,
-    now: datetime,
-) -> dict[str, object]:
-    ticket_id = candidate.ticket_id or "__new_ticket__"
-    approval_id = make_approval_id(
-        schema="codex.ticket.approval.v1",
-        thread_id=thread_id,
-        ticket_id=ticket_id,
-        mutation_id=mutation_id,
-        mutation_fingerprint=mutation_fingerprint,
-        ticket_state_fingerprint=ticket_state_fingerprint,
-        evidence_fingerprint=evidence_fingerprint,
-        current_mode=current_mode,
-        decision=decision_kind.value,
-    )
-    return {
-        "schema": "codex.ticket.approval.v1",
-        "approval_id": approval_id,
-        "thread_id": thread_id,
-        "ticket_id": candidate.ticket_id,
-        "mutation_id": mutation_id,
-        "current_mode": current_mode,
-        "decision": decision_kind.value,
-        "ticket_state_fingerprint": ticket_state_fingerprint,
-        "mutation_fingerprint": mutation_fingerprint,
-        "evidence_fingerprint": evidence_fingerprint,
-        "created_at": _iso_z(now),
-        "expires_at": _iso_z(now + timedelta(minutes=10)),
-    }
+    return None
 
 
 def _decision(
@@ -206,14 +150,12 @@ def _decision(
     reason: str,
     pending_summary_status: str,
     mutation_id: str | None = None,
-    approval: dict[str, object] | None = None,
     engine_dispatch: EngineDispatch | None = None,
 ) -> AutonomyDecision:
     return AutonomyDecision(
         candidate=candidate,
         kind=kind,
         mutation_id=mutation_id,
-        approval=approval,
         engine_dispatch=engine_dispatch,
         reason=reason,
         pending_summary_status=pending_summary_status,
@@ -336,24 +278,23 @@ def _correction_detail_available(candidate: CandidateMutation) -> bool:
     return _has_evidence_kind(candidate, "correction_detail")
 
 
-def _mutation_id_for_candidate(
+def _identity_for_candidate(
     *,
     candidate: CandidateMutation,
     thread_id: str,
     turn_id: str,
-) -> tuple[str, str, str]:
-    mutation_fingerprint = sha256_fingerprint(_candidate_payload(candidate))
-    evidence_fingerprint = sha256_fingerprint(_evidence_payload(candidate))
-    mutation_id = make_mutation_id(
-        schema="codex.ticket.mutation.v1",
+    target_fingerprint: str | None,
+) -> CandidateMutationIdentity:
+    return make_candidate_mutation_identity(
         thread_id=thread_id,
         turn_id=turn_id,
         action=candidate.action,
         ticket_id=candidate.ticket_id,
-        mutation_fingerprint=mutation_fingerprint,
-        evidence_fingerprint=evidence_fingerprint,
+        proposed_change=candidate.proposed_change,
+        ticket_change_scope=candidate.ticket_change_scope,
+        target_fingerprint=target_fingerprint,
+        evidence=_evidence_payload(candidate),
     )
-    return mutation_id, mutation_fingerprint, evidence_fingerprint
 
 
 def evaluate_autonomy_intent(
@@ -371,12 +312,12 @@ def evaluate_autonomy_intent(
         current_mode: Thread-scoped automation mode.
         thread_id: Current Codex thread identifier.
         turn_id: Current turn identifier.
-        now: Approval creation time. Defaults to current UTC time.
+        now: Reserved call-site timestamp for deterministic tests.
 
     Returns:
         One decision per candidate, preserving candidate order.
     """
-    decision_time = now or datetime.now(UTC)
+    del now
     applied_counts: dict[str, int] = defaultdict(int)
     decisions: list[AutonomyDecision] = []
 
@@ -424,12 +365,27 @@ def evaluate_autonomy_intent(
                     )
                 )
                 continue
-            mutation_id, _mutation_fingerprint, _evidence_fingerprint = (
-                _mutation_id_for_candidate(
-                    candidate=candidate,
-                    thread_id=thread_id,
-                    turn_id=turn_id,
+            target_fingerprint = _target_fingerprint_for_candidate(
+                candidate,
+                intent.source_context,
+            )
+            if candidate.action != "create" and target_fingerprint is None:
+                decisions.append(
+                    _decision(
+                        candidate,
+                        RuntimeDecisionKind.TICKET_UPDATE_BLOCKED,
+                        reason="target_fingerprint_required",
+                        pending_summary_status="ticket_update_blocked",
+                        mutation_id=None,
+                        engine_dispatch=dispatch,
+                    )
                 )
+                continue
+            identity = _identity_for_candidate(
+                candidate=candidate,
+                thread_id=thread_id,
+                turn_id=turn_id,
+                target_fingerprint=target_fingerprint,
             )
             decisions.append(
                 _decision(
@@ -437,8 +393,7 @@ def evaluate_autonomy_intent(
                     RuntimeDecisionKind.APPLY_CORRECTION,
                     reason="correction_detail_retained",
                     pending_summary_status="pending",
-                    mutation_id=mutation_id,
-                    approval=None,
+                    mutation_id=identity.mutation_id,
                     engine_dispatch=dispatch,
                 )
             )
@@ -522,32 +477,33 @@ def evaluate_autonomy_intent(
             )
             continue
 
-        mutation_id, mutation_fingerprint, evidence_fingerprint = _mutation_id_for_candidate(
+        target_fingerprint = _target_fingerprint_for_candidate(candidate, intent.source_context)
+        if candidate.action != "create" and target_fingerprint is None:
+            decisions.append(
+                _decision(
+                    candidate,
+                    RuntimeDecisionKind.TICKET_UPDATE_BLOCKED,
+                    reason="target_fingerprint_required",
+                    pending_summary_status="ticket_update_blocked",
+                    mutation_id=None,
+                    engine_dispatch=dispatch,
+                )
+            )
+            continue
+        identity = _identity_for_candidate(
             candidate=candidate,
             thread_id=thread_id,
             turn_id=turn_id,
-        )
-        ticket_state_fingerprint = _ticket_state_fingerprint(candidate, intent.source_context)
-        approval = _make_approval(
-            candidate=candidate,
-            decision_kind=RuntimeDecisionKind.APPLY_AUTONOMOUSLY,
-            mutation_id=mutation_id,
-            mutation_fingerprint=mutation_fingerprint,
-            evidence_fingerprint=evidence_fingerprint,
-            ticket_state_fingerprint=ticket_state_fingerprint,
-            current_mode=current_mode,
-            thread_id=thread_id,
-            now=decision_time,
+            target_fingerprint=target_fingerprint,
         )
         applied_counts[fanout_key] += 1
         decisions.append(
             _decision(
                 candidate,
                 RuntimeDecisionKind.APPLY_AUTONOMOUSLY,
-                reason="approved",
+                reason="authorized",
                 pending_summary_status="pending",
-                mutation_id=mutation_id,
-                approval=approval,
+                mutation_id=identity.mutation_id,
                 engine_dispatch=dispatch,
             )
         )

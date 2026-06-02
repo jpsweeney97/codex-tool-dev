@@ -89,9 +89,6 @@ def _event_with_recovery_fingerprints(
     details = dict(event["details"])
     details["expected_pre_write_fingerprint"] = pre
     details["expected_post_write_fingerprint"] = post
-    approval = details.get("approval")
-    if isinstance(approval, dict):
-        details["approval"] = {**approval, "ticket_state_fingerprint": pre}
     return {**event, "details": details}
 
 
@@ -271,22 +268,6 @@ def test_recover_reports_repair_required_for_unsummarized_prior_turn_mutation(
         ).state
         == "appended"
     )
-    assert (
-        store.append_event(
-            _event_with_recovery_fingerprints(
-                valid_status_event(
-                    "approval_consumed",
-                    event_id="evt_recover_approval",
-                    turn_id="turn-old",
-                    mutation_id="mut-recover",
-                ),
-                pre=pre,
-                post=post,
-            )
-        ).state
-        == "appended"
-    )
-
     result = _run_autonomy(
         tmp_path,
         "recover",
@@ -388,21 +369,6 @@ def test_apply_turn_pauses_for_prior_turn_ledger_recovery_before_new_write(
         ).state
         == "appended"
     )
-    assert (
-        store.append_event(
-            _event_with_recovery_fingerprints(
-                valid_status_event(
-                    "approval_consumed",
-                    event_id="evt_prior_approval",
-                    turn_id="turn-old",
-                    mutation_id="mut-recover",
-                ),
-                pre=pre,
-                post=post,
-            )
-        ).state
-        == "appended"
-    )
     context = _write_context(
         tmp_path,
         turn_id="turn-new",
@@ -441,7 +407,6 @@ def test_apply_turn_pauses_for_prior_turn_ledger_recovery_before_new_write(
     assert "priority: medium" not in ticket.read_text(encoding="utf-8")
     assert [event["event_id"] for event in PendingSummaryStore(tmp_path).read_events()] == [
         "evt_prior_attempt",
-        "evt_prior_approval",
     ]
 
 
@@ -997,20 +962,6 @@ def test_doctor_ledger_repairs_deterministic_recovery_gaps(tmp_path: Path) -> No
         ).state
         == "appended"
     )
-    assert (
-        store.append_event(
-            _event_with_recovery_fingerprints(
-                valid_status_event(
-                    "approval_consumed",
-                    event_id="evt_doctor_approval",
-                    mutation_id="mut-doctor",
-                ),
-                pre=pre,
-                post=post,
-            )
-        ).state
-        == "appended"
-    )
 
     dry_run = _run_autonomy(
         tmp_path,
@@ -1046,7 +997,6 @@ def test_doctor_ledger_repairs_deterministic_recovery_gaps(tmp_path: Path) -> No
     assert repair_payload["events_appended"] == 3
     assert [event["status"] for event in PendingSummaryStore(tmp_path).read_events()] == [
         "pending",
-        "approval_consumed",
         "ticket_written",
         "applied",
         "summarized",

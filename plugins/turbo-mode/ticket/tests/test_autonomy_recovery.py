@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
 
 from scripts.ticket_autonomy_ids import make_mutation_id
@@ -28,12 +27,6 @@ def _event_with_bound_fingerprints(
     details = dict(event["details"])
     details["expected_pre_write_fingerprint"] = pre
     details["expected_post_write_fingerprint"] = post
-    approval = details.get("approval")
-    if isinstance(approval, Mapping):
-        details["approval"] = {
-            **dict(approval),
-            "ticket_state_fingerprint": pre,
-        }
     return {**event, "details": details}
 
 
@@ -118,7 +111,7 @@ def test_attempt_recorded_retries_only_same_mutation_when_pre_write_matches(
     assert stale.state == "pause_for_reconciliation"
 
 
-def test_approval_consumed_with_post_write_state_appends_missing_write_events(
+def test_attempt_recorded_with_post_write_state_appends_missing_write_events(
     tmp_path: Path,
 ) -> None:
     project_root = project_root_with_ignored_workspace(tmp_path)
@@ -128,17 +121,6 @@ def test_approval_consumed_with_post_write_state_appends_missing_write_events(
         _event_with_bound_fingerprints(
             valid_attempt_event(
                 event_id="evt_attempt",
-                thread_id="thread-1",
-                mutation_id="mut_recover",
-            )
-        ),
-    )
-    _append_ok(
-        store,
-        _event_with_bound_fingerprints(
-            valid_status_event(
-                "approval_consumed",
-                event_id="evt_approval",
                 thread_id="thread-1",
                 mutation_id="mut_recover",
             )
@@ -162,82 +144,6 @@ def test_approval_consumed_with_post_write_state_appends_missing_write_events(
     assert projection.events_to_append[1]["details"]["commit_disposition"] == "commit_deferred"
 
 
-def test_approval_consumed_with_pre_write_state_retries_same_mutation(
-    tmp_path: Path,
-) -> None:
-    project_root = project_root_with_ignored_workspace(tmp_path)
-    store = PendingSummaryStore(project_root)
-    _append_ok(
-        store,
-        _event_with_bound_fingerprints(
-            valid_attempt_event(
-                event_id="evt_attempt",
-                thread_id="thread-1",
-                mutation_id="mut_recover",
-            )
-        ),
-    )
-    _append_ok(
-        store,
-        _event_with_bound_fingerprints(
-            valid_status_event(
-                "approval_consumed",
-                event_id="evt_approval",
-                thread_id="thread-1",
-                mutation_id="mut_recover",
-            )
-        ),
-    )
-
-    projection = project_mutation_recovery(
-        store=store,
-        thread_id="thread-1",
-        mutation_id="mut_recover",
-        current_ticket_fingerprint="pre-fp",
-    )
-
-    assert projection.state == "retry_with_same_mutation"
-    assert projection.events_to_append == ()
-
-
-def test_approval_consumed_with_unknown_ticket_state_pauses_for_reconciliation(
-    tmp_path: Path,
-) -> None:
-    project_root = project_root_with_ignored_workspace(tmp_path)
-    store = PendingSummaryStore(project_root)
-    _append_ok(
-        store,
-        _event_with_bound_fingerprints(
-            valid_attempt_event(
-                event_id="evt_attempt",
-                thread_id="thread-1",
-                mutation_id="mut_recover",
-            )
-        ),
-    )
-    _append_ok(
-        store,
-        _event_with_bound_fingerprints(
-            valid_status_event(
-                "approval_consumed",
-                event_id="evt_approval",
-                thread_id="thread-1",
-                mutation_id="mut_recover",
-            )
-        ),
-    )
-
-    projection = project_mutation_recovery(
-        store=store,
-        thread_id="thread-1",
-        mutation_id="mut_recover",
-        current_ticket_fingerprint="other-fp",
-    )
-
-    assert projection.state == "pause_for_reconciliation"
-    assert projection.reason == "ticket_state_mismatch"
-
-
 def test_ticket_written_without_terminal_status_appends_outcome(
     tmp_path: Path,
 ) -> None:
@@ -248,17 +154,6 @@ def test_ticket_written_without_terminal_status_appends_outcome(
         _event_with_bound_fingerprints(
             valid_attempt_event(
                 event_id="evt_attempt",
-                thread_id="thread-1",
-                mutation_id="mut_recover",
-            )
-        ),
-    )
-    _append_ok(
-        store,
-        _event_with_bound_fingerprints(
-            valid_status_event(
-                "approval_consumed",
-                event_id="evt_approval",
                 thread_id="thread-1",
                 mutation_id="mut_recover",
             )
@@ -296,14 +191,6 @@ def test_status_recorded_without_summary_appends_recovery_summary_receipt(
         _event_with_bound_fingerprints(
             valid_attempt_event(
                 event_id="evt_attempt",
-                thread_id="thread-1",
-                mutation_id="mut_recover",
-            )
-        ),
-        _event_with_bound_fingerprints(
-            valid_status_event(
-                "approval_consumed",
-                event_id="evt_approval",
                 thread_id="thread-1",
                 mutation_id="mut_recover",
             )
@@ -393,18 +280,6 @@ def test_recovery_derives_mutation_state_from_events(tmp_path: Path) -> None:
     )
     assert store.derive_mutation_state(thread_id=thread_id, mutation_id=mutation_id) == (
         "attempt_recorded"
-    )
-
-    store.append_event(
-        valid_status_event(
-            "approval_consumed",
-            event_id="evt_approval",
-            thread_id=thread_id,
-            mutation_id=mutation_id,
-        )
-    )
-    assert store.derive_mutation_state(thread_id=thread_id, mutation_id=mutation_id) == (
-        "approval_consumed"
     )
 
     store.append_event(

@@ -38,12 +38,17 @@ def _repo_context(project_root: Path) -> VerifiedRepoContext:
     )
 
 
-def _correction_decision(candidate: CandidateMutation):
+def _correction_decision(candidate: CandidateMutation, *, ticket_path: Path | None = None):
+    source_context: dict[str, object] = {}
+    if ticket_path is not None and candidate.ticket_id is not None:
+        source_context["ticket_state_fingerprints"] = {
+            candidate.ticket_id: target_fingerprint(ticket_path)
+        }
     return evaluate_autonomy_intent(
         AutonomyIntent(
             action_kind="correct_ticket_mutation",
             candidates=(candidate,),
-            source_context={},
+            source_context=source_context,
         ),
         current_mode="agent_primary",
         thread_id="thread-1",
@@ -59,7 +64,7 @@ def _apply_correction(
     ticket_path: Path,
     candidate: CandidateMutation,
 ):
-    decision = _correction_decision(candidate)
+    decision = _correction_decision(candidate, ticket_path=ticket_path)
     mutation = GatewayMutation(
         action="correction",
         ticket_id=candidate.ticket_id,
@@ -105,7 +110,6 @@ def test_user_triggered_update_correction_applies_without_new_approval(
     )
 
     assert decision.kind == RuntimeDecisionKind.APPLY_CORRECTION
-    assert decision.approval is None
     assert response.state == "ok_update"
     assert "priority: high" in ticket_path.read_text(encoding="utf-8")
     assert "correction" in ticket_path.read_text(encoding="utf-8")

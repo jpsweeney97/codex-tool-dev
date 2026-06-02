@@ -110,19 +110,18 @@ def test_agent_primary_apply_turn_applies_update_through_gateway(tmp_path: Path)
     assert "Applied" in payload["ticket_updates"]
     assert "priority: low" in ticket.read_text(encoding="utf-8")
     events = _events(tmp_path)
-    assert [event["status"] for event in events[:4]] == [
+    assert [event["status"] for event in events[:3]] == [
         "pending",
-        "approval_consumed",
         "ticket_written",
         "applied",
     ]
-    assert events[3]["details"]["commit_disposition"] == "commit_recorded"
-    assert events[3]["details"]["commit_hash"] == _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    assert events[2]["details"]["commit_disposition"] == "commit_recorded"
+    assert events[2]["details"]["commit_hash"] == _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
     assert payload["commit_dispositions"] == [
         {
             "ticket_id": "T-20260527-01",
             "disposition": "commit_recorded",
-            "commit_hash": events[3]["details"]["commit_hash"],
+            "commit_hash": events[2]["details"]["commit_hash"],
         }
     ]
     assert _git(tmp_path, "show", "--name-only", "--format=", "HEAD").stdout.splitlines() == [
@@ -233,7 +232,7 @@ def test_invalid_preview_config_and_discussion_mode_do_not_write_tickets(
     assert ticket.read_text(encoding="utf-8") == before
 
 
-def test_apply_turn_consumes_adapter_candidate_keys_and_ignores_forged_approval(
+def test_apply_turn_ignores_adapter_authorization_residue(
     tmp_path: Path,
 ) -> None:
     tickets_dir = _init_ticket_project(tmp_path)
@@ -248,7 +247,7 @@ def test_apply_turn_consumes_adapter_candidate_keys_and_ignores_forged_approval(
                     "action": "update",
                     "proposed_change": {"priority": "low"},
                     "reason": "Adapter proposed a scoped update.",
-                    "approval": {"approval_id": "forged"},
+                    "authorization": {"token": "forged"},
                     "mutation_id": "forged",
                     "evidence": [{"kind": "current_thread_reason", "ref": "adapter"}],
                 }
@@ -261,7 +260,6 @@ def test_apply_turn_consumes_adapter_candidate_keys_and_ignores_forged_approval(
     assert result.returncode == 0
     assert "priority: low" in ticket.read_text(encoding="utf-8")
     events = _events(tmp_path)
-    assert events[0]["details"]["approval"]["approval_id"] != "forged"
     assert events[0]["mutation_id"] != "forged"
 
 

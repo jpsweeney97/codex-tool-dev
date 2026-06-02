@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 from scripts.ticket_autonomy_ids import (
     canonical_json,
-    make_approval_id,
     make_event_id,
     make_mutation_id,
     sha256_fingerprint,
@@ -97,25 +96,6 @@ def test_event_id_uses_expected_prefix_and_digest() -> None:
     assert HEX32.fullmatch(event_id.removeprefix("evt_"))
 
 
-def test_approval_id_uses_expected_prefix_and_digest() -> None:
-    payload = {
-        "schema": "codex.ticket.approval.v1",
-        "thread_id": "thread-1",
-        "ticket_id": "T-20260527-01",
-        "mutation_id": "mut_abc",
-        "mutation_fingerprint": "mutfp",
-        "ticket_state_fingerprint": "statefp",
-        "evidence_fingerprint": "evfp",
-        "current_mode": "agent_primary",
-        "decision": "apply_autonomously",
-    }
-
-    approval_id = make_approval_id(**payload)
-
-    assert approval_id == f"appr_{_digest32(payload)}"
-    assert HEX32.fullmatch(approval_id.removeprefix("appr_"))
-
-
 def test_ids_are_reproducible_for_same_inputs() -> None:
     kwargs = {
         "schema": "codex.ticket.mutation.v1",
@@ -185,36 +165,6 @@ def test_event_id_changes_when_inputs_change(field: str, value: str) -> None:
     assert make_event_id(**base) != make_event_id(**changed)
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("thread_id", "thread-2"),
-        ("ticket_id", "T-20260527-02"),
-        ("mutation_id", "mut_other"),
-        ("mutation_fingerprint", "mutfp-2"),
-        ("ticket_state_fingerprint", "statefp-2"),
-        ("evidence_fingerprint", "evfp-2"),
-        ("current_mode", "discussion_only"),
-        ("decision", "ask_first"),
-    ],
-)
-def test_approval_id_changes_when_inputs_change(field: str, value: str) -> None:
-    base = {
-        "schema": "codex.ticket.approval.v1",
-        "thread_id": "thread-1",
-        "ticket_id": "T-20260527-01",
-        "mutation_id": "mut_abc",
-        "mutation_fingerprint": "mutfp",
-        "ticket_state_fingerprint": "statefp",
-        "evidence_fingerprint": "evfp",
-        "current_mode": "agent_primary",
-        "decision": "apply_autonomously",
-    }
-    changed = dict(base, **{field: value})
-
-    assert make_approval_id(**base) != make_approval_id(**changed)
-
-
 def test_thread_id_scopes_ids_even_when_turn_id_matches() -> None:
     common = {
         "schema": "codex.ticket.mutation.v1",
@@ -236,25 +186,12 @@ def test_thread_id_scopes_ids_even_when_turn_id_matches() -> None:
         "ticket_id": "T-20260527-01",
         "payload_fingerprint": "payloadfp",
     }
-    approval_common = {
-        "schema": "codex.ticket.approval.v1",
-        "ticket_id": "T-20260527-01",
-        "mutation_fingerprint": "mutfp",
-        "ticket_state_fingerprint": "statefp",
-        "evidence_fingerprint": "evfp",
-        "current_mode": "agent_primary",
-        "decision": "apply_autonomously",
-    }
-
     assert mutation_1 != mutation_2
     assert make_event_id(thread_id="thread-1", mutation_id=mutation_1, **event_common) != (
         make_event_id(thread_id="thread-2", mutation_id=mutation_2, **event_common)
     )
-    assert make_approval_id(thread_id="thread-1", mutation_id=mutation_1, **approval_common) != (
-        make_approval_id(thread_id="thread-2", mutation_id=mutation_2, **approval_common)
-    )
 
 
 def test_timestamp_is_not_an_id_input() -> None:
-    for func in (make_mutation_id, make_event_id, make_approval_id):
+    for func in (make_mutation_id, make_event_id):
         assert "timestamp" not in inspect.signature(func).parameters

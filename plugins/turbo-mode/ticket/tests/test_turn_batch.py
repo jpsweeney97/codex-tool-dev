@@ -34,7 +34,6 @@ def valid_attempt_event(**overrides: object) -> dict[str, object]:
     details: dict[str, object] = {
         "decision": "apply_autonomously",
         "current_mode": "agent_primary",
-        "approval": {"approval_id": "appr_123", "decision": "apply_autonomously"},
         "evidence_kind": "runtime_context",
     }
     details.update(overrides.pop("details", {}))
@@ -50,7 +49,7 @@ def valid_attempt_event(**overrides: object) -> dict[str, object]:
         "ticket_id": "T-20260527-01",
         "mutation_id": "mut_123",
         "repo_context": valid_repo_context(),
-        "reason": "Apply approved ticket update",
+        "reason": "Apply autonomous Ticket mutation.",
         "details": details,
     }
     data.update(overrides)
@@ -59,7 +58,6 @@ def valid_attempt_event(**overrides: object) -> dict[str, object]:
 
 def valid_status_event(status: str, **detail_overrides: object) -> dict[str, object]:
     details_by_status: dict[str, dict[str, object]] = {
-        "approval_consumed": {"approval_id": "appr_123"},
         "ticket_written": {"post_write_fingerprint": "post-fp"},
         "applied": {"commit_disposition": "commit_deferred"},
         "discussion_required": {"question": "Which ticket should be updated?"},
@@ -178,7 +176,6 @@ def test_verified_repo_context_exports_exact_event_payload() -> None:
         ("mutation_attempt", "discussion_required"),
         ("mutation_attempt", "deferred"),
         ("mutation_attempt", "failed"),
-        ("mutation_status", "approval_consumed"),
         ("mutation_status", "ticket_written"),
         ("mutation_status", "applied"),
         ("summary_receipt", "summarized"),
@@ -243,15 +240,21 @@ def test_finite_values(field: str, value: object, expected: str) -> None:
     assert_invalid(valid_attempt_event(**{field: value}), expected)
 
 
-def test_preview_records_use_skipped_status_with_preview_only_decision() -> None:
-    preview = valid_attempt_event(
+def test_preview_only_decision_is_not_a_supported_pending_summary_decision() -> None:
+    event = valid_attempt_event(
         status="skipped",
         details={"decision": "preview_only", "current_mode": "preview"},
     )
-    invalid_status = valid_attempt_event(status="preview_only")
 
-    assert validate_pending_summary_event(preview).ok is True
-    assert_invalid(invalid_status, "status")
+    assert_invalid(event, "decision")
+
+
+def test_approval_consumed_status_is_not_supported() -> None:
+    event = valid_status_event("ticket_written")
+    event["status"] = "approval_consumed"
+    event["details"] = {"approval_id": "old-approval"}
+
+    assert_invalid(event, "status")
 
 
 def test_reason_is_one_short_line() -> None:
@@ -262,11 +265,6 @@ def test_reason_is_one_short_line() -> None:
 @pytest.mark.parametrize(
     ("event", "expected"),
     [
-        (
-            without_detail(valid_attempt_event(), "approval"),
-            "approval",
-        ),
-        (valid_status_event("approval_consumed", approval_id=""), "approval_id"),
         (valid_status_event("ticket_written", post_write_fingerprint=""), "post_write_fingerprint"),
         (
             valid_attempt_event(
