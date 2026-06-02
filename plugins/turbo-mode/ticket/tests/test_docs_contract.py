@@ -77,7 +77,17 @@ OLD_SCHEMA_TERMS = (
     "`refinement_status`",
     "`acceptance_criteria`",
     "`capture_confidence`",
+)
+GIT_BRANCH_BOOKKEEPING_TERMS = (
     "`ticket_change_scope`",
+    "`commit_disposition`",
+    "`commit_hash`",
+    "`commit_reason`",
+    "`commit_dispositions`",
+    "commit coordination",
+    "commit_recorded",
+    "commit_bundled_with_work",
+    "commit_deferred",
 )
 NO_FLAG_LAUNCHER_RE = re.compile(r"python3\s+(?!-B\b)<[^>]+>/scripts/[^\s`]+")
 COUNTED_TESTS_RE = re.compile(r"\b\d+\s+tests?\b")
@@ -237,6 +247,15 @@ def test_core_docs_document_target_candidate_mutation_contract() -> None:
         assert "target.sections" in target
         assert "expected_ticket_fingerprint" in target
         assert "Unknown fields are invalid" in target
+
+
+def test_core_docs_do_not_present_git_branch_bookkeeping_as_target_behavior() -> None:
+    for path in CORE_AUTHORITY_DOCS:
+        text = _read_text(path)
+        target = _target_sections(text)
+        normalized_target = _normalize_whitespace(target)
+        for term in GIT_BRANCH_BOOKKEEPING_TERMS:
+            assert term not in normalized_target
 
 
 def test_core_docs_document_target_result_envelope_states() -> None:
