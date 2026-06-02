@@ -26,16 +26,6 @@ def _init_ticket_project(project_root: Path) -> Path:
     return tickets_dir
 
 
-def _git(project_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args],
-        cwd=project_root,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-
-
 def _run_autonomy(project_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args],
@@ -115,18 +105,10 @@ def test_agent_primary_apply_turn_applies_update_through_gateway(tmp_path: Path)
         "ticket_written",
         "applied",
     ]
-    assert events[2]["details"]["commit_disposition"] == "commit_recorded"
-    assert events[2]["details"]["commit_hash"] == _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
-    assert payload["commit_dispositions"] == [
-        {
-            "ticket_id": "T-20260527-01",
-            "disposition": "commit_recorded",
-            "commit_hash": events[2]["details"]["commit_hash"],
-        }
-    ]
-    assert _git(tmp_path, "show", "--name-only", "--format=", "HEAD").stdout.splitlines() == [
-        "docs/tickets/one.md"
-    ]
+    assert events[2]["status"] == "applied"
+    assert events[2]["details"] == {}
+    assert payload["ticket_updates"] == {"Applied": ["T-20260527-01"]}
+    assert "commit_dispositions" not in payload
     assert all(event["thread_id"] == "thread-1" for event in events)
     expected_repo_context = json.loads(context.read_text(encoding="utf-8"))["git"]
     assert all(event["repo_context"] == expected_repo_context for event in events)

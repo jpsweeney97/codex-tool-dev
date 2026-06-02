@@ -508,7 +508,6 @@ def _summary_payload(
     discussion: list[str],
     discussion_question: str | None,
     blocked_reasons: dict[str, str],
-    commit_dispositions: list[dict[str, object]],
 ) -> dict[str, Any]:
     if (
         not applied
@@ -547,29 +546,7 @@ def _summary_payload(
     }
     if blocked_reasons:
         payload["blocked_reasons"] = blocked_reasons
-    if commit_dispositions:
-        payload["commit_dispositions"] = commit_dispositions
     return payload
-
-
-def _commit_disposition_summary(
-    ticket_id: str,
-    response_data: Mapping[str, object],
-) -> dict[str, object] | None:
-    disposition = response_data.get("commit_disposition")
-    if not isinstance(disposition, str) or not disposition:
-        return None
-    summary: dict[str, object] = {
-        "ticket_id": ticket_id,
-        "disposition": disposition,
-    }
-    commit_hash = response_data.get("commit_hash")
-    if isinstance(commit_hash, str) and commit_hash:
-        summary["commit_hash"] = commit_hash
-    commit_reason = response_data.get("commit_reason")
-    if isinstance(commit_reason, str) and commit_reason:
-        summary["reason"] = commit_reason
-    return summary
 
 
 def _ticket_label(candidate_ticket_id: str | None, response_ticket_id: str | None = None) -> str:
@@ -1005,7 +982,6 @@ def _run_apply_turn_with_mode(
     blocked: list[str] = []
     blocked_reasons: dict[str, str] = {}
     discussion: list[str] = []
-    commit_dispositions: list[dict[str, object]] = []
     summary_mutation_ids: list[str] = []
     discussion_question: str | None = None
 
@@ -1025,7 +1001,6 @@ def _run_apply_turn_with_mode(
                     if isinstance(decision.candidate.ticket_id, str)
                     else None
                 ),
-                ticket_change_scope=decision.candidate.ticket_change_scope,
             )
             response = apply_autonomous_mutation(
                 project_root=project_root,
@@ -1046,9 +1021,6 @@ def _run_apply_turn_with_mode(
                 summary_mutation_ids.append(summary_mutation_id)
             if response.state.startswith("ok_"):
                 applied.append(ticket_id)
-                commit_summary = _commit_disposition_summary(ticket_id, response.data)
-                if commit_summary is not None:
-                    commit_dispositions.append(commit_summary)
             else:
                 discussion.append(ticket_id)
                 discussion_question = discussion_question or response.message
@@ -1091,7 +1063,6 @@ def _run_apply_turn_with_mode(
             discussion=discussion,
             discussion_question=discussion_question,
             blocked_reasons=blocked_reasons,
-            commit_dispositions=commit_dispositions,
         )
     )
     return 0

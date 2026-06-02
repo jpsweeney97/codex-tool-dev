@@ -10,7 +10,6 @@ from scripts.ticket_autonomy_runtime import (
     EngineAction,
     EvidenceLink,
     RuntimeDecisionKind,
-    TicketChangeScope,
     evaluate_autonomy_intent,
     map_candidate_to_engine,
 )
@@ -29,7 +28,6 @@ def _candidate(
     proposed_change: dict[str, object] | None = None,
     evidence: tuple[EvidenceLink, ...] | None = None,
     conflict_reason: str | None = None,
-    ticket_change_scope: TicketChangeScope = "current_branch",
 ) -> CandidateMutation:
     change = {"field": "value"} if proposed_change is None else proposed_change
     return CandidateMutation(
@@ -38,7 +36,6 @@ def _candidate(
         proposed_change=change,
         evidence=evidence or _evidence("current_thread_reason"),
         conflict_reason=conflict_reason,
-        ticket_change_scope=ticket_change_scope,
     )
 
 
@@ -289,16 +286,10 @@ def test_correction_requires_target_fingerprint_for_identity() -> None:
     assert decision.mutation_id is None
 
 
-def test_ticket_change_scope_still_binds_mutation_identity_until_scope_slice() -> None:
-    current_branch = _decisions(
-        _candidate("update", ticket_change_scope="current_branch"),
-    )[0]
-    unrelated_backlog = _decisions(
-        _candidate("update", ticket_change_scope="unrelated_backlog"),
-    )[0]
+def test_candidate_mutation_has_no_ticket_change_scope_field() -> None:
+    candidate = _candidate("update")
 
-    assert current_branch.mutation_id != unrelated_backlog.mutation_id
-    assert current_branch.mutation_id != unrelated_backlog.mutation_id
+    assert not hasattr(candidate, "ticket_change_scope")
 
 
 def test_ticket_actions_map_to_engine_dispatch_exactly() -> None:

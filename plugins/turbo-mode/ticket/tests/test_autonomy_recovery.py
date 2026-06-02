@@ -141,7 +141,7 @@ def test_attempt_recorded_with_post_write_state_appends_missing_write_events(
     ]
     assert all(validate_pending_summary_event(event).ok for event in projection.events_to_append)
     assert projection.events_to_append[0]["details"]["post_write_fingerprint"] == "post-fp"
-    assert projection.events_to_append[1]["details"]["commit_disposition"] == "commit_deferred"
+    assert projection.events_to_append[1]["details"] == {}
 
 
 def test_ticket_written_without_terminal_status_appends_outcome(
@@ -179,6 +179,7 @@ def test_ticket_written_without_terminal_status_appends_outcome(
 
     assert projection.state == "append_missing_terminal_status"
     assert [event["status"] for event in projection.events_to_append] == ["applied"]
+    assert projection.events_to_append[0]["details"] == {}
     assert validate_pending_summary_event(projection.events_to_append[0]).ok
 
 

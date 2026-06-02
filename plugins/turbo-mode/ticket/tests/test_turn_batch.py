@@ -59,7 +59,7 @@ def valid_attempt_event(**overrides: object) -> dict[str, object]:
 def valid_status_event(status: str, **detail_overrides: object) -> dict[str, object]:
     details_by_status: dict[str, dict[str, object]] = {
         "ticket_written": {"post_write_fingerprint": "post-fp"},
-        "applied": {"commit_disposition": "commit_deferred"},
+        "applied": {},
         "discussion_required": {"question": "Which ticket should be updated?"},
         "deferred": {"retry_condition": "branch is clean"},
         "failed": {"error_code": "policy_blocked"},
@@ -233,7 +233,6 @@ def test_invalid_event_status_matrix(event_type: str, status: str) -> None:
         ("details", {"current_mode": "unknown"}, "current_mode"),
         ("details", {"evidence_kind": "unknown"}, "evidence_kind"),
         ("details", {"pause_reason": "unknown"}, "pause_reason"),
-        ("details", {"commit_disposition": "unknown"}, "commit_disposition"),
     ],
 )
 def test_finite_values(field: str, value: object, expected: str) -> None:
@@ -284,11 +283,28 @@ def test_reason_is_one_short_line() -> None:
             "retry_condition",
         ),
         (valid_status_event("failed", error_code=""), "error_code"),
-        (valid_status_event("applied", commit_disposition=""), "commit_disposition"),
     ],
 )
 def test_status_details_requirements(event: dict[str, object], expected: str) -> None:
     assert_invalid(event, expected)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("commit_disposition", "commit_deferred"),
+        ("commit_hash", "abc123"),
+        ("commit_reason", "Containing work commit was not supplied."),
+        ("ticket_change_scope", "current_branch"),
+    ],
+)
+def test_git_branch_bookkeeping_details_are_not_supported(
+    key: str,
+    value: object,
+) -> None:
+    event = valid_status_event("applied", **{key: value})
+
+    assert_invalid(event, key)
 
 
 def test_event_payload_fingerprint_excludes_event_id_and_timestamp() -> None:

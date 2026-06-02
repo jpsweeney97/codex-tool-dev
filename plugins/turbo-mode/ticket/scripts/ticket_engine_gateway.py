@@ -22,11 +22,6 @@ from scripts.ticket_change_history import (
     ChangeHistoryEntry,
     ChangeHistoryLabel,
 )
-from scripts.ticket_commit_coordinator import (
-    CommitDispositionRecord,
-    TicketChangeScope,
-    record_ticket_commit_disposition,
-)
 from scripts.ticket_dedup import target_fingerprint as compute_target_fingerprint
 from scripts.ticket_engine_core import (
     EngineResponse,
@@ -58,7 +53,6 @@ class GatewayMutation:
     fields: Mapping[str, object]
     tickets_dir: Path
     target_fingerprint: str | None
-    ticket_change_scope: TicketChangeScope = "current_branch"
 
 
 def _policy_blocked(message: str, *, data: dict[str, object] | None = None) -> EngineResponse:
@@ -104,7 +98,6 @@ def _mutation_fingerprint(mutation: GatewayMutation) -> str:
             "ticket_id": mutation.ticket_id,
             "action": mutation.action,
             "proposed_change": dict(mutation.fields),
-            "ticket_change_scope": mutation.ticket_change_scope,
         }
     )
 
@@ -143,7 +136,6 @@ def build_engine_dispatch(mutation: GatewayMutation) -> EngineDispatch:
         action=mutation.action,
         proposed_change=dict(mutation.fields),
         evidence=(),
-        ticket_change_scope=mutation.ticket_change_scope,
     )
     return map_candidate_to_engine(candidate)
 
@@ -173,8 +165,6 @@ def _decision_error(
         return "ticket_mismatch"
     if decision.candidate.action != mutation.action:
         return "action_mismatch"
-    if decision.candidate.ticket_change_scope != mutation.ticket_change_scope:
-        return "ticket_change_scope_mismatch"
     if dict(decision.candidate.proposed_change) != dict(mutation.fields):
         return "mutation_fingerprint_mismatch"
     if mutation.action != "create" and mutation.target_fingerprint is None:
@@ -185,7 +175,6 @@ def _decision_error(
         ticket_id=decision.candidate.ticket_id,
         action=decision.candidate.action,
         proposed_change=decision.candidate.proposed_change,
-        ticket_change_scope=decision.candidate.ticket_change_scope,
         target_fingerprint=mutation.target_fingerprint,
         evidence=_candidate_evidence_payload(decision.candidate),
     )
@@ -476,33 +465,6 @@ def _validate_autonomous_create_dedup(
     return plan_response
 
 
-def _record_commit_disposition(
-    project_root: Path,
-    ticket_path_raw: object,
-    ticket_change_scope: TicketChangeScope,
-) -> CommitDispositionRecord:
-    if not isinstance(ticket_path_raw, str):
-        return CommitDispositionRecord(
-            "commit_deferred",
-            reason="Ticket path missing from engine response.",
-        )
-    return record_ticket_commit_disposition(
-        project_root=project_root,
-        touched_ticket_paths=(Path(ticket_path_raw),),
-        ticket_change_scope=ticket_change_scope,
-        create_ticket_only_commit=True,
-    )
-
-
-def _commit_disposition_details(record: CommitDispositionRecord) -> dict[str, object]:
-    details: dict[str, object] = {"commit_disposition": record.disposition}
-    if record.commit_hash is not None:
-        details["commit_hash"] = record.commit_hash
-    if record.reason is not None:
-        details["commit_reason"] = record.reason
-    return details
-
-
 def _response_ok(response: EngineResponse) -> bool:
     return response.state in {
         "ok_create",
@@ -695,13 +657,6 @@ def _apply_autonomous_mutation_locked(
     if ticket_written_error is not None:
         return ticket_written_error
 
-    commit_record = _record_commit_disposition(
-        project_root,
-        ticket_path_raw,
-        mutation.ticket_change_scope,
-    )
-    response.data.update(_commit_disposition_details(commit_record))
-
     applied_error = _append_gateway_event(
         pending_summary=pending_summary,
         event_type="mutation_status",
@@ -712,7 +667,7 @@ def _apply_autonomous_mutation_locked(
         turn_id=turn_id,
         repo_context=repo_context,
         reason="Autonomous Ticket mutation applied.",
-        details=_commit_disposition_details(commit_record),
+        details={},
     )
     if applied_error is not None:
         return applied_error

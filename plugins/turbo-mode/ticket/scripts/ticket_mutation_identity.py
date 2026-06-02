@@ -22,7 +22,6 @@ def candidate_mutation_payload(
     ticket_id: str | None,
     action: str,
     proposed_change: Mapping[str, object],
-    ticket_change_scope: str,
     target_fingerprint: str | None,
 ) -> dict[str, object]:
     """Return the canonical payload used for mutation identity."""
@@ -30,7 +29,6 @@ def candidate_mutation_payload(
         "ticket_id": ticket_id,
         "action": action,
         "proposed_change": dict(proposed_change),
-        "ticket_change_scope": ticket_change_scope,
         "target_fingerprint": target_fingerprint,
     }
 
@@ -42,7 +40,6 @@ def make_candidate_mutation_identity(
     ticket_id: str | None,
     action: str,
     proposed_change: Mapping[str, object],
-    ticket_change_scope: str,
     target_fingerprint: str | None,
     evidence: object,
 ) -> CandidateMutationIdentity:
@@ -57,7 +54,6 @@ def make_candidate_mutation_identity(
             ticket_id=ticket_id,
             action=action,
             proposed_change=proposed_change,
-            ticket_change_scope=ticket_change_scope,
             target_fingerprint=target_fingerprint,
         )
     )

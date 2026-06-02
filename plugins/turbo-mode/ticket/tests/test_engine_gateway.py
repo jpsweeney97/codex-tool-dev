@@ -19,7 +19,6 @@ from scripts.ticket_autonomy_runtime import (
     RuntimeDecisionKind,
     evaluate_autonomy_intent,
 )
-from scripts.ticket_commit_coordinator import TicketChangeScope
 from scripts.ticket_dedup import target_fingerprint
 from scripts.ticket_engine_core import EngineResponse, engine_execute
 from scripts.ticket_engine_gateway import (
@@ -56,7 +55,6 @@ def _decision_for(
     action: str = "update",
     fields: dict[str, object] | None = None,
     target_fp: str = "ticket-fp",
-    ticket_change_scope: TicketChangeScope = "current_branch",
     turn_id: str = "turn-1",
 ):
     candidate = CandidateMutation(
@@ -64,7 +62,6 @@ def _decision_for(
         action=action,
         proposed_change=fields or {"priority": "low"},
         evidence=(EvidenceLink("current_thread_reason", "test"),),
-        ticket_change_scope=ticket_change_scope,
     )
     return evaluate_autonomy_intent(
         AutonomyIntent(
@@ -86,7 +83,6 @@ def _mutation(
     ticket_id: str = "T-20260527-01",
     action: str = "update",
     fields: dict[str, object] | None = None,
-    ticket_change_scope: TicketChangeScope = "current_branch",
 ) -> GatewayMutation:
     return GatewayMutation(
         action=action,
@@ -94,7 +90,6 @@ def _mutation(
         fields=fields or {"priority": "low"},
         tickets_dir=tickets_dir,
         target_fingerprint=target_fingerprint(ticket_path),
-        ticket_change_scope=ticket_change_scope,
     )
 
 
@@ -115,6 +110,14 @@ def _event_with_recovery_fingerprints(
     details["expected_pre_write_fingerprint"] = pre
     details["expected_post_write_fingerprint"] = post
     return {**event, "details": details}
+
+
+def test_gateway_does_not_import_commit_coordination() -> None:
+    source = Path(gateway.__file__).read_text(encoding="utf-8")
+
+    assert "ticket_commit_coordinator" not in source
+    assert "record_ticket_commit_disposition" not in source
+    assert "CommitDispositionRecord" not in source
 
 
 def test_gateway_rejects_non_autonomous_or_mismatched_decisions(
@@ -175,15 +178,6 @@ def test_gateway_rejects_non_autonomous_or_mismatched_decisions(
         ),
         pending_summary=store,
     )
-    mismatched_scope = apply_autonomous_mutation(
-        project_root=project_root,
-        thread_id="thread-1",
-        turn_id="turn-1",
-        repo_context=_repo_context(project_root),
-        mutation=replace(mutation, ticket_change_scope="unrelated_backlog"),
-        decision=decision,
-        pending_summary=store,
-    )
     mismatched_target_fingerprint = apply_autonomous_mutation(
         project_root=project_root,
         thread_id="thread-1",
@@ -209,8 +203,6 @@ def test_gateway_rejects_non_autonomous_or_mismatched_decisions(
     assert "ticket_mismatch" in mismatched_ticket.message
     assert mismatched_fields.error_code == "gateway_required"
     assert "mutation_fingerprint_mismatch" in mismatched_fields.message
-    assert mismatched_scope.error_code == "gateway_required"
-    assert "ticket_change_scope_mismatch" in mismatched_scope.message
     assert mismatched_target_fingerprint.error_code == "gateway_required"
     assert "mutation_id_mismatch" in mismatched_target_fingerprint.message
     assert forged_mutation_id.error_code == "gateway_required"
@@ -306,8 +298,10 @@ def test_gateway_applies_update_records_events_and_writes_change_history(tmp_tic
     assert all(event["thread_id"] == "thread-1" for event in events)
     expected_repo_context = _repo_context(project_root).as_event_payload()
     assert all(event["repo_context"] == expected_repo_context for event in events)
-    assert events[-1]["details"]["commit_disposition"] == "commit_deferred"
-    assert response.data["commit_disposition"] == "commit_deferred"
+    assert events[-1]["details"] == {}
+    assert "commit_disposition" not in response.data
+    assert "commit_hash" not in response.data
+    assert "commit_reason" not in response.data
 
     reused = apply_autonomous_mutation(
         project_root=project_root,
@@ -418,54 +412,6 @@ def test_gateway_retry_uses_original_attempt_timestamp_for_change_history_dedupe
     text = ticket_path.read_text(encoding="utf-8")
     assert "priority: low" in text
     assert text.count(original_entry) == 1
-
-
-def test_gateway_passes_ticket_change_scope_to_commit_disposition(
-    tmp_tickets: Path,
-    monkeypatch,
-) -> None:
-    project_root = tmp_tickets.parent.parent
-    _declare_ignored_workspace(project_root)
-    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
-    mutation = _mutation(
-        tmp_tickets,
-        ticket_path,
-        ticket_change_scope="unrelated_backlog",
-    )
-    decision = _decision_for(
-        ticket_id="T-20260527-01",
-        target_fp=mutation.target_fingerprint or "",
-        ticket_change_scope="unrelated_backlog",
-    )
-    captured: dict[str, object] = {}
-
-    def fake_record_ticket_commit_disposition(**kwargs: object) -> gateway.CommitDispositionRecord:
-        captured.update(kwargs)
-        return gateway.CommitDispositionRecord(
-            "commit_deferred",
-            reason="Unrelated backlog ticket commits require main.",
-        )
-
-    monkeypatch.setattr(
-        gateway,
-        "record_ticket_commit_disposition",
-        fake_record_ticket_commit_disposition,
-    )
-
-    response = apply_autonomous_mutation(
-        project_root=project_root,
-        thread_id="thread-1",
-        turn_id="turn-1",
-        repo_context=_repo_context(project_root),
-        mutation=mutation,
-        decision=decision,
-        pending_summary=PendingSummaryStore(project_root),
-    )
-
-    assert response.state == "ok_update"
-    assert captured["ticket_change_scope"] == "unrelated_backlog"
-    assert response.data["commit_disposition"] == "commit_deferred"
-    assert response.data["commit_reason"] == "Unrelated backlog ticket commits require main."
 
 
 def test_gateway_write_lock_clears_dead_pid_lock_and_proceeds(tmp_tickets: Path) -> None:

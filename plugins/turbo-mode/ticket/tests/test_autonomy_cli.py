@@ -581,7 +581,7 @@ def test_apply_turn_reports_created_ticket_id_in_summary(
     assert payload["state"] == "applied"
     assert created_id.startswith("T-")
     assert payload["ticket_updates"]["Applied"] == [created_id]
-    assert payload["commit_dispositions"][0]["ticket_id"] == created_id
+    assert "commit_dispositions" not in payload
 
 
 def test_apply_turn_id_only_ticket_mention_does_not_mutate_ticket(

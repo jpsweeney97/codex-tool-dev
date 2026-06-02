@@ -84,10 +84,10 @@ def test_discovers_explicit_candidate_mutations(tmp_path: Path) -> None:
     assert candidates[0].action == "update"
     assert candidates[0].proposed_change == {"priority": "high"}
     assert candidates[0].evidence[0].kind == "codex_candidate"
-    assert candidates[0].ticket_change_scope == "current_branch"
+    assert not hasattr(candidates[0], "ticket_change_scope")
 
 
-def test_structured_candidates_may_supply_bounded_ticket_change_scope(
+def test_structured_candidates_ignore_deprecated_ticket_change_scope(
     tmp_path: Path,
 ) -> None:
     tickets_dir = tmp_path / "docs" / "tickets"
@@ -99,25 +99,15 @@ def test_structured_candidates_may_supply_bounded_ticket_change_scope(
                 "proposed_change": {"priority": "high"},
                 "ticket_change_scope": "unrelated_backlog",
             },
-            {
-                "ticket_id": "T-20260527-02",
-                "action": "update",
-                "proposed_change": {"priority": "low"},
-                "ticket_change_scope": "outside_contract",
-            },
         ]
     )
 
     candidates = discover_candidate_mutations(context, tickets_dir)
 
-    assert [candidate.ticket_change_scope for candidate in candidates] == [
-        "unrelated_backlog",
-        "current_branch",
-    ]
-    assert [candidate.proposed_change for candidate in candidates] == [
-        {"priority": "high"},
-        {"priority": "low"},
-    ]
+    assert len(candidates) == 1
+    assert candidates[0].ticket_id == "T-20260527-01"
+    assert candidates[0].proposed_change == {"priority": "high"}
+    assert not hasattr(candidates[0], "ticket_change_scope")
 
 
 def test_id_only_mentions_do_not_create_mutation_candidates(tmp_path: Path) -> None:
@@ -158,7 +148,7 @@ def test_matches_related_paths_against_ticket_metadata(tmp_path: Path) -> None:
         "T-20260527-02",
     ]
     assert {candidate.evidence[0].kind for candidate in candidates} == {"related_path"}
-    assert {candidate.ticket_change_scope for candidate in candidates} == {"current_branch"}
+    assert not any(hasattr(candidate, "ticket_change_scope") for candidate in candidates)
 
 
 def test_matches_diff_and_test_file_references_to_tickets(tmp_path: Path) -> None:

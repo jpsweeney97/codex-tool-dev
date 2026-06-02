@@ -110,11 +110,12 @@ _PAUSE_REASONS = frozenset(
         "repair",
     }
 )
-_COMMIT_DISPOSITIONS = frozenset(
+_PROHIBITED_DETAILS = frozenset(
     {
-        "commit_recorded",
-        "commit_bundled_with_work",
-        "commit_deferred",
+        "commit_disposition",
+        "commit_hash",
+        "commit_reason",
+        "ticket_change_scope",
     }
 )
 
@@ -253,12 +254,14 @@ def _validate_optional_string(event: Mapping[str, object], key: str) -> Validati
 
 
 def _validate_finite_details(details: Mapping[str, object]) -> ValidationResult:
+    for key in _PROHIBITED_DETAILS:
+        if key in details:
+            return _invalid(f"{key} is not supported")
     finite_checks = (
         ("decision", _DECISIONS),
         ("current_mode", _MODES),
         ("evidence_kind", _EVIDENCE_KINDS),
         ("pause_reason", _PAUSE_REASONS),
-        ("commit_disposition", _COMMIT_DISPOSITIONS),
     )
     for key, allowed in finite_checks:
         if key in details and details[key] not in allowed:
@@ -300,13 +303,6 @@ def _validate_details(
         result = _require_detail(details, required)
         if not result.ok:
             return result
-
-    if status == "applied" and action in _ACTIONS:
-        result = _require_detail(details, "commit_disposition")
-        if not result.ok:
-            return result
-        if details["commit_disposition"] not in _COMMIT_DISPOSITIONS:
-            return _invalid("commit_disposition is not supported")
 
     return _ok()
 
@@ -920,10 +916,7 @@ def project_mutation_recovery(
                     event_type="mutation_status",
                     status="applied",
                     reason="Recovered autonomous Ticket terminal status.",
-                    details={
-                        "commit_disposition": "commit_deferred",
-                        "commit_reason": "Recovered from pending-summary projection.",
-                    },
+                    details={},
                 ),
             )
             return RecoveryProjection(
@@ -969,10 +962,7 @@ def project_mutation_recovery(
                 event_type="mutation_status",
                 status="applied",
                 reason="Recovered autonomous Ticket terminal status.",
-                details={
-                    "commit_disposition": "commit_deferred",
-                    "commit_reason": "Recovered from pending-summary projection.",
-                },
+                details={},
             ),
         )
         return RecoveryProjection(

@@ -1,10 +1,12 @@
-from scripts.ticket_mutation_identity import make_candidate_mutation_identity
+from scripts.ticket_mutation_identity import (
+    candidate_mutation_payload,
+    make_candidate_mutation_identity,
+)
 
 
 def _identity(
     *,
     target_fingerprint: str | None = "ticket-state-a",
-    ticket_change_scope: str = "current_branch",
 ):
     return make_candidate_mutation_identity(
         thread_id="thread-1",
@@ -12,7 +14,6 @@ def _identity(
         ticket_id="T-20260527-01",
         action="update",
         proposed_change={"priority": "high"},
-        ticket_change_scope=ticket_change_scope,
         target_fingerprint=target_fingerprint,
         evidence=(
             {"kind": "current_thread_reason", "ref": "test", "freshness": "fresh"},
@@ -37,8 +38,17 @@ def test_helper_hashes_missing_target_fingerprint_without_policy_decision() -> N
     assert missing.mutation_fingerprint != present.mutation_fingerprint
 
 
-def test_ticket_change_scope_binds_identity_until_scope_slice() -> None:
-    current_branch = _identity(ticket_change_scope="current_branch")
-    unrelated_backlog = _identity(ticket_change_scope="unrelated_backlog")
+def test_candidate_payload_excludes_branch_scope() -> None:
+    payload = candidate_mutation_payload(
+        ticket_id="T-20260527-01",
+        action="update",
+        proposed_change={"priority": "high"},
+        target_fingerprint="ticket-state-a",
+    )
 
-    assert current_branch.mutation_id != unrelated_backlog.mutation_id
+    assert payload == {
+        "ticket_id": "T-20260527-01",
+        "action": "update",
+        "proposed_change": {"priority": "high"},
+        "target_fingerprint": "ticket-state-a",
+    }
