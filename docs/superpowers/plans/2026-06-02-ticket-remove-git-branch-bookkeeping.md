@@ -4,7 +4,7 @@
 
 **Goal:** Remove Ticket's git/branch bookkeeping residue from source mutation paths so Ticket writes ticket state only, while naming the remaining ADR 0006 drift explicitly.
 
-**Architecture:** This is a source-only ADR-drift slice. It removes `ticket_change_scope`, commit coordination side effects, `commit_disposition` private-log facts, and `commit_dispositions` success output from the autonomous gateway/apply-turn path and the transitional manual/source surfaces that still preserve the behavior. It keeps deterministic ticket-file recovery facts such as pre/post fingerprints and summary receipts, and it does not implement the full target candidate contract, ticket-file cutover, diagnostic dry-run, or Change History grammar slice.
+**Architecture:** This is a source-only ADR-drift slice. It removes `ticket_change_scope`, commit coordination side effects, `commit_disposition` private-log facts, and `commit_dispositions` success output from the autonomous gateway/apply-turn path and the transitional manual/source surfaces that still preserve the behavior. It keeps deterministic ticket-file recovery facts such as pre/post fingerprints and summary receipts, and it does not implement the full target candidate contract, ticket-file cutover, diagnostic dry-run, or Change History grammar slice. Because `ticket_change_scope` crosses candidate discovery, runtime identity, gateway validation, apply-turn dispatch, and commit coordination, Tasks 1 through 4 are one atomic source behavior boundary: do not commit a checkpoint where producers no longer expose scope while consumers still require it.
 
 **Tech Stack:** Python >=3.11, dataclasses, pytest, ruff, existing Ticket scripts, bytecode-safe `uv run` verification.
 
@@ -50,8 +50,8 @@ Primary authority:
 Current source inventory from 2026-06-02:
 
 ```bash
-rg -n "ticket_change_scope|commit_disposition|record_ticket_commit_disposition|ticket_commit_coordinator|commit coordination|commit_dispositions|commit_recorded|commit_bundled_with_work|commit_deferred" \
-  plugins/turbo-mode/ticket docs/decisions docs/superpowers/specs
+rg -n "ticket_change_scope|commit_disposition|commit_hash|commit_reason|record_ticket_commit_disposition|ticket_commit_coordinator|commit coordination|commit_dispositions|commit_recorded|commit_bundled_with_work|commit_deferred" \
+  plugins/turbo-mode/ticket docs/decisions docs/superpowers/specs docs/audits docs/superpowers/plans
 ```
 
 Important live source hits:
@@ -64,6 +64,15 @@ Important live source hits:
 - `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py` stores `ticket_change_scope` on `CandidateMutation`.
 - `plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py` reads structured candidate `ticket_change_scope`.
 - `plugins/turbo-mode/ticket/tests/test_ticket_commit_coordinator.py` preserves commit coordination as a feature and should be deleted.
+
+Expected side effect:
+
+- Removing `ticket_change_scope` from the canonical mutation payload changes
+  mutation fingerprints and mutation IDs for current candidate shapes. For
+  `create` mutations, the gateway write-lock filename can also change because
+  the create lock key is derived from the mutation fingerprint. This is accepted
+  in this slice because no tests pin literal mutation IDs or lock filenames, and
+  non-create write safety still depends on Ticket-derived target fingerprints.
 
 ## File Structure
 
@@ -119,6 +128,30 @@ Do not modify:
 - `plugins/turbo-mode/ticket/scripts/ticket_change_history.py` for `prior_commit`
 - `docs/tickets/`
 - Historical handoffs
+
+## Atomic Source Boundary
+
+Tasks 1 through 4 remove one shared runtime surface. They may be executed as
+separate TDD work blocks, but they must be committed as one source behavior
+commit after the full affected selector in Task 4 passes.
+
+Do not create separate commits after Task 1, Task 2, or Task 3. Those
+intermediate states are intentionally incomplete because later consumers still
+depend on fields or behavior removed earlier in the task order. In particular:
+
+- Removing `CandidateMutation.ticket_change_scope` and the identity-helper
+  parameter in Task 1 must land in the same commit as the gateway and apply-turn
+  consumer updates in Tasks 2 and 4.
+- Removing gateway commit coordination in Task 2 must land in the same commit as
+  integration-test output rewrites in Task 4, because the old integration test
+  asserts that the gateway creates a git commit.
+- Removing pending-summary commit-disposition validation in Task 3 must land in
+  the same commit as gateway/apply-turn output removal, so recovery, event
+  validation, and user output agree.
+
+Task 5 remains a separate docs/static-guard commit unless Task 4 uncovers an
+active authority-doc contradiction that must be patched before source execution
+continues.
 
 ## Stop Conditions
 
@@ -179,11 +212,11 @@ Expected: ADR 0006 still says Ticket does not track git commit disposition, and 
 Run:
 
 ```bash
-rg -n "ticket_change_scope|commit_disposition|record_ticket_commit_disposition|ticket_commit_coordinator|commit coordination|commit_dispositions|commit_recorded|commit_bundled_with_work|commit_deferred" \
-  plugins/turbo-mode/ticket docs/decisions docs/superpowers/specs
+rg -n "ticket_change_scope|commit_disposition|commit_hash|commit_reason|record_ticket_commit_disposition|ticket_commit_coordinator|commit coordination|commit_dispositions|commit_recorded|commit_bundled_with_work|commit_deferred" \
+  plugins/turbo-mode/ticket docs/decisions docs/superpowers/specs docs/audits docs/superpowers/plans
 ```
 
-Expected: hits are assignable to source behavior, tests preserving deprecated behavior, active authority docs, historical/superseded docs, or this plan. If a new active source path outside the files listed in this plan appears, add it to the relevant task before editing.
+Expected: hits are assignable to source behavior, tests preserving deprecated behavior, active authority docs, historical/superseded docs, historical/superseded plans, historical audits, or this plan. If a new active source path outside the files listed in this plan appears, add it to the relevant task before editing.
 
 - [ ] **Step 4: Run a narrow baseline selector**
 
@@ -251,7 +284,15 @@ Keep the existing target-fingerprint tests, updated to call `_identity()` withou
 
 - [ ] **Step 2: Write failing candidate discovery/runtime tests**
 
-In `plugins/turbo-mode/ticket/tests/test_candidate_discovery.py`, update `test_discovers_explicit_candidate_mutations()`:
+In `plugins/turbo-mode/ticket/tests/test_candidate_discovery.py`, update
+`test_discovers_explicit_candidate_mutations()` by replacing the old branch-scope
+assertion:
+
+```python
+    assert candidates[0].ticket_change_scope == "current_branch"
+```
+
+with:
 
 ```python
     assert not hasattr(candidates[0], "ticket_change_scope")
@@ -283,7 +324,43 @@ def test_structured_candidates_ignore_deprecated_ticket_change_scope(
     assert not hasattr(candidates[0], "ticket_change_scope")
 ```
 
-In `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py`, remove the `TicketChangeScope` import and replace `test_ticket_change_scope_still_binds_mutation_identity_until_scope_slice()` with:
+In `test_matches_related_paths_against_ticket_metadata()`, replace the final
+branch-scope assertion:
+
+```python
+    assert {candidate.ticket_change_scope for candidate in candidates} == {"current_branch"}
+```
+
+with:
+
+```python
+    assert not any(hasattr(candidate, "ticket_change_scope") for candidate in candidates)
+```
+
+In `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py`, remove
+`TicketChangeScope` from the import block and rewrite `_candidate()` so it no
+longer accepts or passes `ticket_change_scope`:
+
+```python
+def _candidate(
+    action: str,
+    *,
+    ticket_id: str = "T-20260527-01",
+    proposed_change: dict[str, object] | None = None,
+    evidence: tuple[EvidenceLink, ...] | None = None,
+    conflict_reason: str | None = None,
+) -> CandidateMutation:
+    change = {"field": "value"} if proposed_change is None else proposed_change
+    return CandidateMutation(
+        ticket_id=ticket_id,
+        action=action,
+        proposed_change=change,
+        evidence=evidence or _evidence("current_thread_reason"),
+        conflict_reason=conflict_reason,
+    )
+```
+
+Replace `test_ticket_change_scope_still_binds_mutation_identity_until_scope_slice()` with:
 
 ```python
 def test_candidate_mutation_has_no_ticket_change_scope_field() -> None:
@@ -421,18 +498,20 @@ Run:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_candidate_discovery.py tests/test_autonomy_runtime.py -q
 ```
 
-Expected: PASS.
+Expected: PASS for the Task 1-local selector. Do not commit yet. Gateway and
+apply-turn consumers still depend on the removed field until Tasks 2 and 4 land
+in the same atomic source behavior commit.
 
-- [ ] **Step 7: Commit Task 1**
+- [ ] **Step 7: Checkpoint Task 1 without committing**
 
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_candidate_discovery.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py
-git commit -m "fix(ticket): remove branch scope from mutation identity"
+git diff -- plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_candidate_discovery.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py
 ```
 
-Expected: commit succeeds.
+Expected: diff shows only Task 1 edits. Leave the worktree dirty and continue
+to Task 2.
 
 ## Task 2: Remove Gateway Commit Coordination And Delete The Coordinator
 
@@ -581,19 +660,22 @@ Run:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_engine_gateway.py -q
 ```
 
-Expected: PASS.
+Expected: PASS for `tests/test_engine_gateway.py`. Do not commit yet. The
+integration tests still contain old git-commit/output assertions until Task 4
+lands in the same atomic source behavior commit.
 
-- [ ] **Step 6: Commit Task 2**
+- [ ] **Step 6: Checkpoint Task 2 without committing**
 
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py
-git add -u plugins/turbo-mode/ticket/scripts/ticket_commit_coordinator.py plugins/turbo-mode/ticket/tests/test_ticket_commit_coordinator.py
-git commit -m "fix(ticket): remove gateway commit coordination"
+git diff -- plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py
+git status --short plugins/turbo-mode/ticket/scripts/ticket_commit_coordinator.py plugins/turbo-mode/ticket/tests/test_ticket_commit_coordinator.py
 ```
 
-Expected: commit succeeds.
+Expected: diff shows Task 2 gateway/test edits, and `git status --short` shows
+the coordinator source and test as deleted. Leave the worktree dirty and
+continue to Task 3.
 
 ## Task 3: Remove Commit Disposition From Pending-Summary Validation And Recovery
 
@@ -722,18 +804,20 @@ Run:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_turn_batch.py tests/test_autonomy_recovery.py -q
 ```
 
-Expected: PASS.
+Expected: PASS for the Task 3-local selector. Do not commit yet. Gateway,
+pending-summary recovery, and apply-turn output must land together in the Task
+4 atomic source behavior commit.
 
-- [ ] **Step 7: Commit Task 3**
+- [ ] **Step 7: Checkpoint Task 3 without committing**
 
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
-git commit -m "fix(ticket): remove commit disposition from pending summary"
+git diff -- plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 ```
 
-Expected: commit succeeds.
+Expected: diff shows only Task 3 pending-summary/recovery edits. Leave the
+worktree dirty and continue to Task 4.
 
 ## Task 4: Remove Commit Disposition From Apply-Turn Output And Integration Fixtures
 
@@ -745,12 +829,31 @@ Expected: commit succeeds.
 
 - [ ] **Step 1: Write failing output tests**
 
-In `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`, replace success-output assertions with:
+In
+`plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py::test_agent_primary_apply_turn_applies_update_through_gateway`,
+replace the old commit-disposition and git-commit assertions:
+
+```python
+    assert events[2]["details"]["commit_disposition"] == "commit_recorded"
+    assert events[2]["details"]["commit_hash"] == _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    assert payload["commit_dispositions"] == [
+        {
+            "ticket_id": "T-20260527-01",
+            "disposition": "commit_recorded",
+            "commit_hash": events[2]["details"]["commit_hash"],
+        }
+    ]
+    assert _git(tmp_path, "show", "--name-only", "--format=", "HEAD").stdout.splitlines() == [
+        "docs/tickets/one.md"
+    ]
+```
+
+with:
 
 ```python
     assert events[2]["status"] == "applied"
     assert events[2]["details"] == {}
-    assert payload["ticket_updates"] == {"Applied": [created_id]}
+    assert payload["ticket_updates"] == {"Applied": ["T-20260527-01"]}
     assert "commit_dispositions" not in payload
 ```
 
@@ -823,26 +926,31 @@ When emitting summary payload, call:
         )
 ```
 
-- [ ] **Step 4: Run the Task 4 selector**
+- [ ] **Step 4: Run the atomic source boundary selector**
 
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_mutation_identity.py tests/test_candidate_discovery.py tests/test_autonomy_runtime.py tests/test_engine_gateway.py tests/test_turn_batch.py tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py tests/test_autonomy_recovery.py -q
 ```
 
-Expected: PASS.
+Expected: PASS. This is the first source behavior commit gate for Tasks 1
+through 4; do not commit before this selector is green.
 
-- [ ] **Step 5: Commit Task 4**
+- [ ] **Step 5: Commit Tasks 1 through 4 atomically**
 
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py
-git commit -m "fix(ticket): remove commit disposition from apply-turn output"
+git add plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py
+git add plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_candidate_discovery.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
+git add -u plugins/turbo-mode/ticket/scripts/ticket_commit_coordinator.py plugins/turbo-mode/ticket/tests/test_ticket_commit_coordinator.py
+git commit -m "fix(ticket): remove git branch bookkeeping from mutation paths"
 ```
 
-Expected: commit succeeds.
+Expected: one atomic source behavior commit succeeds. The commit contains Tasks
+1 through 4 only: source mutation-path changes, focused tests, and deletion of
+the deprecated commit coordinator source/test.
 
 ## Task 5: Patch Active Source Authority And Static Contract Tests
 
@@ -858,7 +966,7 @@ Expected: commit succeeds.
 Run:
 
 ```bash
-rg -n "ticket_change_scope|commit_disposition|commit_dispositions|commit coordination|commit_recorded|commit_bundled_with_work|commit_deferred" \
+rg -n "ticket_change_scope|commit_disposition|commit_hash|commit_reason|commit_dispositions|commit coordination|commit_recorded|commit_bundled_with_work|commit_deferred" \
   plugins/turbo-mode/ticket/README.md \
   plugins/turbo-mode/ticket/HANDBOOK.md \
   plugins/turbo-mode/ticket/references \
@@ -869,12 +977,16 @@ Expected: no active target/current-behavior doc presents branch scope or commit 
 
 - [ ] **Step 2: Add static active-doc negative coverage**
 
-In `plugins/turbo-mode/ticket/tests/test_docs_contract.py`, add:
+In `plugins/turbo-mode/ticket/tests/test_docs_contract.py`, remove the
+`ticket_change_scope` entry from `OLD_SCHEMA_TERMS` and add a separate
+git/branch-bookkeeping term list:
 
 ```python
 GIT_BRANCH_BOOKKEEPING_TERMS = (
     "`ticket_change_scope`",
     "`commit_disposition`",
+    "`commit_hash`",
+    "`commit_reason`",
     "`commit_dispositions`",
     "commit coordination",
     "commit_recorded",
@@ -934,15 +1046,16 @@ Expected: exactly one Task 5 commit succeeds.
 Run:
 
 ```bash
-rg -n "ticket_change_scope|commit_disposition|record_ticket_commit_disposition|ticket_commit_coordinator|commit coordination|commit_dispositions|commit_recorded|commit_bundled_with_work|commit_deferred" \
-  plugins/turbo-mode/ticket docs/decisions docs/superpowers/specs
+rg -n "ticket_change_scope|commit_disposition|commit_hash|commit_reason|record_ticket_commit_disposition|ticket_commit_coordinator|commit coordination|commit_dispositions|commit_recorded|commit_bundled_with_work|commit_deferred" \
+  plugins/turbo-mode/ticket docs/decisions docs/superpowers/specs docs/audits docs/superpowers/plans
 ```
 
 Expected:
 
 - No hits in `plugins/turbo-mode/ticket/scripts`.
 - No feature-preserving hits in `plugins/turbo-mode/ticket/tests`.
-- Allowed hits only in ADR/control docs, this plan, superseded historical docs, or deliberate negative tests.
+- Allowed hits only in ADR/control docs, this plan, superseded historical docs,
+  historical audits, completed plans, or deliberate negative tests.
 
 - [ ] **Step 2: Run focused Ticket selectors**
 
