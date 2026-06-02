@@ -1727,7 +1727,36 @@ Do not add `autonomy_health`, `ticket_update_blocked`, or other blocked-candidat
 pending-summary event validation here. Missing target fingerprints are
 turn-local output only in this slice.
 
-- [ ] **Step 4: Run the atomic approval-boundary tests**
+- [ ] **Step 4: Complete approval-boundary consumer rewrites**
+
+Do these consumer rewrites in Task 5 before running the atomic approval-boundary
+tests. They are physically described again in Task 6 for later verification, but
+they must already be implemented, staged, and committed with the Task 5 atomic
+approval-boundary removal:
+
+- Rewrite `_event_with_recovery_fingerprints()` in
+  `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py` and
+  `plugins/turbo-mode/ticket/tests/test_engine_gateway.py` so it sets only
+  `expected_pre_write_fingerprint` and `expected_post_write_fingerprint`, and no
+  longer mutates nested approval details. In
+  `plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py`, keep the real
+  `_event_with_bound_fingerprints(event, *, pre="pre-fp", post="post-fp")`
+  helper name/signature and strip only the nested approval/`Mapping` branch.
+- Rewrite
+  `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py::test_agent_primary_apply_turn_applies_update_through_gateway`
+  from the four-event approval sequence to the three-event sequence
+  `pending`, `ticket_written`, `applied`, and reindex commit-disposition
+  assertions from `events[3]` to `events[2]`.
+- Rename the forged-approval integration test to a neutral
+  authorization-residue test and keep the final assertion focused on mutation
+  identity, without approval-shaped strings.
+- Keep approval-free recovery coverage in
+  `plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py` by modeling
+  `test_ticket_written_without_terminal_status_appends_outcome` with a
+  `pending` attempt event followed by `ticket_written`, expecting only the
+  `applied` terminal projection.
+
+- [ ] **Step 5: Run the atomic approval-boundary tests**
 
 Run:
 
@@ -1737,9 +1766,9 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_ids.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py
 ```
 
-Expected: the focused selector passes **and the whole suite (`pytest -q`) is green**. The atomic approval-boundary commit removes `make_approval_id`, `AutonomyDecision.approval`, the `approval_consumed` status, and durable `preview` from source — which breaks every consumer test in the Consumer Inventory, not just the five focused modules. The boundary is not actually verified until the whole suite collects and passes. Reaching green requires completing **all** approval-boundary consumer rewrites in this commit: `test_autonomy_ids.py` (whose import otherwise fails collection) and the approval/event-sequence cleanup physically described in Task 6 Steps 2, 5, 7, and 8. Task 2 must already have completed the integration durable-preview rewrite; if it did not, stop and repair that earlier checkpoint before creating the approval-boundary commit. Task 6's **new** apply-turn behavior (Steps 3-4: blocked buckets, partial apply, `source_context_unhealthy`) is additive, does not gate this commit, and commits separately.
+Expected: the focused selector passes **and the whole suite (`pytest -q`) is green**. The atomic approval-boundary commit removes `make_approval_id`, `AutonomyDecision.approval`, the `approval_consumed` status, and durable `preview` from source — which breaks every consumer test in the Consumer Inventory, not just the five focused modules. The boundary is not actually verified until the whole suite collects and passes. Reaching green requires completing **all** approval-boundary consumer rewrites in this commit: `test_autonomy_ids.py` (whose import otherwise fails collection) and the Task 5 Step 4 consumer rewrites. Task 2 must already have completed the integration durable-preview rewrite; if it did not, stop and repair that earlier checkpoint before creating the approval-boundary commit. Task 6's **new** apply-turn behavior (Steps 3-4: blocked buckets, partial apply, `source_context_unhealthy`) is additive, does not gate this commit, and commits separately.
 
-- [ ] **Step 5: Commit atomic approval-boundary removal**
+- [ ] **Step 6: Commit atomic approval-boundary removal**
 
 Run:
 
@@ -1748,7 +1777,7 @@ git add plugins/turbo-mode/ticket/scripts/ticket_autonomy_ids.py plugins/turbo-m
 git commit -m "fix(ticket): remove agent-primary approval gate"
 ```
 
-Expected: commit includes Task 3, Task 4, and Task 5 changes plus every approval-boundary consumer rewrite from the Consumer Inventory (including `test_autonomy_ids.py` and the Task 6 Steps 2/5/7/8 cleanup). The committed tree is whole-suite green. Do not create a Task 3-only or Task 4-only commit, and do not commit while `pytest -q` is red. The integration durable-preview rewrite must already be present from Task 2. The apply-turn source changes in `ticket_autonomy.py` (Task 6 Step 3) and their tests (Step 4) are intentionally **not** staged here; they commit in Task 6.
+Expected: commit includes Task 3, Task 4, and Task 5 changes plus every approval-boundary consumer rewrite from the Consumer Inventory (including `test_autonomy_ids.py` and Task 5 Step 4). The committed tree is whole-suite green. Do not create a Task 3-only or Task 4-only commit, and do not commit while `pytest -q` is red. The integration durable-preview rewrite must already be present from Task 2. The apply-turn source changes in `ticket_autonomy.py` (Task 6 Step 3) and their tests (Step 4) are intentionally **not** staged here; they commit in Task 6.
 
 ## Task 6: Update Apply-Turn Recovery And Integration Tests
 
@@ -1771,9 +1800,12 @@ rg -n "approval_consumed|details\\[\\\"approval\\\"\\]|decision\\.approval|appro
 
 Expected after Tasks 3-5: remaining matches should be deletion-only negative fixtures or tests that still need source-slice rewrite. No current write, validation, recovery, or event-sequence test should expect `approval_consumed`; no test should write durable `AutomationMode.PREVIEW`.
 
-- [ ] **Step 2: Rewrite apply-turn recovery helper approval mutation**
+- [ ] **Step 2: Verify Task 5 rewrote recovery helper approval mutation**
 
-In `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`, update `_event_with_recovery_fingerprints()` so it no longer edits nested approval details:
+Task 5 owns this approval-boundary cleanup. Verify
+`plugins/turbo-mode/ticket/tests/test_autonomy_cli.py` already updated
+`_event_with_recovery_fingerprints()` so it no longer edits nested approval
+details:
 
 ```python
 def _event_with_recovery_fingerprints(
@@ -1788,7 +1820,17 @@ def _event_with_recovery_fingerprints(
     return {**event, "details": details}
 ```
 
-Apply the same body change in `plugins/turbo-mode/ticket/tests/test_engine_gateway.py` (the helper there is also named `_event_with_recovery_fingerprints`). In `plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py` the helper has a **different name and signature**: `_event_with_bound_fingerprints(event, *, pre="pre-fp", post="post-fp")`. Keep that real name and its `pre`/`post` defaults (no call site passes them) — only strip the nested `approval`/`Mapping` branch so it sets just the two fingerprint keys. Do not paste the `cli` block verbatim into the recovery file.
+The same body change must already be present in
+`plugins/turbo-mode/ticket/tests/test_engine_gateway.py` (the helper there is
+also named `_event_with_recovery_fingerprints`). In
+`plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py`, the helper has a
+**different name and signature**:
+`_event_with_bound_fingerprints(event, *, pre="pre-fp", post="post-fp")`. The
+Task 5 rewrite must keep that real name and its `pre`/`post` defaults (no call
+site passes them) and strip only the nested `approval`/`Mapping` branch so it
+sets just the two fingerprint keys. Do not paste the `cli` block verbatim into
+the recovery file. If any of these approval-helper rewrites are missing here,
+stop and repair the Task 5 atomic boundary before continuing.
 
 - [ ] **Step 3: Add source-context health and blocked-ticket apply-turn projection**
 
@@ -2118,9 +2160,12 @@ and resume gate.
 
 Do not assert `state: "setup_required"` for source-context failures. `setup_required` remains local config or mode setup only.
 
-- [ ] **Step 5: Rewrite integration success event sequence**
+- [ ] **Step 5: Verify Task 5 rewrote integration success event sequence**
 
-In `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`, update `test_agent_primary_apply_turn_applies_update_through_gateway` so the success event assertions use the three-event sequence:
+Task 5 owns this approval-boundary cleanup. In
+`plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`, verify
+`test_agent_primary_apply_turn_applies_update_through_gateway` already uses the
+three-event sequence:
 
 ```python
     events = _events(tmp_path)
@@ -2139,6 +2184,9 @@ In `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`, update `te
         }
     ]
 ```
+
+If this rewrite is missing, stop and repair the Task 5 atomic boundary before
+continuing.
 
 - [ ] **Step 6: Verify Task 2 integration preview rewrite stayed in place**
 
@@ -2174,22 +2222,27 @@ Keep the existing `discussion_only` block after it. If this rewrite was not done
 in Task 2, stop and repair the earlier commit boundary before continuing; do not
 make this a late Task 6-only fix.
 
-- [ ] **Step 7: Rewrite integration forged-authorization assertion**
+- [ ] **Step 7: Verify Task 5 rewrote integration forged-authorization assertion**
 
-In `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`, rename
+Task 5 owns this approval-boundary cleanup. In
+`plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`, verify
 `test_apply_turn_consumes_adapter_candidate_keys_and_ignores_forged_approval`
-to a neutral authorization-residue test. Keep the final assertion focused on the
-mutation identity, without approval-shaped strings:
+was already renamed to a neutral authorization-residue test. Keep the final
+assertion focused on the mutation identity, without approval-shaped strings:
 
 ```python
     events = _events(tmp_path)
     assert events[0]["mutation_id"] != "forged"
 ```
 
-- [ ] **Step 8: Keep approval-free recovery coverage**
+If this rewrite is missing, stop and repair the Task 5 atomic boundary before
+continuing.
 
-In `plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py`,
-`test_ticket_written_without_terminal_status_appends_outcome` must model the
+- [ ] **Step 8: Verify Task 5 kept approval-free recovery coverage**
+
+Task 5 owns this approval-boundary cleanup. In
+`plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py`, verify
+`test_ticket_written_without_terminal_status_appends_outcome` already models the
 current crash boundary with a `pending` attempt event followed by a
 `ticket_written` event. Keep the expected projection:
 
@@ -2200,6 +2253,9 @@ current crash boundary with a `pending` attempt event followed by a
 
 This proves a write-completed-before-terminal-event recovery path using only
 current event states.
+
+If this rewrite is missing, stop and repair the Task 5 atomic boundary before
+continuing.
 
 - [ ] **Step 9: Confirm no source writes approval envelopes, preview decisions, or blocked private events**
 
@@ -2519,5 +2575,5 @@ Type consistency:
 
 - Use `superpowers:subagent-driven-development` for implementation unless the user chooses inline execution.
 - Use a fresh branch or worktree for source implementation. If creating a worktree, use `superpowers:using-git-worktrees`.
-- Commit after each runnable behavior boundary when tests pass. Commit Tasks 1 and 2 together, including the integration durable-preview rewrite and a full-suite `pytest -q` pass. Do not commit Task 3 by itself; the atomic approval-boundary commit (Task 5) bundles runtime approval removal, gateway decision validation, pending-summary approval/preview deletion, gateway event-sequence rewrites, **and every approval-boundary consumer test rewrite in the Consumer Inventory** (including `test_autonomy_ids.py` and the Task 6 Steps 2/5/7/8 cleanup). That commit must be whole-suite green (`pytest -q`), never green-by-selector. Task 6's **new** apply-turn behavior (Steps 3-4) commits separately after its focused tests. Recurring-block maintenance escalation is a separate future design.
+- Commit after each runnable behavior boundary when tests pass. Commit Tasks 1 and 2 together, including the integration durable-preview rewrite and a full-suite `pytest -q` pass. Do not commit Task 3 by itself; the atomic approval-boundary commit (Task 5) bundles runtime approval removal, gateway decision validation, pending-summary approval/preview deletion, gateway event-sequence rewrites, **and every approval-boundary consumer test rewrite in the Consumer Inventory** (including `test_autonomy_ids.py` and Task 5 Step 4). That commit must be whole-suite green (`pytest -q`), never green-by-selector. Task 6's **new** apply-turn behavior (Steps 3-4) commits separately after its focused tests. Recurring-block maintenance escalation is a separate future design.
 - Do not refresh installed runtime or cache state. Source tests are the proof class for this plan.
