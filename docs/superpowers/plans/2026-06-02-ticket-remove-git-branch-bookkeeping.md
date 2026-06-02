@@ -4,7 +4,7 @@
 
 **Goal:** Remove Ticket's git/branch bookkeeping residue from source mutation paths so Ticket writes ticket state only, while naming the remaining ADR 0006 drift explicitly.
 
-**Architecture:** This is a source-only ADR-drift slice. It removes `ticket_change_scope`, commit coordination side effects, `commit_disposition` private-log facts, and `commit_dispositions` success output from the autonomous gateway/apply-turn path and the transitional manual/source surfaces that still preserve the behavior. It keeps deterministic ticket-file recovery facts such as pre/post fingerprints and summary receipts, and it does not implement the full target candidate contract, ticket-file cutover, diagnostic dry-run, or Change History grammar slice. Because `ticket_change_scope` crosses candidate discovery, runtime identity, gateway validation, apply-turn dispatch, and commit coordination, Tasks 1 through 4 are one atomic source behavior boundary: do not commit a checkpoint where producers no longer expose scope while consumers still require it.
+**Architecture:** This is a source-only ADR-drift slice. It removes `ticket_change_scope`, commit coordination side effects, `commit_disposition` private-log facts, and `commit_dispositions` success output from the autonomous gateway/apply-turn path and the transitional manual/source surfaces that still preserve the behavior. It keeps deterministic ticket-file recovery facts such as pre/post fingerprints and summary receipts, and it does not implement the full target candidate contract, ticket-file cutover, diagnostic dry-run, or Change History grammar slice. ADR 0006 and the May 30 control doc name a read-only `docs/tickets/` cutover inventory as the next cutover step; this plan intentionally takes an orthogonal source-deprecation slice before that inventory because the targeted source behavior is already deprecated and no ticket-file normalization or runtime cache mutation is required. Because `ticket_change_scope` crosses candidate discovery, runtime identity, gateway validation, apply-turn dispatch, and commit coordination, Tasks 1 through 4 are one atomic source behavior boundary: do not commit a checkpoint where producers no longer expose scope while consumers still require it.
 
 **Tech Stack:** Python >=3.11, dataclasses, pytest, ruff, existing Ticket scripts, bytecode-safe `uv run` verification.
 
@@ -45,6 +45,7 @@ Primary authority:
 - `docs/decisions/0006-ticket-runtime-first-state-kernel.md` says Ticket is a deterministic state kernel and "does not track git commit disposition."
 - `docs/decisions/0006-ticket-runtime-first-state-kernel.md` deprecates `commit-disposition` and `ticket_change_scope` fields, plus permanent compatibility tests/docs for old architecture.
 - `docs/superpowers/specs/2026-05-30-ticket-runtime-first-state-kernel-control.md` says the private operation log must not retain commit disposition or `ticket_change_scope`.
+- ADR 0006 and the May 30 control doc prescribe a read-only `docs/tickets/` cutover inventory as the next cutover step. They do not require source git/branch bookkeeping removal to wait for that inventory.
 - The same control doc says older README, handbook, contract text, source comments, and tests must be patched or superseded when they conflict with ADR 0006.
 
 Current source inventory from 2026-06-02:
@@ -73,11 +74,13 @@ Important live source hits:
 Expected side effect:
 
 - Removing `ticket_change_scope` from the canonical mutation payload changes
-  mutation fingerprints and mutation IDs for current candidate shapes. For
-  `create` mutations, the gateway write-lock filename can also change because
-  the create lock key is derived from the mutation fingerprint. This is accepted
+  mutation fingerprints and mutation IDs for current candidate shapes. Gateway
+  write-lock filenames can also change for `create` mutations, and for any
+  malformed non-create mutation that reaches lock acquisition without a ticket ID,
+  because those lock keys fall back to the mutation fingerprint. This is accepted
   in this slice because no tests pin literal mutation IDs or lock filenames, and
-  non-create write safety still depends on Ticket-derived target fingerprints.
+  valid non-create write safety still depends on Ticket-derived target
+  fingerprints.
 
 ## File Structure
 
@@ -169,7 +172,10 @@ continues.
 Stop before source edits if:
 
 - `git status --short --branch` shows tracked dirty files outside this plan.
-- The ADR or May 30 control doc has changed in a way that no longer selects git/branch bookkeeping as the next bounded slice.
+- ADR 0006 or the May 30 control doc no longer deprecates `commit-disposition`,
+  `ticket_change_scope`, or commit-coordination facts, or now makes source
+  bookkeeping removal contingent on the read-only `docs/tickets/` cutover
+  inventory landing first.
 - The inventory shows active non-Ticket code depends on `record_ticket_commit_disposition()`.
 - Any needed operation would mutate installed plugin cache or live runtime state.
 
@@ -733,7 +739,11 @@ Delete the old `test_status_details_requirements()` row that treats
         (valid_status_event("applied", commit_disposition=""), "commit_disposition"),
 ```
 
-Then add this dedicated prohibited-detail test:
+In the same edit, add this dedicated prohibited-detail test. Do not split this
+test from the fixture change above: while the old applied fixture still injects
+`commit_disposition`, the `commit_hash`, `commit_reason`, and
+`ticket_change_scope` rows can fail on the old injected detail instead of the row
+key being tested.
 
 ```python
 @pytest.mark.parametrize(
@@ -776,7 +786,11 @@ Run:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_turn_batch.py tests/test_autonomy_recovery.py -q
 ```
 
-Expected: FAIL before source edits because validation still requires/applies commit-disposition details and recovery emits them.
+Expected: FAIL before source edits. The `commit_disposition` row fails because
+validation still requires and finite-checks commit-disposition details, while
+the `commit_hash`, `commit_reason`, and `ticket_change_scope` rows fail because
+the validator does not yet reject those prohibited details. Recovery assertions
+also fail because recovery still emits commit-disposition details.
 
 - [ ] **Step 4: Remove commit-disposition validation from pending summary**
 
@@ -922,9 +936,12 @@ Run:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_autonomy_cli.py tests/test_autonomy_integration_v1.py -q
 ```
 
-Expected: FAIL before source edits because apply-turn still passes the removed
-`ticket_change_scope` field into `GatewayMutation` and still emits
-`commit_dispositions`.
+Expected: FAIL before source edits after Tasks 1 through 3 have already changed
+the shared types and gateway. The likely first failure is an attribute error or
+constructor mismatch from the old apply-turn code still passing
+`ticket_change_scope=decision.candidate.ticket_change_scope` into
+`GatewayMutation`; after that call site is removed, the output assertions stay
+red until `commit_dispositions` collection and emission are deleted.
 
 - [ ] **Step 3: Remove commit-disposition output code**
 
@@ -1125,8 +1142,19 @@ Expected:
 
 - No hits in `plugins/turbo-mode/ticket/scripts` except the deliberate
   `_PROHIBITED_DETAILS` guard literals in
-  `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py`.
-- No feature-preserving hits in `plugins/turbo-mode/ticket/tests`.
+  `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py`: the literal strings
+  `commit_disposition`, `commit_hash`, `commit_reason`, and
+  `ticket_change_scope`.
+- No feature-preserving hits in `plugins/turbo-mode/ticket/tests`. Expected
+  allowed test hits are limited to:
+  - `plugins/turbo-mode/ticket/tests/test_turn_batch.py`, in the negative
+    `test_git_branch_bookkeeping_details_are_not_supported` coverage and
+    supporting prohibited-detail literals.
+  - `plugins/turbo-mode/ticket/tests/test_docs_contract.py`, in the
+    `GIT_BRANCH_BOOKKEEPING_TERMS` static guard.
+  - `plugins/turbo-mode/ticket/tests/test_change_history.py`, for the
+    out-of-scope `test_helper_does_not_write_containing_commit_hash` helper
+    behavior that this slice intentionally leaves alone.
 - Allowed hits only in ADR/control docs, this plan, superseded historical docs,
   historical audits, completed plans, or deliberate negative tests.
 
