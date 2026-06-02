@@ -1147,9 +1147,19 @@ Expected:
   `ticket_change_scope`.
 - No feature-preserving hits in `plugins/turbo-mode/ticket/tests`. Expected
   allowed test hits are limited to:
+  - `plugins/turbo-mode/ticket/tests/test_candidate_discovery.py`, in
+    deprecated `ticket_change_scope` input-ignore coverage and no-field
+    assertions.
+  - `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py`, in no-field
+    assertions for `CandidateMutation`.
+  - `plugins/turbo-mode/ticket/tests/test_engine_gateway.py`, in negative
+    import/response-data assertions proving commit coordination is absent.
   - `plugins/turbo-mode/ticket/tests/test_turn_batch.py`, in the negative
     `test_git_branch_bookkeeping_details_are_not_supported` coverage and
     supporting prohibited-detail literals.
+  - `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py` and
+    `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`, in
+    negative success-output assertions proving `commit_dispositions` is absent.
   - `plugins/turbo-mode/ticket/tests/test_docs_contract.py`, in the
     `GIT_BRANCH_BOOKKEEPING_TERMS` static guard.
   - `plugins/turbo-mode/ticket/tests/test_change_history.py`, for the
