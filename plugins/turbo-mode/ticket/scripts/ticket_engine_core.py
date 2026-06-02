@@ -1351,7 +1351,7 @@ def engine_execute(
         return EngineResponse(
             state="policy_blocked",
             message=(
-                "Direct agent execute requires a gateway-approved decision. "
+                "Direct agent execute requires a gateway-validated decision. "
                 "Use the runtime-first autonomy gateway once it is available."
             ),
             error_code="gateway_required",
