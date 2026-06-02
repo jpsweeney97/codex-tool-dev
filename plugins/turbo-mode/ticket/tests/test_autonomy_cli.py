@@ -30,6 +30,21 @@ def _run_autonomy(project_root: Path, *args: str) -> subprocess.CompletedProcess
     )
 
 
+def _source_context_candidate(ticket_id: str = "T-20260527-01") -> list[dict[str, object]]:
+    return [
+        {
+            "ticket_id": ticket_id,
+            "action": "update",
+            "proposed_change": {"priority": "low"},
+            "evidence": [{"kind": "current_thread_reason", "ref": "current turn"}],
+        }
+    ]
+
+
+def _break_source_context_ticket(ticket: Path) -> None:
+    ticket.write_text("```yaml\nid: [not-valid\n```\n", encoding="utf-8")
+
+
 def _write_ticket(project_root: Path, name: str, text: str) -> Path:
     path = project_root / "docs" / "tickets" / name
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -903,6 +918,173 @@ def test_apply_turn_pause_marker_returns_paused_output(tmp_path: Path) -> None:
         "ticket_updates": None,
         "discussion_question": None,
     }
+
+
+def test_apply_turn_collector_unhealthy_pauses_without_mutation_or_health_events(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    context = _write_context(tmp_path, candidate_mutations=_source_context_candidate())
+    _break_source_context_ticket(ticket)
+    broken_ticket = ticket.read_text(encoding="utf-8")
+
+    result = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+
+    assert result.returncode == 3
+    assert json.loads(result.stdout) == {
+        "state": "paused",
+        "pause_reason": "source_context_unhealthy",
+        "message": (
+            "Ticket automation paused because source-context collection is unhealthy."
+        ),
+        "ticket_updates": None,
+        "discussion_question": None,
+    }
+    assert (tmp_path / ".codex" / "ticket-workspace" / "pause.json").is_file()
+    assert PendingSummaryStore(tmp_path).read_events() == ()
+    assert not (
+        tmp_path / ".codex" / "ticket-workspace" / "ticket.pending-summary.jsonl"
+    ).exists()
+    assert ticket.read_text(encoding="utf-8") == broken_ticket
+
+
+def test_apply_turn_source_context_pause_stays_paused_without_resume(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    context = _write_context(tmp_path, candidate_mutations=_source_context_candidate())
+    _break_source_context_ticket(ticket)
+    first = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+    assert first.returncode == 3
+
+    second = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+
+    assert second.returncode == 3
+    assert json.loads(second.stdout)["pause_reason"] == "source_context_unhealthy"
+    assert (tmp_path / ".codex" / "ticket-workspace" / "pause.json").is_file()
+    assert PendingSummaryStore(tmp_path).read_events() == ()
+
+
+def test_apply_turn_resume_source_context_pause_fails_closed_while_fault_remains(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    context = _write_context(tmp_path, candidate_mutations=_source_context_candidate())
+    _break_source_context_ticket(ticket)
+    first = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+    assert first.returncode == 3
+
+    resumed = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+        "--setup-choice",
+        "automatic",
+        "--resume-paused",
+    )
+
+    assert resumed.returncode == 3
+    assert json.loads(resumed.stdout)["pause_reason"] == "source_context_unhealthy"
+    assert (tmp_path / ".codex" / "ticket-workspace" / "pause.json").is_file()
+    assert PendingSummaryStore(tmp_path).read_events() == ()
+
+
+def test_apply_turn_resume_source_context_pause_after_collection_recovers(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    valid_ticket = ticket.read_text(encoding="utf-8")
+    context = _write_context(tmp_path, candidate_mutations=_source_context_candidate())
+    _break_source_context_ticket(ticket)
+    first = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+    assert first.returncode == 3
+    ticket.write_text(valid_ticket, encoding="utf-8")
+
+    resumed = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+        "--setup-choice",
+        "automatic",
+        "--resume-paused",
+    )
+
+    assert resumed.returncode == 0
+    assert json.loads(resumed.stdout)["state"] == "applied"
+    assert not (tmp_path / ".codex" / "ticket-workspace" / "pause.json").exists()
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
+    assert PendingSummaryStore(tmp_path).read_events()
 
 
 def test_host_cli_has_no_raw_clear_pause_or_ledger_commands(tmp_path: Path) -> None:
