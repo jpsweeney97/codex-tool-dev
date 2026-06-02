@@ -176,7 +176,9 @@ def test_agent_primary_apply_turn_applies_correction_through_gateway(tmp_path: P
     assert "approval" not in events[0]["details"]
 
 
-def test_preview_and_discussion_modes_do_not_write_tickets(tmp_path: Path) -> None:
+def test_invalid_preview_config_and_discussion_mode_do_not_write_tickets(
+    tmp_path: Path,
+) -> None:
     tickets_dir = _init_ticket_project(tmp_path)
     ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01")
     context = _write_context(
@@ -194,14 +196,19 @@ def test_preview_and_discussion_modes_do_not_write_tickets(tmp_path: Path) -> No
     )
     before = ticket.read_text(encoding="utf-8")
 
-    write_local_config(tmp_path, AutomationMode.PREVIEW)
+    preview_config = tmp_path / ".codex" / "ticket.local.md"
+    preview_config.parent.mkdir(exist_ok=True)
+    preview_config.write_text(
+        '{"schema":"codex.ticket.local.v1","mode":"preview"}\n',
+        encoding="utf-8",
+    )
     preview = _apply_turn(tmp_path, context)
-    assert preview.returncode == 0
+    assert preview.returncode == 3
     preview_payload = json.loads(preview.stdout)
-    assert preview_payload["state"] == "preview"
-    assert "Skipped" in preview_payload["ticket_updates"]
+    assert preview_payload["state"] == "setup_required"
+    assert preview_payload["reason"] == "invalid_mode"
     assert ticket.read_text(encoding="utf-8") == before
-    assert "preview_only" not in {event["status"] for event in _events(tmp_path)}
+    assert _events(tmp_path) == []
 
     other_context = _write_context(
         tmp_path,

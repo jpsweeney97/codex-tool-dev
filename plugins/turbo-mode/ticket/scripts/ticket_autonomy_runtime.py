@@ -24,7 +24,7 @@ class RuntimeDecisionKind(StrEnum):
     REQUIRE_USER_DISCUSSION = "require_user_discussion"
     SKIP_DUE_TO_CONFLICT = "skip_due_to_conflict"
     DEFER_UNTIL_RETRY_CONDITION = "defer_until_retry_condition"
-    PREVIEW_ONLY = "preview_only"
+    TICKET_UPDATE_BLOCKED = "ticket_update_blocked"
 
 
 class EngineAction(StrEnum):
@@ -476,13 +476,13 @@ def evaluate_autonomy_intent(
                 )
             )
             continue
-        if current_mode == "preview":
+        if current_mode != "agent_primary":
             decisions.append(
                 _decision(
                     candidate,
-                    RuntimeDecisionKind.PREVIEW_ONLY,
-                    reason="preview_only",
-                    pending_summary_status="skipped",
+                    RuntimeDecisionKind.REQUIRE_USER_DISCUSSION,
+                    reason="unsupported_mode",
+                    pending_summary_status="discussion_required",
                 )
             )
             continue

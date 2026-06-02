@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -41,7 +42,13 @@ def test_missing_config_requires_setup(tmp_path: Path) -> None:
     assert result.path == tmp_path / ".codex" / "ticket.local.md"
 
 
-@pytest.mark.parametrize("mode", list(AutomationMode))
+DURABLE_MODES = (
+    AutomationMode.DISCUSSION_ONLY,
+    AutomationMode.AGENT_PRIMARY,
+)
+
+
+@pytest.mark.parametrize("mode", DURABLE_MODES)
 def test_valid_strict_json_config(tmp_path: Path, mode: AutomationMode) -> None:
     write_local_config(tmp_path, mode)
 
@@ -99,13 +106,56 @@ def test_guided_setup_choice_writes_strict_json(tmp_path: Path) -> None:
     )
 
 
-def test_preview_is_manual_only_config_mode(tmp_path: Path) -> None:
-    path = write_local_config(tmp_path, AutomationMode.PREVIEW)
-
-    assert path.read_text(encoding="utf-8") == (
-        '{"schema":"codex.ticket.local.v1","mode":"preview"}\n'
+def test_preview_config_requires_setup(tmp_path: Path) -> None:
+    path = tmp_path / ".codex" / "ticket.local.md"
+    path.parent.mkdir()
+    path.write_text(
+        '{"schema":"codex.ticket.local.v1","mode":"preview"}\n',
+        encoding="utf-8",
     )
-    assert read_local_config(tmp_path).mode == AutomationMode.PREVIEW
+
+    result = read_local_config(tmp_path)
+
+    assert result.state == LocalConfigState.SETUP_REQUIRED
+    assert result.mode is None
+    assert result.reason == "invalid_mode"
+
+
+def test_preview_mode_snapshot_requires_setup_instead_of_config_fallback(
+    tmp_path: Path,
+) -> None:
+    _declare_workspace_ignored(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    snapshot_path = (
+        tmp_path
+        / ".codex"
+        / "ticket-workspace"
+        / "mode-snapshots"
+        / f"{mode_snapshot_key(tmp_path, 'thread-1')}.json"
+    )
+    snapshot_path.parent.mkdir(parents=True)
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "schema": "codex.ticket.mode-snapshot.v1",
+                "project_root": str(tmp_path.resolve(strict=False)),
+                "thread_id": "thread-1",
+                "mode": "preview",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    resolved = resolve_thread_mode(tmp_path, "thread-1")
+
+    assert resolved.state == LocalConfigState.SETUP_REQUIRED
+    assert resolved.mode is None
+    assert resolved.source == "setup_required"
+    assert resolved.path == snapshot_path
+    assert resolved.reason == "invalid_snapshot_mode"
 
 
 def test_workspace_requires_ignore_rule(tmp_path: Path) -> None:

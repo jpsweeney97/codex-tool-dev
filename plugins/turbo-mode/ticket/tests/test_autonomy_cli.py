@@ -860,10 +860,7 @@ def test_apply_turn_rejects_preview_setup_choice(tmp_path: Path) -> None:
     assert result.returncode == 2
     assert json.loads(result.stdout) == {
         "state": "invalid_args",
-        "message": (
-            "setup choice must be automatic or ask_first; "
-            "preview is configured manually in .codex/ticket.local.md"
-        ),
+        "message": "setup choice must be automatic or ask_first",
     }
 
 

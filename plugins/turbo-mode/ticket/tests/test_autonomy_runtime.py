@@ -126,16 +126,23 @@ def test_close_archive_or_extra_fields_cannot_be_smuggled_through_auto_close() -
     ]
 
 
-def test_discussion_only_and_preview_modes_do_not_authorize_writes() -> None:
+def test_discussion_only_does_not_authorize_writes() -> None:
     candidate = _candidate("update", evidence=_evidence("current_thread_reason"))
 
     discussion = _decisions(candidate, mode="discussion_only")[0]
-    preview = _decisions(candidate, mode="preview")[0]
 
     assert discussion.kind == RuntimeDecisionKind.REQUIRE_USER_DISCUSSION
-    assert discussion.approval is None
-    assert preview.kind == RuntimeDecisionKind.PREVIEW_ONLY
-    assert preview.approval is None
+    assert discussion.reason == "discussion_only"
+
+
+def test_unsupported_preview_mode_requires_discussion_without_preview_decision() -> None:
+    candidate = _candidate("update", evidence=_evidence("current_thread_reason"))
+
+    decision = _decisions(candidate, mode="preview")[0]
+
+    assert decision.kind == RuntimeDecisionKind.REQUIRE_USER_DISCUSSION
+    assert decision.reason == "unsupported_mode"
+    assert decision.pending_summary_status == "discussion_required"
 
 
 def test_conflicting_candidates_are_skipped() -> None:

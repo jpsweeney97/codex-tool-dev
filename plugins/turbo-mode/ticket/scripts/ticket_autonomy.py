@@ -274,16 +274,6 @@ def _emit_mode_projection(mode: AutomationMode, context: dict[str, Any]) -> int:
     if not _has_candidate_changes(context) or mode == AutomationMode.AGENT_PRIMARY:
         _emit(_no_change_response())
         return 0
-    if mode == AutomationMode.PREVIEW:
-        _emit(
-            {
-                "state": "preview",
-                "changed": False,
-                "ticket_updates": [],
-                "discussion_question": None,
-            }
-        )
-        return 0
     _emit(
         {
             "state": "discussion_only",
@@ -351,17 +341,9 @@ def _append_non_write_decision(
     repo_context: VerifiedRepoContext,
     current_mode: AutomationMode,
 ) -> None:
-    if decision.kind == RuntimeDecisionKind.PREVIEW_ONLY:
+    if decision.kind == RuntimeDecisionKind.SKIP_DUE_TO_CONFLICT:
         status = "skipped"
         details: dict[str, object] = {
-            "decision": RuntimeDecisionKind.PREVIEW_ONLY.value,
-            "current_mode": current_mode.value,
-            "evidence_kind": "runtime_context",
-        }
-        reason = "Preview-only Ticket mutation."
-    elif decision.kind == RuntimeDecisionKind.SKIP_DUE_TO_CONFLICT:
-        status = "skipped"
-        details = {
             "decision": RuntimeDecisionKind.SKIP_DUE_TO_CONFLICT.value,
             "current_mode": current_mode.value,
             "evidence_kind": "runtime_context",
@@ -450,10 +432,12 @@ def _summary_payload(
         ticket_updates["Discussion required"] = discussion
     if applied:
         state = "applied"
+    elif skipped:
+        state = "skipped"
     elif discussion:
         state = "discussion_required"
     else:
-        state = "preview"
+        state = "no_change"
     payload: dict[str, Any] = {
         "state": state,
         "changed": bool(applied),
@@ -818,11 +802,6 @@ def _run_apply_turn(args: argparse.Namespace) -> int:
     if args.resume_paused and setup_choice_value is None:
         return _invalid_args("--resume-paused requires --setup-choice")
     if setup_choice_value is not None:
-        if setup_choice_value == AutomationMode.PREVIEW.value:
-            return _invalid_args(
-                "setup choice must be automatic or ask_first; "
-                "preview is configured manually in .codex/ticket.local.md"
-            )
         try:
             setup_choice = SetupChoice(setup_choice_value)
         except ValueError:
@@ -966,8 +945,6 @@ def _run_apply_turn_with_mode(
             current_mode=mode,
         )
         if decision.kind == RuntimeDecisionKind.SKIP_DUE_TO_CONFLICT:
-            skipped.append(ticket_id)
-        elif decision.kind == RuntimeDecisionKind.PREVIEW_ONLY:
             skipped.append(ticket_id)
         else:
             discussion.append(ticket_id)
