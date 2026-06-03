@@ -158,14 +158,10 @@ class TestEnvelopeToFields:
 
         assert fields["title"] == "Fix auth timeout on large payloads"
         assert fields["problem"] == "Auth handler times out for payloads >10MB."
-        assert fields["source"] == {"type": "handoff", "ref": "session-abc", "session": "abc-123"}
-        assert fields["priority"] == "medium"  # default
+        assert fields["priority"] == "normal"  # target default
         assert fields["tags"] == []  # default
-        assert fields["defer"] == {
-            "active": True,
-            "reason": "deferred via envelope",
-            "deferred_at": "2026-03-10T06:00:00Z",
-        }
+        assert "source" not in fields
+        assert "defer" not in fields
 
     def test_full_envelope_mapping(self) -> None:
         from scripts.ticket_envelope import map_envelope_to_fields
@@ -193,10 +189,9 @@ class TestEnvelopeToFields:
         assert fields["approach"] == "Increase timeout."
         assert fields["acceptance_criteria"] == ["Large payloads succeed"]
         assert fields["verification"] == "pytest tests/ -v"
-        assert fields["key_files"] == [
-            {"file": "handler.py", "role": "Timeout", "look_for": "constant"}
-        ]
-        assert fields["key_file_paths"] == ["handler.py"]
+        assert fields["related_paths"] == ["handler.py"]
+        assert "key_files" not in fields
+        assert "key_file_paths" not in fields
 
     def test_envelope_never_carries_status(self) -> None:
         from scripts.ticket_envelope import map_envelope_to_fields
@@ -204,14 +199,14 @@ class TestEnvelopeToFields:
         fields = map_envelope_to_fields(_valid_envelope())
         assert "status" not in fields, "Consumer synthesizes status; envelope must not carry it"
 
-    def test_effort_passed_through(self) -> None:
-        """effort is mapped to fields when present."""
+    def test_effort_is_not_mapped_to_ticket_fields(self) -> None:
+        """effort is envelope metadata, not target ticket frontmatter."""
         from scripts.ticket_envelope import map_envelope_to_fields
 
         envelope = _valid_envelope()
         envelope["effort"] = "XL"
         fields = map_envelope_to_fields(envelope)
-        assert fields["effort"] == "XL"
+        assert "effort" not in fields
 
     def test_effort_absent_not_in_fields(self) -> None:
         """effort is not in fields when absent from envelope."""
@@ -333,12 +328,10 @@ class TestEnvelopeLifecycle:
 
 
 class TestDeferPassThrough:
-    """Verify _execute_create passes defer field to render_ticket."""
+    """Verify target writes reject legacy defer frontmatter."""
 
-    def test_create_with_defer_field_persists_in_yaml(self, tmp_tickets: Path) -> None:
-        """When fields include defer, the created ticket has defer in frontmatter."""
-        import yaml
-
+    def test_create_with_defer_field_is_rejected(self, tmp_tickets: Path) -> None:
+        """defer is no longer a target ticket write field."""
         problem = "Auth handler times out."
         resp = engine_execute(
             action="create",
@@ -363,21 +356,8 @@ class TestDeferPassThrough:
             classify_confidence=0.95,
             dedup_fingerprint=compute_dedup_fp(problem, []),
         )
-        assert resp.state == "ok_create"
-
-        ticket_path = Path(resp.data["ticket_path"])
-        content = ticket_path.read_text(encoding="utf-8")
-
-        # Extract YAML block
-        import re
-
-        yaml_match = re.search(r"```ya?ml\s*\n(.*?)```", content, re.DOTALL)
-        assert yaml_match, "YAML block not found"
-        frontmatter = yaml.safe_load(yaml_match.group(1))
-
-        assert frontmatter["defer"]["active"] is True
-        assert frontmatter["defer"]["reason"] == "deferred via envelope"
-        assert frontmatter["defer"]["deferred_at"] == "2026-03-10T06:00:00Z"
+        assert resp.state == "need_fields"
+        assert resp.data["validation_errors"] == ["defer is not a target write field"]
 
 
 class TestEnvelopeIngestion:
@@ -385,10 +365,8 @@ class TestEnvelopeIngestion:
 
     def test_envelope_to_ticket_full_pipeline(self, tmp_tickets: Path) -> None:
         """Read envelope, map fields, create ticket, move to processed."""
-        import re
-
-        import yaml
         from scripts.ticket_envelope import map_envelope_to_fields, move_to_processed, read_envelope
+        from scripts.ticket_parse import parse_ticket
 
         # Set up envelope
         envelopes_dir = tmp_tickets / ".envelopes"
@@ -422,22 +400,20 @@ class TestEnvelopeIngestion:
             hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp(fields["problem"], fields.get("key_file_paths", [])),
+            dedup_fingerprint=compute_dedup_fp(fields["problem"], fields.get("related_paths", [])),
         )
-        assert resp.state == "ok_create"
+        assert resp.state == "ok"
 
         # Verify ticket content
         ticket_path = Path(resp.data["ticket_path"])
         content = ticket_path.read_text(encoding="utf-8")
-        yaml_match = re.search(r"```ya?ml\s*\n(.*?)```", content, re.DOTALL)
-        assert yaml_match
-        frontmatter = yaml.safe_load(yaml_match.group(1))
+        ticket = parse_ticket(ticket_path)
+        assert ticket is not None
 
-        assert frontmatter["priority"] == "high"
-        assert frontmatter["tags"] == ["auth"]
-        assert frontmatter["defer"]["active"] is True
-        assert frontmatter["defer"]["reason"] == "deferred via envelope"
-        assert frontmatter["source"]["type"] == "handoff"
+        assert ticket.priority == "high"
+        assert ticket.tags == ["auth"]
+        assert "defer" not in ticket.frontmatter
+        assert "source" not in ticket.frontmatter
         assert "## Context" in content
         assert "Found during API refactor." in content
 

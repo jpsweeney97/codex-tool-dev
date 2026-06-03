@@ -51,7 +51,7 @@ class TestAuditRebaseline:
             dedup_fingerprint=compute_dedup_fp("Future writes use Change History.", []),
         )
 
-        assert response.state == "ok_create"
+        assert response.state == "ok"
         assert not (tmp_tickets / ".audit").exists()
 
     def test_historical_audit_reader_still_counts_existing_files(
@@ -104,7 +104,7 @@ class TestSessionCounting:
             dedup_fingerprint=compute_dedup_fp(problem, []),
         )
 
-        assert response.state == "ok_create"
+        assert response.state == "ok"
         assert engine_count_session_creates("sess-future-count", tmp_tickets) == 0
 
     def test_count_missing_file_returns_zero(self, tmp_tickets: Path) -> None:
@@ -223,7 +223,7 @@ class TestSessionCounting:
         assert engine_count_session_creates(session_id, tmp_tickets) == 2
 
     def test_count_cross_midnight_split_pair(self, tmp_tickets: Path) -> None:
-        """attempt_started on day N + ok_create result on day N+1 counts as 1."""
+        """attempt_started on day N + ok result on day N+1 counts as 1."""
         session_id = "sess-split-pair"
         day1 = tmp_tickets / ".audit" / "2026-03-08"
         day1.mkdir(parents=True, exist_ok=True)
@@ -235,7 +235,7 @@ class TestSessionCounting:
         day2 = tmp_tickets / ".audit" / "2026-03-09"
         day2.mkdir(parents=True, exist_ok=True)
         (day2 / f"{session_id}.jsonl").write_text(
-            json.dumps({"action": "create", "result": "ok_create", "request_origin": "agent"})
+            json.dumps({"action": "create", "result": "ok", "request_origin": "agent"})
             + "\n",
             encoding="utf-8",
         )
@@ -289,28 +289,28 @@ class TestSessionCounting:
         audit_dir.mkdir(parents=True, exist_ok=True)
         audit_file = audit_dir / f"{session_id}.jsonl"
         lines = [
-            # Pre-upgrade: legacy ok_create (no attempt_started with intent)
-            json.dumps({"action": "create", "result": "ok_create", "request_origin": "agent"}),
-            # Post-upgrade: attempt_started with intent + ok_create result
+            # Pre-upgrade: legacy ok (no attempt_started with intent)
+            json.dumps({"action": "create", "result": "ok", "request_origin": "agent"}),
+            # Post-upgrade: attempt_started with intent + ok result
             json.dumps(
                 {"action": "attempt_started", "intent": "create", "request_origin": "agent"}
             ),
-            json.dumps({"action": "create", "result": "ok_create", "request_origin": "agent"}),
+            json.dumps({"action": "create", "result": "ok", "request_origin": "agent"}),
         ]
         audit_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
         # 1 legacy + 1 new-format = 2 total
         assert engine_count_session_creates(session_id, tmp_tickets) == 2
 
     def test_count_mixed_format_legacy_ok_plus_new_gap(self, tmp_tickets: Path) -> None:
-        """Legacy ok_create + new-format gap (no result) counts as 2."""
+        """Legacy ok + new-format gap (no result) counts as 2."""
         session_id = "sess-mixed-gap"
         today = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_dir = tmp_tickets / ".audit" / today
         audit_dir.mkdir(parents=True, exist_ok=True)
         audit_file = audit_dir / f"{session_id}.jsonl"
         lines = [
-            # Pre-upgrade: legacy ok_create
-            json.dumps({"action": "create", "result": "ok_create", "request_origin": "agent"}),
+            # Pre-upgrade: legacy ok
+            json.dumps({"action": "create", "result": "ok", "request_origin": "agent"}),
             # Post-upgrade: attempt_started with no result (gap)
             json.dumps(
                 {"action": "attempt_started", "intent": "create", "request_origin": "agent"}
@@ -321,16 +321,16 @@ class TestSessionCounting:
         assert engine_count_session_creates(session_id, tmp_tickets) == 2
 
     def test_count_mixed_format_two_legacy_plus_new_gap(self, tmp_tickets: Path) -> None:
-        """Two legacy ok_creates + new-format gap counts as 3."""
+        """Two legacy oks + new-format gap counts as 3."""
         session_id = "sess-mixed-gap-3"
         today = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_dir = tmp_tickets / ".audit" / today
         audit_dir.mkdir(parents=True, exist_ok=True)
         audit_file = audit_dir / f"{session_id}.jsonl"
         lines = [
-            # Pre-upgrade: two legacy ok_creates
-            json.dumps({"action": "create", "result": "ok_create", "request_origin": "agent"}),
-            json.dumps({"action": "create", "result": "ok_create", "request_origin": "agent"}),
+            # Pre-upgrade: two legacy oks
+            json.dumps({"action": "create", "result": "ok", "request_origin": "agent"}),
+            json.dumps({"action": "create", "result": "ok", "request_origin": "agent"}),
             # Post-upgrade: attempt_started with no result (gap)
             json.dumps(
                 {"action": "attempt_started", "intent": "create", "request_origin": "agent"}
@@ -340,8 +340,8 @@ class TestSessionCounting:
         # 2 legacy + 1 gap = 3 total
         assert engine_count_session_creates(session_id, tmp_tickets) == 3
 
-    def test_count_legacy_ok_create_entries(self, tmp_tickets: Path) -> None:
-        """Pre-upgrade audit files with ok_create result entries are counted."""
+    def test_count_legacy_ok_entries(self, tmp_tickets: Path) -> None:
+        """Pre-upgrade audit files with ok result entries are counted."""
         session_id = "sess-count-legacy"
         today = datetime.now(UTC).strftime("%Y-%m-%d")
         audit_dir = tmp_tickets / ".audit" / today
@@ -349,8 +349,8 @@ class TestSessionCounting:
         audit_file = audit_dir / f"{session_id}.jsonl"
         # Old format: no attempt_started with intent, just result entries.
         lines = [
-            json.dumps({"action": "create", "result": "ok_create", "request_origin": "agent"}),
-            json.dumps({"action": "create", "result": "ok_create", "request_origin": "agent"}),
+            json.dumps({"action": "create", "result": "ok", "request_origin": "agent"}),
+            json.dumps({"action": "create", "result": "ok", "request_origin": "agent"}),
         ]
         audit_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
         assert engine_count_session_creates(session_id, tmp_tickets) == 2
@@ -367,7 +367,7 @@ class TestSessionCounting:
             json.dumps(
                 {"action": "attempt_started", "intent": "create", "request_origin": "agent"}
             ),
-            json.dumps({"action": "create", "result": "ok_create", "request_origin": "agent"}),
+            json.dumps({"action": "create", "result": "ok", "request_origin": "agent"}),
             json.dumps(
                 {"action": "attempt_started", "intent": "create", "request_origin": "agent"}
             ),
@@ -390,7 +390,7 @@ class TestSessionCounting:
             json.dumps(
                 {"action": "attempt_started", "intent": "create", "request_origin": "agent"}
             ),
-            json.dumps({"action": "create", "result": "ok_create", "request_origin": "agent"}),
+            json.dumps({"action": "create", "result": "ok", "request_origin": "agent"}),
             # One gap create (attempt_started but no result)
             json.dumps(
                 {"action": "attempt_started", "intent": "create", "request_origin": "agent"}
@@ -411,7 +411,7 @@ class TestAuditRepairCli:
         audit_dir.mkdir(parents=True, exist_ok=True)
         audit_file = audit_dir / "dry-run.jsonl"
         original = (
-            json.dumps({"action": "create", "result": "ok_create"}) + "\n" + "NOT VALID JSON\n"
+            json.dumps({"action": "create", "result": "ok"}) + "\n" + "NOT VALID JSON\n"
         )
         audit_file.write_text(original, encoding="utf-8")
 
@@ -434,8 +434,8 @@ class TestAuditRepairCli:
         audit_dir = tmp_tickets / ".audit" / today
         audit_dir.mkdir(parents=True, exist_ok=True)
         audit_file = audit_dir / "rewrite.jsonl"
-        valid_one = {"action": "create", "result": "ok_create", "ticket_id": "T-1"}
-        valid_two = {"action": "update", "result": "ok_update", "ticket_id": "T-1"}
+        valid_one = {"action": "create", "result": "ok", "ticket_id": "T-1"}
+        valid_two = {"action": "update", "result": "ok", "ticket_id": "T-1"}
         audit_file.write_text(
             json.dumps(valid_one) + "\n" + "BROKEN LINE\n" + json.dumps(valid_two),
             encoding="utf-8",
@@ -469,7 +469,7 @@ class TestAuditRepairCli:
         audit_dir = tmp_tickets / ".audit" / today
         audit_dir.mkdir(parents=True, exist_ok=True)
         clean_file = audit_dir / "clean.jsonl"
-        clean_text = json.dumps({"action": "create", "result": "ok_create"}) + "\n"
+        clean_text = json.dumps({"action": "create", "result": "ok"}) + "\n"
         clean_file.write_text(clean_text, encoding="utf-8")
         ignored_backup = audit_dir / "clean.jsonl.bak-20260306T000000Z"
         ignored_backup.write_text("NOT JSON\n", encoding="utf-8")
@@ -492,7 +492,7 @@ class TestAuditRepairCli:
         audit_dir = tmp_tickets / ".audit" / today
         audit_dir.mkdir(parents=True, exist_ok=True)
         audit_file = audit_dir / "partial.jsonl"
-        valid_entry = {"action": "create", "result": "ok_create", "ticket_id": "T-1"}
+        valid_entry = {"action": "create", "result": "ok", "ticket_id": "T-1"}
         audit_file.write_text(
             json.dumps(valid_entry) + "\n" + '{"action": "close"',
             encoding="utf-8",
@@ -513,7 +513,7 @@ class TestAuditRepairCli:
         audit_dir = tmp_tickets / ".audit" / today
         audit_dir.mkdir(parents=True, exist_ok=True)
         audit_file = audit_dir / "default-mode.jsonl"
-        original = json.dumps({"action": "create", "result": "ok_create"}) + "\n" + "CORRUPT LINE\n"
+        original = json.dumps({"action": "create", "result": "ok"}) + "\n" + "CORRUPT LINE\n"
         audit_file.write_text(original, encoding="utf-8")
 
         result = _run_audit_cli("repair", "docs/tickets", cwd=project_root)
@@ -532,7 +532,7 @@ class TestAuditRepairCli:
         audit_dir = tmp_tickets / ".audit" / today
         audit_dir.mkdir(parents=True, exist_ok=True)
         audit_file = audit_dir / "fix-mode.jsonl"
-        valid_entry = {"action": "create", "result": "ok_create"}
+        valid_entry = {"action": "create", "result": "ok"}
         audit_file.write_text(json.dumps(valid_entry) + "\n" + "CORRUPT\n", encoding="utf-8")
 
         result = _run_audit_cli("repair", "docs/tickets", "--fix", cwd=project_root)
@@ -605,7 +605,7 @@ class TestAuditRepairIntegration:
                     "ts": "t1",
                 }
             ),
-            json.dumps({"action": "create", "result": "ok_create", "request_origin": "agent"}),
+            json.dumps({"action": "create", "result": "ok", "request_origin": "agent"}),
             "NOT JSON AT ALL",
             json.dumps(
                 {

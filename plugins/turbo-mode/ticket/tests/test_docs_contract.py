@@ -13,6 +13,7 @@ from scripts.ticket_target_schema import (
     TARGET_PRIORITIES,
     TARGET_SECTIONS_REQUIRED,
     TARGET_STATUSES,
+    validate_target_ticket_file,
 )
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -439,6 +440,16 @@ def test_docs_contract_imports_source_target_vocabulary() -> None:
         "reopen",
         "correct",
     )
+
+
+def test_repo_ticket_records_are_target_normalized() -> None:
+    tickets_dir = REPO_ROOT / "docs" / "tickets"
+    failures = []
+    for path in sorted(tickets_dir.glob("*.md")):
+        result = validate_target_ticket_file(path)
+        if not result.ok:
+            failures.append(f"{path}: {result.error}")
+    assert failures == []
 
 
 def _strip_frontmatter_scalar(value: str) -> str:
@@ -1161,7 +1172,7 @@ def test_readme_and_handbook_use_source_authority_installed_boundary() -> None:
         assert "staging only, not the proof target" in normalized
 
 
-def test_handbook_update_surface_matches_focused_backend() -> None:
+def test_handbook_surface_matches_focused_backend() -> None:
     text = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
     target = _target_sections(text)
     normalized = _normalize_whitespace(target)

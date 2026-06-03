@@ -97,10 +97,10 @@ If activation blocks, report the blocker code first:
 
 When a backend response includes `data.recovery_hint`, show the recovery summary and next step before any lower-level message. Do not expose payload paths, envelope paths, canonical command repair, raw temp/workspace paths, or hook/provenance fields in the transcript.
 
-- `cleanup_stale_preview`: say old abandoned Ticket preview state can be cleaned
-  up after review. This is maintenance and diagnostic legacy-source cleanup,
-  not target preview-mode authority. Do not clean anything until the user
-  explicitly approves the confirmed cleanup command.
+- Legacy stale-preview cleanup hints mean old abandoned Ticket preview state
+  can be cleaned up after review. This is maintenance and diagnostic
+  legacy-source cleanup, not target preview-mode authority. Do not clean
+  anything until the user explicitly approves the confirmed cleanup command.
 
 ## Audit Repair
 

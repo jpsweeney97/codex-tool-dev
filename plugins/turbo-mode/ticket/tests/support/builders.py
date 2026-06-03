@@ -20,6 +20,7 @@ def make_ticket(
     source_ref: str = "",
     session: str = "test-session",
     tags: list[str] | None = None,
+    related_paths: list[str] | None = None,
     blocked_by: list[str] | None = None,
     blocks: list[str] | None = None,
     contract_version: str = "1.0",
@@ -28,36 +29,32 @@ def make_ticket(
     extra_yaml: str = "",
     extra_sections: str = "",
 ) -> Path:
-    """Create a v1.0 format ticket file for testing.
+    """Create a target-normalized ticket file for testing.
 
     Returns the path to the created file.
     """
     tags = tags or []
+    related_paths = related_paths or []
     blocked_by = blocked_by or []
-    blocks = blocks or []
-
-    created_at_line = f'created_at: "{created_at}"\n        ' if created_at else ""
     content = textwrap.dedent(f"""\
-        # {id}: {title}
-
-        ```yaml
+        ---
         id: {id}
-        date: "{date}"
-        {created_at_line}status: {status}
+        title: {title}
+        status: {status}
         priority: {priority}
-        effort: {effort}
-        source:
-          type: {source_type}
-          ref: "{source_ref}"
-          session: "{session}"
         tags: {tags}
+        related_paths: {related_paths}
         blocked_by: {blocked_by}
-        blocks: {blocks}
-        contract_version: "{contract_version}"
-        {extra_yaml}```
+        {extra_yaml}---
 
         ## Problem
         {problem}
+
+        ## Next Action
+        Continue work on this ticket.
+
+        ## Change History
+        - 2026-06-02T00:00:00Z | migration | Test fixture normalized to target schema.
 
         ## Approach
         Fix the issue.
@@ -76,6 +73,42 @@ def make_ticket(
         | test.py | Test | Test code |
         {extra_sections}
     """)
+    path = tickets_dir / f"{id}.md"
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def make_legacy_ticket_for_cutover(
+    tickets_dir: Path,
+    filename: str = "legacy-ticket.md",
+    *,
+    id: str = "legacy-ticket",
+    status: str = "open",
+    priority: str = "medium",
+    title: str = "Legacy ticket",
+    problem: str = "Legacy problem description.",
+    extra_yaml: str = "",
+    extra_sections: str = "",
+) -> Path:
+    """Create a fenced-YAML legacy ticket for cutover inventory tests only."""
+    yaml_lines = [
+        f"id: {id}",
+        'date: "2026-03-02"',
+        f"status: {status}",
+        f"priority: {priority}",
+        "tags: []",
+        "blocked_by: []",
+        "blocks: []",
+    ]
+    if extra_yaml:
+        yaml_lines.extend(line for line in extra_yaml.strip().splitlines() if line.strip())
+    yaml_text = "\n".join(yaml_lines)
+    content = (
+        f"# {id}: {title}\n\n"
+        f"```yaml\n{yaml_text}\n```\n\n"
+        f"## Problem\n{problem}\n"
+        f"{extra_sections}"
+    )
     path = tickets_dir / filename
     path.write_text(content, encoding="utf-8")
     return path

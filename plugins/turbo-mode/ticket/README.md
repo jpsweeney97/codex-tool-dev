@@ -77,10 +77,8 @@ Deprecated source drift may mention old four-stage, prepare/execute, or
 persistent `preview` behavior only as non-target implementation debt. These
 surfaces are subordinate to ADR 0006 and the May 30 control doc.
 
-The old `ticket_capture.py prepare` and `ticket_capture.py execute` path, old
-`ticket_update.py prepare` and `ticket_update.py execute` path,
-`ticket_autonomy.py apply-turn`, `direct_execute`, `gateway_required`,
-`stale_plan`, `toctou_conflict`, direct `ticket_engine_agent.py execute`, and
+Old capture/update prepare-execute helpers, host-facing autonomy wrappers,
+`direct_execute`, stale-read wrapper codes, direct agent-engine execution, and
 the Workflow runner are deprecated or diagnostic source facts, not target
 product architecture.
 

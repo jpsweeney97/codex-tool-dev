@@ -72,10 +72,10 @@ Deprecated source drift may mention old four-stage, prepare/execute, or
 persistent `preview` behavior only as non-target implementation debt. These
 surfaces are subordinate to ADR 0006 and the May 30 control doc.
 
-The host-facing autonomy CLI, `direct_execute`, `gateway_required`,
-`stale_plan`, `toctou_conflict`, direct `ticket_engine_agent.py execute`, and
-the Workflow runner are deprecated or diagnostic source facts, not target
-product architecture.
+The host-facing autonomy CLI, direct execution gates, gateway wrapper codes,
+stale-read wrapper codes, direct `ticket_engine_agent.py execute`, and the
+Workflow runner are deprecated or diagnostic source facts, not target product
+architecture.
 
 Direct `ticket_engine_agent.py execute` is not an autonomous mutation route in
 this source slice. It fails closed with `gateway_required`.
@@ -108,9 +108,8 @@ source commands. Any remaining `python3` hook acceptance is legacy
 compatibility.
 
 Existing `docs/tickets/.audit/` files are historical artifacts. Recovery hints
-such as `data.recovery_hint`, `retry_preview`, `cleanup_stale_preview`, and
-`engine_gate_required` are maintenance or deprecated wrapper details, not target
-result states.
+and engine-gate wrapper details are maintenance or deprecated wrapper details,
+not target result states.
 
 Exit code diagnostics remain source-maintenance facts. Do not treat old
 machine-state or code sets as target authority.
@@ -200,17 +199,15 @@ prove live runtime behavior.
 
 ADR 0006 and the May 30 control doc define the current target authority.
 
-## 11. DeferredWorkEnvelope Schema (v1.0)
+## 11. Handoff Envelope Input
 
-Bridge format for deferred work items from the handoff plugin. Envelopes are JSON files consumed by the ticket engine to create deferred tickets.
+Handoff can emit JSON envelopes under `docs/tickets/.envelopes/`. Ticket owns
+the ingest boundary and maps accepted envelope content into target create
+fields. Envelope input is not target ticket storage.
 
-For v1.0, the envelope id is the envelope filename under `docs/tickets/.envelopes/`. Ticket owns this input contract and uses that id for idempotency.
-
-### Storage
-
-- Incoming: `docs/tickets/.envelopes/<timestamp>-<slug>.json`
-- Processed: `docs/tickets/.envelopes/.processed/<filename>`
-- Retention: Processed envelopes are retained indefinitely for now as the idempotency ledger and cross-plugin audit trail.
+For v1.0, the envelope id is the envelope filename under
+`docs/tickets/.envelopes/`. Ticket uses that identity for idempotency and moves
+consumed envelopes to `docs/tickets/.envelopes/.processed/`. Processed envelopes are retained indefinitely for now as the idempotency ledger and cross-plugin audit trail.
 
 ### Required Fields
 
@@ -219,37 +216,38 @@ For v1.0, the envelope id is the envelope filename under `docs/tickets/.envelope
 | `envelope_version` | string | Must be "1.0" |
 | `title` | string | Ticket title |
 | `problem` | string | Problem description |
-| `source` | object | `{type: string, ref: string, session: string}` |
-| `emitted_at` | string | ISO 8601 UTC timestamp when envelope was created |
+| `source` | object | Handoff provenance object |
+| `emitted_at` | string | ISO 8601 UTC timestamp when the envelope was created |
 
-### Optional Fields
+### Optional Target Mapping
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `context` | string | "" | Context section content |
-| `prior_investigation` | string | "" | Prior investigation section content |
-| `approach` | string | "" | Approach section content |
-| `acceptance_criteria` | list[string] | [] | Acceptance criteria items |
-| `verification` | string | "" | Verification command |
-| `key_files` | list[object] | [] | `{file, role, look_for}` table rows |
-| `key_file_paths` | list[string] | [] | File paths for dedup fingerprinting |
-| `suggested_priority` | string | "medium" | One of: critical, high, medium, low |
-| `suggested_tags` | list[string] | [] | Categorization tags |
-| `effort` | string | "S" | Effort estimate (freeform) |
+| Envelope Fact | Target Mapping |
+|---------------|----------------|
+| context text | `Context` body section |
+| prior investigation text | `Prior Investigation` body section |
+| approach text | `Approach` body section |
+| acceptance criteria | `Acceptance Criteria` body section |
+| verification text | `Verification` body section |
+| key-file table rows | `Key Files` body section |
+| legacy file-path list | `related_paths` frontmatter |
+| suggested priority | `priority`, limited to `high`, `normal`, or `low` |
+| suggested tags | `tags` frontmatter |
 
 ### Consumer Behavior
 
 The ticket engine's envelope consumer:
-1. Reads and validates the JSON against this schema
-2. Maps fields to engine create vocabulary (no `status` — consumer synthesizes `open` with `defer.active: true`)
-3. Sets `defer.reason` to `"deferred via envelope"` and `defer.deferred_at` to `emitted_at`
-4. Creates ticket through the normal engine pipeline
-5. Moves consumed envelope to `.processed/`
 
-Before creating a ticket, ingest checks whether `.processed/<filename>` already exists. If it does, ingest returns a duplicate/replay outcome, preserves the incoming envelope, and creates no ticket. Similar-content envelopes with different filenames go through normal duplicate detection and are not auto-collapsed.
+1. Reads and validates the JSON input.
+2. Maps accepted fields to target create vocabulary.
+3. Creates an `open` target ticket through the normal engine path.
+4. Moves consumed envelopes to `.processed/`.
+
+Before creating a ticket, ingest checks whether the processed envelope already
+exists. If it does, ingest returns a duplicate/replay outcome, preserves the incoming envelope, and creates no ticket. Similar-content envelopes with different filenames go through normal duplicate detection and are not auto-collapsed.
 
 ### Invariants
 
-- Envelopes carry no `status` field — the consumer is the sole authority for initial ticket state
-- `emitted_at` is required for provenance — it becomes `defer.deferred_at`
-- Unknown fields are rejected (closed schema)
+- Envelopes do not persist `status`, defer metadata, effort, or source
+  frontmatter on target tickets.
+- Unknown fields are rejected.
+- Envelope provenance remains input context, not target ticket identity.

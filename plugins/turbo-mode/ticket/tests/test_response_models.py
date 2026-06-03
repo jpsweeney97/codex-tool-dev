@@ -12,11 +12,11 @@ class TestEngineResponseInvariant:
     _OK_STATES = frozenset(
         {
             "ok",
-            "ok_create",
-            "ok_update",
-            "ok_close",
-            "ok_close_archived",
-            "ok_reopen",
+            "ok",
+            "ok",
+            "ok",
+            "ok",
+            "ok",
         }
     )
 

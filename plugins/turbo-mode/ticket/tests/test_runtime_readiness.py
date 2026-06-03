@@ -826,7 +826,7 @@ def test_verifier_rederives_post_activation_result_from_raw_transcript(tmp_path:
 
     assert result.passed is False
     assert result.error_code == "proof_invalid"
-    assert "ok_create" in result.message
+    assert "ok" in result.message
 
 
 def test_verifier_rederives_hook_membrane_completion_from_raw_transcript(tmp_path: Path) -> None:
@@ -841,7 +841,7 @@ def test_verifier_rederives_hook_membrane_completion_from_raw_transcript(tmp_pat
         [
             _command_item_row(
                 proof["hook_membrane_proof"]["command"],
-                {"state": "ok_create"},
+                {"state": "ok"},
             )
         ],
     )
@@ -870,7 +870,7 @@ def test_verifier_rederives_activation_engine_stdout_from_raw_file(tmp_path: Pat
 
     assert result.passed is False
     assert result.error_code == "proof_invalid"
-    assert "ok_create" in result.message
+    assert "ok" in result.message
 
 
 def test_verifier_binds_guard_command_to_expected_script(tmp_path: Path) -> None:
@@ -1473,7 +1473,7 @@ def test_run_activation_smoke_uses_uv_run_python_launcher(
                 "direction": "recv",
                 "body": {
                     "method": "item/commandExecution/outputDelta",
-                    "params": {"delta": '{"state":"ok_create"}'},
+                    "params": {"delta": '{"state":"ok"}'},
                 },
             },
         ]
@@ -1752,7 +1752,7 @@ def test_run_activation_smoke_ignores_unrelated_hook_completions(
                 "direction": "recv",
                 "body": {
                     "method": "item/commandExecution/outputDelta",
-                    "params": {"delta": '{"state":"ok_create"}'},
+                    "params": {"delta": '{"state":"ok"}'},
                 },
             },
         ]
@@ -1807,7 +1807,7 @@ def test_run_activation_smoke_rejects_malformed_hook_entries(
                             "type": "commandExecution",
                             "id": "cmd-1",
                             "command": activation_command,
-                            "aggregatedOutput": json.dumps({"state": "ok_create"}),
+                            "aggregatedOutput": json.dumps({"state": "ok"}),
                         }
                     }
                 },
@@ -1881,7 +1881,7 @@ def test_run_activation_smoke_rejects_legacy_hook_specific_output(
                     },
                 },
             },
-            _command_item_row(activation_command, {"state": "ok_create"}),
+            _command_item_row(activation_command, {"state": "ok"}),
         ]
 
     monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
@@ -1933,7 +1933,7 @@ def test_run_activation_smoke_rejects_stop_entries(
                     },
                 },
             },
-            _command_item_row(activation_command, {"state": "ok_create"}),
+            _command_item_row(activation_command, {"state": "ok"}),
         ]
 
     monkeypatch.setattr(ticket_runtime_readiness, "_run_app_server_turn", _fake_turn)
@@ -2042,7 +2042,7 @@ def test_run_activation_smoke_requires_pre_activation_gate(
                     "direction": "recv",
                     "body": {
                         "method": "item/commandExecution/outputDelta",
-                        "params": {"delta": '{"state":"ok_create"}'},
+                        "params": {"delta": '{"state":"ok"}'},
                     },
                 },
             ]
@@ -2058,7 +2058,7 @@ def test_run_activation_smoke_requires_pre_activation_gate(
                             "command": prompt.split("Command: ", 1)[1].split("\n", 1)[0],
                             "aggregatedOutput": json.dumps(
                                 {
-                                    "state": "ok_create",
+                                    "state": "ok",
                                     "data": {"ticket_path": str(run_dir / "unexpected.md")},
                                 }
                             ),
@@ -2144,7 +2144,7 @@ def test_run_post_activation_direct_execute_smoke_stages_agent_primary_policy_la
                     "params": {
                         "delta": json.dumps(
                             {
-                                "state": "ok_create",
+                                "state": "ok",
                                 "data": {"ticket_path": str(ticket_path)},
                             }
                         )
@@ -2165,7 +2165,7 @@ def test_run_post_activation_direct_execute_smoke_stages_agent_primary_policy_la
 
     assert (
         result["post_activation_gated_smokes"]["surface_results"]["direct_execute"]["engine_state"]
-        == "ok_create"
+        == "ok"
     )
 
 
@@ -2224,7 +2224,7 @@ def test_run_post_activation_direct_execute_smoke_uses_uv_run_python_launcher(
                     "params": {
                         "delta": json.dumps(
                             {
-                                "state": "ok_create",
+                                "state": "ok",
                                 "data": {"ticket_path": str(ticket_path)},
                             }
                         )
@@ -2295,7 +2295,7 @@ def test_run_post_activation_direct_execute_smoke_accepts_aggregated_output(
                             "command": expected_command,
                             "aggregatedOutput": json.dumps(
                                 {
-                                    "state": "ok_create",
+                                    "state": "ok",
                                     "data": {"ticket_path": str(ticket_path)},
                                 }
                             ),
@@ -2366,7 +2366,7 @@ def test_run_post_activation_direct_execute_smoke_requires_allowing_hook_result(
                             "command": expected_command,
                             "aggregatedOutput": json.dumps(
                                 {
-                                    "state": "ok_create",
+                                    "state": "ok",
                                     "data": {"ticket_path": str(ticket_path)},
                                 }
                             ),
@@ -2404,7 +2404,7 @@ def test_run_post_activation_direct_execute_smoke_requires_allowing_hook_result(
             False,
         ),
         (
-            json.dumps({"state": "ok_create", "data": {}}),
+            json.dumps({"state": "ok", "data": {}}),
             "deterministic_driver_unavailable",
             "did not report a created ticket path",
             False,
@@ -2412,7 +2412,7 @@ def test_run_post_activation_direct_execute_smoke_requires_allowing_hook_result(
         (
             json.dumps(
                 {
-                    "state": "ok_create",
+                    "state": "ok",
                     "data": {"ticket_path": "__TICKET_PATH__"},
                 }
             ),
@@ -3322,10 +3322,10 @@ def _fake_smoke_result(
         hook_events,
         [
             _hook_completed_row(hook_manifest),
-            _command_item_row(activation_command, {"state": "ok_create"}),
+            _command_item_row(activation_command, {"state": "ok"}),
         ],
     )
-    engine_stdout.write_text('{"state":"ok_create"}\n', encoding="utf-8")
+    engine_stdout.write_text('{"state":"ok"}\n', encoding="utf-8")
     app_server_stderr.write_text("", encoding="utf-8")
     _write_jsonl(
         pre_events,
@@ -3405,7 +3405,7 @@ def _fake_post_activation_smoke_result(
             _hook_completed_row(hook_manifest),
             _command_item_row(
                 command,
-                {"state": "ok_create", "data": {"ticket_path": str(ticket_path)}},
+                {"state": "ok", "data": {"ticket_path": str(ticket_path)}},
             ),
         ],
     )
@@ -3419,7 +3419,7 @@ def _fake_post_activation_smoke_result(
                     "command": command,
                     "execute_surface": "direct_execute",
                     "runtime_readiness_required": True,
-                    "engine_state": "ok_create",
+                    "engine_state": "ok",
                     "raw_events_sha256": ticket_runtime_readiness.sha256_file(post_events),
                     "ticket_path": str(ticket_path),
                     "ticket_sha256": ticket_runtime_readiness.sha256_file(ticket_path),
@@ -3453,7 +3453,7 @@ def build_valid_runtime_readiness_fixture(
     payload_after_path.write_text(
         '{"tickets_dir":"docs/tickets","hook_injected":true}\n', encoding="utf-8"
     )
-    engine_stdout_path.write_text('{"state":"ok_create"}\n', encoding="utf-8")
+    engine_stdout_path.write_text('{"state":"ok"}\n', encoding="utf-8")
     app_server_stderr_path.write_text("", encoding="utf-8")
     post_ticket_path.parent.mkdir(parents=True, exist_ok=True)
     post_ticket_path.write_text("# T-20260520-01: Runtime activation smoke\n", encoding="utf-8")
@@ -3496,7 +3496,7 @@ def build_valid_runtime_readiness_fixture(
         hook_events_path,
         [
             _hook_completed_row(hook_manifest),
-            _command_item_row(activation_command, {"state": "ok_create"}),
+            _command_item_row(activation_command, {"state": "ok"}),
         ],
     )
     _write_jsonl(
@@ -3514,7 +3514,7 @@ def build_valid_runtime_readiness_fixture(
             _hook_completed_row(hook_manifest),
             _command_item_row(
                 post_command,
-                {"state": "ok_create", "data": {"ticket_path": str(post_ticket_path)}},
+                {"state": "ok", "data": {"ticket_path": str(post_ticket_path)}},
             ),
         ],
     )
@@ -3602,7 +3602,7 @@ def build_valid_runtime_readiness_fixture(
                     "command": post_command,
                     "execute_surface": "direct_execute",
                     "runtime_readiness_required": True,
-                    "engine_state": "ok_create",
+                    "engine_state": "ok",
                     "raw_events_sha256": module.sha256_file(post_events_path),
                     "ticket_path": str(post_ticket_path),
                     "ticket_sha256": module.sha256_file(post_ticket_path),

@@ -103,9 +103,8 @@ After creation, show a suggested second capture prompt for the remaining item.
 
 ## Deprecated Source Drift
 
-Deprecated source drift only: `ticket_capture.py prepare` and
-`ticket_capture.py execute` were the old capture mutation path. They are not
-active target guidance.
+Deprecated source drift only: the old capture prepare-execute helper path is
+not active target guidance.
 
 Execute requires the prepared payload and hook/provenance path injected by the
 canonical command path. Do not bypass the guard or use noncanonical commands.

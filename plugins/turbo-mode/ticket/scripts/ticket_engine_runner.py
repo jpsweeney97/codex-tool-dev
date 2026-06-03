@@ -10,6 +10,8 @@ The public guarded engine entrypoints are ticket_engine_user.py and ticket_engin
 Direct engine stages are low-level compatibility, debug, and agent-internal paths.
 They are not normal user-facing mutation interfaces. Agent-origin direct execute
 fails closed outside the runtime-first gateway.
+Sunset: remove direct stage dispatch once the Tasks 2-9 source/repo cutover is
+merged and no source test requires stage-specific compatibility fixtures.
 """
 
 from __future__ import annotations
@@ -271,14 +273,7 @@ def _run_impl(
 def _exit_code(resp: EngineResponse) -> int:
     """Map EngineResponse to exit code. Single-sourced."""
     # Exit codes: 0=success, 1=engine error, 2=validation failure (need_fields).
-    if resp.state in (
-        "ok",
-        "ok_create",
-        "ok_update",
-        "ok_close",
-        "ok_close_archived",
-        "ok_reopen",
-    ):
+    if resp.state == "ok":
         return 0
     if resp.error_code == "need_fields":
         return 2
@@ -290,7 +285,7 @@ def _ingest_need_fields_recovery_code(resp: EngineResponse) -> str:
     validation_errors = data.get("validation_errors")
     if isinstance(validation_errors, list) and validation_errors:
         return "preflight_failed"
-    return "retry_preview"
+    return "preflight_failed"
 
 
 def _sanitize_user_facing_ingest_response(resp: EngineResponse) -> EngineResponse:
@@ -308,9 +303,7 @@ def _sanitize_user_facing_ingest_response(resp: EngineResponse) -> EngineRespons
     elif hint_code == "preflight_failed":
         resp.message = "Ticket checks did not pass."
     elif hint_code == "stale_plan":
-        resp.message = "The saved preview is no longer current."
-    elif hint_code == "retry_preview":
-        resp.message = "The saved preview state is no longer usable."
+        resp.message = "The ticket changed since it was read."
     return attach_engine_recovery_hint(resp, hint_code)
 
 
@@ -443,7 +436,7 @@ def _dispatch_ingest(
         dedup_fingerprint=dedup_fp,
         duplicate_of=duplicate_of,
     )
-    if not exec_resp.state.startswith("ok"):
+    if exec_resp.state != "ok":
         return exec_resp
 
     # Step 6: Move envelope to processed.
@@ -598,7 +591,7 @@ def _dispatch(
             return EngineResponse(
                 state=exc.state,
                 message=(
-                    "The saved preview state is no longer usable."
+                    "Ticket checks did not pass."
                     if exc.code in {"need_fields", "parse_error"}
                     else "Ticket ingest is blocked by Ticket policy."
                 ),

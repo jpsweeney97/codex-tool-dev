@@ -88,10 +88,8 @@ surfaces are subordinate to ADR 0006 and the May 30 control doc.
 
 Direct `ticket_engine_agent.py execute` is not an autonomous mutation route in
 this source slice. It fails closed with `gateway_required`. The runtime-first
-gateway, `direct_execute`, `ticket_update.py prepare`,
-`ticket_update.py execute`, `ticket_capture.py prepare`, and
-`ticket_capture.py execute` remain deprecated or diagnostic source facts, not
-target product architecture.
+gateway, direct execution gate, and old update/capture prepare-execute helpers
+remain deprecated or diagnostic source facts, not target product architecture.
 
 Runtime-first source bookkeeping such as
 `.codex/ticket-workspace/ticket.pending-summary.jsonl` is diagnostic source

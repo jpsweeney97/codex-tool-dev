@@ -13,9 +13,9 @@ from scripts.ticket_engine_core import (
     engine_plan,
     engine_preflight,
 )
-from scripts.ticket_parse import extract_fenced_yaml
+from scripts.ticket_parse import parse_ticket
 
-from tests.support.builders import expected_canonical_yaml, make_ticket
+from tests.support.builders import make_ticket
 
 
 class TestFullCreatePipeline:
@@ -34,8 +34,8 @@ class TestFullCreatePipeline:
         fields = {
             "title": "Integration test ticket",
             "problem": "This is an integration test.",
-            "priority": "medium",
-            "key_file_paths": [],
+            "priority": "normal",
+            "related_paths": [],
         }
         plan_resp = engine_plan(
             intent=classify_resp.data["intent"],
@@ -76,7 +76,7 @@ class TestFullCreatePipeline:
             classify_confidence=classify_resp.data["confidence"],
             dedup_fingerprint=plan_resp.data["dedup_fingerprint"],
         )
-        assert execute_resp.state == "ok_create"
+        assert execute_resp.state == "ok"
         assert Path(execute_resp.data["ticket_path"]).exists()
 
     def test_user_create_end_to_end_with_plain_classify_data_merge(self, tmp_tickets):
@@ -89,8 +89,8 @@ class TestFullCreatePipeline:
             "fields": {
                 "title": "Integration plain merge ticket",
                 "problem": "This verifies classify aliases are emitted natively.",
-                "priority": "medium",
-                "key_file_paths": [],
+                "priority": "normal",
+                "related_paths": [],
             },
         }
 
@@ -141,7 +141,7 @@ class TestFullCreatePipeline:
             classify_confidence=payload.get("classify_confidence"),
             dedup_fingerprint=payload.get("dedup_fingerprint"),
         )
-        assert execute_resp.state == "ok_create"
+        assert execute_resp.state == "ok"
         assert Path(execute_resp.data["ticket_path"]).exists()
 
     def test_agent_blocked_phase1_fail_closed(self, tmp_tickets):
@@ -187,7 +187,7 @@ class TestFullCreatePipeline:
             classify_confidence=0.95,
             target_fingerprint=compute_target_fp(next(tmp_tickets.glob("*.md"))),
         )
-        assert update_resp.state == "ok_update"
+        assert update_resp.state == "ok"
 
         # Close.
         close_resp = engine_execute(
@@ -205,26 +205,27 @@ class TestFullCreatePipeline:
             classify_confidence=0.95,
             target_fingerprint=compute_target_fp(next(tmp_tickets.glob("*.md"))),
         )
-        assert close_resp.state == "ok_close"
+        assert close_resp.state == "ok"
 
     def test_dedup_then_override(self, tmp_tickets):
         """Create duplicate detected -> override -> create succeeds."""
         # Use dynamic date so ticket stays within 24h dedup window.
         today = datetime.now(UTC).date().isoformat()
+        today_compact = today.replace("-", "")
         make_ticket(
             tmp_tickets,
             f"{today}-existing.md",
-            id="T-20260302-01",
+            id=f"T-{today_compact}-01",
             date=today,
             problem="Auth times out.",
+            related_paths=["test.py"],
         )
 
         fields = {
             "title": "Same auth bug",
             "problem": "Auth times out.",
             "priority": "high",
-            # make_ticket's Key Files table always includes "test.py".
-            "key_file_paths": ["test.py"],
+            "related_paths": ["test.py"],
         }
 
         plan_resp = engine_plan(
@@ -251,18 +252,18 @@ class TestFullCreatePipeline:
             hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp(fields["problem"], fields.get("key_file_paths", [])),
+            dedup_fingerprint=compute_dedup_fp(fields["problem"], fields.get("related_paths", [])),
         )
-        assert execute_resp.state == "ok_create"
+        assert execute_resp.state == "ok"
 
-    def test_create_with_key_file_paths_only_produces_valid_ticket_without_key_files_section(
+    def test_create_with_related_paths_only_produces_valid_ticket_without_key_files_section(
         self, tmp_tickets
     ):
         fields = {
             "title": "Paths only create",
             "problem": "Only dedup file paths are available for this ticket.",
-            "priority": "medium",
-            "key_file_paths": ["src/auth/token.py", "src/middleware/session.py"],
+            "priority": "normal",
+            "related_paths": ["src/auth/token.py", "src/middleware/session.py"],
         }
 
         plan_resp = engine_plan(
@@ -290,7 +291,7 @@ class TestFullCreatePipeline:
             classify_confidence=0.95,
             dedup_fingerprint=plan_resp.data["dedup_fingerprint"],
         )
-        assert execute_resp.state == "ok_create"
+        assert execute_resp.state == "ok"
 
         ticket_path = Path(execute_resp.data["ticket_path"])
         assert ticket_path.exists()
@@ -311,8 +312,7 @@ class TestEngineExecuteIntegration:
             fields={
                 "title": "Lifecycle test",
                 "problem": "Integration test problem.",
-                "priority": "medium",
-                "source": {"type": "ad-hoc", "ref": "", "session": "test-session"},
+                "priority": "normal",
                 "tags": ["test"],
             },
             session_id="test-session",
@@ -326,7 +326,7 @@ class TestEngineExecuteIntegration:
             classify_confidence=0.95,
             dedup_fingerprint=compute_dedup_fp("Integration test problem.", []),
         )
-        assert resp.state == "ok_create"
+        assert resp.state == "ok"
         ticket_id = resp.ticket_id
         ticket_path = Path(resp.data["ticket_path"])
         assert ticket_path.exists()
@@ -347,7 +347,7 @@ class TestEngineExecuteIntegration:
             classify_confidence=0.95,
             target_fingerprint=compute_target_fp(next(tmp_tickets.glob("*.md"))),
         )
-        assert resp.state == "ok_update"
+        assert resp.state == "ok"
 
         # Close with wontfix (avoids acceptance criteria requirement).
         resp = engine_execute(
@@ -365,7 +365,7 @@ class TestEngineExecuteIntegration:
             classify_confidence=0.95,
             target_fingerprint=compute_target_fp(next(tmp_tickets.glob("*.md"))),
         )
-        assert resp.state == "ok_close"
+        assert resp.state == "ok"
 
         # Reopen.
         resp = engine_execute(
@@ -383,7 +383,7 @@ class TestEngineExecuteIntegration:
             classify_confidence=0.95,
             target_fingerprint=compute_target_fp(next(tmp_tickets.glob("*.md"))),
         )
-        assert resp.state == "ok_reopen"
+        assert resp.state == "ok"
 
         # Verify final state.
         content = ticket_path.read_text(encoding="utf-8")
@@ -397,12 +397,9 @@ class TestEngineExecuteIntegration:
             fields={
                 "title": "Serializer lifecycle",
                 "problem": "All mutation paths should share one YAML renderer.",
-                "priority": "medium",
-                "effort": "S",
-                "source": {"type": "ad-hoc", "ref": "", "session": "test-session"},
+                "priority": "normal",
                 "tags": ["test"],
                 "blocked_by": [],
-                "blocks": [],
             },
             session_id="test-session",
             request_origin="user",
@@ -417,33 +414,20 @@ class TestEngineExecuteIntegration:
                 "All mutation paths should share one YAML renderer.", []
             ),
         )
-        assert resp.state == "ok_create"
+        assert resp.state == "ok"
         ticket_id = resp.ticket_id
         ticket_path = Path(resp.data["ticket_path"])
-        ticket_date = ticket_path.name[:10]
-
-        # Extract dynamic created_at from actual output.
-        import re as _re
-
-        _actual_yaml = extract_fenced_yaml(ticket_path.read_text(encoding="utf-8"))
-        _ca_match = _re.search(r'created_at: "([^"]+)"', _actual_yaml or "")
-        _created_at = _ca_match.group(1) if _ca_match else ""
-
-        expected = expected_canonical_yaml(
-            ticket_id=ticket_id,
-            date=ticket_date,
-            created_at=_created_at,
-            status="open",
-            priority="medium",
-            effort="S",
-            source_type="ad-hoc",
-            source_ref="",
-            session="test-session",
-            tags=["test"],
-            blocked_by=[],
-            blocks=[],
-        )
-        assert _actual_yaml == expected
+        ticket = parse_ticket(ticket_path)
+        assert ticket is not None
+        assert ticket.frontmatter == {
+            "id": ticket_id,
+            "title": "Serializer lifecycle",
+            "status": "open",
+            "priority": "normal",
+            "tags": ["test"],
+            "related_paths": [],
+            "blocked_by": [],
+        }
 
         resp = engine_execute(
             action="update",
@@ -460,9 +444,10 @@ class TestEngineExecuteIntegration:
             classify_confidence=0.95,
             target_fingerprint=compute_target_fp(next(tmp_tickets.glob("*.md"))),
         )
-        assert resp.state == "ok_update"
-        expected = expected.replace("status: open\n", "status: in_progress\n")
-        assert extract_fenced_yaml(ticket_path.read_text(encoding="utf-8")) == expected
+        assert resp.state == "ok"
+        ticket = parse_ticket(ticket_path)
+        assert ticket is not None
+        assert ticket.status == "in_progress"
 
         resp = engine_execute(
             action="close",
@@ -479,9 +464,10 @@ class TestEngineExecuteIntegration:
             classify_confidence=0.95,
             target_fingerprint=compute_target_fp(next(tmp_tickets.glob("*.md"))),
         )
-        assert resp.state == "ok_close"
-        expected = expected.replace("status: in_progress\n", "status: wontfix\n")
-        assert extract_fenced_yaml(ticket_path.read_text(encoding="utf-8")) == expected
+        assert resp.state == "ok"
+        ticket = parse_ticket(ticket_path)
+        assert ticket is not None
+        assert ticket.status == "wontfix"
 
         resp = engine_execute(
             action="reopen",
@@ -498,10 +484,11 @@ class TestEngineExecuteIntegration:
             classify_confidence=0.95,
             target_fingerprint=compute_target_fp(next(tmp_tickets.glob("*.md"))),
         )
-        assert resp.state == "ok_reopen"
-        expected = expected.replace("status: wontfix\n", "status: open\n")
+        assert resp.state == "ok"
         content = ticket_path.read_text(encoding="utf-8")
-        assert extract_fenced_yaml(content) == expected
+        ticket = parse_ticket(ticket_path)
+        assert ticket is not None
+        assert ticket.status == "open"
         assert "## Reopen History" in content
 
     def test_unknown_action_escalates(self, tmp_tickets):

@@ -15,6 +15,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.ticket_parse import ParsedTicket, parse_ticket  # noqa: E402
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir  # noqa: E402
+from scripts.ticket_target_schema import validate_target_ticket_file  # noqa: E402
+
+
+class InvalidTicketState(ValueError):
+    """Raised when an active ticket record is not target-normalized."""
 
 
 def list_tickets(
@@ -22,10 +27,9 @@ def list_tickets(
     *,
     include_closed: bool = False,
 ) -> list[ParsedTicket]:
-    """List all parseable tickets in the tickets directory.
+    """List all target-normalized tickets in the tickets directory.
 
-    Scans docs/tickets/*.md. If include_closed=True, also scans
-    docs/tickets/closed-tickets/*.md. Skips unparseable files silently.
+    Scans docs/tickets/*.md. Invalid active files fail explicitly.
     Returns tickets sorted by date (newest first), then by ID.
     """
     tickets: list[ParsedTicket] = []
@@ -35,18 +39,12 @@ def list_tickets(
 
     # Scan active tickets.
     for ticket_file in tickets_dir.glob("*.md"):
+        validation = validate_target_ticket_file(ticket_file)
+        if not validation.ok:
+            raise InvalidTicketState(validation.error)
         ticket = parse_ticket(ticket_file)
         if ticket is not None:
             tickets.append(ticket)
-
-    # Scan closed tickets if requested.
-    if include_closed:
-        closed_dir = tickets_dir / "closed-tickets"
-        if closed_dir.is_dir():
-            for ticket_file in closed_dir.glob("*.md"):
-                ticket = parse_ticket(ticket_file)
-                if ticket is not None:
-                    tickets.append(ticket)
 
     # Sort: newest date first, then by ID.
     tickets.sort(key=lambda t: (t.date, t.id), reverse=True)
@@ -97,12 +95,14 @@ def fuzzy_match_id(
 
 
 def split_refinement_tickets(tickets: list[ParsedTicket]) -> dict[str, list[ParsedTicket]]:
-    """Split tickets into refinement placeholders and ready candidates."""
+    """Return target ticket groups for list payloads.
+
+    Target tickets do not persist refinement metadata, so normal reads classify
+    every valid target ticket as ready.
+    """
     return {
-        "needs_refinement": [
-            ticket for ticket in tickets if ticket.refinement_status == "needs_refinement"
-        ],
-        "ready": [ticket for ticket in tickets if ticket.refinement_status != "needs_refinement"],
+        "needs_refinement": [],
+        "ready": list(tickets),
     }
 
 
@@ -110,13 +110,10 @@ def _ticket_to_dict(ticket: ParsedTicket) -> dict:
     """Convert ParsedTicket to JSON-serializable dict."""
     from scripts.ticket_ux import humanize_state, ticket_identity
 
-    priority_rank = {"critical": "0", "high": "1", "medium": "2", "low": "3"}.get(
-        ticket.priority, "9"
-    )
+    priority_rank = {"high": "0", "normal": "1", "low": "2"}.get(ticket.priority, "9")
     status_rank = {
-        "blocked": "0",
-        "open": "1",
-        "in_progress": "2",
+        "open": "0",
+        "in_progress": "1",
         "done": "8",
         "wontfix": "9",
     }.get(ticket.status, "7")
@@ -128,15 +125,8 @@ def _ticket_to_dict(ticket: ParsedTicket) -> dict:
         "priority": ticket.priority,
         "tags": ticket.tags,
         "blocked_by": ticket.blocked_by,
-        "blocks": ticket.blocks,
         "path": str(ticket.path),
-        "capture": {
-            "confidence": ticket.capture_confidence,
-            "source": ticket.capture_source,
-            "refinement_status": ticket.refinement_status,
-            "component": ticket.component,
-            "related_paths": ticket.related_paths,
-        },
+        "related_paths": ticket.related_paths,
         "display": {
             "identity": ticket_identity(ticket),
             "status_label": humanize_state(ticket.status),
@@ -239,7 +229,19 @@ def main() -> None:
         sys.exit(1)
 
     if args.subcommand == "list":
-        tickets = list_tickets(tickets_dir, include_closed=args.include_closed)
+        try:
+            tickets = list_tickets(tickets_dir, include_closed=args.include_closed)
+        except InvalidTicketState as exc:
+            print(
+                json.dumps(
+                    {
+                        "state": "invalid_state",
+                        "message": str(exc),
+                        "error_code": "invalid_state",
+                    }
+                )
+            )
+            sys.exit(1)
         tickets = filter_tickets(
             tickets,
             status=args.status,
@@ -256,7 +258,19 @@ def main() -> None:
         )
 
     elif args.subcommand == "query":
-        all_tickets = list_tickets(tickets_dir, include_closed=True)
+        try:
+            all_tickets = list_tickets(tickets_dir, include_closed=True)
+        except InvalidTicketState as exc:
+            print(
+                json.dumps(
+                    {
+                        "state": "invalid_state",
+                        "message": str(exc),
+                        "error_code": "invalid_state",
+                    }
+                )
+            )
+            sys.exit(1)
         payload = query_tickets_payload(all_tickets, args.search_term)
         print(
             json.dumps(
@@ -270,7 +284,19 @@ def main() -> None:
     elif args.subcommand == "check":
         from scripts.ticket_ux import close_readiness
 
-        ticket = find_ticket_by_id(tickets_dir, args.ticket_id, include_closed=True)
+        try:
+            ticket = find_ticket_by_id(tickets_dir, args.ticket_id, include_closed=True)
+        except InvalidTicketState as exc:
+            print(
+                json.dumps(
+                    {
+                        "state": "invalid_state",
+                        "message": str(exc),
+                        "error_code": "invalid_state",
+                    }
+                )
+            )
+            sys.exit(1)
         if ticket is None:
             print(
                 json.dumps(

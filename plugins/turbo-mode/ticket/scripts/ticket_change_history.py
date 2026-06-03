@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
 
 CHANGE_HISTORY_HEADING = "## Change History"
@@ -13,16 +12,25 @@ RELATED_HEADING = "## Related"
 REOPEN_HISTORY_HEADING = "## Reopen History"
 
 
-class ChangeHistoryLabel(StrEnum):
-    """Controlled labels for automatic Ticket Change History entries."""
-
-    AUTO_CREATE = "auto-create"
-    AUTO_UPDATE = "auto-update"
-    AUTO_BLOCKER = "auto-blocker"
-    AUTO_CLOSE = "auto-close"
-    AUTO_REOPEN = "auto-reopen"
-    CORRECTION = "correction"
-    DISCUSSION_APPROVED = "discussion-approved"
+_REJECTED_ACTORS = frozenset(
+    {
+        "auto-create",
+        "auto-update",
+        "auto-blocker",
+        "auto-close",
+        "auto-reopen",
+        "correction",
+        "discussion-approved",
+        "codex-create",
+        "codex-update",
+        "codex-blocker",
+        "codex-close",
+        "codex-reopen",
+        "codex-correct",
+        "codex-discussion",
+    }
+)
+_TARGET_ACTORS = frozenset({"codex", "user-approved", "migration"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,9 +38,9 @@ class ChangeHistoryEntry:
     """A durable lightweight ticket history fact."""
 
     timestamp: str
-    label: ChangeHistoryLabel
+    actor: str
     reason: str
-    prior_commit: str | None = None
+    corrects: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,7 +152,7 @@ def _validate_one_line(value: str, *, field: str, optional: bool = False) -> Non
 
 
 def render_change_history_entry(entry: ChangeHistoryEntry) -> str:
-    """Render one controlled Change History entry.
+    """Render one target Change History entry.
 
     Args:
         entry: Entry data to render.
@@ -153,21 +161,28 @@ def render_change_history_entry(entry: ChangeHistoryEntry) -> str:
         A single Markdown list item without a trailing newline.
 
     Raises:
-        ValueError: If the label or line-shaped fields are invalid.
+        ValueError: If the actor or line-shaped fields are invalid.
     """
-    if not isinstance(entry.label, ChangeHistoryLabel):
+    if not isinstance(entry.actor, str):
         raise _value_error(
             "render Change History entry",
-            "label must be a ChangeHistoryLabel",
-            entry.label,
+            "actor must be a string",
+            entry.actor,
         )
     _validate_one_line(entry.timestamp, field="timestamp")
+    _validate_one_line(entry.actor, field="actor")
     _validate_one_line(entry.reason, field="reason")
+    if entry.actor in _REJECTED_ACTORS:
+        raise _value_error(
+            "render Change History entry",
+            "actor must not encode action label",
+            entry.actor,
+        )
 
-    rendered = f"- {entry.timestamp} | {entry.label.value} | {entry.reason}"
-    if entry.prior_commit is not None:
-        _validate_one_line(entry.prior_commit, field="prior_commit")
-        rendered = f"{rendered} Prior commit: {entry.prior_commit}."
+    rendered = f"- {entry.timestamp} | {entry.actor} | {entry.reason}"
+    if entry.corrects is not None:
+        _validate_one_line(entry.corrects, field="corrects")
+        rendered = f"{rendered} Corrects: {entry.corrects}."
     return rendered
 
 

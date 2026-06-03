@@ -1,4 +1,4 @@
-"""Tests for dedup persistence (C-002) and dedup_override binding (C-008)."""
+"""Tests for related-path dedup persistence and dedup_override binding."""
 
 from __future__ import annotations
 
@@ -11,33 +11,29 @@ from scripts.ticket_parse import parse_ticket
 from tests.support.builders import make_ticket
 
 
-class TestKeyFilePathsPersistence:
-    """C-002: key_file_paths persisted in YAML frontmatter on create."""
+class TestRelatedPathsPersistence:
+    """related_paths are persisted in target YAML frontmatter on create."""
 
-    def test_created_ticket_persists_key_file_paths(self, tmp_tickets):
-        """key_file_paths should appear in YAML frontmatter, sorted."""
+    def test_created_ticket_persists_related_paths(self, tmp_tickets):
+        """related_paths should appear in YAML frontmatter."""
         resp = _execute_create(
             fields={
                 "title": "Fix auth timeout",
                 "problem": "Auth handler times out",
-                "key_file_paths": ["handler.py", "auth/config.py"],
-                "key_files": [
-                    {"file": "handler.py", "role": "Timeout logic", "look_for": "timeout"},
-                    {"file": "auth/config.py", "role": "Config", "look_for": "timeout_ms"},
-                ],
+                "related_paths": ["handler.py", "auth/config.py"],
             },
             session_id="test-session",
             request_origin="user",
             tickets_dir=tmp_tickets,
         )
-        assert resp.state == "ok_create"
+        assert resp.state == "ok"
 
         ticket = parse_ticket(Path(resp.data["ticket_path"]))
         assert ticket is not None
-        assert ticket.frontmatter.get("key_file_paths") == ["auth/config.py", "handler.py"]
+        assert ticket.frontmatter.get("related_paths") == ["handler.py", "auth/config.py"]
 
-    def test_created_ticket_without_key_file_paths_has_no_field(self, tmp_tickets):
-        """No key_file_paths in fields => no key_file_paths in YAML."""
+    def test_created_ticket_without_related_paths_has_empty_target_field(self, tmp_tickets):
+        """No related_paths in fields => empty related_paths in target YAML."""
         resp = _execute_create(
             fields={
                 "title": "Simple fix",
@@ -47,36 +43,36 @@ class TestKeyFilePathsPersistence:
             request_origin="user",
             tickets_dir=tmp_tickets,
         )
-        assert resp.state == "ok_create"
+        assert resp.state == "ok"
 
         ticket = parse_ticket(Path(resp.data["ticket_path"]))
         assert ticket is not None
-        assert "key_file_paths" not in ticket.frontmatter
+        assert ticket.frontmatter["related_paths"] == []
 
-    def test_created_ticket_empty_key_file_paths_not_persisted(self, tmp_tickets):
-        """Empty key_file_paths list should not be persisted."""
+    def test_created_ticket_empty_related_paths_remains_empty_target_field(self, tmp_tickets):
+        """Empty related_paths list is retained as the target frontmatter field."""
         resp = _execute_create(
             fields={
                 "title": "Simple fix",
                 "problem": "Something is broken",
-                "key_file_paths": [],
+                "related_paths": [],
             },
             session_id="test-session",
             request_origin="user",
             tickets_dir=tmp_tickets,
         )
-        assert resp.state == "ok_create"
+        assert resp.state == "ok"
 
         ticket = parse_ticket(Path(resp.data["ticket_path"]))
         assert ticket is not None
-        assert "key_file_paths" not in ticket.frontmatter
+        assert ticket.frontmatter["related_paths"] == []
 
 
 class TestDedupPrefersPersistedField:
-    """C-002: dedup scan reads persisted key_file_paths over regex extraction."""
+    """Dedup scan reads persisted related_paths from target frontmatter."""
 
-    def test_dedup_reads_persisted_key_file_paths(self, tmp_tickets):
-        """Dedup scan uses persisted key_file_paths from YAML, not regex."""
+    def test_dedup_reads_persisted_related_paths(self, tmp_tickets):
+        """Dedup scan uses persisted related_paths from YAML, not regex."""
         from scripts.ticket_engine_core import engine_plan
 
         today = datetime.now(UTC)
@@ -84,7 +80,7 @@ class TestDedupPrefersPersistedField:
         today_compact = today_str.replace("-", "")
         created_at = today.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        # Create a ticket with key_file_paths persisted in YAML.
+        # Create a ticket with related_paths persisted in YAML.
         make_ticket(
             tmp_tickets,
             f"{today_str}-auth.md",
@@ -93,17 +89,17 @@ class TestDedupPrefersPersistedField:
             created_at=created_at,
             problem="Auth times out.",
             title="Fix auth bug",
-            extra_yaml="key_file_paths: [handler.py, auth/config.py]\n        ",
+            related_paths=["handler.py", "auth/config.py"],
         )
 
-        # Try to create a duplicate with matching key_file_paths.
+        # Try to create a duplicate with matching related_paths.
         resp = engine_plan(
             intent="create",
             fields={
                 "title": "Fix auth bug again",
                 "problem": "Auth times out.",
                 "priority": "high",
-                "key_file_paths": ["auth/config.py", "handler.py"],
+                "related_paths": ["auth/config.py", "handler.py"],
             },
             session_id="test-session",
             request_origin="user",
@@ -111,8 +107,8 @@ class TestDedupPrefersPersistedField:
         )
         assert resp.state == "duplicate_candidate"
 
-    def test_dedup_falls_back_to_regex_without_persisted_field(self, tmp_tickets):
-        """Pre-existing tickets without key_file_paths YAML still work via regex."""
+    def test_dedup_uses_empty_related_paths_without_regex_fallback(self, tmp_tickets):
+        """Target dedup does not infer paths from markdown tables."""
         from scripts.ticket_engine_core import engine_plan
 
         today = datetime.now(UTC)
@@ -120,7 +116,8 @@ class TestDedupPrefersPersistedField:
         today_compact = today_str.replace("-", "")
         created_at = today.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        # Ticket WITHOUT key_file_paths in YAML — has Key Files markdown table.
+        # Ticket WITHOUT related_paths values — has a Key Files markdown table,
+        # but target dedup reads only frontmatter related_paths.
         make_ticket(
             tmp_tickets,
             f"{today_str}-auth.md",
@@ -138,14 +135,13 @@ class TestDedupPrefersPersistedField:
                 "title": "Fix auth bug again",
                 "problem": "Auth times out.",
                 "priority": "high",
-                "key_file_paths": ["test.py"],
+                "related_paths": ["test.py"],
             },
             session_id="test-session",
             request_origin="user",
             tickets_dir=tmp_tickets,
         )
-        # Regex fallback extracts "test.py" from Key Files table.
-        assert resp.state == "duplicate_candidate"
+        assert resp.state == "ok"
 
 
 class TestDedupOverrideBinding:

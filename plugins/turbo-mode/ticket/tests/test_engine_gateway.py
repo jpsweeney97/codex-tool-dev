@@ -220,7 +220,7 @@ def test_gateway_autonomous_create_writes_ticket_without_target_fingerprint(
         "title": "Add retry to publisher",
         "problem": "Publisher drops messages on transient broker errors.",
         "priority": "high",
-        "key_file_paths": ["publisher.py"],
+        "related_paths": ["publisher.py"],
     }
     candidate = CandidateMutation(
         ticket_id=None,
@@ -253,12 +253,12 @@ def test_gateway_autonomous_create_writes_ticket_without_target_fingerprint(
         pending_summary=PendingSummaryStore(project_root),
     )
 
-    assert response.state == "ok_create"
+    assert response.state == "ok"
     created = list(tmp_tickets.glob("*.md"))
     assert len(created) == 1
     ticket_text = created[0].read_text(encoding="utf-8")
     assert "Add retry to publisher" in ticket_text
-    assert "auto-create" in ticket_text
+    assert "| codex | Created ticket from candidate evidence." in ticket_text
     events = _events(project_root)
     assert [event["status"] for event in events] == [
         "pending",
@@ -284,11 +284,11 @@ def test_gateway_applies_update_records_events_and_writes_change_history(tmp_tic
         pending_summary=PendingSummaryStore(project_root),
     )
 
-    assert response.state == "ok_update"
+    assert response.state == "ok"
     text = ticket_path.read_text(encoding="utf-8")
     assert "priority: low" in text
     assert "## Change History" in text
-    assert "auto-update" in text
+    assert "| codex | Updated ticket from candidate evidence." in text
     events = _events(project_root)
     assert [event["status"] for event in events] == [
         "pending",
@@ -334,7 +334,7 @@ def test_gateway_replay_after_summary_recorded_does_not_rewrite_ticket(
         decision=decision,
         pending_summary=store,
     )
-    assert first.state == "ok_update"
+    assert first.state == "ok"
     assert (
         store.append_event(
             valid_attempt_event(
@@ -366,7 +366,7 @@ def test_gateway_replay_after_summary_recorded_does_not_rewrite_ticket(
     assert replay.data["recovery_state"] == "healthy"
     assert ticket_path.read_text(encoding="utf-8") == before_text
     assert _events(project_root) == before_events
-    assert before_text.count("auto-update") == 1
+    assert before_text.count("Updated ticket from candidate evidence.") == 1
 
 
 def test_gateway_retry_uses_original_attempt_timestamp_for_change_history_dedupe(
@@ -375,7 +375,7 @@ def test_gateway_retry_uses_original_attempt_timestamp_for_change_history_dedupe
     project_root = tmp_tickets.parent.parent
     _declare_ignored_workspace(project_root)
     ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
-    original_entry = "- 2026-05-27T12:00:00Z | auto-update | Automatic Ticket update applied."
+    original_entry = "- 2026-05-27T12:00:00Z | codex | Updated ticket from candidate evidence."
     ticket_text = ticket_path.read_text(encoding="utf-8").rstrip()
     ticket_path.write_text(
         f"{ticket_text}\n\n## Change History\n{original_entry}\n",
@@ -408,7 +408,7 @@ def test_gateway_retry_uses_original_attempt_timestamp_for_change_history_dedupe
         pending_summary=store,
     )
 
-    assert response.state == "ok_update"
+    assert response.state == "ok"
     text = ticket_path.read_text(encoding="utf-8")
     assert "priority: low" in text
     assert text.count(original_entry) == 1
@@ -434,7 +434,7 @@ def test_gateway_write_lock_clears_dead_pid_lock_and_proceeds(tmp_tickets: Path)
         pending_summary=PendingSummaryStore(project_root),
     )
 
-    assert response.state == "ok_update"
+    assert response.state == "ok"
     assert not lock_path.exists()
 
 
@@ -474,7 +474,7 @@ def test_concurrent_same_ticket_gateway_calls_serialize_and_second_sees_stale_fi
     ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
     pre = target_fingerprint(ticket_path) or ""
     first_mutation = _mutation(tmp_tickets, ticket_path, fields={"priority": "low"})
-    second_mutation = _mutation(tmp_tickets, ticket_path, fields={"priority": "medium"})
+    second_mutation = _mutation(tmp_tickets, ticket_path, fields={"priority": "normal"})
     first_decision = _decision_for(
         ticket_id="T-20260527-01",
         fields={"priority": "low"},
@@ -483,7 +483,7 @@ def test_concurrent_same_ticket_gateway_calls_serialize_and_second_sees_stale_fi
     )
     second_decision = _decision_for(
         ticket_id="T-20260527-01",
-        fields={"priority": "medium"},
+        fields={"priority": "normal"},
         target_fp=pre,
         turn_id="turn-second",
     )
@@ -516,7 +516,7 @@ def test_concurrent_same_ticket_gateway_calls_serialize_and_second_sees_stale_fi
                 encoding="utf-8",
             )
             return EngineResponse(
-                "ok_update",
+                "ok",
                 "Updated.",
                 data={"ticket_path": str(ticket_path)},
             )
@@ -560,7 +560,7 @@ def test_concurrent_same_ticket_gateway_calls_serialize_and_second_sees_stale_fi
     assert not second_thread.is_alive()
     assert isinstance(responses["first"], EngineResponse)
     assert isinstance(responses["second"], EngineResponse)
-    assert responses["first"].state == "ok_update"
+    assert responses["first"].state == "ok"
     assert responses["second"].state == "preflight_failed"
     assert responses["second"].error_code == "stale_plan"
     assert dispatch_priorities == ["low"]
@@ -570,12 +570,11 @@ def test_concurrent_same_ticket_gateway_calls_serialize_and_second_sees_stale_fi
 def test_gateway_autonomous_create_stops_at_duplicate_candidate(tmp_tickets: Path) -> None:
     project_root = tmp_tickets.parent.parent
     _declare_ignored_workspace(project_root)
-    today = datetime.now(UTC).date().isoformat()
+    today = datetime.now(UTC).strftime("%Y%m%d")
     make_ticket(
         tmp_tickets,
         "existing.md",
-        id="T-20260527-01",
-        date=today,
+        id=f"T-{today}-01",
         title="Fix auth bug",
         problem="Auth times out.",
     )
@@ -583,7 +582,6 @@ def test_gateway_autonomous_create_stops_at_duplicate_candidate(tmp_tickets: Pat
         "title": "Fix auth bug",
         "problem": "Auth times out.",
         "priority": "high",
-        "key_file_paths": ["test.py"],
     }
     candidate = CandidateMutation(
         ticket_id=None,
@@ -756,7 +754,7 @@ def test_gateway_treats_success_without_ticket_path_as_failed_mutation(
     monkeypatch.setattr(
         gateway,
         "_execute_dispatch",
-        lambda **_kwargs: EngineResponse("ok_update", "Updated without path", data={}),
+        lambda **_kwargs: EngineResponse("ok", "Updated without path", data={}),
     )
 
     response = apply_autonomous_mutation(

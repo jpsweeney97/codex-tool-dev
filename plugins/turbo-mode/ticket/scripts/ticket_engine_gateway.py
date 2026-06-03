@@ -18,10 +18,7 @@ from scripts.ticket_autonomy_runtime import (
     RuntimeDecisionKind,
     map_candidate_to_engine,
 )
-from scripts.ticket_change_history import (
-    ChangeHistoryEntry,
-    ChangeHistoryLabel,
-)
+from scripts.ticket_change_history import ChangeHistoryEntry
 from scripts.ticket_dedup import target_fingerprint as compute_target_fingerprint
 from scripts.ticket_engine_core import (
     EngineResponse,
@@ -409,18 +406,18 @@ def _execute_dispatch(
     return _policy_blocked(f"Unsupported dispatch action: {dispatch.action!r}")
 
 
-def _change_history_label(action: str) -> ChangeHistoryLabel:
+def _change_history_reason(action: str) -> str:
     if action == "create":
-        return ChangeHistoryLabel.AUTO_CREATE
+        return "Created ticket from candidate evidence."
     if action == "blocker_edit":
-        return ChangeHistoryLabel.AUTO_BLOCKER
+        return "Updated blocker details from candidate evidence."
     if action in {"done", "wontfix"}:
-        return ChangeHistoryLabel.AUTO_CLOSE
+        return f"Closed ticket as {action} from candidate evidence."
     if action == "reopen":
-        return ChangeHistoryLabel.AUTO_REOPEN
+        return "Reopened ticket from candidate evidence."
     if action == "correction":
-        return ChangeHistoryLabel.CORRECTION
-    return ChangeHistoryLabel.AUTO_UPDATE
+        return "Corrected ticket from candidate evidence."
+    return "Updated ticket from candidate evidence."
 
 
 def _mutation_attempt_timestamp(
@@ -443,8 +440,8 @@ def _mutation_attempt_timestamp(
 def _change_history_entry(action: str, *, timestamp: str | None = None) -> ChangeHistoryEntry:
     return ChangeHistoryEntry(
         timestamp=timestamp or _now_z(),
-        label=_change_history_label(action),
-        reason=f"Automatic Ticket {action} applied.",
+        actor="codex",
+        reason=_change_history_reason(action),
     )
 
 
@@ -456,7 +453,7 @@ def _validate_autonomous_create_dedup(
     if mutation.action != "create":
         return None
     fields = dict(mutation.fields)
-    fields.setdefault("priority", "medium")
+    fields.setdefault("priority", "normal")
     plan_response = _plan_create(fields, thread_id, "agent", mutation.tickets_dir)
     if plan_response.state == "ok":
         return None
@@ -466,13 +463,7 @@ def _validate_autonomous_create_dedup(
 
 
 def _response_ok(response: EngineResponse) -> bool:
-    return response.state in {
-        "ok_create",
-        "ok_update",
-        "ok_close",
-        "ok_close_archived",
-        "ok_reopen",
-    }
+    return response.state == "ok"
 
 
 def apply_autonomous_mutation(

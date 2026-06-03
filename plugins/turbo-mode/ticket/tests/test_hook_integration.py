@@ -124,7 +124,7 @@ class TestFullCreateFlow:
             "fields": {
                 "title": "Integration test ticket",
                 "problem": problem,
-                "priority": "medium",
+                "priority": "normal",
             },
             "tickets_dir": str(tickets_dir),
             "classify_intent": "create",
@@ -147,7 +147,7 @@ class TestFullCreateFlow:
         assert injected["session_id"] == "integration-sess"
         assert injected["hook_request_origin"] == "user"
 
-        # Step 2: Run user entrypoint subprocess — verify ok_create.
+        # Step 2: Run user entrypoint subprocess — verify ok.
         result = subprocess.run(
             [sys.executable, USER_ENTRYPOINT, "execute", str(payload_file)],
             capture_output=True,
@@ -157,7 +157,7 @@ class TestFullCreateFlow:
         )
         assert result.returncode == 0, f"Entrypoint failed: {result.stderr}"
         resp = json.loads(result.stdout)
-        assert resp["state"] == "ok_create"
+        assert resp["state"] == "ok"
 
         # Step 3: Verify the ticket exists and future runtime does not create `.audit`.
         ticket_path = Path(resp["data"]["ticket_path"])
@@ -259,7 +259,7 @@ class TestPatch1Integration:
             "fields": {
                 "title": "Patch 1 Integration Test",
                 "problem": problem,
-                "priority": "medium",
+                "priority": "normal",
             },
             "classify_intent": "create",
             "classify_confidence": 0.95,

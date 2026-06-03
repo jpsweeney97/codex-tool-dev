@@ -1,4 +1,4 @@
-"""Tests for blocker resolution with archived tickets (C-003)."""
+"""Tests for blocker resolution with target tickets."""
 
 from __future__ import annotations
 
@@ -46,31 +46,22 @@ class TestClassifyBlockers:
         assert unresolved == ["T-20260301-01"]
 
 
-class TestPreflightCloseWithArchivedBlocker:
-    """Integration test: close action with blocker in closed-tickets/."""
+class TestPreflightCloseWithBlocker:
+    """Integration test: close action with target blocker references."""
 
-    def test_preflight_close_with_archived_blocker(self, tmp_tickets):
-        """Blocker in closed-tickets/ (done) should not cause dependency_blocked.
-
-        Before fix: list_tickets(tickets_dir) misses closed-tickets/ subdir,
-        so the blocker appears "missing" and preflight returns dependency_blocked.
-        After fix: _list_tickets_with_closed includes archived tickets.
-        """
-        # Create a done blocker in closed-tickets/ subdirectory.
-        closed_dir = tmp_tickets / "closed-tickets"
-        closed_dir.mkdir(parents=True, exist_ok=True)
+    def test_preflight_close_with_done_blocker(self, tmp_tickets):
+        """Terminal blocker in the target active directory is resolved."""
         make_ticket(
-            closed_dir,
-            "2026-03-01-blocker.md",
+            tmp_tickets,
+            "T-20260301-01.md",
             id="T-20260301-01",
             status="done",
             title="Blocker task",
         )
 
-        # Create a ticket blocked by the archived one.
         make_ticket(
             tmp_tickets,
-            "2026-03-10-blocked.md",
+            "T-20260310-01.md",
             id="T-20260310-01",
             status="in_progress",
             blocked_by=["T-20260301-01"],
@@ -89,31 +80,26 @@ class TestPreflightCloseWithArchivedBlocker:
             tickets_dir=tmp_tickets,
             hook_injected=True,
         )
-        # After fix: blocker is found in closed-tickets/ and is terminal.
         assert resp.state != "dependency_blocked", (
-            f"Archived done blocker should not cause dependency_blocked, "
+            f"Terminal blocker should not cause dependency_blocked, "
             f"got state={resp.state!r}, message={resp.message!r}"
         )
 
-    def test_closed_dir_nonterminal_blocker_is_unresolved(self, tmp_tickets):
-        """Closed-dir ticket with non-terminal status is unresolved, not missing."""
-        # A ticket physically in closed-tickets/ but with status=in_progress
-        closed_dir = tmp_tickets / "closed-tickets"
-        closed_dir.mkdir(parents=True, exist_ok=True)
+    def test_nonterminal_blocker_is_unresolved(self, tmp_tickets):
+        """Non-terminal blocker is unresolved, not missing."""
         make_ticket(
-            closed_dir,
-            "2026-03-01-nonterminal.md",
+            tmp_tickets,
+            "T-20260301-99.md",
             id="T-20260301-99",
             status="in_progress",
             title="Not actually done",
         )
 
-        # A ticket blocked by that non-terminal "closed" ticket
         make_ticket(
             tmp_tickets,
-            "2026-03-10-blocked.md",
+            "T-20260310-01.md",
             id="T-20260310-01",
-            status="blocked",
+            status="in_progress",
             blocked_by=["T-20260301-99"],
             title="Blocked task",
         )

@@ -22,7 +22,11 @@ class TestDashboard:
         make_ticket(tmp_tickets, "t1.md", id="T-20260302-01", status="open")
         make_ticket(tmp_tickets, "t2.md", id="T-20260302-02", status="in_progress")
         make_ticket(
-            tmp_tickets, "t3.md", id="T-20260302-03", status="blocked", blocked_by=["T-20260302-01"]
+            tmp_tickets,
+            "t3.md",
+            id="T-20260302-03",
+            status="open",
+            blocked_by=["T-20260302-01"],
         )
         make_ticket(tmp_tickets, "t4.md", id="T-20260302-04", status="done")
         return tmp_tickets
@@ -31,10 +35,10 @@ class TestDashboard:
         from scripts.ticket_triage import triage_dashboard
 
         result = triage_dashboard(populated_tickets)
-        assert result["counts"]["open"] == 1
+        assert result["counts"]["open"] == 2
         assert result["counts"]["in_progress"] == 1
-        assert result["counts"]["blocked"] == 1
-        assert result["total"] == 3  # open + in_progress + blocked (done excluded)
+        assert "blocked" not in result["counts"]
+        assert result["total"] == 3
 
     def test_empty_directory(self, tmp_tickets):
         from scripts.ticket_triage import triage_dashboard
@@ -49,12 +53,12 @@ def test_dashboard_includes_recommended_next_actions(tmp_tickets: Path) -> None:
 
     make_ticket(
         tmp_tickets,
-        "2026-04-20-critical-open.md",
+        "2026-04-20-high-open.md",
         id="T-20260420-01",
         date="2026-04-20",
         status="open",
-        priority="critical",
-        title="Critical open item",
+        priority="high",
+        title="High open item",
     )
     make_ticket(
         tmp_tickets,
@@ -68,8 +72,8 @@ def test_dashboard_includes_recommended_next_actions(tmp_tickets: Path) -> None:
 
     dashboard = triage_dashboard(tmp_tickets)
 
-    assert dashboard["priority_counts"]["critical"] == 1
-    assert dashboard["next_actions"][0]["action"] == "start_or_assign_critical"
+    assert dashboard["priority_counts"]["high"] == 2
+    assert dashboard["next_actions"][0]["action"] == "start_or_assign_high"
     assert dashboard["next_actions"][0]["ticket_id"] == "T-20260420-01"
 
 
@@ -240,29 +244,28 @@ def test_runtime_probe_status_blocks_missing_manifest(tmp_path: Path) -> None:
     assert "cannot read hooks.json" in status["manifest_error"]
 
 
-def test_dashboard_next_actions_exclude_needs_refinement_placeholders(
+def test_dashboard_next_actions_include_target_high_open_tickets(
     tmp_tickets: Path,
 ) -> None:
     from scripts.ticket_triage import triage_dashboard
 
     make_ticket(
         tmp_tickets,
-        "2026-05-18-critical-placeholder.md",
+        "2026-05-18-normal-open.md",
         id="T-20260518-01",
         date="2026-05-18",
         status="open",
-        priority="critical",
-        title="Placeholder capture",
-        extra_yaml="refinement_status: needs_refinement\n        ",
+        priority="normal",
+        title="Normal work",
     )
     make_ticket(
         tmp_tickets,
-        "2026-05-18-ready-critical.md",
+        "2026-05-18-ready-high.md",
         id="T-20260518-02",
         date="2026-05-18",
         status="open",
-        priority="critical",
-        title="Ready critical work",
+        priority="high",
+        title="Ready high-priority work",
     )
 
     dashboard = triage_dashboard(tmp_tickets)
@@ -287,7 +290,14 @@ class TestStaleDetection:
     def test_recent_ticket_not_stale(self, tmp_tickets):
         """Ticket from today -> not stale."""
         today = datetime.now(UTC).strftime("%Y-%m-%d")
-        make_ticket(tmp_tickets, "new.md", id="T-20260302-01", date=today, status="open")
+        today_compact = today.replace("-", "")
+        make_ticket(
+            tmp_tickets,
+            "new.md",
+            id=f"T-{today_compact}-01",
+            date=today,
+            status="open",
+        )
         from scripts.ticket_triage import triage_dashboard
 
         result = triage_dashboard(tmp_tickets)
@@ -313,14 +323,14 @@ class TestBlockedChain:
             tmp_tickets,
             "mid.md",
             id="T-20260302-02",
-            status="blocked",
+            status="open",
             blocked_by=["T-20260302-01"],
         )
         make_ticket(
             tmp_tickets,
             "leaf.md",
             id="T-20260302-03",
-            status="blocked",
+            status="in_progress",
             blocked_by=["T-20260302-02"],
         )
         from scripts.ticket_triage import triage_dashboard
@@ -337,7 +347,7 @@ class TestBlockedChain:
             tmp_tickets,
             "blocked.md",
             id="T-20260302-01",
-            status="blocked",
+            status="open",
             blocked_by=["T-MISSING-01"],
         )
         from scripts.ticket_triage import triage_dashboard
@@ -348,10 +358,18 @@ class TestBlockedChain:
     def test_circular_dependency_no_infinite_loop(self, tmp_tickets):
         """Circular blocked_by chain -> visited set prevents infinite loop."""
         make_ticket(
-            tmp_tickets, "a.md", id="T-20260302-01", status="blocked", blocked_by=["T-20260302-02"]
+            tmp_tickets,
+            "a.md",
+            id="T-20260302-01",
+            status="open",
+            blocked_by=["T-20260302-02"],
         )
         make_ticket(
-            tmp_tickets, "b.md", id="T-20260302-02", status="blocked", blocked_by=["T-20260302-01"]
+            tmp_tickets,
+            "b.md",
+            id="T-20260302-02",
+            status="in_progress",
+            blocked_by=["T-20260302-01"],
         )
         from scripts.ticket_triage import triage_dashboard
 
@@ -409,9 +427,9 @@ class TestAuditReport:
         # Session 1: 2 creates, 1 update.
         s1_file = audit_dir / "session-1.jsonl"
         entries = [
-            {"action": "create", "result": "ok_create", "session_id": "session-1"},
-            {"action": "create", "result": "ok_create", "session_id": "session-1"},
-            {"action": "update", "result": "ok_update", "session_id": "session-1"},
+            {"action": "create", "result": "ok", "session_id": "session-1"},
+            {"action": "create", "result": "ok", "session_id": "session-1"},
+            {"action": "update", "result": "ok", "session_id": "session-1"},
         ]
         s1_file.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
 
@@ -441,7 +459,7 @@ class TestAuditReport:
         from scripts.ticket_triage import triage_audit_report
 
         result = triage_audit_report(audit_env)
-        assert result["by_result"]["ok_create"] == 2
+        assert result["by_result"]["ok"] == 3
         assert result["by_result"]["policy_blocked"] == 1
 
     def test_session_count(self, audit_env):
@@ -470,7 +488,7 @@ class TestAuditReport:
             json.dumps(
                 {
                     "action": "create",
-                    "result": "ok_create",
+                    "result": "ok",
                     "session_id": "boundary-session",
                 }
             )
@@ -491,10 +509,10 @@ class TestAuditReport:
         audit_dir.mkdir(parents=True)
         s_file = audit_dir / "corrupt-session.jsonl"
         s_file.write_text(
-            json.dumps({"action": "create", "result": "ok_create"})
+            json.dumps({"action": "create", "result": "ok"})
             + "\n"
             + "NOT VALID JSON\n"
-            + json.dumps({"action": "update", "result": "ok_update"})
+            + json.dumps({"action": "update", "result": "ok"})
             + "\n"
         )
         result = triage_audit_report(tmp_tickets)
@@ -558,8 +576,8 @@ class TestOrphanDetection:
         handoffs_dir.mkdir()
         return tickets_dir, handoffs_dir
 
-    def test_uid_match_by_session(self, orphan_env):
-        """Handoff matching ticket's source.session -> uid_match."""
+    def test_session_text_without_ticket_id_is_orphaned(self, orphan_env):
+        """Target tickets do not expose source.session for uid matching."""
         tickets_dir, handoffs_dir = orphan_env
         make_ticket(tickets_dir, "t1.md", id="T-20260302-01", session="session-abc")
         (handoffs_dir / "handoff-1.md").write_text(
@@ -568,9 +586,8 @@ class TestOrphanDetection:
         from scripts.ticket_triage import triage_orphan_detection
 
         result = triage_orphan_detection(tickets_dir, handoffs_dir)
-        assert len(result["matched"]) == 1
-        assert result["matched"][0]["match_type"] == "uid_match"
-        assert result["matched"][0]["matched_ticket"] == "T-20260302-01"
+        assert result["matched"] == []
+        assert len(result["orphaned"]) == 1
 
     def test_id_ref_match(self, orphan_env):
         """Handoff mentioning ticket ID -> id_ref match."""
@@ -600,8 +617,8 @@ class TestOrphanDetection:
         result = triage_orphan_detection(tmp_tickets, Path("/nonexistent"))
         assert result["total_items"] == 0
 
-    def test_uid_match_takes_priority_over_id_ref(self, orphan_env):
-        """uid_match is checked before id_ref -- first match wins."""
+    def test_id_ref_is_the_target_match_strategy(self, orphan_env):
+        """Ticket ID references match target tickets."""
         tickets_dir, handoffs_dir = orphan_env
         make_ticket(tickets_dir, "t1.md", id="T-20260302-01", session="session-xyz")
         (handoffs_dir / "handoff-1.md").write_text(
@@ -611,7 +628,7 @@ class TestOrphanDetection:
 
         result = triage_orphan_detection(tickets_dir, handoffs_dir)
         assert len(result["matched"]) == 1
-        assert result["matched"][0]["match_type"] == "uid_match"
+        assert result["matched"][0]["match_type"] == "id_ref"
 
 
 TRIAGE_SCRIPT = Path(__file__).parent.parent / "scripts" / "ticket_triage.py"

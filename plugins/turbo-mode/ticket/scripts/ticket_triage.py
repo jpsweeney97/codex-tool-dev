@@ -409,8 +409,8 @@ def triage_dashboard(tickets_dir: Path) -> dict[str, Any]:
     tickets = [t for t in all_tickets if t.status not in _TERMINAL_STATUSES]
     ticket_map = {t.id: t for t in tickets}
 
-    counts: dict[str, int] = {"open": 0, "in_progress": 0, "blocked": 0}
-    priority_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    counts: dict[str, int] = {"open": 0, "in_progress": 0}
+    priority_counts: dict[str, int] = {"high": 0, "normal": 0, "low": 0}
     active_ticket_rows: list[dict[str, Any]] = []
     stale: list[dict[str, str]] = []
     blocked_chains: list[dict[str, Any]] = []
@@ -427,7 +427,6 @@ def triage_dashboard(tickets_dir: Path) -> dict[str, Any]:
                 "title": ticket.title,
                 "status": ticket.status,
                 "priority": ticket.priority,
-                "refinement_status": ticket.refinement_status,
                 "blocked_by": ticket.blocked_by,
                 "date": ticket.date,
             }
@@ -443,7 +442,7 @@ def triage_dashboard(tickets_dir: Path) -> dict[str, Any]:
                 }
             )
 
-        if ticket.status == "blocked" and ticket.blocked_by:
+        if ticket.blocked_by:
             root_blockers = _find_root_blockers(ticket, ticket_map)
             blocked_chains.append(
                 {
@@ -473,20 +472,17 @@ def triage_dashboard(tickets_dir: Path) -> dict[str, Any]:
 def _next_actions(active_ticket_rows: list[dict[str, Any]]) -> list[dict[str, str]]:
     """Recommend next actions from dashboard rows only."""
     actions: list[dict[str, str]] = []
-    executable_rows = [
-        row for row in active_ticket_rows if row.get("refinement_status") != "needs_refinement"
-    ]
-    for row in executable_rows:
-        if row["priority"] == "critical" and row["status"] == "open":
+    for row in active_ticket_rows:
+        if row["priority"] == "high" and row["status"] == "open":
             actions.append(
                 {
-                    "action": "start_or_assign_critical",
+                    "action": "start_or_assign_high",
                     "ticket_id": row["id"],
-                    "reason": "Critical ticket is open and not in progress",
+                    "reason": "High-priority ticket is open and not in progress",
                 }
             )
-    for row in executable_rows:
-        if row["status"] == "blocked" and row["blocked_by"]:
+    for row in active_ticket_rows:
+        if row["blocked_by"]:
             actions.append(
                 {
                     "action": "resolve_blocker",
@@ -494,7 +490,7 @@ def _next_actions(active_ticket_rows: list[dict[str, Any]]) -> list[dict[str, st
                     "reason": "Blocked ticket has unresolved blockers",
                 }
             )
-    for row in executable_rows:
+    for row in active_ticket_rows:
         if row["status"] == "in_progress":
             actions.append(
                 {
@@ -510,18 +506,13 @@ def _next_actions(active_ticket_rows: list[dict[str, Any]]) -> list[dict[str, st
 
 
 def _suggested_capture_prompts(active_ticket_rows: list[dict[str, Any]]) -> list[dict[str, str]]:
-    """Return capture prompts for placeholders that need more definition."""
-    prompts: list[dict[str, str]] = []
-    for row in active_ticket_rows:
-        if row.get("refinement_status") != "needs_refinement":
-            continue
-        prompts.append(
-            {
-                "ticket_id": row["id"],
-                "prompt": f"Use capture-ticket to refine {row['id']}: {row['title']}",
-            }
-        )
-    return prompts
+    """Return capture prompts for target tickets.
+
+    Target tickets do not carry refinement metadata, so normal review does not
+    infer capture follow-up prompts from frontmatter.
+    """
+    del active_ticket_rows
+    return []
 
 
 def _is_stale(ticket: Any, cutoff_days: int = 7) -> bool:
@@ -644,21 +635,14 @@ def triage_orphan_detection(
 ) -> dict[str, Any]:
     """Detect orphaned handoff items not linked to any ticket.
 
-    Three matching strategies (ported from handoff triage.py):
-    1. uid_match: handoff text contains ticket's source.session
-    2. id_ref: handoff text contains a ticket ID
-    3. manual_review: no deterministic match
+    Matching strategies:
+    1. id_ref: handoff text contains a ticket ID
+    2. manual_review: no deterministic match
     """
     from scripts.ticket_read import list_tickets
 
     tickets = list_tickets(tickets_dir, include_closed=True)
     ticket_ids = {t.id for t in tickets}
-    session_map: dict[str, str] = {}  # session_id -> ticket_id
-    for t in tickets:
-        sid = t.source.get("session", "")
-        if sid:
-            session_map[sid] = t.id
-
     matched: list[dict[str, Any]] = []
     orphaned: list[dict[str, Any]] = []
     read_errors: list[str] = []
@@ -681,17 +665,7 @@ def triage_orphan_detection(
         item: dict[str, str] = {"file": hf.name, "path": str(hf)}
         match_found = False
 
-        # Strategy 1: uid_match -- session ID in handoff text.
-        for sid, tid in session_map.items():
-            if sid in text:
-                matched.append({"match_type": "uid_match", "matched_ticket": tid, "item": item})
-                match_found = True
-                break
-
-        if match_found:
-            continue
-
-        # Strategy 2: id_ref -- ticket ID referenced in handoff text.
+        # Strategy 1: id_ref -- ticket ID referenced in handoff text.
         for pattern in _TICKET_ID_PATTERNS:
             refs = pattern.findall(text)
             for ref in refs:
@@ -705,7 +679,7 @@ def triage_orphan_detection(
         if match_found:
             continue
 
-        # Strategy 3: manual_review -- no deterministic match.
+        # Strategy 2: manual_review -- no deterministic match.
         orphaned.append({"match_type": "manual_review", "matched_ticket": None, "item": item})
 
     return {

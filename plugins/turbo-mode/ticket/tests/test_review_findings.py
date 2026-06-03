@@ -25,26 +25,25 @@ from scripts.ticket_engine_core import (
     engine_execute,
     engine_plan,
 )
-from scripts.ticket_read import find_ticket_by_id
+from scripts.ticket_parse import parse_ticket
 from scripts.ticket_review import hygiene_candidates_from_review, review_payload
 from scripts.ticket_validate import validate_fields
 
 from tests.support.builders import make_ticket
 
 # ---------------------------------------------------------------------------
-# F1: Reopening an archived ticket must move it back to active directory
+# F1: Close/reopen stays in active target ticket records
 # ---------------------------------------------------------------------------
 
 
 class TestF1ReopenUnarchive:
-    """Repro: create -> close(archive=True) -> reopen should move ticket back."""
+    """Target records no longer archive closed tickets to closed-tickets/."""
 
-    def test_reopen_archived_ticket_moves_to_active_dir(self, tmp_tickets: Path) -> None:
-        # Create and close with archive.
+    def test_close_then_reopen_updates_active_ticket_in_place(self, tmp_tickets: Path) -> None:
         resp = engine_execute(
             action="create",
             ticket_id=None,
-            fields={"title": "Archive test", "problem": "Will be archived"},
+            fields={"title": "Reopen test", "problem": "Will remain active"},
             session_id="f1-sess",
             request_origin="user",
             dedup_override=False,
@@ -54,9 +53,9 @@ class TestF1ReopenUnarchive:
             hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp("Will be archived", []),
+            dedup_fingerprint=compute_dedup_fp("Will remain active", []),
         )
-        assert resp.state == "ok_create"
+        assert resp.state == "ok"
         ticket_id = resp.ticket_id
         ticket_path = Path(resp.data["ticket_path"])
 
@@ -64,7 +63,7 @@ class TestF1ReopenUnarchive:
         close_resp = engine_execute(
             action="close",
             ticket_id=ticket_id,
-            fields={"resolution": "wontfix", "archive": True},
+            fields={"resolution": "wontfix"},
             session_id="f1-sess",
             request_origin="user",
             dedup_override=False,
@@ -76,14 +75,16 @@ class TestF1ReopenUnarchive:
             classify_intent="close",
             classify_confidence=0.95,
         )
-        assert close_resp.state == "ok_close_archived"
-        archived_path = Path(close_resp.data["ticket_path"])
-        assert archived_path.parent.name == "closed-tickets"
-        assert archived_path.exists()
-        assert not ticket_path.exists()
+        assert close_resp.state == "ok"
+        closed_path = Path(close_resp.data["ticket_path"])
+        assert closed_path == ticket_path
+        assert closed_path.parent == tmp_tickets
+        assert closed_path.exists()
+        closed_ticket = parse_ticket(closed_path)
+        assert closed_ticket is not None
+        assert closed_ticket.status == "wontfix"
 
-        # Reopen: should move back to active directory.
-        reopen_fp = compute_target_fp(archived_path)
+        reopen_fp = compute_target_fp(closed_path)
         reopen_resp = engine_execute(
             action="reopen",
             ticket_id=ticket_id,
@@ -99,26 +100,24 @@ class TestF1ReopenUnarchive:
             classify_intent="reopen",
             classify_confidence=0.95,
         )
-        assert reopen_resp.state == "ok_reopen"
+        assert reopen_resp.state == "ok"
         reopened_path = Path(reopen_resp.data["ticket_path"])
 
-        # Ticket must be in active directory, not closed-tickets/.
         assert reopened_path.parent == tmp_tickets
         assert reopened_path.exists()
-        assert not archived_path.exists()
+        assert reopened_path == ticket_path
 
-        # Status must be open.
-        ticket = find_ticket_by_id(tmp_tickets, ticket_id, include_closed=False)
+        ticket = parse_ticket(reopened_path)
         assert ticket is not None
         assert ticket.status == "open"
 
-    def test_reopen_rename_failure_preserves_closed_status(self, tmp_tickets: Path) -> None:
-        """If un-archive rename fails, ticket stays closed with original status."""
+    def test_close_archive_field_is_rejected(self, tmp_tickets: Path) -> None:
+        """archive is removed from the target write vocabulary."""
         resp = engine_execute(
             action="create",
             ticket_id=None,
-            fields={"title": "Rename fail", "problem": "Will fail rename"},
-            session_id="f1-rename-sess",
+            fields={"title": "Archive rejected", "problem": "Archive flag should fail"},
+            session_id="f1-archive-sess",
             request_origin="user",
             dedup_override=False,
             dependency_override=False,
@@ -127,9 +126,9 @@ class TestF1ReopenUnarchive:
             hook_request_origin="user",
             classify_intent="create",
             classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp("Will fail rename", []),
+            dedup_fingerprint=compute_dedup_fp("Archive flag should fail", []),
         )
-        assert resp.state == "ok_create"
+        assert resp.state == "ok"
         ticket_id = resp.ticket_id
         ticket_path = Path(resp.data["ticket_path"])
 
@@ -138,7 +137,7 @@ class TestF1ReopenUnarchive:
             action="close",
             ticket_id=ticket_id,
             fields={"resolution": "wontfix", "archive": True},
-            session_id="f1-rename-sess",
+            session_id="f1-archive-sess",
             request_origin="user",
             dedup_override=False,
             dependency_override=False,
@@ -149,214 +148,8 @@ class TestF1ReopenUnarchive:
             classify_intent="close",
             classify_confidence=0.95,
         )
-        assert close_resp.state == "ok_close_archived"
-        archived_path = Path(close_resp.data["ticket_path"])
-        original_text = archived_path.read_text(encoding="utf-8")
-
-        # Force rename to fail.
-        reopen_fp = compute_target_fp(archived_path)
-        real_rename = Path.rename
-
-        def failing_rename(self_path: Path, target: Path) -> Path:
-            if self_path == archived_path:
-                raise OSError("simulated rename failure")
-            return real_rename(self_path, target)
-
-        with patch.object(Path, "rename", failing_rename):
-            reopen_resp = engine_execute(
-                action="reopen",
-                ticket_id=ticket_id,
-                fields={"reopen_reason": "Should fail"},
-                session_id="f1-rename-sess",
-                request_origin="user",
-                dedup_override=False,
-                dependency_override=False,
-                tickets_dir=tmp_tickets,
-                target_fingerprint=reopen_fp,
-                hook_injected=True,
-                hook_request_origin="user",
-                classify_intent="reopen",
-                classify_confidence=0.95,
-            )
-
-        assert reopen_resp.state == "escalate"
-        assert reopen_resp.error_code == "io_error"
-        # Ticket must still be in closed-tickets/ with original content (not status: open).
-        assert archived_path.exists()
-        assert archived_path.read_text(encoding="utf-8") == original_text
-        assert "wontfix" in original_text  # original closed status preserved
-
-    def test_reopen_write_failure_after_rename_rolls_back(self, tmp_tickets: Path) -> None:
-        """If write_text fails after un-archive rename, ticket is moved back."""
-        resp = engine_execute(
-            action="create",
-            ticket_id=None,
-            fields={"title": "Write fail", "problem": "Will fail write"},
-            session_id="f1-write-sess",
-            request_origin="user",
-            dedup_override=False,
-            dependency_override=False,
-            tickets_dir=tmp_tickets,
-            hook_injected=True,
-            hook_request_origin="user",
-            classify_intent="create",
-            classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp("Will fail write", []),
-        )
-        assert resp.state == "ok_create"
-        ticket_id = resp.ticket_id
-        ticket_path = Path(resp.data["ticket_path"])
-
-        fp = compute_target_fp(ticket_path)
-        close_resp = engine_execute(
-            action="close",
-            ticket_id=ticket_id,
-            fields={"resolution": "wontfix", "archive": True},
-            session_id="f1-write-sess",
-            request_origin="user",
-            dedup_override=False,
-            dependency_override=False,
-            tickets_dir=tmp_tickets,
-            target_fingerprint=fp,
-            hook_injected=True,
-            hook_request_origin="user",
-            classify_intent="close",
-            classify_confidence=0.95,
-        )
-        assert close_resp.state == "ok_close_archived"
-        archived_path = Path(close_resp.data["ticket_path"])
-        original_text = archived_path.read_text(encoding="utf-8")
-
-        # Force write_text to fail on the post-rename destination.
-        reopen_fp = compute_target_fp(archived_path)
-        active_dst = tmp_tickets / archived_path.name
-        real_write_text = Path.write_text
-
-        def failing_write(
-            self_path: Path,
-            data: str,
-            encoding: str | None = None,
-            errors: str | None = None,
-            newline: str | None = None,
-        ) -> None:
-            if self_path == active_dst:
-                raise OSError("simulated write failure")
-            real_write_text(self_path, data, encoding=encoding, errors=errors, newline=newline)
-
-        with patch.object(Path, "write_text", failing_write):
-            reopen_resp = engine_execute(
-                action="reopen",
-                ticket_id=ticket_id,
-                fields={"reopen_reason": "Should fail write"},
-                session_id="f1-write-sess",
-                request_origin="user",
-                dedup_override=False,
-                dependency_override=False,
-                tickets_dir=tmp_tickets,
-                target_fingerprint=reopen_fp,
-                hook_injected=True,
-                hook_request_origin="user",
-                classify_intent="reopen",
-                classify_confidence=0.95,
-            )
-
-        assert reopen_resp.state == "escalate"
-        assert reopen_resp.error_code == "io_error"
-        # Ticket must be rolled back to closed-tickets/ with original content.
-        assert archived_path.exists()
-        assert archived_path.read_text(encoding="utf-8") == original_text
-        assert not active_dst.exists()
-
-    def test_reopen_write_and_rollback_both_fail_reports_inconsistency(
-        self, tmp_tickets: Path
-    ) -> None:
-        """If write fails and rollback rename also fails, message warns about inconsistent state."""
-        resp = engine_execute(
-            action="create",
-            ticket_id=None,
-            fields={"title": "Double fault", "problem": "Both will fail"},
-            session_id="f1-dbl-sess",
-            request_origin="user",
-            dedup_override=False,
-            dependency_override=False,
-            tickets_dir=tmp_tickets,
-            hook_injected=True,
-            hook_request_origin="user",
-            classify_intent="create",
-            classify_confidence=0.95,
-            dedup_fingerprint=compute_dedup_fp("Both will fail", []),
-        )
-        assert resp.state == "ok_create"
-        ticket_id = resp.ticket_id
-        ticket_path = Path(resp.data["ticket_path"])
-
-        fp = compute_target_fp(ticket_path)
-        close_resp = engine_execute(
-            action="close",
-            ticket_id=ticket_id,
-            fields={"resolution": "wontfix", "archive": True},
-            session_id="f1-dbl-sess",
-            request_origin="user",
-            dedup_override=False,
-            dependency_override=False,
-            tickets_dir=tmp_tickets,
-            target_fingerprint=fp,
-            hook_injected=True,
-            hook_request_origin="user",
-            classify_intent="close",
-            classify_confidence=0.95,
-        )
-        assert close_resp.state == "ok_close_archived"
-        archived_path = Path(close_resp.data["ticket_path"])
-
-        reopen_fp = compute_target_fp(archived_path)
-        active_dst = tmp_tickets / archived_path.name
-        real_write_text = Path.write_text
-        real_rename = Path.rename
-        rename_call_count = 0
-
-        def failing_write(
-            self_path: Path,
-            data: str,
-            encoding: str | None = None,
-            errors: str | None = None,
-            newline: str | None = None,
-        ) -> None:
-            if self_path == active_dst:
-                raise OSError("simulated write failure")
-            real_write_text(self_path, data, encoding=encoding, errors=errors, newline=newline)
-
-        def failing_rollback_rename(self_path: Path, target: Path) -> Path:
-            nonlocal rename_call_count
-            rename_call_count += 1
-            # First rename (un-archive) succeeds; second (rollback) fails.
-            if rename_call_count >= 2:
-                raise OSError("simulated rollback failure")
-            return real_rename(self_path, target)
-
-        with (
-            patch.object(Path, "write_text", failing_write),
-            patch.object(Path, "rename", failing_rollback_rename),
-        ):
-            reopen_resp = engine_execute(
-                action="reopen",
-                ticket_id=ticket_id,
-                fields={"reopen_reason": "Should double-fault"},
-                session_id="f1-dbl-sess",
-                request_origin="user",
-                dedup_override=False,
-                dependency_override=False,
-                tickets_dir=tmp_tickets,
-                target_fingerprint=reopen_fp,
-                hook_injected=True,
-                hook_request_origin="user",
-                classify_intent="reopen",
-                classify_confidence=0.95,
-            )
-
-        assert reopen_resp.state == "escalate"
-        assert reopen_resp.error_code == "io_error"
-        assert "ROLLBACK ALSO FAILED" in reopen_resp.message
+        assert close_resp.state == "need_fields"
+        assert close_resp.data["validation_errors"] == ["archive is not a target write field"]
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +207,7 @@ class TestF2PlanFingerprint:
         # Plan with top-level ticket_id (matches pipeline-guide.md schema).
         plan_resp = engine_plan(
             intent="update",
-            fields={"priority": "critical"},
+            fields={"priority": "high"},
             session_id="f2-sess",
             request_origin="user",
             tickets_dir=tmp_tickets,
@@ -427,7 +220,7 @@ class TestF2PlanFingerprint:
         exec_resp = engine_execute(
             action="update",
             ticket_id="T-20260302-03",
-            fields={"priority": "critical"},
+            fields={"priority": "high"},
             session_id="f2-sess",
             request_origin="user",
             dedup_override=False,
@@ -439,7 +232,7 @@ class TestF2PlanFingerprint:
             classify_intent="update",
             classify_confidence=0.95,
         )
-        assert exec_resp.state == "ok_update"
+        assert exec_resp.state == "ok"
 
     def test_plan_via_entrypoint_payload(self, tmp_tickets: Path) -> None:
         """PlanInput.from_payload extracts top-level ticket_id."""
@@ -449,7 +242,7 @@ class TestF2PlanFingerprint:
             "action": "update",
             "ticket_id": "T-20260302-04",
             "session_id": "f2-sess",
-            "fields": {"priority": "critical"},
+            "fields": {"priority": "high"},
         }
         inp = PlanInput.from_payload(payload)
         assert inp.ticket_id == "T-20260302-04"
@@ -468,7 +261,7 @@ class TestF2PlanFingerprint:
             "args": {"ticket_id": "T-20260302-05"},
             "session_id": "",
             "request_origin": "user",
-            "fields": {"priority": "critical"},
+            "fields": {"priority": "high"},
         }
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -610,7 +403,7 @@ class TestF3bAuditResultFailClose:
                 classify_confidence=0.95,
                 dedup_fingerprint=compute_dedup_fp("User issue", []),
             )
-        assert resp.state == "ok_create"
+        assert resp.state == "ok"
         assert call_count == 0
 
 
@@ -682,20 +475,20 @@ class TestF4ProjectRootDiscovery:
 
 
 # ---------------------------------------------------------------------------
-# F5: source dict without "type" key must return validation error, not crash
+# F5: source is not a target write field
 # ---------------------------------------------------------------------------
 
 
 class TestF5SourceValidation:
-    """Repro: source={"ref":"x"} should fail validation, not KeyError."""
+    """source metadata is no longer written into target ticket frontmatter."""
 
-    def test_source_without_type_returns_validation_error(self) -> None:
+    def test_source_without_type_returns_deprecated_field_error(self) -> None:
         errors = validate_fields({"source": {"ref": "x"}})
-        assert any("type" in e for e in errors)
+        assert errors == ["source is not a target write field"]
 
-    def test_source_with_all_required_keys_passes(self) -> None:
+    def test_source_with_all_required_keys_is_still_deprecated(self) -> None:
         errors = validate_fields({"source": {"type": "ad-hoc", "ref": "x", "session": ""}})
-        assert not errors
+        assert errors == ["source is not a target write field"]
 
     def test_create_with_bad_source_returns_need_fields(self, tmp_tickets: Path) -> None:
         """Engine should catch bad source before render_ticket crashes."""
@@ -729,7 +522,7 @@ def test_review_payload_remains_read_only_and_exports_hygiene_candidates(
     ticket_path = make_ticket(
         tmp_tickets,
         "stale.md",
-        id="T-20260527-01",
+        id="T-20260501-01",
         date="2026-05-01",
         status="open",
     )
@@ -739,7 +532,7 @@ def test_review_payload_remains_read_only_and_exports_hygiene_candidates(
     candidates = hygiene_candidates_from_review(payload)
 
     assert ticket_path.read_text(encoding="utf-8") == before
-    assert payload["stale"][0]["id"] == "T-20260527-01"
-    assert candidates["review_hygiene_findings"][0]["ticket_id"] == "T-20260527-01"
+    assert payload["stale"][0]["id"] == "T-20260501-01"
+    assert candidates["review_hygiene_findings"][0]["ticket_id"] == "T-20260501-01"
     assert candidates["review_hygiene_findings"][0]["action"] == "stale_cleanup"
     assert "approval" not in candidates["review_hygiene_findings"][0]

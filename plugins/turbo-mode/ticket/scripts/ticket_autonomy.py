@@ -38,7 +38,7 @@ from scripts.ticket_change_history import plan_change_history_migration  # noqa:
 from scripts.ticket_dedup import target_fingerprint as compute_target_fingerprint  # noqa: E402
 from scripts.ticket_engine_gateway import GatewayMutation, apply_autonomous_mutation  # noqa: E402
 from scripts.ticket_parse import parse_ticket  # noqa: E402
-from scripts.ticket_read import find_ticket_by_id  # noqa: E402
+from scripts.ticket_read import InvalidTicketState, find_ticket_by_id  # noqa: E402
 from scripts.ticket_turn_batch import (  # noqa: E402
     PENDING_SUMMARY_SCHEMA,
     PendingSummaryStore,
@@ -442,7 +442,14 @@ def _ticket_state_fingerprints(
 
     parsed_by_id: dict[str, Any] = {}
     for ticket_file in _ticket_files_for_source_context(tickets_dir):
-        ticket = parse_ticket(ticket_file)
+        try:
+            ticket = parse_ticket(ticket_file)
+        except InvalidTicketState:
+            return TicketStateFingerprintCollection(
+                "unhealthy",
+                {},
+                "source_context_unhealthy",
+            )
         if ticket is None:
             return TicketStateFingerprintCollection(
                 "unhealthy",
@@ -476,7 +483,14 @@ def _known_ticket_probe_collection(tickets_dir: Path) -> TicketStateFingerprintC
             {},
             "source_context_unhealthy",
         )
-    ticket = parse_ticket(active_ticket_files[0])
+    try:
+        ticket = parse_ticket(active_ticket_files[0])
+    except InvalidTicketState:
+        return TicketStateFingerprintCollection(
+            "unhealthy",
+            {},
+            "source_context_unhealthy",
+        )
     if ticket is None:
         return TicketStateFingerprintCollection(
             "unhealthy",
@@ -494,7 +508,14 @@ def _source_context_resume_collection(
     context: dict[str, Any],
 ) -> TicketStateFingerprintCollection:
     tickets_dir = project_root / "docs" / "tickets"
-    candidates = discover_candidate_mutations(context, tickets_dir)
+    try:
+        candidates = discover_candidate_mutations(context, tickets_dir)
+    except InvalidTicketState:
+        return TicketStateFingerprintCollection(
+            "unhealthy",
+            {},
+            "source_context_unhealthy",
+        )
     if candidates:
         return _ticket_state_fingerprints(candidates, tickets_dir)
     return _known_ticket_probe_collection(tickets_dir)
@@ -951,7 +972,12 @@ def _run_apply_turn_with_mode(
         return 3
 
     tickets_dir = project_root / "docs" / "tickets"
-    candidates = discover_candidate_mutations(context, tickets_dir)
+    try:
+        candidates = discover_candidate_mutations(context, tickets_dir)
+    except InvalidTicketState:
+        pause_workspace_automation(project_root, reason="source_context_unhealthy")
+        _emit(_paused_response("source_context_unhealthy"))
+        return 3
     if not candidates:
         if _has_candidate_changes(context):
             return _emit_mode_projection(mode, context)
@@ -1019,7 +1045,7 @@ def _run_apply_turn_with_mode(
             )
             if summary_mutation_id is not None:
                 summary_mutation_ids.append(summary_mutation_id)
-            if response.state.startswith("ok_"):
+            if response.state == "ok":
                 applied.append(ticket_id)
             else:
                 discussion.append(ticket_id)

@@ -30,7 +30,7 @@ def _audit_file_has_corrupt_line(path: Path) -> bool:
     return "NOT JSON" in path.read_text(encoding="utf-8")
 
 
-def test_find_open_list_groups_needs_refinement_separately(tmp_tickets: Path) -> None:
+def test_find_open_list_groups_target_tickets_as_ready(tmp_tickets: Path) -> None:
     make_ticket(
         tmp_tickets,
         "ready.md",
@@ -41,12 +41,11 @@ def test_find_open_list_groups_needs_refinement_separately(tmp_tickets: Path) ->
     )
     make_ticket(
         tmp_tickets,
-        "needs-refinement.md",
+        "normal.md",
         id="T-20260518-02",
-        title="Needs more capture",
+        title="Normal target ticket",
         status="open",
-        priority="critical",
-        extra_yaml="refinement_status: needs_refinement\n        ",
+        priority="normal",
     )
 
     returncode, output = _run_json(
@@ -56,19 +55,23 @@ def test_find_open_list_groups_needs_refinement_separately(tmp_tickets: Path) ->
 
     assert returncode == 0
     groups = output["data"]["ticket_groups"]
-    assert [ticket["id"] for ticket in groups["needs_refinement"]] == ["T-20260518-02"]
-    assert [ticket["id"] for ticket in groups["ready"]] == ["T-20260518-01"]
+    assert groups["needs_refinement"] == []
+    assert {ticket["id"] for ticket in groups["ready"]} == {
+        "T-20260518-01",
+        "T-20260518-02",
+    }
 
 
-def test_review_output_suggests_capture_prompts_without_writing_tickets(tmp_tickets: Path) -> None:
+def test_review_output_does_not_infer_capture_prompts_from_target_tickets(
+    tmp_tickets: Path,
+) -> None:
     ticket_path = make_ticket(
         tmp_tickets,
-        "needs-refinement.md",
+        "target-ticket.md",
         id="T-20260518-03",
-        title="Captured placeholder",
+        title="Target ticket",
         status="open",
-        priority="medium",
-        extra_yaml="refinement_status: needs_refinement\n        ",
+        priority="normal",
     )
     before = {path: path.read_text(encoding="utf-8") for path in tmp_tickets.glob("*.md")}
 
@@ -79,12 +82,7 @@ def test_review_output_suggests_capture_prompts_without_writing_tickets(tmp_tick
 
     assert returncode == 0
     prompts = output["data"]["suggested_capture_prompts"]
-    assert prompts == [
-        {
-            "ticket_id": "T-20260518-03",
-            "prompt": "Use capture-ticket to refine T-20260518-03: Captured placeholder",
-        }
-    ]
+    assert prompts == []
     assert ticket_path.read_text(encoding="utf-8") == before[ticket_path]
     assert {path.name for path in tmp_tickets.glob("*.md")} == {path.name for path in before}
 

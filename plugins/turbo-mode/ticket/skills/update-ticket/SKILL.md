@@ -105,8 +105,8 @@ mutation contract. Summarize the requested candidate and stop without writing.
 
 ## Deprecated Source Drift
 
-Old `ticket_update.py prepare` and `ticket_update.py execute` guidance is
-deprecated source drift only. It is not active target mutation guidance.
+Old update prepare-execute helper guidance is deprecated source drift only. It
+is not active target mutation guidance.
 
 Old focused update fields and old backend payloads are legacy cutover input
 only.

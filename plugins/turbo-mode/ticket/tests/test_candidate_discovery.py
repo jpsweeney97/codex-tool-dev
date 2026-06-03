@@ -2,52 +2,37 @@
 
 from __future__ import annotations
 
-import textwrap
 from pathlib import Path
 
 from scripts.ticket_candidate_discovery import discover_candidate_mutations
-
-
-def _ticket_yaml_list(values: list[str]) -> str:
-    if not values:
-        return "[]"
-    return "[" + ", ".join(values) + "]"
 
 
 def _write_ticket(
     tickets_dir: Path,
     *,
     ticket_id: str,
-    key_file_paths: list[str] | None = None,
     related_paths: list[str] | None = None,
 ) -> Path:
     tickets_dir.mkdir(parents=True, exist_ok=True)
-    path = tickets_dir / f"{ticket_id.lower()}.md"
+    path = tickets_dir / f"{ticket_id}.md"
+    paths = related_paths or []
     path.write_text(
-        textwrap.dedent(
-            f"""\
-            # {ticket_id}: Example
-
-            ```yaml
-            id: {ticket_id}
-            date: "2026-05-27"
-            status: open
-            priority: medium
-            source:
-              type: test
-              ref: ""
-              session: test
-            tags: []
-            blocked_by: []
-            blocks: []
-            contract_version: "1.0"
-            key_file_paths: {_ticket_yaml_list(key_file_paths or [])}
-            related_paths: {_ticket_yaml_list(related_paths or [])}
-            ```
-
-            ## Problem
-            Example problem.
-            """
+        (
+            "---\n"
+            f"id: {ticket_id}\n"
+            "title: Example\n"
+            "status: open\n"
+            "priority: normal\n"
+            "tags: []\n"
+            f"related_paths: {paths}\n"
+            "blocked_by: []\n"
+            "---\n\n"
+            "## Problem\n"
+            "Example problem.\n\n"
+            "## Next Action\n"
+            "Continue work on this ticket.\n\n"
+            "## Change History\n"
+            "- 2026-06-02T00:00:00Z | test | Created target fixture.\n"
         ),
         encoding="utf-8",
     )
@@ -127,7 +112,7 @@ def test_matches_related_paths_against_ticket_metadata(tmp_path: Path) -> None:
     _write_ticket(
         tickets_dir,
         ticket_id="T-20260527-01",
-        key_file_paths=["plugins/turbo-mode/ticket/scripts/ticket_update.py"],
+        related_paths=["plugins/turbo-mode/ticket/scripts/ticket_update.py"],
     )
     _write_ticket(
         tickets_dir,
@@ -161,7 +146,7 @@ def test_matches_diff_and_test_file_references_to_tickets(tmp_path: Path) -> Non
     _write_ticket(
         tickets_dir,
         ticket_id="T-20260527-02",
-        key_file_paths=["plugins/turbo-mode/ticket/tests/test_runtime.py"],
+        related_paths=["plugins/turbo-mode/ticket/tests/test_runtime.py"],
     )
     context = _context(
         diff_files=["plugins/turbo-mode/ticket/scripts/ticket_runtime.py"],

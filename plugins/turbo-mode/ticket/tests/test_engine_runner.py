@@ -28,7 +28,7 @@ def _agent_create_payload(problem: str, hook_origin: str | None = "user") -> dic
         "fields": {
             "title": "Runtime gate",
             "problem": problem,
-            "priority": "medium",
+            "priority": "normal",
         },
         "session_id": "runner-session",
         "hook_injected": True,
@@ -73,7 +73,7 @@ def _old_mode_agent_execute_payload(
             "fields": {
                 "title": "Gateway required",
                 "problem": problem,
-                "priority": "medium",
+                "priority": "normal",
             },
             "session_id": session_id,
             "hook_injected": True,
@@ -230,7 +230,7 @@ def test_agent_execute_with_missing_runtime_proof_env_still_requires_gateway_fir
             "fields": {
                 "title": "Runtime gate",
                 "problem": problem,
-                "priority": "medium",
+                "priority": "normal",
             },
             "session_id": "runner-session",
             "hook_injected": True,
@@ -289,7 +289,7 @@ def test_runner_passes_activation_bootstrap_only_with_execute_proof_env(
         project_root,
         {
             "action": "create",
-            "fields": {"title": "Runtime gate", "problem": "bootstrap", "priority": "medium"},
+            "fields": {"title": "Runtime gate", "problem": "bootstrap", "priority": "normal"},
             "session_id": "runner-session",
             "hook_injected": True,
             "hook_request_origin": "user",
@@ -358,7 +358,7 @@ def test_runner_unexpected_exception_returns_internal_error_response(
         project_root,
         {
             "action": "create",
-            "fields": {"title": "Boom", "problem": "Runner raises", "priority": "medium"},
+            "fields": {"title": "Boom", "problem": "Runner raises", "priority": "normal"},
             "session_id": "runner-session",
             "hook_injected": True,
             "hook_request_origin": "user",
@@ -393,7 +393,7 @@ def test_runner_oserror_returns_io_error_response(
         project_root,
         {
             "action": "create",
-            "fields": {"title": "Boom", "problem": "Runner raises", "priority": "medium"},
+            "fields": {"title": "Boom", "problem": "Runner raises", "priority": "normal"},
             "session_id": "runner-session",
             "hook_injected": True,
             "hook_request_origin": "user",

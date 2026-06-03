@@ -205,7 +205,9 @@ def test_ticket_doctor_diagnose_response_adds_cleanup_hint_for_stale_payloads(
     assert response["data"]["recovery_hint"] == {
         "code": "cleanup_stale_preview",
         "summary": "Old abandoned Ticket preview state can be cleaned up after review.",
-        "next_step": "Use ticket-doctor stale cleanup after reviewing the reported items.",
+        "next_step": (
+            "Use ticket-doctor stale cleanup only for pre-cutover diagnostic residue."
+        ),
     }
 
 

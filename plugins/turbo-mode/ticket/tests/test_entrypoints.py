@@ -96,13 +96,14 @@ def capture_payload(tmp_path: Path) -> dict:
 
 
 class TestCaptureEntrypoint:
-    def test_prepare_returns_ready_preview(self, tmp_path: Path) -> None:
+    def test_prepare_returns_deprecated_unavailable(self, tmp_path: Path) -> None:
         output = run_capture_entrypoint("prepare", capture_payload(tmp_path), tmp_path)
 
-        assert output["state"] == "ready_to_execute"
-        assert output["data"]["preview"]["title"] == "Capture entrypoint preview"
+        assert output["state"] == "unavailable"
+        assert output["error_code"] == "deprecated_workflow"
+        assert output["data"]["surface"] == "capture/prepare"
 
-    def test_prepare_edit_option_updates_preview(self, tmp_path: Path) -> None:
+    def test_prepare_edit_option_is_deprecated_unavailable(self, tmp_path: Path) -> None:
         output = run_capture_entrypoint(
             "prepare",
             capture_payload(tmp_path),
@@ -111,8 +112,8 @@ class TestCaptureEntrypoint:
             "make it high priority",
         )
 
-        assert output["state"] == "ready_to_execute"
-        assert output["data"]["preview"]["priority"] == "high"
+        assert output["state"] == "unavailable"
+        assert output["error_code"] == "deprecated_workflow"
 
 
 class TestUserEntrypoint:
@@ -203,7 +204,7 @@ class TestAgentEntrypoint:
             "execute",
             {
                 "action": "create",
-                "fields": {"title": "test", "problem": "test", "priority": "medium"},
+                "fields": {"title": "test", "problem": "test", "priority": "normal"},
                 "session_id": "test",
                 "tickets_dir": str(tmp_path),
             },
@@ -305,7 +306,7 @@ class TestExecuteTrustTriple:
         """User execute without hook_injected is rejected."""
         payload = {
             "action": "create",
-            "fields": {"title": "Test", "problem": "Problem", "priority": "medium"},
+            "fields": {"title": "Test", "problem": "Problem", "priority": "normal"},
         }
         result = run_entrypoint("ticket_engine_user.py", "execute", payload, tmp_path)
         assert (
@@ -316,7 +317,7 @@ class TestExecuteTrustTriple:
         """User execute with hook_injected but empty session_id is rejected."""
         payload = {
             "action": "create",
-            "fields": {"title": "Test", "problem": "Problem", "priority": "medium"},
+            "fields": {"title": "Test", "problem": "Problem", "priority": "normal"},
             "hook_injected": True,
             "hook_request_origin": "user",
             "session_id": "",
@@ -330,7 +331,7 @@ class TestExecuteTrustTriple:
         """User execute with hook_injected but missing hook_request_origin is rejected."""
         payload = {
             "action": "create",
-            "fields": {"title": "Test", "problem": "Problem", "priority": "medium"},
+            "fields": {"title": "Test", "problem": "Problem", "priority": "normal"},
             "hook_injected": True,
             "session_id": "test-session",
             # hook_request_origin missing
@@ -345,7 +346,7 @@ class TestExecuteTrustTriple:
         """Agent execute without hook_injected is rejected."""
         payload = {
             "action": "create",
-            "fields": {"title": "Test", "problem": "Problem", "priority": "medium"},
+            "fields": {"title": "Test", "problem": "Problem", "priority": "normal"},
         }
         result = run_entrypoint("ticket_engine_agent.py", "execute", payload, tmp_path)
         assert (
@@ -363,7 +364,7 @@ class TestExecuteTrustTriple:
         payload = {
             "action": "create",
             "intent": "create",
-            "fields": {"title": "Test", "problem": "Problem", "priority": "medium"},
+            "fields": {"title": "Test", "problem": "Problem", "priority": "normal"},
         }
         result = run_entrypoint("ticket_engine_user.py", "plan", payload, tmp_path)
         assert result.get("state") in ("ok", "duplicate_candidate")
@@ -375,7 +376,7 @@ class TestExecuteTrustTriple:
         problem = "Problem"
         payload = {
             "action": "create",
-            "fields": {"title": "Test", "problem": problem, "priority": "medium"},
+            "fields": {"title": "Test", "problem": problem, "priority": "normal"},
             "hook_injected": True,
             "hook_request_origin": "user",
             "session_id": "test-session",
@@ -384,7 +385,7 @@ class TestExecuteTrustTriple:
             "dedup_fingerprint": compute_fp(problem, []),
         }
         result = run_entrypoint("ticket_engine_user.py", "execute", payload, tmp_path)
-        assert result.get("state") == "ok_create"
+        assert result.get("state") == "ok"
 
 
 class TestEntrypointTicketsDirBoundaries:
@@ -427,7 +428,7 @@ class TestEntrypointTicketsDirBoundaries:
             },
             tmp_path,
         )
-        assert output["state"] == "ok_create"
+        assert output["state"] == "ok"
 
     def test_agent_rejects_tickets_dir_outside_project_root(self, tmp_path: Path):
         outside = tmp_path.parent / "outside-tickets"
@@ -642,7 +643,7 @@ class TestEntrypointProjectRootDiscovery:
         problem = "nested cwd test"
         payload = {
             "action": "create",
-            "fields": {"title": "Test", "problem": problem, "priority": "medium"},
+            "fields": {"title": "Test", "problem": problem, "priority": "normal"},
             "hook_injected": True,
             "hook_request_origin": "user",
             "session_id": "test-session",
@@ -665,7 +666,7 @@ class TestEntrypointProjectRootDiscovery:
             cwd=str(nested),
         )
         output = json.loads(result.stdout)
-        assert output["state"] == "ok_create"
+        assert output["state"] == "ok"
         # Ticket should be created under project root, not under nested cwd.
         tickets_in_root = tmp_path / "docs" / "tickets"
         assert tickets_in_root.exists(), (

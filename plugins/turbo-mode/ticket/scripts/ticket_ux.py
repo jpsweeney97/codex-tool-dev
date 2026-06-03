@@ -11,11 +11,10 @@ from typing import Any
 
 STATE_LABELS = {
     "ok": "Ready",
-    "ok_create": "Ticket created",
-    "ok_update": "Ticket updated",
-    "ok_close": "Ticket closed",
-    "ok_close_archived": "Ticket closed and archived",
-    "ok_reopen": "Ticket reopened",
+    "blocked": "Blocked",
+    "needs_discussion": "Needs discussion",
+    "invalid_state": "Invalid ticket state",
+    "no_change": "No change",
     "need_fields": "More information needed",
     "duplicate_candidate": "Potential duplicate found",
     "preflight_failed": "Preflight check failed",
@@ -24,7 +23,7 @@ STATE_LABELS = {
     "dependency_blocked": "Blocking tickets are unresolved",
     "not_found": "Ticket not found",
     "escalate": "Manual review required",
-    "target_fingerprint": "Ticket changed since preview",
+    "target_fingerprint": "Ticket changed since read",
     "dedup_override": "Create anyway",
     "dependency_override": "Ignore blockers for this operation",
 }
@@ -53,8 +52,8 @@ _RUNTIME_EVIDENCE_HINT = {
 
 RECOVERY_HINTS: dict[str, dict[str, str]] = {
     "stale_plan": {
-        "summary": "The saved preview is no longer current.",
-        "next_step": "Rerun the preview, review the updated result, then confirm again.",
+        "summary": "The ticket changed since it was read.",
+        "next_step": "Read the ticket again, review the requested mutation, then retry.",
     },
     "trust_setup": {
         "summary": "Ticket setup needs attention before this write can continue.",
@@ -63,13 +62,11 @@ RECOVERY_HINTS: dict[str, dict[str, str]] = {
             "hook setup before retrying."
         ),
     },
-    "retry_preview": {
-        "summary": "The saved preview state is no longer usable.",
-        "next_step": "Rerun the preview and confirm again before writing.",
-    },
     "cleanup_stale_preview": {
         "summary": "Old abandoned Ticket preview state can be cleaned up after review.",
-        "next_step": "Use ticket-doctor stale cleanup after reviewing the reported items.",
+        "next_step": (
+            "Use ticket-doctor stale cleanup only for pre-cutover diagnostic residue."
+        ),
     },
     "policy_blocked": {
         "summary": "This write is blocked by Ticket policy.",
@@ -77,7 +74,7 @@ RECOVERY_HINTS: dict[str, dict[str, str]] = {
     },
     "preflight_failed": {
         "summary": "Ticket checks did not pass.",
-        "next_step": "Review the preview or check details, update the request, then rerun preview.",
+        "next_step": "Review the failed checks, update the request or ticket, then retry.",
     },
     "internal_error": {
         "summary": "Ticket hit an unexpected internal error.",
@@ -197,7 +194,7 @@ def recovery_hint_code_for_response(response: dict[str, Any]) -> str | None:
     if response.get("error_code") == "stale_plan":
         return "stale_plan"
     if response.get("error_code") == "parse_error":
-        return "retry_preview"
+        return "preflight_failed"
     if response.get("error_code") == "origin_mismatch":
         return "trust_setup"
     if response.get("error_code") == "internal_error":

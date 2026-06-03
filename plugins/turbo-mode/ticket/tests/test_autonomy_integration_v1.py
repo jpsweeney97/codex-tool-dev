@@ -146,7 +146,7 @@ def test_agent_primary_apply_turn_applies_correction_through_gateway(tmp_path: P
     assert payload["changed"] is True
     text = ticket.read_text(encoding="utf-8")
     assert "priority: high" in text
-    assert "correction" in text
+    assert " | codex | Corrected ticket from candidate evidence." in text
     events = _events(tmp_path)
     assert [event["status"] for event in events[:3]] == [
         "pending",

@@ -391,7 +391,7 @@ def test_apply_turn_pauses_for_prior_turn_ledger_recovery_before_new_write(
             {
                 "ticket_id": "T-20260527-01",
                 "action": "update",
-                "proposed_change": {"priority": "medium"},
+                "proposed_change": {"priority": "normal"},
                 "evidence": [{"kind": "current_thread_reason", "ref": "current turn"}],
             }
         ],
@@ -419,7 +419,7 @@ def test_apply_turn_pauses_for_prior_turn_ledger_recovery_before_new_write(
         "Run ticket_autonomy.py doctor-ledger --confirm-repair before new automatic writes."
     )
     assert "priority: low" in ticket.read_text(encoding="utf-8")
-    assert "priority: medium" not in ticket.read_text(encoding="utf-8")
+    assert "priority: normal" not in ticket.read_text(encoding="utf-8")
     assert [event["event_id"] for event in PendingSummaryStore(tmp_path).read_events()] == [
         "evt_prior_attempt",
     ]
@@ -550,7 +550,7 @@ def test_apply_turn_reports_created_ticket_id_in_summary(
                 "proposed_change": {
                     "title": "Created by autonomy",
                     "problem": "The automatic create path needs an observable ticket id.",
-                    "priority": "medium",
+                    "priority": "normal",
                 },
                 "evidence": [{"kind": "current_thread_reason", "ref": "current turn"}],
             }

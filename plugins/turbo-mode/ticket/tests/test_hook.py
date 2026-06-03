@@ -538,7 +538,7 @@ class TestPayloadInjection:
         assert result["hook_request_origin"] == "user"
 
 
-def test_hook_allows_ticket_workflow_prepare_and_injects_payload(tmp_path: Path) -> None:
+def test_hook_denies_ticket_workflow_prepare(tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     payload = tmp_path / "payload.json"
     payload.write_text('{"action":"create","fields":{}}', encoding="utf-8")
@@ -551,10 +551,9 @@ def test_hook_allows_ticket_workflow_prepare_and_injects_payload(tmp_path: Path)
 
     result = run_hook(event, plugin_root=str(plugin_root))
 
-    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
-    injected = json.loads(payload.read_text(encoding="utf-8"))
-    assert injected["hook_injected"] is True
-    assert injected["hook_request_origin"] == "user"
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "Deprecated Ticket workflow" in result["hookSpecificOutput"]["permissionDecisionReason"]
+    assert json.loads(payload.read_text(encoding="utf-8")) == {"action": "create", "fields": {}}
 
 
 def test_hook_allows_ticket_engine_ingest_and_injects_payload(tmp_path: Path) -> None:
@@ -585,7 +584,7 @@ def test_hook_allows_ticket_engine_ingest_and_injects_payload(tmp_path: Path) ->
     assert injected["hook_request_origin"] == "user"
 
 
-def test_hook_allows_ticket_capture_prepare_and_injects_payload(tmp_path: Path) -> None:
+def test_hook_denies_ticket_capture_prepare(tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     payload = tmp_path / "payload.json"
     payload.write_text('{"tickets_dir":"docs/tickets","capture":{}}', encoding="utf-8")
@@ -598,13 +597,15 @@ def test_hook_allows_ticket_capture_prepare_and_injects_payload(tmp_path: Path) 
 
     result = run_hook(event, plugin_root=str(plugin_root))
 
-    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
-    injected = json.loads(payload.read_text(encoding="utf-8"))
-    assert injected["hook_injected"] is True
-    assert injected["hook_request_origin"] == "user"
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "Deprecated Ticket capture" in result["hookSpecificOutput"]["permissionDecisionReason"]
+    assert json.loads(payload.read_text(encoding="utf-8")) == {
+        "tickets_dir": "docs/tickets",
+        "capture": {},
+    }
 
 
-def test_hook_allows_ticket_update_prepare_and_injects_payload(tmp_path: Path) -> None:
+def test_hook_denies_ticket_update_prepare(tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     payload = tmp_path / "payload.json"
     payload.write_text(
@@ -620,10 +621,13 @@ def test_hook_allows_ticket_update_prepare_and_injects_payload(tmp_path: Path) -
 
     result = run_hook(event, plugin_root=str(plugin_root))
 
-    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
-    injected = json.loads(payload.read_text(encoding="utf-8"))
-    assert injected["hook_injected"] is True
-    assert injected["hook_request_origin"] == "user"
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "Deprecated Ticket update" in result["hookSpecificOutput"]["permissionDecisionReason"]
+    assert json.loads(payload.read_text(encoding="utf-8")) == {
+        "tickets_dir": "docs/tickets",
+        "ticket_id": "T-20260518-01",
+        "update": {},
+    }
 
 
 def test_hook_denies_noncanonical_ticket_capture_command_shape(tmp_path: Path) -> None:
@@ -661,7 +665,7 @@ def test_hook_denies_noncanonical_ticket_update_command_shape(tmp_path: Path) ->
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
-def test_hook_workflow_valid_agent_id_injects_agent_origin(tmp_path: Path) -> None:
+def test_hook_workflow_agent_id_still_denied_as_deprecated(tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     payload = tmp_path / "payload.json"
     payload.write_text('{"action":"create","fields":{}}', encoding="utf-8")
@@ -675,9 +679,8 @@ def test_hook_workflow_valid_agent_id_injects_agent_origin(tmp_path: Path) -> No
 
     result = run_hook(event, plugin_root=str(plugin_root))
 
-    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
-    injected = json.loads(payload.read_text(encoding="utf-8"))
-    assert injected["hook_request_origin"] == "agent"
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "Deprecated Ticket workflow" in result["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 @pytest.mark.parametrize("agent_id", ["", None, 42])
@@ -696,10 +699,10 @@ def test_hook_workflow_malformed_agent_id_denied(tmp_path: Path, agent_id: objec
     result = run_hook(event, plugin_root=str(plugin_root))
 
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert "Malformed agent_id" in result["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "Deprecated Ticket workflow" in result["hookSpecificOutput"]["permissionDecisionReason"]
 
 
-def test_hook_allows_ticket_workflow_recover_and_injects_payload(tmp_path: Path) -> None:
+def test_hook_denies_ticket_workflow_recover(tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     payload = tmp_path / "payload.json"
     payload.write_text(
@@ -714,10 +717,11 @@ def test_hook_allows_ticket_workflow_recover_and_injects_payload(tmp_path: Path)
 
     result = run_hook(event, plugin_root=str(plugin_root))
 
-    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "Deprecated Ticket workflow" in result["hookSpecificOutput"]["permissionDecisionReason"]
 
 
-def test_hook_allows_ticket_workflow_recover_set_field_with_quoted_json(tmp_path: Path) -> None:
+def test_hook_denies_ticket_workflow_recover_set_field_with_quoted_json(tmp_path: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     payload = tmp_path / "payload.json"
     payload.write_text('{"action":"create","fields":{}}', encoding="utf-8")
@@ -733,7 +737,8 @@ def test_hook_allows_ticket_workflow_recover_set_field_with_quoted_json(tmp_path
 
     result = run_hook(event, plugin_root=str(plugin_root))
 
-    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "Deprecated Ticket workflow" in result["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 def test_hook_denies_ticket_workflow_recover_set_field_shell_metacharacter_json(
@@ -955,7 +960,7 @@ def test_hook_denies_noncanonical_ticket_workflow_command_shapes(
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
-def test_hook_allows_resolved_ticket_workflow_path_when_plugin_root_is_symlink(
+def test_hook_denies_resolved_ticket_workflow_path_when_plugin_root_is_symlink(
     tmp_path: Path,
 ) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
@@ -975,7 +980,8 @@ def test_hook_allows_resolved_ticket_workflow_path_when_plugin_root_is_symlink(
 
     result = run_hook(event, plugin_root=str(symlink_root))
 
-    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "Deprecated Ticket workflow" in result["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 def test_hook_denies_ticket_workflow_recover_without_action(tmp_path: Path) -> None:
@@ -994,7 +1000,7 @@ def test_hook_denies_ticket_workflow_recover_without_action(tmp_path: Path) -> N
     result = run_hook(event, plugin_root=str(plugin_root))
 
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert "requires a recovery action" in result["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "Deprecated Ticket workflow" in result["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 def test_hook_denies_ticket_workflow_recover_set_field_missing_json_value(tmp_path: Path) -> None:
@@ -1011,9 +1017,7 @@ def test_hook_denies_ticket_workflow_recover_set_field_missing_json_value(tmp_pa
     result = run_hook(event, plugin_root=str(plugin_root))
 
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert (
-        "expects 2 argument(s), got 1" in result["hookSpecificOutput"]["permissionDecisionReason"]
-    )
+    assert "Deprecated Ticket workflow" in result["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 def test_hook_denies_ticket_workflow_recover_set_field_extra_argument(tmp_path: Path) -> None:
@@ -1033,9 +1037,7 @@ def test_hook_denies_ticket_workflow_recover_set_field_extra_argument(tmp_path: 
     result = run_hook(event, plugin_root=str(plugin_root))
 
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert (
-        "expects 2 argument(s), got 3" in result["hookSpecificOutput"]["permissionDecisionReason"]
-    )
+    assert "Deprecated Ticket workflow" in result["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 def test_preserves_existing_payload_fields(tmp_path: Path) -> None:
@@ -1246,7 +1248,7 @@ class TestPayloadPathBoundaries:
         )
         output = run_hook(inp, plugin_root=plugin_root)
         assert _decision(output) == "deny"
-        assert "absolute" in _reason(output).lower()
+        assert "deprecated ticket workflow" in _reason(output).lower()
 
     def test_denies_payload_outside_workspace_root(self, tmp_path: Path) -> None:
         payload_file = make_payload_file(tmp_path, {"action": "plan"})
@@ -1692,12 +1694,12 @@ class TestCandidateDetection:
         result = run_hook(make_hook_input(cmd, cwd=str(tmp_path)))
         assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "allow"
 
-    def test_uv_run_python_capture_prepare_allowed(self, tmp_path: Path) -> None:
+    def test_uv_run_python_capture_prepare_denied_as_deprecated(self, tmp_path: Path) -> None:
         plugin_root = str(Path(__file__).parent.parent)
         payload = make_payload_file(tmp_path)
         cmd = f"uv run python -B {plugin_root}/scripts/ticket_capture.py prepare {payload}"
         result = run_hook(make_hook_input(cmd, cwd=str(tmp_path)))
-        assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "allow"
+        assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
 
     @pytest.mark.parametrize("python_prefix", ["-BB", "-B -u", "-u -B"])
     def test_noncanonical_dash_b_flag_combinations_denied(
