@@ -424,7 +424,11 @@ def _dispatch_ingest(
     try:
         move_to_processed(envelope_path)
     except FileExistsError as exc:
-        # Ticket was created but another cleanup path already recorded the envelope.
+        # The .processed ledger entry already exists, which means a concurrent
+        # ingest of this envelope already recorded it. The create above can
+        # therefore have produced a duplicate ticket, so this must surface as a
+        # non-ok escalation (exit != 0), not a silent success that hides the
+        # partial outcome behind state="ok".
         data = dict(exec_resp.data or {})
         data.update(
             {
@@ -437,8 +441,12 @@ def _dispatch_ingest(
             }
         )
         return EngineResponse(
-            state=exec_resp.state,
-            message="Ticket was created, but Ticket could not finish ingest cleanup.",
+            state="escalate",
+            message=(
+                "Ticket was created, but another ingest already recorded this envelope; "
+                "a duplicate ticket may exist and manual review is required before replay."
+            ),
+            error_code="io_error",
             ticket_id=exec_resp.ticket_id,
             data=data,
         )

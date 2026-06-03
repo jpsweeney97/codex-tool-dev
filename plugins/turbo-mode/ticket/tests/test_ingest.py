@@ -944,12 +944,14 @@ class TestIngestSubcommand:
         assert envelope_path.exists()
         assert len(list(tickets_dir.glob("*.md"))) == 1
 
-    def test_created_envelope_move_failed_file_exists_remains_nonfatal(
+    def test_created_envelope_move_failed_file_exists_escalates(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
+        """A processed-ledger collision signals a concurrent ingest, so it must
+        escalate (exit 1) rather than report success and hide a possible duplicate."""
         import scripts.ticket_envelope as ticket_envelope
 
         _ensure_project_root(tmp_path)
@@ -959,6 +961,7 @@ class TestIngestSubcommand:
         tickets_dir.mkdir()
         envelopes_dir = tickets_dir / ".envelopes"
         envelope_path = _write_envelope(_valid_envelope(), envelopes_dir)
+        processed_path = envelopes_dir / ".processed" / envelope_path.name
 
         def fail_move(envelope_path: Path) -> Path:
             raise FileExistsError(f"already processed: {envelope_path}")
@@ -978,14 +981,34 @@ class TestIngestSubcommand:
         exit_code = run("user", argv=["ingest", str(payload_file)], prog="test")
         response = json.loads(capsys.readouterr().out)
 
-        assert exit_code == 0
-        assert response["state"] == "ok"
+        assert exit_code == 1
+        assert response["state"] == "blocked"
+        assert response["error_code"] == "io_error"
         assert response["data"]["ingest_outcome"] == "created_envelope_move_failed"
         assert response["data"]["ticket_created"] is True
+        assert response["data"]["envelope_id"] == envelope_path.name
+        assert response["data"]["processed_path"] == str(processed_path)
+        assert response["data"]["incoming_envelope_path"] == str(envelope_path)
         assert response["data"]["envelope_move_error"].startswith("already processed")
-        assert (
-            response["message"] == "Ticket was created, but Ticket could not finish ingest cleanup."
+        assert "recovery_hint" not in response["data"]
+        assert response["message"] == (
+            "Ticket was created, but another ingest already recorded this envelope; "
+            "a duplicate ticket may exist and manual review is required before replay."
         )
+        # The duplicate-risk message survives into the transcript projection (so the
+        # signal is not hidden), while the coarse ingest_outcome category is shared
+        # with the generic cleanup-failure case and no envelope paths leak.
+        projection = _ingest_transcript_projection(response)
+        assert projection["message"] == response["message"]
+        assert (
+            projection["ingest_outcome"]
+            == "Ticket was created, but Ticket could not finish ingest cleanup."
+        )
+        assert "processed_path" not in projection
+        assert "incoming_envelope_path" not in projection
+        _assert_ingest_transcript_projection_safe(response)
+        assert envelope_path.exists()
+        assert len(list(tickets_dir.glob("*.md"))) == 1
 
     def test_ingest_with_effort(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Envelope effort metadata is accepted but not written to target tickets."""
