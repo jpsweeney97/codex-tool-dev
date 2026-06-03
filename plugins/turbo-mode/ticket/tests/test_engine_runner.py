@@ -22,6 +22,25 @@ def _write_payload(root: Path, payload: dict[str, object]) -> str:
     return str(payload_path)
 
 
+def _write_ingest_envelope(tickets_dir: Path) -> Path:
+    envelopes_dir = tickets_dir / ".envelopes"
+    envelopes_dir.mkdir(parents=True, exist_ok=True)
+    envelope_path = envelopes_dir / "2026-06-03T120000Z-agent-ingest.json"
+    envelope_path.write_text(
+        json.dumps(
+            {
+                "envelope_version": "1.0",
+                "title": "Agent ingest should use gateway",
+                "problem": "Agent ingest must not create tickets directly.",
+                "source": {"type": "handoff", "ref": "session-abc", "session": "abc-123"},
+                "emitted_at": "2026-06-03T12:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return envelope_path
+
+
 def _agent_create_payload(problem: str, hook_origin: str | None = "user") -> dict[str, object]:
     payload: dict[str, object] = {
         "action": "create",
@@ -210,6 +229,37 @@ def test_agent_execute_with_agent_hook_origin_requires_gateway_before_runtime_ga
     assert response["state"] == "policy_blocked"
     assert response["error_code"] == "gateway_required"
     assert "runtime_readiness" not in response.get("data", {})
+
+
+def test_agent_ingest_with_agent_hook_origin_requires_gateway(
+    tmp_tickets: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_local_config(tmp_tickets.parent.parent, AutomationMode.AGENT_PRIMARY)
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    envelope_path = _write_ingest_envelope(tmp_tickets)
+    payload_file = _write_payload(
+        project_root,
+        {
+            "envelope_path": str(envelope_path),
+            "tickets_dir": str(tmp_tickets),
+            "session_id": "runner-session",
+            "hook_injected": True,
+            "hook_request_origin": "agent",
+        },
+    )
+
+    exit_code = run("agent", ["ingest", payload_file], prog="ticket_engine_agent.py")
+
+    assert exit_code == 1
+    response = json.loads(capsys.readouterr().out)
+    assert response["state"] == "blocked"
+    assert response["error_code"] == "gateway_required"
+    assert list(tmp_tickets.glob("*.md")) == []
+    assert envelope_path.exists()
+    assert not (tmp_tickets / ".envelopes" / ".processed").exists()
 
 
 def test_agent_execute_with_missing_runtime_proof_env_still_requires_gateway_first(

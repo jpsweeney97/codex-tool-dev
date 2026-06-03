@@ -316,6 +316,16 @@ def _dispatch_ingest(
     request_origin: str,
 ) -> EngineResponse:
     """Orchestrate envelope ingestion through the create pipeline."""
+    if request_origin == "agent":
+        return EngineResponse(
+            state="policy_blocked",
+            message=(
+                "Agent ingest requires a runtime-first autonomy gateway decision before "
+                "Ticket can write."
+            ),
+            error_code="gateway_required",
+        )
+
     from scripts.ticket_envelope import (
         envelope_id_from_path,
         map_envelope_to_fields,
