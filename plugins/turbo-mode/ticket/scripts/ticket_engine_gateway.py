@@ -497,7 +497,13 @@ def apply_ingest_create(
     """Create a ticket for ingest without exposing the old public stage pipeline."""
     normalized_fields = dict(fields)
     normalized_fields.setdefault("priority", "normal")
-    plan_response = _plan_create(normalized_fields, session_id, request_origin, tickets_dir)
+    try:
+        plan_response = _plan_create(normalized_fields, session_id, request_origin, tickets_dir)
+    except InvalidTicketState as exc:
+        return _invalid_state(
+            "Ticket state is not target-normalized.",
+            data={"reason": str(exc)},
+        )
     if plan_response.state != "ok":
         return normalize_target_response(plan_response)
     return normalize_target_response(

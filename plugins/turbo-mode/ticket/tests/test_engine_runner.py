@@ -13,7 +13,11 @@ from scripts.ticket_runtime_readiness import (
     RUNTIME_PROOF_PATH_ENV,
 )
 
-from tests.support.builders import make_ticket, write_autonomy_config
+from tests.support.builders import (
+    make_legacy_ticket_for_cutover,
+    make_ticket,
+    write_autonomy_config,
+)
 
 
 def _write_payload(root: Path, payload: dict[str, object]) -> str:
@@ -258,6 +262,42 @@ def test_agent_ingest_with_agent_hook_origin_requires_gateway(
     assert response["state"] == "blocked"
     assert response["error_code"] == "gateway_required"
     assert list(tmp_tickets.glob("*.md")) == []
+    assert envelope_path.exists()
+    assert not (tmp_tickets / ".envelopes" / ".processed").exists()
+
+
+def test_user_ingest_with_non_normalized_ticket_returns_invalid_state(
+    tmp_tickets: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    monkeypatch.chdir(project_root)
+    make_legacy_ticket_for_cutover(
+        tmp_tickets,
+        "legacy-active.md",
+        id="legacy-ticket",
+    )
+    envelope_path = _write_ingest_envelope(tmp_tickets)
+    payload_file = _write_payload(
+        project_root,
+        {
+            "envelope_path": str(envelope_path),
+            "tickets_dir": str(tmp_tickets),
+            "session_id": "runner-session",
+            "hook_injected": True,
+            "hook_request_origin": "user",
+        },
+    )
+
+    exit_code = run("user", ["ingest", payload_file], prog="ticket_engine_user.py")
+
+    assert exit_code == 1
+    response = json.loads(capsys.readouterr().out)
+    assert response["state"] == "invalid_state"
+    assert response["error_code"] == "invalid_state"
+    assert response["data"]["ingest_outcome"] == "blocked"
+    assert list(tmp_tickets.glob("*.md")) == [tmp_tickets / "legacy-active.md"]
     assert envelope_path.exists()
     assert not (tmp_tickets / ".envelopes" / ".processed").exists()
 
