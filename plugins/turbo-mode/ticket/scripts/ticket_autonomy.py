@@ -476,31 +476,31 @@ def _ticket_state_fingerprints(
 
 
 def _known_ticket_probe_collection(tickets_dir: Path) -> TicketStateFingerprintCollection:
-    active_ticket_files = tuple(sorted(tickets_dir.glob("*.md"))) if tickets_dir.is_dir() else ()
-    if len(active_ticket_files) != 1:
+    ticket_files = _ticket_files_for_source_context(tickets_dir)
+    if not ticket_files:
         return TicketStateFingerprintCollection(
             "unhealthy",
             {},
             "source_context_unhealthy",
         )
-    try:
-        ticket = parse_ticket(active_ticket_files[0])
-    except InvalidTicketState:
-        return TicketStateFingerprintCollection(
-            "unhealthy",
-            {},
-            "source_context_unhealthy",
-        )
-    if ticket is None:
-        return TicketStateFingerprintCollection(
-            "unhealthy",
-            {},
-            "source_context_unhealthy",
-        )
-    return _ticket_state_fingerprints(
-        (TicketStateFingerprintProbe(ticket_id=ticket.id),),
-        tickets_dir,
-    )
+    probes: list[TicketStateFingerprintProbe] = []
+    for ticket_file in ticket_files:
+        try:
+            ticket = parse_ticket(ticket_file)
+        except InvalidTicketState:
+            return TicketStateFingerprintCollection(
+                "unhealthy",
+                {},
+                "source_context_unhealthy",
+            )
+        if ticket is None:
+            return TicketStateFingerprintCollection(
+                "unhealthy",
+                {},
+                "source_context_unhealthy",
+            )
+        probes.append(TicketStateFingerprintProbe(ticket_id=ticket.id))
+    return _ticket_state_fingerprints(tuple(probes), tickets_dir)
 
 
 def _source_context_resume_collection(

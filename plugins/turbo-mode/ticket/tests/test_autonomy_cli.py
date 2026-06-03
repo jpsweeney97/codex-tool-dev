@@ -10,7 +10,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from scripts.ticket_autonomy import build_repo_context
-from scripts.ticket_autonomy_config import AutomationMode, write_local_config
+from scripts.ticket_autonomy_config import (
+    AutomationMode,
+    pause_workspace_automation,
+    write_local_config,
+)
 from scripts.ticket_dedup import target_fingerprint
 from scripts.ticket_turn_batch import PendingSummaryStore
 
@@ -1085,6 +1089,37 @@ def test_apply_turn_resume_source_context_pause_after_collection_recovers(
     assert not (tmp_path / ".codex" / "ticket-workspace" / "pause.json").exists()
     assert "priority: low" in ticket.read_text(encoding="utf-8")
     assert PendingSummaryStore(tmp_path).read_events()
+
+
+def test_apply_turn_resume_source_context_pause_with_multiple_healthy_tickets(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    make_ticket(tickets_dir, "two.md", id="T-20260527-02", priority="normal")
+    pause_workspace_automation(tmp_path, reason="source_context_unhealthy")
+    context = _write_context(tmp_path)
+
+    resumed = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+        "--setup-choice",
+        "automatic",
+        "--resume-paused",
+    )
+
+    assert resumed.returncode == 0
+    assert json.loads(resumed.stdout)["state"] == "no_change"
+    assert not (tmp_path / ".codex" / "ticket-workspace" / "pause.json").exists()
 
 
 def test_host_cli_has_no_raw_clear_pause_or_ledger_commands(tmp_path: Path) -> None:

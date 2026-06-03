@@ -1644,7 +1644,7 @@ def _execute_create(
     for _attempt in range(_CREATE_WRITE_RETRY_LIMIT):
         ticket_id = allocate_id(tickets_dir, today)
         try:
-            filename = build_filename(ticket_id, title, tickets_dir)
+            filename = build_filename(ticket_id, title)
         except ValueError as exc:
             return EngineResponse(
                 state="invalid_state",

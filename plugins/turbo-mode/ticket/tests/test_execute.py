@@ -275,6 +275,33 @@ class TestCreate:
         assert attempts[1] != attempts[0]
         assert Path(response.data["ticket_path"]) == attempts[1]
 
+    def test_create_retries_when_allocated_target_filename_already_exists(
+        self,
+        tmp_tickets: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        make_ticket(tmp_tickets, "existing.md", id="T-20260603-01")
+        allocated = iter(("T-20260603-01", "T-20260603-02"))
+
+        def allocate_existing_then_next(*_args: object, **_kwargs: object) -> str:
+            return next(allocated)
+
+        monkeypatch.setattr(ticket_engine_core, "allocate_id", allocate_existing_then_next)
+
+        response = _create_response(
+            tmp_tickets,
+            {
+                "title": "Retry pre-write filename collision",
+                "problem": "Pre-write target filename collisions should retry.",
+                "priority": "normal",
+            },
+        )
+
+        assert response.state == "ok"
+        assert response.ticket_id == "T-20260603-02"
+        assert (tmp_tickets / "T-20260603-01.md").exists()
+        assert Path(response.data["ticket_path"]) == tmp_tickets / "T-20260603-02.md"
+
     def test_create_fails_after_retry_budget_exhausted(
         self,
         tmp_tickets: Path,
