@@ -1284,6 +1284,9 @@ def test_task4_docs_do_not_overclaim_current_placeholder_refinement() -> None:
     assert "`ticket_workflow.py` is a compatibility/debug runner" not in _normalize_whitespace(
         _target_sections(handbook)
     )
+    update_runbook = _section(handbook, "### `ticket_update.py`", "\n### ")
+    assert "deprecated" in update_runbook.lower() or "unavailable" in update_runbook.lower()
+    assert "performs the write after user confirmation" not in update_runbook
 
 
 def test_current_facing_docs_do_not_keep_old_active_product_sections() -> None:

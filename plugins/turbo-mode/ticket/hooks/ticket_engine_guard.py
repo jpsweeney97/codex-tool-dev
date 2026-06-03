@@ -3,7 +3,8 @@
 
 Decision paths:
 - Engine allowlist: validate subcommand/payload and inject trust fields.
-- Workflow/capture/update allowlists: validate command shape and inject trust fields.
+- Workflow/capture/update commands: deny as deprecated and unavailable after the
+  ADR 0006 source cutover.
 - Read-only allowlist: allow safe reads; `ticket_triage.py doctor` validates roots.
 - Maintenance allowlist: allow users, deny agents.
 - Unknown ticket script invocations: deny.

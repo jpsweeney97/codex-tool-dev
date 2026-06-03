@@ -387,13 +387,12 @@ blockers, related paths, or target sections.
 
 ### `ticket_update.py`
 
-Use for user-facing existing-ticket mutations. `prepare` validates scoped
-lifecycle, metadata, and focused refinement fields, then returns a preview.
-`execute` performs the write after user confirmation. These workflow commands
-require canonical Bash invocation so the guard hook can inject trust fields.
-Payload paths must be absolute, must live inside the active workspace root, and
-must not contain whitespace. Recreate unsupported payloads under a path such as
-`<PROJECT_ROOT>/.codex/ticket-tmp/payload.json`.
+Deprecated after the ADR 0006 source cutover. The saved-preview `prepare` /
+`execute` update workflow is removed: `run_update` returns
+`{"state": "unavailable", "error_code": "deprecated_workflow"}` for both
+subcommands, and the guard hook denies any `ticket_update.py` invocation as a
+deprecated, unavailable command. Existing-ticket mutation now flows through the
+runtime-first candidate path (engine gateway), not a standalone update backend.
 
 ---
 

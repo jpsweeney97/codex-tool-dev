@@ -14,7 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Purpose-built capture, update, review, and doctor entrypoints:
   `ticket_capture.py`, `ticket_update.py`, `ticket_review.py`, and
   `ticket_doctor.py`.
-- Capture guidance now writes target tickets without capture metadata or
+- Capture guidance describes target tickets without capture metadata or
   refinement frontmatter.
 - Source manifest readiness URLs for website, privacy policy, and terms of
   service. This is source metadata only, not installed runtime proof.
@@ -33,9 +33,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Runtime-first Ticket autonomy source support: strict local JSON setup,
   project-local pending-summary bookkeeping, ticket-local `## Change History`,
   deterministic mutation IDs, `ticket_autonomy.py apply-turn`, engine-owned
-  gateway writes, correction handling, recovery projections, and ticket commit
-  disposition recording. This is source behavior only, not installed-runtime
-  proof.
+  gateway writes, correction handling, and recovery projections. This is source
+  behavior only, not installed-runtime proof.
 
 ### Changed
 
