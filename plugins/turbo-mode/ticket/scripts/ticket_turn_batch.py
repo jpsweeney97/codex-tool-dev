@@ -876,6 +876,15 @@ def project_mutation_recovery(
 
     if state == "attempt_recorded":
         if expected_pre is None:
+            if reference.get("action") == "create" and current_ticket_fingerprint is None:
+                return RecoveryProjection(
+                    "retry_with_same_mutation",
+                    thread_id,
+                    mutation_id,
+                    current_ticket_fingerprint,
+                    expected_pre,
+                    expected_post,
+                )
             return _pause_projection(
                 thread_id=thread_id,
                 mutation_id=mutation_id,

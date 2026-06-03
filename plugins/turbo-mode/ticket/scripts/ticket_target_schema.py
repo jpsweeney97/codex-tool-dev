@@ -20,7 +20,7 @@ TARGET_CANDIDATE_ACTIONS = ("create", "update", "done", "wontfix", "reopen", "co
 
 _TARGET_ID_RE = re.compile(r"^T-\d{8}-\d{2,}$")
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
-_FENCED_YAML_RE = re.compile(r"^```ya?ml\b", re.MULTILINE)
+_LEGACY_FENCED_YAML_HEADER_RE = re.compile(r"\A(?:# [^\n]*\n+)?[ \t]*```ya?ml\b")
 _H1_RE = re.compile(r"(?m)^# ")
 _SECTION_RE = re.compile(r"(?m)^## ([^\n]+)$")
 _CHANGE_HISTORY_RE = re.compile(
@@ -76,7 +76,7 @@ def validate_target_ticket_file(path: Path) -> TargetTicketValidation:
 
 def validate_target_ticket_text(path: Path, text: str) -> TargetTicketValidation:
     """Validate target-shaped ticket Markdown without semantic scoring."""
-    if _FENCED_YAML_RE.search(text):
+    if _LEGACY_FENCED_YAML_HEADER_RE.match(text):
         return _invalid("target ticket validation", "fenced YAML is not target format", path)
     if _H1_RE.search(text):
         return _invalid(

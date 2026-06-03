@@ -124,6 +124,32 @@ def test_target_ticket_rejects_fenced_yaml(tmp_path: Path) -> None:
     assert "fenced YAML" in result.error
 
 
+def test_target_ticket_accepts_yaml_code_fence_in_body(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    _write_target_ticket(
+        ticket,
+        body=(
+            "\n"
+            "## Problem\n"
+            "Document the target shape with an example:\n"
+            "```yaml\n"
+            "priority: normal\n"
+            "```\n"
+            "\n"
+            "## Next Action\n"
+            "Keep the prose example valid.\n"
+            "\n"
+            "## Change History\n"
+            "- 2026-06-02T00:00:00Z | migration | Normalized ticket into ADR 0006 schema.\n"
+        ),
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is True
+    assert result.error == ""
+
+
 def test_target_ticket_rejects_duplicated_h1_title(tmp_path: Path) -> None:
     ticket = tmp_path / "T-20260508-01.md"
     _write_target_ticket(ticket, body="\n# T-20260508-01: Example\n\n## Problem\nExample.\n")

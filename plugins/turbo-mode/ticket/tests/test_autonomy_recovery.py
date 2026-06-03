@@ -111,6 +111,34 @@ def test_attempt_recorded_retries_only_same_mutation_when_pre_write_matches(
     assert stale.state == "pause_for_reconciliation"
 
 
+def test_attempt_recorded_create_without_ticket_fingerprint_retries_same_mutation(
+    tmp_path: Path,
+) -> None:
+    project_root = project_root_with_ignored_workspace(tmp_path)
+    store = PendingSummaryStore(project_root)
+    _append_ok(
+        store,
+        valid_attempt_event(
+            event_id="evt_create_attempt",
+            action="create",
+            ticket_id=None,
+            mutation_id="mut_create",
+        ),
+    )
+
+    projection = project_mutation_recovery(
+        store=store,
+        thread_id="thread-1",
+        mutation_id="mut_create",
+        current_ticket_fingerprint=None,
+    )
+
+    assert projection.state == "retry_with_same_mutation"
+    assert projection.events_to_append == ()
+    assert projection.expected_pre_write_fingerprint is None
+    assert projection.expected_post_write_fingerprint is None
+
+
 def test_attempt_recorded_with_post_write_state_appends_missing_write_events(
     tmp_path: Path,
 ) -> None:
