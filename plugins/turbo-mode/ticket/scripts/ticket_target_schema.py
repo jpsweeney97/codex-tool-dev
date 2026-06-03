@@ -18,7 +18,7 @@ TARGET_STATUSES = ("open", "in_progress", "done", "wontfix")
 TARGET_PRIORITIES = ("high", "normal", "low")
 TARGET_CANDIDATE_ACTIONS = ("create", "update", "done", "wontfix", "reopen", "correct")
 
-_TARGET_ID_RE = re.compile(r"^T-\d{8}-\d{2}$")
+_TARGET_ID_RE = re.compile(r"^T-\d{8}-\d{2,}$")
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
 _FENCED_YAML_RE = re.compile(r"^```ya?ml\b", re.MULTILINE)
 _H1_RE = re.compile(r"(?m)^# ")

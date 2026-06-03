@@ -23,7 +23,7 @@ from scripts.ticket_target_schema import (
     TARGET_SECTIONS_REQUIRED,
 )
 
-_TARGET_ID_RE = re.compile(r"^T-\d{8}-\d{2}$")
+_TARGET_ID_RE = re.compile(r"^T-\d{8}-\d{2,}$")
 _DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 
 

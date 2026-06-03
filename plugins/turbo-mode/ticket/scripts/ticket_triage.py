@@ -25,7 +25,6 @@ from scripts.ticket_payloads import (  # noqa: E402
 _TERMINAL_STATUSES = frozenset({"done", "wontfix"})
 _DOCTOR_MAX_FILES = 5000
 _DOCTOR_MAX_BYTES = 100 * 1024 * 1024
-_EXPECTED_CACHE_ROOT = Path("/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0")
 
 # Ticket ID patterns for id_ref matching.
 _TICKET_ID_PATTERNS = [
@@ -51,6 +50,23 @@ def _script_plugin_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _expected_cache_root() -> Path | None:
+    """Return the installed cache root for this plugin version, or None.
+
+    Derived from the user home and the manifest version so the doctor trust
+    boundary is portable across machines and tracks the plugin version, rather
+    than pinning a hardcoded absolute path.
+    """
+    manifest = _script_plugin_root() / ".codex-plugin" / "plugin.json"
+    try:
+        version = json.loads(manifest.read_text(encoding="utf-8"))["version"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(version, str) or not version.strip():
+        return None
+    return Path.home() / ".codex" / "plugins" / "cache" / "turbo-mode" / "ticket" / version
+
+
 def _validate_doctor_roots(plugin_root: Path, cache_root: Path) -> tuple[Path, Path]:
     """Resolve and constrain doctor roots before any recursive walk."""
     script_root = _script_plugin_root().resolve()
@@ -72,7 +88,10 @@ def _validate_doctor_roots(plugin_root: Path, cache_root: Path) -> tuple[Path, P
         raise DoctorInputError(
             f"doctor cache_root failed: path does not exist. Got: {str(cache_root)!r:.100}"
         ) from exc
-    allowed_cache_roots = {script_root, _EXPECTED_CACHE_ROOT.resolve()}
+    allowed_cache_roots = {script_root}
+    expected_cache = _expected_cache_root()
+    if expected_cache is not None:
+        allowed_cache_roots.add(expected_cache.resolve(strict=False))
     if resolved_cache not in allowed_cache_roots:
         raise DoctorInputError(
             "doctor cache_root failed: must equal the running plugin root or the expected "

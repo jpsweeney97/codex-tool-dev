@@ -77,8 +77,8 @@ _FIELD_DEFAULTS: dict[str, Any] = {
 # ID pattern matchers for generation detection.
 _GEN2_ID_RE = re.compile(r"^T-[A-F]$")
 _GEN3_ID_RE = re.compile(r"^T-\d{1,3}$")
-_DATE_ID_RE = re.compile(r"^T-\d{8}-\d{2}$")
-_TARGET_ID_DATE_RE = re.compile(r"^T-(\d{4})(\d{2})(\d{2})-\d{2}$")
+_DATE_ID_RE = re.compile(r"^T-\d{8}-\d{2,}$")
+_TARGET_ID_DATE_RE = re.compile(r"^T-(\d{4})(\d{2})(\d{2})-\d{2,}$")
 
 
 @dataclass(frozen=True)
