@@ -193,6 +193,29 @@ class TestEnvelopeToFields:
         assert "key_files" not in fields
         assert "key_file_paths" not in fields
 
+    @pytest.mark.parametrize(
+        ("handoff_priority", "target_priority"),
+        [
+            ("critical", "high"),
+            ("medium", "normal"),
+        ],
+    )
+    def test_legacy_handoff_priorities_map_to_target_priorities(
+        self, tmp_path: Path, handoff_priority: str, target_priority: str
+    ) -> None:
+        from scripts.ticket_envelope import map_envelope_to_fields, read_envelope
+
+        envelope_data = _valid_envelope()
+        envelope_data["suggested_priority"] = handoff_priority
+        path = tmp_path / "legacy-priority.json"
+        path.write_text(json.dumps(envelope_data), encoding="utf-8")
+
+        envelope, errors = read_envelope(path)
+
+        assert errors == []
+        assert envelope is not None
+        assert map_envelope_to_fields(envelope)["priority"] == target_priority
+
     def test_envelope_never_carries_status(self) -> None:
         from scripts.ticket_envelope import map_envelope_to_fields
 

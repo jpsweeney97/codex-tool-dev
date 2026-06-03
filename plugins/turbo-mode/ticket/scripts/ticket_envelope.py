@@ -33,10 +33,21 @@ _OPTIONAL_FIELDS = (
 _ALL_FIELDS = frozenset(_REQUIRED_FIELDS + _OPTIONAL_FIELDS)
 
 _VALID_PRIORITIES = frozenset({"high", "normal", "low"})
+_LEGACY_HANDOFF_PRIORITY_MAP = {
+    "critical": "high",
+    "medium": "normal",
+}
 
 _SOURCE_REQUIRED_KEYS = ("type", "ref", "session")
 
 _KEY_FILE_REQUIRED_KEYS = ("file", "role", "look_for")
+
+
+def _target_suggested_priority(value: Any) -> Any:
+    """Map Handoff v1.0 legacy priorities to target ticket priorities."""
+    if not isinstance(value, str):
+        return value
+    return _LEGACY_HANDOFF_PRIORITY_MAP.get(value, value)
 
 
 def validate_envelope(envelope: dict[str, Any]) -> list[str]:
@@ -92,7 +103,7 @@ def validate_envelope(envelope: dict[str, Any]) -> list[str]:
     # suggested_priority
     if "suggested_priority" in envelope:
         v = envelope["suggested_priority"]
-        if not isinstance(v, str) or v not in _VALID_PRIORITIES:
+        if not isinstance(v, str) or _target_suggested_priority(v) not in _VALID_PRIORITIES:
             errors.append(
                 f"suggested_priority must be one of {sorted(_VALID_PRIORITIES)}, got {v!r}"
             )
@@ -159,7 +170,7 @@ def map_envelope_to_fields(envelope: dict[str, Any]) -> dict[str, Any]:
     fields: dict[str, Any] = {
         "title": envelope["title"],
         "problem": envelope["problem"],
-        "priority": envelope.get("suggested_priority", "normal"),
+        "priority": _target_suggested_priority(envelope.get("suggested_priority", "normal")),
         "tags": envelope.get("suggested_tags", []),
     }
 
