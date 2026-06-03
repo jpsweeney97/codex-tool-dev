@@ -4,15 +4,16 @@ This document describes the Ticket plugin source package in this repository. It
 does not certify what any installed Codex runtime or plugin cache currently
 loads.
 
-The Ticket plugin stores repo-local tickets and capture metadata in the active
-project, normally under `docs/tickets/`. Future autonomous durable history is
-stored in each affected ticket's `## Change History` section, and local
-autonomous operational state is stored under
-`.codex/ticket-workspace/ticket.pending-summary.jsonl`. Existing
-`docs/tickets/.audit/` files are historical artifacts for read/repair only.
-Ticket payloads may include titles, problem summaries, next actions, tags,
-priorities, related paths, and other ticket metadata entered or approved during
-a Codex session.
+The Ticket plugin stores repo-local ticket content and local operational
+metadata in the active project, normally under `docs/tickets/`. Future
+post-cutover durable history belongs in each affected ticket's
+`## Change History` section. Current source may still store local autonomous
+operational state under `.codex/ticket-workspace/ticket.pending-summary.jsonl`;
+that file is source drift or diagnostic evidence, not installed-runtime proof.
+Existing `docs/tickets/.audit/` files are historical artifacts for read/repair
+only. Ticket payloads may include titles, problem summaries, next actions,
+tags, priorities, related paths, and other ticket metadata entered or approved
+during a Codex session.
 
 Processed envelopes are retained indefinitely for now as the idempotency ledger and cross-plugin audit trail. Processed DeferredWorkEnvelope files under `docs/tickets/.envelopes/.processed/` may contain deferred-work metadata such as source session references, problem statements, acceptance criteria, and file paths.
 

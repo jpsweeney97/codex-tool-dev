@@ -8,35 +8,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Capture-first skill split: `ticket-capture`, `ticket-find`, `ticket-update`,
-  `ticket-review`, and explicit-only `ticket-doctor` replace the old broad
+- Capture-first skill split: `capture-ticket`, `read-ticket`, `update-ticket`,
+  `ticket-backlog-triage`, and explicit-only `ticket-doctor` replace the old broad
   user-facing Ticket skill.
 - Purpose-built capture, update, review, and doctor entrypoints:
   `ticket_capture.py`, `ticket_update.py`, `ticket_review.py`, and
   `ticket_doctor.py`.
-- Capture metadata and refinement schema fields for synthesized tickets,
-  including `capture_confidence`, `capture_source`, and
-  `refinement_status: needs_refinement`.
+- Capture guidance describes target tickets without capture metadata or
+  refinement frontmatter.
 - Source manifest readiness URLs for website, privacy policy, and terms of
   service. This is source metadata only, not installed runtime proof.
-- Guided ticket UX plan: workflow prepare/execute, mutation previews,
-  recovery options, close-readiness checks, triage next actions, and static
-  doctor diagnostics
-- `DeferredWorkEnvelope` schema validator with JSON Schema-based validation (T-04a, #69)
-- `ticket_envelope.py` module: envelope read, field mapping, and lifecycle management for consuming deferred work envelopes (T-04a, #69)
-- `DeferredWorkEnvelope` schema documented in ticket contract §11 (T-04a, #69)
-- `effort` field in `DeferredWorkEnvelope` schema for sizing deferred work items (T-04b, #70)
+- Guided ticket UX plan: capture availability checks, read-only ticket lookup,
+  backlog triage next actions, close-readiness checks, recovery options, and
+  static doctor diagnostics.
+- Handoff envelope validator with JSON Schema-based validation (T-04a, #69)
+- `ticket_envelope.py` module: envelope read, target field mapping, and lifecycle management for consuming deferred work envelopes (T-04a, #69)
+- Handoff envelope input documented in ticket contract §11 (T-04a, #69)
+- Legacy envelope sizing metadata accepted as input context only (T-04b, #70)
 - `IngestInput` stage model at dispatch boundary for envelope ingestion pipeline (T-04b, #70)
-- `ingest` subcommand in engine runner: read-validate-map-plan-preflight-execute-move pipeline for consuming deferred work envelopes (T-04b, #70)
+- `ingest` subcommand in engine runner consumes handoff envelopes through the target create path (T-04b, #70)
 - `ingest` added to guard hook `VALID_SUBCOMMANDS` allowlist (T-04b, #70)
 - `defer` field passed through `_execute_create` to `render_ticket` for envelope-originated tickets (T-04a, #69)
 - `ticket_doctor.py activate-runtime` explicit direct-execute runtime activation subcommand.
 - Runtime-first Ticket autonomy source support: strict local JSON setup,
   project-local pending-summary bookkeeping, ticket-local `## Change History`,
   deterministic mutation IDs, `ticket_autonomy.py apply-turn`, engine-owned
-  gateway writes, correction handling, recovery projections, and ticket commit
-  disposition recording. This is source behavior only, not installed-runtime
-  proof.
+  gateway writes, correction handling, and recovery projections. This is source
+  behavior only, not installed-runtime proof.
+- Target write validation rejects deprecated write fields including
+  `contract_version`, `source`, `defer`, and `key_files`; current writes derive
+  contract and source facts from target ticket identity and supported sections.
 
 ### Changed
 
@@ -54,9 +55,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - Archived tickets included in blocker resolution and dedup scan — `_list_tickets_with_closed()` helper prevents false "missing" blocker reports and dedup false negatives on done/wontfix tickets (C-003, #68)
-- Legacy write gate rejects mutations on pre-v1.0 tickets until migrated via engine; `contract_version` now engine-owned and stamped on all write paths (C-001/C-004)
-- `key_file_paths` persisted in YAML frontmatter for round-trip dedup reliability; `dedup_override` bound to `duplicate_of` field (C-002/C-008)
-- Full contract shapes enforced for `source`, `defer`, and `key_files` fields before any file mutation (C-005)
+- Legacy write gate rejects mutations on pre-v1.0 tickets until migrated via engine; target writes now reject caller-supplied `contract_version` as deprecated write input (C-001/C-004)
+- Related paths persisted in YAML frontmatter for target dedup reliability; `dedup_override` bound to `duplicate_of` field (C-002/C-008)
+- Deprecated write fields are rejected before mutation; target `related_paths` and supported body sections replace old `source`, `defer`, and `key_files` write contracts (C-005)
 - Contract documentation aligned with implementation; agent-preflight hook gate removed (C-006/C-007/C-009/C-010)
 - Envelope `move_to_processed` rejects overwrite of existing processed file, preventing silent data loss (code review I-1, #69)
 - Envelope move exception catch widened from `FileExistsError` to `OSError` for filesystem robustness (T-04b, #70)
@@ -117,7 +118,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - All mutation paths (create/update/close/reopen) unified on a single serialization surface in `ticket_render.py`, eliminating dual-serializer drift (#52)
-- `key_file_paths` locked as dedup-only; create without `key_files` produces a valid ticket with no Key Files section (#52)
+- Related paths locked as dedup input; create without key-file table rows produces a valid ticket with no Key Files section (#52)
 
 ## 1.2.0 — 2026-03-06
 

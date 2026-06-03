@@ -6,7 +6,7 @@ from datetime import UTC
 
 from scripts.ticket_engine_core import engine_plan
 
-from tests.support.builders import make_ticket
+from tests.support.builders import make_legacy_ticket_for_cutover, make_ticket
 
 
 class TestEnginePlan:
@@ -17,7 +17,7 @@ class TestEnginePlan:
                 "title": "Fix auth bug",
                 "problem": "Auth times out.",
                 "priority": "high",
-                "key_file_paths": ["handler.py"],
+                "related_paths": ["handler.py"],
             },
             session_id="test-session",
             request_origin="user",
@@ -38,14 +38,14 @@ class TestEnginePlan:
         assert resp.state == "need_fields"
         assert "problem" in resp.data["missing_fields"]
 
-    def test_create_invalid_key_file_paths_rejected(self, tmp_tickets):
+    def test_create_invalid_related_paths_rejected(self, tmp_tickets):
         resp = engine_plan(
             intent="create",
             fields={
                 "title": "Fix auth bug",
                 "problem": "Auth times out.",
                 "priority": "high",
-                "key_file_paths": "handler.py",
+                "related_paths": "handler.py",
             },
             session_id="test-session",
             request_origin="user",
@@ -53,7 +53,7 @@ class TestEnginePlan:
         )
         assert resp.state == "need_fields"
         assert resp.error_code == "need_fields"
-        assert "key_file_paths" in resp.message
+        assert "related_paths" in resp.message
 
     def test_dedup_detection(self, tmp_tickets):
         from datetime import datetime
@@ -75,7 +75,7 @@ class TestEnginePlan:
                 "title": "Fix auth bug",
                 "problem": "Auth times out.",
                 "priority": "high",
-                "key_file_paths": ["test.py"],  # Must match conftest's Key Files table
+                "related_paths": [],
             },
             session_id="test-session",
             request_origin="user",
@@ -99,7 +99,7 @@ class TestEnginePlan:
                 "title": "Fix auth bug",
                 "problem": "Auth times out.",
                 "priority": "high",
-                "key_file_paths": [],
+                "related_paths": [],
             },
             session_id="test-session",
             request_origin="user",
@@ -108,28 +108,18 @@ class TestEnginePlan:
         # Old ticket outside 24h window — no dedup match.
         assert resp.state == "ok"
 
-    def test_dedup_uses_created_at_over_date(self, tmp_tickets):
-        """Dedup uses created_at for precise window check (P0-3).
+    def test_dedup_uses_target_id_date(self, tmp_tickets):
+        """Dedup uses the target ID date derived from T-YYYYMMDD-NN."""
+        from datetime import datetime
 
-        A ticket with a recent created_at but old date should still be
-        within the 24h dedup window. created_at has second-level precision
-        and is immune to git checkout/clone mtime resets.
-        """
-        from datetime import datetime, timedelta
-
-        # created_at = 1 hour ago (within 24h window).
-        recent = datetime.now(UTC) - timedelta(hours=1)
-        created_at = recent.strftime("%Y-%m-%dT%H:%M:%SZ")
-        # Date is 2 days ago — would be outside window with date-only logic.
-        old_date = "2026-02-28"
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        today_compact = today.replace("-", "")
         make_ticket(
             tmp_tickets,
-            f"{old_date}-midnight.md",
-            id="T-20260228-01",
-            date=old_date,
-            created_at=created_at,
+            f"T-{today_compact}-01.md",
+            id=f"T-{today_compact}-01",
             problem="Auth times out.",
-            title="Midnight edge case",
+            title="Target ID date ticket",
         )
         resp = engine_plan(
             intent="create",
@@ -137,28 +127,20 @@ class TestEnginePlan:
                 "title": "Fix auth bug",
                 "problem": "Auth times out.",
                 "priority": "high",
-                "key_file_paths": ["test.py"],
+                "related_paths": [],
             },
             session_id="test-session",
             request_origin="user",
             tickets_dir=tmp_tickets,
         )
-        # created_at puts it within window — duplicate detected.
         assert resp.state == "duplicate_candidate"
 
-    def test_dedup_skips_old_created_at(self, tmp_tickets):
-        """Tickets with old created_at are excluded even with recent date."""
-        from datetime import datetime, timedelta
-
-        # created_at = 3 days ago (outside 24h window).
-        old = datetime.now(UTC) - timedelta(days=3)
-        created_at = old.strftime("%Y-%m-%dT%H:%M:%SZ")
+    def test_dedup_skips_old_target_id_date(self, tmp_tickets):
+        """Tickets with old target ID dates are excluded from dedup."""
         make_ticket(
             tmp_tickets,
-            "2026-03-07-stale.md",
+            "T-20260307-01.md",
             id="T-20260307-01",
-            date="2026-03-07",
-            created_at=created_at,
             problem="Auth times out.",
             title="Stale ticket",
         )
@@ -168,32 +150,26 @@ class TestEnginePlan:
                 "title": "Fix auth bug",
                 "problem": "Auth times out.",
                 "priority": "high",
-                "key_file_paths": ["test.py"],
+                "related_paths": [],
             },
             session_id="test-session",
             request_origin="user",
             tickets_dir=tmp_tickets,
         )
-        # Old created_at puts ticket outside window — no dedup match.
         assert resp.state == "ok"
 
-    def test_dedup_end_of_day_fallback_catches_near_midnight(self, tmp_tickets):
-        """Legacy tickets without created_at use end-of-day fallback.
-
-        A ticket dated today (without created_at) should always be in the
-        24h window because its date is treated as 23:59:59 UTC.
-        """
+    def test_dedup_target_id_date_uses_end_of_day_window(self, tmp_tickets):
+        """A ticket ID dated today is always inside the 24h dedup window."""
         from datetime import datetime
 
         today = datetime.now(UTC).strftime("%Y-%m-%d")
+        today_compact = today.replace("-", "")
         make_ticket(
             tmp_tickets,
-            f"{today}-legacy.md",
-            id="T-20260307-01",
-            date=today,
-            # No created_at — exercises fallback path.
+            f"T-{today_compact}-02.md",
+            id=f"T-{today_compact}-02",
             problem="Auth times out.",
-            title="Legacy ticket",
+            title="Target ticket",
         )
         resp = engine_plan(
             intent="create",
@@ -201,13 +177,12 @@ class TestEnginePlan:
                 "title": "Fix auth bug",
                 "problem": "Auth times out.",
                 "priority": "high",
-                "key_file_paths": ["test.py"],
+                "related_paths": [],
             },
             session_id="test-session",
             request_origin="user",
             tickets_dir=tmp_tickets,
         )
-        # End-of-day fallback puts today's ticket within window.
         assert resp.state == "duplicate_candidate"
 
     def test_dedup_ignores_mtime_after_git_clone(self, tmp_tickets):
@@ -238,7 +213,7 @@ class TestEnginePlan:
                 "title": "Fix auth bug",
                 "problem": "Auth times out.",
                 "priority": "high",
-                "key_file_paths": ["test.py"],
+                "related_paths": [],
             },
             session_id="test-session",
             request_origin="user",
@@ -259,29 +234,32 @@ class TestEnginePlan:
         # No dedup for non-create.
         assert resp.data.get("dedup_fingerprint") is None
 
-    def test_plan_create_dedup_includes_archived_tickets(self, tmp_tickets):
-        """Dedup scan must include closed-tickets/ to detect archived duplicates.
+    def test_non_create_invalid_active_ticket_returns_invalid_state(self, tmp_tickets):
+        make_legacy_ticket_for_cutover(tmp_tickets, "legacy-active.md")
 
-        Before fix: list_tickets(tickets_dir) misses closed-tickets/ subdir,
-        so an archived ticket with identical problem text is not detected.
-        After fix: _list_tickets_with_closed scans closed-tickets/ too.
-        """
+        resp = engine_plan(
+            intent="update",
+            fields={"ticket_id": "T-20260302-01"},
+            session_id="test-session",
+            request_origin="user",
+            tickets_dir=tmp_tickets,
+        )
+
+        assert resp.state == "invalid_state"
+        assert resp.error_code == "invalid_state"
+        assert resp.data["reason"]
+
+    def test_plan_create_dedup_includes_terminal_tickets(self, tmp_tickets):
+        """Dedup scan includes terminal target tickets in docs/tickets/."""
         from datetime import datetime
 
         today = datetime.now(UTC)
         today_str = today.strftime("%Y-%m-%d")
         today_compact = today_str.replace("-", "")
-        created_at = today.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        # Create an archived ticket in closed-tickets/ with known problem text.
-        closed_dir = tmp_tickets / "closed-tickets"
-        closed_dir.mkdir(parents=True, exist_ok=True)
         make_ticket(
-            closed_dir,
-            f"{today_str}-archived.md",
+            tmp_tickets,
+            f"T-{today_compact}-03.md",
             id=f"T-{today_compact}-01",
-            date=today_str,
-            created_at=created_at,
             status="done",
             problem="Auth times out.",
             title="Fix auth bug",
@@ -294,13 +272,13 @@ class TestEnginePlan:
                 "title": "Fix auth bug",
                 "problem": "Auth times out.",
                 "priority": "high",
-                "key_file_paths": ["test.py"],
+                "related_paths": [],
             },
             session_id="test-session",
             request_origin="user",
             tickets_dir=tmp_tickets,
         )
         assert resp.state == "duplicate_candidate", (
-            f"Archived ticket with same problem should be detected as duplicate, "
+            f"Terminal ticket with same problem should be detected as duplicate, "
             f"got state={resp.state!r}"
         )

@@ -6,6 +6,7 @@ import ast
 import json
 import os
 import threading
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -18,7 +19,6 @@ from scripts.ticket_autonomy_runtime import (
     RuntimeDecisionKind,
     evaluate_autonomy_intent,
 )
-from scripts.ticket_commit_coordinator import TicketChangeScope
 from scripts.ticket_dedup import target_fingerprint
 from scripts.ticket_engine_core import EngineResponse, engine_execute
 from scripts.ticket_engine_gateway import (
@@ -28,8 +28,8 @@ from scripts.ticket_engine_gateway import (
 )
 from scripts.ticket_turn_batch import PendingSummaryStore, VerifiedRepoContext
 
-from tests.support.builders import make_ticket
-from tests.test_turn_batch import valid_attempt_event, valid_status_event
+from tests.support.builders import make_legacy_ticket_for_cutover, make_ticket
+from tests.test_turn_batch import valid_attempt_event
 
 
 def _declare_ignored_workspace(project_root: Path) -> None:
@@ -55,14 +55,13 @@ def _decision_for(
     action: str = "update",
     fields: dict[str, object] | None = None,
     target_fp: str = "ticket-fp",
-    ticket_change_scope: TicketChangeScope = "current_branch",
+    turn_id: str = "turn-1",
 ):
     candidate = CandidateMutation(
         ticket_id=ticket_id,
         action=action,
         proposed_change=fields or {"priority": "low"},
         evidence=(EvidenceLink("current_thread_reason", "test"),),
-        ticket_change_scope=ticket_change_scope,
     )
     return evaluate_autonomy_intent(
         AutonomyIntent(
@@ -72,7 +71,7 @@ def _decision_for(
         ),
         current_mode="agent_primary",
         thread_id="thread-1",
-        turn_id="turn-1",
+        turn_id=turn_id,
         now=datetime.now(UTC),
     )[0]
 
@@ -84,7 +83,6 @@ def _mutation(
     ticket_id: str = "T-20260527-01",
     action: str = "update",
     fields: dict[str, object] | None = None,
-    ticket_change_scope: TicketChangeScope = "current_branch",
 ) -> GatewayMutation:
     return GatewayMutation(
         action=action,
@@ -92,7 +90,6 @@ def _mutation(
         fields=fields or {"priority": "low"},
         tickets_dir=tickets_dir,
         target_fingerprint=target_fingerprint(ticket_path),
-        ticket_change_scope=ticket_change_scope,
     )
 
 
@@ -112,13 +109,18 @@ def _event_with_recovery_fingerprints(
     details = dict(event["details"])
     details["expected_pre_write_fingerprint"] = pre
     details["expected_post_write_fingerprint"] = post
-    approval = details.get("approval")
-    if isinstance(approval, dict):
-        details["approval"] = {**approval, "ticket_state_fingerprint": pre}
     return {**event, "details": details}
 
 
-def test_gateway_rejects_missing_mismatched_reused_and_expired_approvals(
+def test_gateway_does_not_import_commit_coordination() -> None:
+    source = Path(gateway.__file__).read_text(encoding="utf-8")
+
+    assert "ticket_commit_coordinator" not in source
+    assert "record_ticket_commit_disposition" not in source
+    assert "CommitDispositionRecord" not in source
+
+
+def test_gateway_rejects_non_autonomous_or_mismatched_decisions(
     tmp_tickets: Path,
 ) -> None:
     project_root = tmp_tickets.parent.parent
@@ -128,86 +130,118 @@ def test_gateway_rejects_missing_mismatched_reused_and_expired_approvals(
     decision = _decision_for(ticket_id="T-20260527-01", target_fp=mutation.target_fingerprint or "")
     store = PendingSummaryStore(project_root)
 
-    missing = apply_autonomous_mutation(
+    discussion = apply_autonomous_mutation(
         project_root=project_root,
         thread_id="thread-1",
         turn_id="turn-1",
         repo_context=_repo_context(project_root),
         mutation=mutation,
-        decision=decision.__class__(
-            decision.candidate,
-            RuntimeDecisionKind.REQUIRE_USER_DISCUSSION,
-            None,
-            None,
-            None,
-            "discussion_required",
-            "discussion_required",
+        decision=replace(
+            decision,
+            kind=RuntimeDecisionKind.REQUIRE_USER_DISCUSSION,
+            reason="discussion_required",
+            pending_summary_status="discussion_required",
         ),
         pending_summary=store,
     )
-    forged_approval = dict(decision.approval or {})
-    forged_approval["ticket_id"] = "T-20260527-99"
-    forged = apply_autonomous_mutation(
+    mismatched_ticket = apply_autonomous_mutation(
         project_root=project_root,
         thread_id="thread-1",
         turn_id="turn-1",
         repo_context=_repo_context(project_root),
         mutation=mutation,
-        decision=decision.__class__(
-            decision.candidate,
-            decision.kind,
-            decision.mutation_id,
-            forged_approval,
-            decision.engine_dispatch,
-            decision.reason,
-            decision.pending_summary_status,
+        decision=replace(
+            decision,
+            candidate=CandidateMutation(
+                ticket_id="T-20260527-99",
+                action="update",
+                proposed_change={"priority": "low"},
+                evidence=(EvidenceLink("current_thread_reason", "test"),),
+            ),
         ),
         pending_summary=store,
     )
-    expired_approval = dict(decision.approval or {})
-    expired_approval["expires_at"] = "2000-01-01T00:00:00Z"
-    expired = apply_autonomous_mutation(
+    mismatched_fields = apply_autonomous_mutation(
         project_root=project_root,
         thread_id="thread-1",
         turn_id="turn-1",
         repo_context=_repo_context(project_root),
         mutation=mutation,
-        decision=decision.__class__(
-            decision.candidate,
-            decision.kind,
-            decision.mutation_id,
-            expired_approval,
-            decision.engine_dispatch,
-            decision.reason,
-            decision.pending_summary_status,
+        decision=replace(
+            decision,
+            candidate=CandidateMutation(
+                ticket_id="T-20260527-01",
+                action="update",
+                proposed_change={"priority": "normal"},
+                evidence=(EvidenceLink("current_thread_reason", "test"),),
+            ),
         ),
         pending_summary=store,
     )
+    mismatched_target_fingerprint = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=replace(mutation, target_fingerprint="different-ticket-state"),
+        decision=decision,
+        pending_summary=store,
+    )
+    forged_mutation_id = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=replace(decision, mutation_id="mut_wrong"),
+        pending_summary=store,
+    )
 
-    assert missing.error_code == "gateway_required"
-    assert forged.error_code == "gateway_required"
-    assert expired.error_code == "gateway_required"
+    assert discussion.error_code == "gateway_required"
+    assert "autonomous_decision_required" in discussion.message
+    assert mismatched_ticket.error_code == "gateway_required"
+    assert "ticket_mismatch" in mismatched_ticket.message
+    assert mismatched_fields.error_code == "gateway_required"
+    assert "mutation_fingerprint_mismatch" in mismatched_fields.message
+    assert mismatched_target_fingerprint.error_code == "gateway_required"
+    assert "mutation_id_mismatch" in mismatched_target_fingerprint.message
+    assert forged_mutation_id.error_code == "gateway_required"
+    assert "mutation_id_mismatch" in forged_mutation_id.message
+    assert "priority: high" in ticket_path.read_text(encoding="utf-8")
+    assert _events(project_root) == []
 
 
-def test_gateway_rejects_approval_when_live_mutation_fingerprint_differs(
+def test_gateway_autonomous_create_writes_ticket_without_target_fingerprint(
     tmp_tickets: Path,
 ) -> None:
     project_root = tmp_tickets.parent.parent
     _declare_ignored_workspace(project_root)
-    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
-    mutation = _mutation(tmp_tickets, ticket_path)
-    decision = _decision_for(ticket_id="T-20260527-01", target_fp=mutation.target_fingerprint or "")
-    forged_approval = dict(decision.approval or {})
-    forged_approval["mutation_fingerprint"] = "sha256:not-the-live-mutation"
-    forged = decision.__class__(
-        decision.candidate,
-        decision.kind,
-        decision.mutation_id,
-        forged_approval,
-        decision.engine_dispatch,
-        decision.reason,
-        decision.pending_summary_status,
+    fields = {
+        "title": "Add retry to publisher",
+        "problem": "Publisher drops messages on transient broker errors.",
+        "priority": "high",
+        "related_paths": ["publisher.py"],
+    }
+    candidate = CandidateMutation(
+        ticket_id=None,
+        action="create",
+        proposed_change=fields,
+        evidence=(EvidenceLink("current_thread_reason", "discussed this turn"),),
     )
+    decision = evaluate_autonomy_intent(
+        AutonomyIntent(
+            action_kind="create",
+            candidates=(candidate,),
+            source_context={},
+        ),
+        current_mode="agent_primary",
+        thread_id="thread-1",
+        turn_id="turn-1",
+        now=datetime.now(UTC),
+    )[0]
+    assert decision.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY
+    assert decision.mutation_id is not None
+    mutation = GatewayMutation("create", None, fields, tmp_tickets, None)
 
     response = apply_autonomous_mutation(
         project_root=project_root,
@@ -215,17 +249,28 @@ def test_gateway_rejects_approval_when_live_mutation_fingerprint_differs(
         turn_id="turn-1",
         repo_context=_repo_context(project_root),
         mutation=mutation,
-        decision=forged,
+        decision=decision,
         pending_summary=PendingSummaryStore(project_root),
     )
 
-    assert response.state == "policy_blocked"
-    assert "mutation_fingerprint_mismatch" in response.message
-    assert "priority: high" in ticket_path.read_text(encoding="utf-8")
-    pending_summary_path = (
-        project_root / ".codex" / "ticket-workspace" / "ticket.pending-summary.jsonl"
-    )
-    assert not pending_summary_path.exists()
+    assert response.state == "ok"
+    created = list(tmp_tickets.glob("*.md"))
+    assert len(created) == 1
+    ticket_text = created[0].read_text(encoding="utf-8")
+    assert "Add retry to publisher" in ticket_text
+    assert "| codex | Created ticket from candidate evidence." in ticket_text
+    # A freshly created ticket carries exactly one Change History entry — no
+    # fabricated render-time placeholder ahead of the real gateway entry.
+    history_section = ticket_text.split("## Change History", 1)[1].split("\n## ", 1)[0]
+    history_entries = [line for line in history_section.splitlines() if line.startswith("- ")]
+    assert len(history_entries) == 1, history_entries
+    assert "Rendered target ticket." not in ticket_text
+    events = _events(project_root)
+    assert [event["status"] for event in events] == [
+        "pending",
+        "ticket_written",
+        "applied",
+    ]
 
 
 def test_gateway_applies_update_records_events_and_writes_change_history(tmp_tickets: Path) -> None:
@@ -245,23 +290,24 @@ def test_gateway_applies_update_records_events_and_writes_change_history(tmp_tic
         pending_summary=PendingSummaryStore(project_root),
     )
 
-    assert response.state == "ok_update"
+    assert response.state == "ok"
     text = ticket_path.read_text(encoding="utf-8")
     assert "priority: low" in text
     assert "## Change History" in text
-    assert "auto-update" in text
+    assert "| codex | Updated ticket from candidate evidence." in text
     events = _events(project_root)
     assert [event["status"] for event in events] == [
         "pending",
-        "approval_consumed",
         "ticket_written",
         "applied",
     ]
     assert all(event["thread_id"] == "thread-1" for event in events)
     expected_repo_context = _repo_context(project_root).as_event_payload()
     assert all(event["repo_context"] == expected_repo_context for event in events)
-    assert events[-1]["details"]["commit_disposition"] == "commit_deferred"
-    assert response.data["commit_disposition"] == "commit_deferred"
+    assert events[-1]["details"] == {}
+    assert "commit_disposition" not in response.data
+    assert "commit_hash" not in response.data
+    assert "commit_reason" not in response.data
 
     reused = apply_autonomous_mutation(
         project_root=project_root,
@@ -294,7 +340,7 @@ def test_gateway_replay_after_summary_recorded_does_not_rewrite_ticket(
         decision=decision,
         pending_summary=store,
     )
-    assert first.state == "ok_update"
+    assert first.state == "ok"
     assert (
         store.append_event(
             valid_attempt_event(
@@ -322,11 +368,11 @@ def test_gateway_replay_after_summary_recorded_does_not_rewrite_ticket(
         pending_summary=store,
     )
 
-    assert replay.state == "policy_blocked"
+    assert replay.state == "blocked"
     assert replay.data["recovery_state"] == "healthy"
     assert ticket_path.read_text(encoding="utf-8") == before_text
     assert _events(project_root) == before_events
-    assert before_text.count("auto-update") == 1
+    assert before_text.count("Updated ticket from candidate evidence.") == 1
 
 
 def test_gateway_retry_uses_original_attempt_timestamp_for_change_history_dedupe(
@@ -335,7 +381,7 @@ def test_gateway_retry_uses_original_attempt_timestamp_for_change_history_dedupe
     project_root = tmp_tickets.parent.parent
     _declare_ignored_workspace(project_root)
     ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
-    original_entry = "- 2026-05-27T12:00:00Z | auto-update | Automatic Ticket update applied."
+    original_entry = "- 2026-05-27T12:00:00Z | codex | Updated ticket from candidate evidence."
     ticket_text = ticket_path.read_text(encoding="utf-8").rstrip()
     ticket_path.write_text(
         f"{ticket_text}\n\n## Change History\n{original_entry}\n",
@@ -343,7 +389,7 @@ def test_gateway_retry_uses_original_attempt_timestamp_for_change_history_dedupe
     )
     mutation = _mutation(tmp_tickets, ticket_path)
     pre = mutation.target_fingerprint or ""
-    decision = _decision_for(ticket_id="T-20260527-01", target_fp=pre)
+    decision = _decision_for(ticket_id="T-20260527-01", target_fp=pre, turn_id="turn-retry")
     store = PendingSummaryStore(project_root)
     assert (
         store.append_event(
@@ -368,58 +414,10 @@ def test_gateway_retry_uses_original_attempt_timestamp_for_change_history_dedupe
         pending_summary=store,
     )
 
-    assert response.state == "ok_update"
+    assert response.state == "ok"
     text = ticket_path.read_text(encoding="utf-8")
     assert "priority: low" in text
     assert text.count(original_entry) == 1
-
-
-def test_gateway_passes_ticket_change_scope_to_commit_disposition(
-    tmp_tickets: Path,
-    monkeypatch,
-) -> None:
-    project_root = tmp_tickets.parent.parent
-    _declare_ignored_workspace(project_root)
-    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
-    mutation = _mutation(
-        tmp_tickets,
-        ticket_path,
-        ticket_change_scope="unrelated_backlog",
-    )
-    decision = _decision_for(
-        ticket_id="T-20260527-01",
-        target_fp=mutation.target_fingerprint or "",
-        ticket_change_scope="unrelated_backlog",
-    )
-    captured: dict[str, object] = {}
-
-    def fake_record_ticket_commit_disposition(**kwargs: object) -> gateway.CommitDispositionRecord:
-        captured.update(kwargs)
-        return gateway.CommitDispositionRecord(
-            "commit_deferred",
-            reason="Unrelated backlog ticket commits require main.",
-        )
-
-    monkeypatch.setattr(
-        gateway,
-        "record_ticket_commit_disposition",
-        fake_record_ticket_commit_disposition,
-    )
-
-    response = apply_autonomous_mutation(
-        project_root=project_root,
-        thread_id="thread-1",
-        turn_id="turn-1",
-        repo_context=_repo_context(project_root),
-        mutation=mutation,
-        decision=decision,
-        pending_summary=PendingSummaryStore(project_root),
-    )
-
-    assert response.state == "ok_update"
-    assert captured["ticket_change_scope"] == "unrelated_backlog"
-    assert response.data["commit_disposition"] == "commit_deferred"
-    assert response.data["commit_reason"] == "Unrelated backlog ticket commits require main."
 
 
 def test_gateway_write_lock_clears_dead_pid_lock_and_proceeds(tmp_tickets: Path) -> None:
@@ -442,7 +440,7 @@ def test_gateway_write_lock_clears_dead_pid_lock_and_proceeds(tmp_tickets: Path)
         pending_summary=PendingSummaryStore(project_root),
     )
 
-    assert response.state == "ok_update"
+    assert response.state == "ok"
     assert not lock_path.exists()
 
 
@@ -482,16 +480,18 @@ def test_concurrent_same_ticket_gateway_calls_serialize_and_second_sees_stale_fi
     ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
     pre = target_fingerprint(ticket_path) or ""
     first_mutation = _mutation(tmp_tickets, ticket_path, fields={"priority": "low"})
-    second_mutation = _mutation(tmp_tickets, ticket_path, fields={"priority": "medium"})
+    second_mutation = _mutation(tmp_tickets, ticket_path, fields={"priority": "normal"})
     first_decision = _decision_for(
         ticket_id="T-20260527-01",
         fields={"priority": "low"},
         target_fp=pre,
+        turn_id="turn-first",
     )
     second_decision = _decision_for(
         ticket_id="T-20260527-01",
-        fields={"priority": "medium"},
+        fields={"priority": "normal"},
         target_fp=pre,
+        turn_id="turn-second",
     )
     first_entered = threading.Event()
     release_first = threading.Event()
@@ -522,7 +522,7 @@ def test_concurrent_same_ticket_gateway_calls_serialize_and_second_sees_stale_fi
                 encoding="utf-8",
             )
             return EngineResponse(
-                "ok_update",
+                "ok",
                 "Updated.",
                 data={"ticket_path": str(ticket_path)},
             )
@@ -566,8 +566,8 @@ def test_concurrent_same_ticket_gateway_calls_serialize_and_second_sees_stale_fi
     assert not second_thread.is_alive()
     assert isinstance(responses["first"], EngineResponse)
     assert isinstance(responses["second"], EngineResponse)
-    assert responses["first"].state == "ok_update"
-    assert responses["second"].state == "preflight_failed"
+    assert responses["first"].state == "ok"
+    assert responses["second"].state == "invalid_state"
     assert responses["second"].error_code == "stale_plan"
     assert dispatch_priorities == ["low"]
     assert max_active_dispatches == 1
@@ -576,12 +576,11 @@ def test_concurrent_same_ticket_gateway_calls_serialize_and_second_sees_stale_fi
 def test_gateway_autonomous_create_stops_at_duplicate_candidate(tmp_tickets: Path) -> None:
     project_root = tmp_tickets.parent.parent
     _declare_ignored_workspace(project_root)
-    today = datetime.now(UTC).date().isoformat()
+    today = datetime.now(UTC).strftime("%Y%m%d")
     make_ticket(
         tmp_tickets,
         "existing.md",
-        id="T-20260527-01",
-        date=today,
+        id=f"T-{today}-01",
         title="Fix auth bug",
         problem="Auth times out.",
     )
@@ -589,7 +588,6 @@ def test_gateway_autonomous_create_stops_at_duplicate_candidate(tmp_tickets: Pat
         "title": "Fix auth bug",
         "problem": "Auth times out.",
         "priority": "high",
-        "key_file_paths": ["test.py"],
     }
     candidate = CandidateMutation(
         ticket_id=None,
@@ -620,9 +618,45 @@ def test_gateway_autonomous_create_stops_at_duplicate_candidate(tmp_tickets: Pat
         pending_summary=PendingSummaryStore(project_root),
     )
 
-    assert response.state == "duplicate_candidate"
+    assert response.state == "blocked"
     assert response.error_code == "duplicate_candidate"
     assert len(list(tmp_tickets.glob("*.md"))) == 1
+
+
+def test_gateway_returns_invalid_state_for_non_normalized_active_ticket(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    make_legacy_ticket_for_cutover(
+        tmp_tickets,
+        "legacy-active.md",
+        id="legacy-ticket",
+    )
+    target_fp = "sha256:legacy-ticket-state"
+    mutation = GatewayMutation(
+        action="update",
+        ticket_id="legacy-ticket",
+        fields={"priority": "low"},
+        tickets_dir=tmp_tickets,
+        target_fingerprint=target_fp,
+    )
+    decision = _decision_for(ticket_id="legacy-ticket", target_fp=target_fp)
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    assert response.state == "invalid_state"
+    assert response.error_code == "invalid_state"
+    assert response.ticket_id == "legacy-ticket"
+    assert _events(project_root) == []
 
 
 def test_gateway_recovers_missing_write_events_without_rewriting_ticket(
@@ -656,22 +690,6 @@ def test_gateway_recovers_missing_write_events_without_rewriting_ticket(
         ).state
         == "appended"
     )
-    assert (
-        store.append_event(
-            _event_with_recovery_fingerprints(
-                valid_status_event(
-                    "approval_consumed",
-                    event_id="evt_approval_recover",
-                    thread_id="thread-1",
-                    mutation_id=decision.mutation_id,
-                ),
-                pre=pre,
-                post=post,
-            )
-        ).state
-        == "appended"
-    )
-
     recovered = apply_autonomous_mutation(
         project_root=project_root,
         thread_id="thread-1",
@@ -687,7 +705,6 @@ def test_gateway_recovers_missing_write_events_without_rewriting_ticket(
     assert ticket_path.read_text(encoding="utf-8") == before
     assert [event["status"] for event in _events(project_root)] == [
         "pending",
-        "approval_consumed",
         "ticket_written",
         "applied",
     ]
@@ -713,7 +730,7 @@ def test_pending_summary_failure_and_pause_prevent_ticket_mutation(tmp_tickets: 
         decision=decision,
         pending_summary=PendingSummaryStore(project_root, lock_timeout_seconds=0),
     )
-    assert blocked.state == "policy_blocked"
+    assert blocked.state == "blocked"
     assert ticket_path.read_text(encoding="utf-8") == before
     lock_path.unlink()
 
@@ -729,13 +746,13 @@ def test_pending_summary_failure_and_pause_prevent_ticket_mutation(tmp_tickets: 
         decision=decision,
         pending_summary=PendingSummaryStore(project_root),
     )
-    assert paused.state == "policy_blocked"
+    assert paused.state == "blocked"
     assert paused.data["pause_reason"] == "user_requested"
     assert ticket_path.read_text(encoding="utf-8") == before
     assert _events(project_root) == []
 
 
-def test_gateway_rechecks_pause_after_approval_consumption_before_dispatch(
+def test_gateway_rechecks_pause_after_attempt_record_before_dispatch(
     tmp_tickets: Path,
     monkeypatch,
 ) -> None:
@@ -759,13 +776,10 @@ def test_gateway_rechecks_pause_after_approval_consumption_before_dispatch(
         pending_summary=PendingSummaryStore(project_root),
     )
 
-    assert response.state == "policy_blocked"
+    assert response.state == "blocked"
     assert response.data["pause_reason"] == "workspace_paused"
     assert ticket_path.read_text(encoding="utf-8") == before
-    assert [event["status"] for event in _events(project_root)] == [
-        "pending",
-        "approval_consumed",
-    ]
+    assert [event["status"] for event in _events(project_root)] == ["pending"]
 
 
 def test_gateway_treats_success_without_ticket_path_as_failed_mutation(
@@ -782,7 +796,7 @@ def test_gateway_treats_success_without_ticket_path_as_failed_mutation(
     monkeypatch.setattr(
         gateway,
         "_execute_dispatch",
-        lambda **_kwargs: EngineResponse("ok_update", "Updated without path", data={}),
+        lambda **_kwargs: EngineResponse("ok", "Updated without path", data={}),
     )
 
     response = apply_autonomous_mutation(
@@ -795,12 +809,11 @@ def test_gateway_treats_success_without_ticket_path_as_failed_mutation(
         pending_summary=PendingSummaryStore(project_root),
     )
 
-    assert response.state == "policy_blocked"
+    assert response.state == "blocked"
     assert "ticket_path_missing" in response.message
     assert ticket_path.read_text(encoding="utf-8") == before
     assert [event["status"] for event in _events(project_root)] == [
         "pending",
-        "approval_consumed",
         "failed",
     ]
 

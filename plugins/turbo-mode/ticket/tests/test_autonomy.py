@@ -137,7 +137,7 @@ def test_low_level_agent_execute_requires_gateway_before_write(tmp_tickets: Path
     resp = engine_execute(
         action="create",
         ticket_id=None,
-        fields={"title": "Gateway required", "problem": problem, "priority": "medium"},
+        fields={"title": "Gateway required", "problem": problem, "priority": "normal"},
         session_id="execute-session",
         request_origin="agent",
         dedup_override=False,
@@ -164,7 +164,7 @@ def test_direct_agent_execute_requires_gateway_before_runtime_proof(tmp_tickets:
     resp = engine_execute(
         action="create",
         ticket_id=None,
-        fields={"title": "Gateway required", "problem": problem, "priority": "medium"},
+        fields={"title": "Gateway required", "problem": problem, "priority": "normal"},
         session_id="execute-session",
         request_origin="agent",
         dedup_override=False,

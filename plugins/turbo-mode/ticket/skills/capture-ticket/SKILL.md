@@ -1,6 +1,6 @@
 ---
 name: capture-ticket
-description: "Create repo-local tickets from natural language capture intent. Use when the user says to track, file, capture, ticket, or remember a bug, feature, follow-up, task, or cleanup item. Infer aggressively, synthesize a compact ticket preview, and require explicit confirmation before writing. Do not trigger from casual statements like 'this is a bug' unless the user also asks to track or file it."
+description: "Create repo-local tickets from natural language capture intent. Use when the user says to track, file, capture, ticket, or remember a bug, feature, follow-up, task, or cleanup item. temporarily unavailable for writes until Ticket exposes the target candidate mutation path. Do not trigger from casual statements like 'this is a bug' unless the user also asks to track or file it."
 allowed-tools:
   - Bash
   - Write
@@ -9,8 +9,8 @@ allowed-tools:
 
 # Ticket Capture
 
-Create one repo-local ticket from capture intent. Infer useful ticket fields,
-show a compact preview, and write only after explicit user confirmation.
+Capture intent is still a useful user signal, but active create mutation is
+temporarily unavailable until source exposes a live target-candidate entrypoint.
 
 ## Setup
 
@@ -31,118 +31,91 @@ Create the payload directory if needed:
 mkdir -p <PROJECT_ROOT>/.codex/ticket-tmp
 ```
 
-## Capture Payload
+## Authority Boundary
 
-Synthesize the payload from conversation context. Never store raw user wording:
-do not write verbatim transcript text, and do not include `raw_user_text`,
-`raw_request`, or `transcript_excerpt`.
+ADR 0006 is the accepted architecture authority for the Ticket runtime-first
+state-kernel rebaseline. The May 30 control doc is the implementation and
+cutover control surface. This skill is source-authority guidance, not
+installed-runtime proof and not runtime proof. This docs/tests slice does not
+perform cutover inventory or normalization.
 
-Write a JSON object to `PAYLOAD_PATH` with a `capture` object only. Do not
+Durable runtime modes are `agent_primary` and `discussion_only`.
+
+## Target Post-Cutover Ticket Shape
+
+Target tickets use ID-only filenames, YAML frontmatter, and the sections
+`Problem`, `Next Action`, and `Change History`.
+
+Target frontmatter fields are `id`, `title`, `status`, `priority`, `tags`,
+`related_paths`, and `blocked_by`. Target statuses are `open`, `in_progress`,
+`done`, and `wontfix`. Target priorities are `high`, `normal`, and `low`.
+Unknown frontmatter keys are invalid. `blocked` is not a status; derive reverse
+`blocks` views by scanning `blocked_by`.
+
+## Target Candidate Mutation Contract
+
+Create candidates use the target mutation fields `action`, `ticket_id`,
+`target.fields`, `target.sections`, `proposed_change`,
+`expected_ticket_fingerprint`, and `evidence_summary`.
+
+non-create writes require an expected ticket fingerprint. Ticket computes
+candidate identity from canonical candidate content plus the live target
+fingerprint; callers do not supply authoritative identity values. Unknown fields
+are invalid.
+
+## Target Result Envelope
+
+The target result envelope uses only `ok`, `blocked`, `needs_discussion`,
+`invalid_state`, and `no_change`.
+
+## Target Change History Grammar
+
+Target entries use:
+
+```markdown
+- <timestamp> | <actor> | <reason>
+- <timestamp> | <actor> | <reason> Corrects: <reference>.
+```
+
+The actor is a source value such as `codex`, `user-approved`, or `migration`.
+The actor is not a workflow label and must not encode action type.
+
+## Active Create Guidance
+
+Create mutation is temporarily unavailable from this skill until Ticket exposes
+and documents a live source entrypoint that accepts the target candidate
+mutation contract. In `discussion_only`, any future user approval must be
+tied to candidate identity before writing. This is approval tied to the
+candidate identity, not general permission to write.
+
+While unavailable, summarize the intended ticket in prose and stop without
+writing.
+
+Never store raw user wording: do not write verbatim transcript text, and do not
+include `raw_user_text`, `raw_request`, or `transcript_excerpt`.
+
+Do not
 write `session_id`, `hook_injected`, or `hook_request_origin`; those
-hook/provenance fields are hook-owned and injected by the canonical command
-path.
-
-- `capture.title`: short synthesized title.
-- `capture.captured_request`: synthesized summary of the requested work.
-- `capture.problem`: 1-2 synthesized sentences explaining the issue or need.
-- `capture.next_action`: one concrete next step.
-- `capture.capture_confidence`: `low`, `medium`, or `high`.
-- `capture.priority`: `critical`, `high`, `medium`, or `low`.
-- `capture.tags`: controlled tags only: `needs-refinement`, `bug`, `feature`,
-  `docs`, `test`, `maintenance`, and `security`.
-- `capture.component`: optional compact component name.
-- `capture.related_paths`: repo-relative paths when useful.
-- `capture.acceptance_criteria`: concise, checkable criteria.
-
-Use deterministic inference boundaries:
-
-- Default priority to `medium`.
-- Set priority to `critical` only for explicit production, data-loss, security,
-  or release-blocking language.
-- Set priority to `high` only for explicit blocker, regression, CI-red, or
-  cannot-ship language.
-- Set priority to `low` only for explicit cleanup, polish, or nice-to-have
-  language.
-- Do not invent component tags.
-- Set `related_paths` only from explicit user text and files immediately
-  discussed in the current turn. Do not scan the whole git diff by default.
-- Set `component` only when user-supplied or obvious from explicit paths.
-
-Infer aggressively. Ask one follow-up only when no useful `next_action` can be
-synthesized. For vague but actionable captures, use `capture_confidence: low`
-and concrete acceptance criteria instead of asking for more detail.
+hook/provenance fields are hook-owned.
 
 If the user asks to split multiple items, capture the first or clearest ticket.
 After creation, show a suggested second capture prompt for the remaining item.
 
-## Prepare
+## Deprecated Source Drift
 
-Run:
-
-```bash
-uv run python -B <PLUGIN_ROOT>/scripts/ticket_capture.py prepare <PAYLOAD_PATH>
-```
-
-If the response needs fields, ask for one missing field at a time. If the
-response is policy-blocked, show the policy message and stop.
-
-Show the preview in exactly this compact shape:
-
-```text
-Capture ticket
-
-Title: <synthesized title>
-Problem: <1-2 sentence synthesized problem>
-Next action: <single concrete next step>
-Confidence: low|medium|high
-Duplicate: none | possible T-... "<title>"
-
-Create this ticket? [create / edit / cancel]
-```
-
-Show `Priority: <priority>` only when priority is not `medium` or confidence is
-`low`. Do not show hidden payload fields unless the user asks.
-
-## Recovery Hints
-
-When a backend response includes `data.recovery_hint`, show the recovery summary and next step before any lower-level message. Do not expose payload paths, envelope paths, canonical command repair, raw temp/workspace paths, or hook/provenance fields in the transcript.
-
-- `stale_plan`: say the preview is no longer current; rerun prepare and ask for
-  confirmation again.
-- `retry_preview`: say the saved preview state is no longer usable; rerun
-  prepare and ask for confirmation again.
-- `trust_setup`: stop without writing; say Ticket setup needs attention and
-  suggest ticket-doctor diagnostics or plugin hook setup verification. The
-  phrase "plugin hook setup" is allowed setup-level language; do not include
-  hook/provenance field names or command-shape repair.
-- `policy_blocked`: stop without writing; say the write is blocked by Ticket
-  policy and the request or policy must change before retrying.
-- `preflight_failed`: stop without writing; ask the user to review the check
-  details, adjust the request, and rerun the preview.
-
-## User Choice
-
-- `create`: run execute for the same `PAYLOAD_PATH`.
-- `edit`: safely update the payload with the scoped edit, then rerun the
-  canonical prepare command for the same `PAYLOAD_PATH`. Do not put free-form
-  edit text on the shell command line.
-- `cancel`: stop without writing a ticket.
-
-Require explicit `create` confirmation before writing. Do not treat silence,
-approval-like wording outside this prompt, or earlier intent to track as execute
-approval.
-
-## Execute
-
-After the user chooses `create`, run:
-
-```bash
-uv run python -B <PLUGIN_ROOT>/scripts/ticket_capture.py execute <PAYLOAD_PATH>
-```
+Deprecated source drift only: the old capture prepare-execute helper path is
+not active target guidance.
 
 Execute requires the prepared payload and hook/provenance path injected by the
-canonical command path. If execute returns `policy_blocked`, `preflight_failed`,
-or another non-success state, show the returned message and stop. Do not bypass
-the guard or use noncanonical commands.
+canonical command path. Do not bypass the guard or use noncanonical commands.
 
-Report the created ticket ID and path from the JSON response.
+## Legacy Cutover Input
+
+Old capture payloads used capture fields such as title, problem, next action,
+confidence, priority, tags, component, related paths, and acceptance criteria.
+Those fields are legacy cutover input only.
+
+## Maintenance And Diagnostics
+
+Use maintenance diagnostics only when explicitly requested. Do not run old
+capture mutation commands as diagnostics for ordinary ticket creation.

@@ -38,14 +38,14 @@ def test_ticket_identity_uses_content_id_before_filename(tmp_tickets: Path) -> N
         "id": "T-20260503-07",
         "title": "Readable slug is not identity",
         "path": str(path),
-        "filename": "2026-05-03-readable-slug.md",
+        "filename": "T-20260503-07.md",
     }
 
 
 def test_humanize_state_replaces_internal_terms() -> None:
     assert humanize_state("duplicate_candidate") == "Potential duplicate found"
     assert humanize_state("policy_blocked") == "Blocked by ticket policy"
-    assert humanize_state("target_fingerprint") == "Ticket changed since preview"
+    assert humanize_state("target_fingerprint") == "Ticket changed since read"
 
 
 def test_close_readiness_reports_missing_acceptance_criteria(tmp_tickets: Path) -> None:
@@ -110,13 +110,7 @@ def test_close_readiness_rejects_terminal_tickets(tmp_tickets: Path, status: str
 def test_close_readiness_rejects_legacy_tickets(tmp_tickets: Path) -> None:
     path = make_gen1_ticket(tmp_tickets, "legacy.md")
     ticket = parse_ticket(path)
-    assert ticket is not None
-
-    result = close_readiness(ticket, tmp_tickets, resolution="done")
-
-    assert result["ready"] is False
-    assert result["error_code"] == "policy_blocked"
-    assert result["allowed_actions"] == ["migrate ticket before close", "keep current status"]
+    assert ticket is None
 
 
 def test_close_readiness_reports_open_blocker(tmp_tickets: Path) -> None:
@@ -251,23 +245,9 @@ def test_close_readiness_error_code_matches_close_policy_for_blocked_ticket(
 def test_close_readiness_error_code_matches_close_policy_for_legacy_ticket(
     tmp_tickets: Path,
 ) -> None:
-    from scripts.ticket_engine_core import _execute_close
-
     path = make_gen1_ticket(tmp_tickets, "legacy-parity.md")
     ticket = parse_ticket(path)
-    assert ticket is not None
-
-    readiness = close_readiness(ticket, tmp_tickets, resolution="done")
-    close_response = _execute_close(
-        ticket.id,
-        {"resolution": "done"},
-        "session-parity",
-        "user",
-        tmp_tickets,
-    )
-
-    assert readiness["error_code"] == close_response.error_code
-    assert readiness["ready"] is False
+    assert ticket is None
 
 
 def test_close_readiness_error_code_matches_close_policy_for_invalid_resolution(
@@ -314,7 +294,7 @@ def test_close_readiness_ready_matches_close_policy_for_successful_close(tmp_tic
     )
 
     assert readiness["ready"] is True
-    assert close_response.state == "ok_close"
+    assert close_response.state == "ok"
 
 
 def test_recovery_hint_contract_is_transcript_safe() -> None:
@@ -322,7 +302,6 @@ def test_recovery_hint_contract_is_transcript_safe() -> None:
         *get_args(RuntimeReadinessErrorCode),
         "stale_plan",
         "trust_setup",
-        "retry_preview",
         "cleanup_stale_preview",
         "policy_blocked",
         "preflight_failed",
@@ -380,7 +359,7 @@ def test_attach_recovery_hint_preserves_response_data() -> None:
     assert updated["data"]["recovery_hint"] == {
         "code": "preflight_failed",
         "summary": "Ticket checks did not pass.",
-        "next_step": "Review the preview or check details, update the request, then rerun preview.",
+        "next_step": "Review the failed checks, update the request or ticket, then retry.",
     }
     assert "recovery_hint" not in response["data"]
 

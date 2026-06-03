@@ -20,11 +20,14 @@ from typing import Any
 
 import yaml
 
+from scripts.ticket_target_schema import TARGET_ID_RE
+
 # Match the first ```yaml or ```yml block in markdown.
 _FENCED_YAML_RE = re.compile(
     r"^```ya?ml\s*\n(.*?)^```",
     re.MULTILINE | re.DOTALL,
 )
+_YAML_FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
 
 # Match ## headings (level 2 only — ### and deeper are section content).
 _SECTION_HEADING_RE = re.compile(r"^## (.+)$", re.MULTILINE)
@@ -76,7 +79,7 @@ _FIELD_DEFAULTS: dict[str, Any] = {
 # ID pattern matchers for generation detection.
 _GEN2_ID_RE = re.compile(r"^T-[A-F]$")
 _GEN3_ID_RE = re.compile(r"^T-\d{1,3}$")
-_DATE_ID_RE = re.compile(r"^T-\d{8}-\d{2}$")
+_TARGET_ID_DATE_RE = re.compile(r"^T-(\d{4})(\d{2})(\d{2})-\d{2,}$")
 
 
 @dataclass(frozen=True)
@@ -197,7 +200,7 @@ def detect_generation(frontmatter: dict[str, Any]) -> int:
         return 10
 
     # Gen 4: date-based ID with provenance dict
-    if _DATE_ID_RE.match(ticket_id) and "provenance" in frontmatter:
+    if TARGET_ID_RE.fullmatch(ticket_id) and "provenance" in frontmatter:
         return 4
 
     # Gen 2: letter IDs
@@ -274,11 +277,25 @@ def _map_gen4_fields(frontmatter: dict[str, Any]) -> dict[str, Any]:
     return frontmatter
 
 
-def parse_ticket(path: Path) -> ParsedTicket | None:
-    """Parse a ticket file into a ParsedTicket with full normalization.
+def date_from_ticket_id(ticket_id: str) -> str:
+    """Derive display/sort date from a target ticket ID."""
+    match = _TARGET_ID_DATE_RE.fullmatch(ticket_id)
+    if match is None:
+        raise ValueError(
+            f"date derivation failed: invalid target ticket id. Got: {ticket_id!r:.100}"
+        )
+    year, month, day = match.groups()
+    return f"{year}-{month}-{day}"
+
+
+def parse_legacy_ticket_for_cutover(path: Path) -> ParsedTicket | None:
+    """Parse legacy fenced-YAML tickets only for cutover diagnostics.
 
     Supports v1.0 and 4 legacy generations. Returns None on read/parse failure.
     Applies: field defaults, section renames, status normalization, field mapping.
+    Sunset: remove or move this helper out of the plugin runtime path once the
+    Tasks 2-9 source/repo cutover is merged and legacy inventory no longer needs
+    Gen 1-4 conversion explanations.
     """
     try:
         text = path.read_text(encoding="utf-8")
@@ -364,5 +381,59 @@ def parse_ticket(path: Path) -> ParsedTicket | None:
         component=frontmatter.get("component", ""),
         related_paths=frontmatter.get("related_paths", []),
         defer=frontmatter.get("defer"),
+        body=body,
+    )
+
+
+def parse_ticket(path: Path) -> ParsedTicket | None:
+    """Parse a target-normalized ticket file.
+
+    Normal product reads accept only ADR 0006 target records: YAML frontmatter,
+    ID-only filenames, target frontmatter keys, and required target sections.
+    Legacy fenced-YAML reads are available only through
+    parse_legacy_ticket_for_cutover().
+    """
+    from scripts.ticket_target_schema import validate_target_ticket_text
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        warnings.warn(f"Cannot read ticket {path}: {exc}", stacklevel=2)
+        return None
+
+    validation = validate_target_ticket_text(path, text)
+    if not validation.ok:
+        warnings.warn(validation.error, stacklevel=2)
+        return None
+
+    frontmatter_match = _YAML_FRONTMATTER_RE.match(text)
+    if frontmatter_match is None:
+        warnings.warn(f"No target YAML frontmatter in {path}", stacklevel=2)
+        return None
+
+    frontmatter = parse_yaml_block(frontmatter_match.group(1))
+    if frontmatter is None:
+        warnings.warn(f"Cannot parse target frontmatter in {path}", stacklevel=2)
+        return None
+
+    ticket_id = str(frontmatter["id"])
+    body = text[frontmatter_match.end() :].strip()
+    sections = extract_sections(body)
+
+    return ParsedTicket(
+        path=str(path),
+        id=ticket_id,
+        title=str(frontmatter["title"]),
+        date=date_from_ticket_id(ticket_id),
+        status=str(frontmatter["status"]),
+        priority=str(frontmatter["priority"]),
+        source={},
+        generation=10,
+        frontmatter=frontmatter,
+        sections=sections,
+        tags=list(frontmatter.get("tags", [])),
+        blocked_by=list(frontmatter.get("blocked_by", [])),
+        blocks=[],
+        related_paths=list(frontmatter.get("related_paths", [])),
         body=body,
     )

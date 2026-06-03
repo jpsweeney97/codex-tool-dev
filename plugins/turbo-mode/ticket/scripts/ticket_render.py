@@ -10,21 +10,12 @@ import yaml
 
 CANONICAL_FIELD_ORDER = [
     "id",
-    "date",
-    "created_at",
+    "title",
     "status",
     "priority",
-    "effort",
-    "source",
-    "capture_confidence",
-    "capture_source",
-    "refinement_status",
-    "component",
-    "related_paths",
     "tags",
+    "related_paths",
     "blocked_by",
-    "blocks",
-    "contract_version",
 ]
 
 _FENCED_YAML_BLOCK_RE = re.compile(r"^```ya?ml\s*\n.*?^```", re.MULTILINE | re.DOTALL)
@@ -128,11 +119,6 @@ def render_frontmatter(data: dict[str, Any]) -> str:
             continue
         lines.append(f"{key}: {_yaml_value(value)}")
 
-    if "defer" in data and data["defer"] is not None:
-        lines.append("defer:")
-        for defer_key, defer_value in data["defer"].items():
-            lines.append(f"  {defer_key}: {_yaml_value(defer_value)}")
-
     return "\n".join(lines) + "\n"
 
 
@@ -155,7 +141,7 @@ def render_ticket(
     *,
     id: str,
     title: str,
-    date: str,
+    date: str = "",
     status: str,
     priority: str,
     problem: str,
@@ -178,88 +164,53 @@ def render_ticket(
     next_action: str = "",
     verification: str = "",
     key_files: list[dict[str, str]] | None = None,
-    key_file_paths: list[str] | None = None,
     context: str = "",
     prior_investigation: str = "",
     decisions_made: str = "",
     related: str = "",
+    change_history_entry: str,
 ) -> str:
-    """Render a complete v1.0 ticket markdown file.
+    """Render a complete target ticket markdown file.
 
     Returns the full file content as a string.
-    Section ordering follows the contract: Captured Request -> Problem -> Next Action
+    Section ordering follows the target contract: Problem -> Next Action
+    -> Change History
     -> Context -> Prior Investigation -> Approach -> Decisions Made ->
     Acceptance Criteria -> Verification -> Key Files -> Related.
     """
-    source = source or {"type": "ad-hoc", "ref": "", "session": ""}
     related_paths = related_paths or []
     tags = tags or []
     blocked_by = blocked_by or []
-    blocks = blocks or []
     acceptance_criteria = _normalize_acceptance_criteria(acceptance_criteria)
 
-    # --- YAML frontmatter (render_frontmatter preserves canonical ordering and safe quoting) ---
     frontmatter: dict[str, Any] = {
         "id": id,
-        "date": date,
+        "title": title,
+        "status": status,
+        "priority": priority,
+        "tags": tags,
+        "related_paths": related_paths,
+        "blocked_by": blocked_by,
     }
-    if created_at:
-        frontmatter["created_at"] = created_at
-    frontmatter["status"] = status
-    frontmatter["priority"] = priority
-    if effort:
-        frontmatter["effort"] = effort
-    frontmatter["source"] = {
-        "type": source["type"],
-        "ref": source.get("ref", ""),
-        "session": source.get("session", ""),
-    }
-    if capture_confidence:
-        frontmatter["capture_confidence"] = capture_confidence
-    if capture_source:
-        frontmatter["capture_source"] = capture_source
-    if refinement_status:
-        frontmatter["refinement_status"] = refinement_status
-    if component:
-        frontmatter["component"] = component
-    if related_paths:
-        frontmatter["related_paths"] = related_paths
-    frontmatter["tags"] = tags
-    frontmatter["blocked_by"] = blocked_by
-    frontmatter["blocks"] = blocks
-
-    if defer is not None:
-        frontmatter["defer"] = {
-            "active": defer.get("active", False),
-            "reason": defer.get("reason", ""),
-            "deferred_at": defer.get("deferred_at", ""),
-        }
-
-    frontmatter["contract_version"] = contract_version
-
-    # Persist key_file_paths for future dedup scans (C-002).
-    if key_file_paths:
-        frontmatter["key_file_paths"] = sorted(key_file_paths)
 
     yaml_str = render_frontmatter(frontmatter).rstrip("\n")
 
     lines = [
-        f"# {id}: {title}",
-        "",
-        "```yaml",
+        "---",
         yaml_str,
-        "```",
+        "---",
         "",
     ]
 
     # --- Required sections ---
-    if captured_request:
-        lines.extend(["## Captured Request", captured_request, ""])
     lines.extend(["## Problem", problem, ""])
-    if next_action:
-        lines.extend(["## Next Action", next_action, ""])
+    lines.extend(["## Next Action", next_action or "Continue work on this ticket.", ""])
+    lines.extend(["## Change History", change_history_entry, ""])
 
     # --- Optional sections (in contract order) ---
+    if captured_request:
+        lines.extend(["## Captured Request", captured_request, ""])
+
     if context:
         lines.extend(["## Context", context, ""])
 

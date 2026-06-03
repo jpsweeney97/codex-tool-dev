@@ -22,14 +22,14 @@ def test_agent_configured_for_agent_primary_still_waits_for_gateway(tmp_tickets:
         classify_intent="create",
         dedup_fingerprint=compute_dedup_fp(problem, []),
         target_fingerprint=None,
-        fields={"title": "Gateway required", "problem": problem, "priority": "medium"},
+        fields={"title": "Gateway required", "problem": problem, "priority": "normal"},
         tickets_dir=tmp_tickets,
         hook_injected=True,
     )
     execute = engine_execute(
         action="create",
         ticket_id=None,
-        fields={"title": "Gateway required", "problem": problem, "priority": "medium"},
+        fields={"title": "Gateway required", "problem": problem, "priority": "normal"},
         session_id="int-session",
         request_origin="agent",
         dedup_override=False,
@@ -64,13 +64,13 @@ def test_user_create_is_unaffected_by_local_automation_mode(tmp_tickets: Path) -
         classify_intent="create",
         dedup_fingerprint=compute_dedup_fp(problem, []),
         target_fingerprint=None,
-        fields={"title": "User ticket", "problem": problem, "priority": "medium"},
+        fields={"title": "User ticket", "problem": problem, "priority": "normal"},
         tickets_dir=tmp_tickets,
     )
     execute = engine_execute(
         action="create",
         ticket_id=None,
-        fields={"title": "User ticket", "problem": problem, "priority": "medium"},
+        fields={"title": "User ticket", "problem": problem, "priority": "normal"},
         session_id="user-session",
         request_origin="user",
         dedup_override=False,
@@ -84,5 +84,5 @@ def test_user_create_is_unaffected_by_local_automation_mode(tmp_tickets: Path) -
     )
 
     assert preflight.state == "ok"
-    assert execute.state == "ok_create"
+    assert execute.state == "ok"
     assert len(list(tmp_tickets.glob("*.md"))) == 1

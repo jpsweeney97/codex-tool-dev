@@ -111,7 +111,6 @@ def make_mutation_id(
         },
     )
 
-
 def make_event_id(
     *,
     schema: str,
@@ -152,49 +151,5 @@ def make_event_id(
             "action": action,
             "ticket_id": ticket_id,
             "payload_fingerprint": payload_fingerprint,
-        },
-    )
-
-
-def make_approval_id(
-    *,
-    schema: str,
-    thread_id: str,
-    ticket_id: str,
-    mutation_id: str,
-    mutation_fingerprint: str,
-    ticket_state_fingerprint: str,
-    evidence_fingerprint: str,
-    current_mode: str,
-    decision: str,
-) -> str:
-    """Build a deterministic approval ID.
-
-    Args:
-        schema: Approval schema identifier.
-        thread_id: Codex thread identifier.
-        ticket_id: Target ticket ID.
-        mutation_id: Related mutation ID.
-        mutation_fingerprint: Canonical mutation payload fingerprint.
-        ticket_state_fingerprint: Ticket state fingerprint at approval time.
-        evidence_fingerprint: Evidence payload fingerprint.
-        current_mode: Thread-scoped automation mode.
-        decision: Approval decision kind.
-
-    Returns:
-        `appr_` plus the first 32 hex characters of the payload digest.
-    """
-    return _short_prefixed_id(
-        "appr",
-        {
-            "schema": schema,
-            "thread_id": thread_id,
-            "ticket_id": ticket_id,
-            "mutation_id": mutation_id,
-            "mutation_fingerprint": mutation_fingerprint,
-            "ticket_state_fingerprint": ticket_state_fingerprint,
-            "evidence_fingerprint": evidence_fingerprint,
-            "current_mode": current_mode,
-            "decision": decision,
         },
     )

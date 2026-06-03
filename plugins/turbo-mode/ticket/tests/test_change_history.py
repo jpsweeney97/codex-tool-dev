@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 import pytest
 from scripts.ticket_change_history import (
     ChangeHistoryEntry,
-    ChangeHistoryLabel,
     append_change_history_entry,
     plan_change_history_migration,
     render_change_history_entry,
@@ -17,34 +14,37 @@ from scripts.ticket_change_history import (
 def test_render_change_history_entry_format() -> None:
     entry = ChangeHistoryEntry(
         timestamp="2026-05-27T12:00:00Z",
-        label=ChangeHistoryLabel.AUTO_UPDATE,
+        actor="codex",
         reason="Adjusted stale metadata.",
     )
-    with_prior = ChangeHistoryEntry(
+    with_correction = ChangeHistoryEntry(
         timestamp="2026-05-27T12:00:00Z",
-        label=ChangeHistoryLabel.CORRECTION,
+        actor="codex",
         reason="Corrected prior automatic update.",
-        prior_commit="abc1234",
+        corrects="mutation abc1234",
     )
 
     assert render_change_history_entry(entry) == (
-        "- 2026-05-27T12:00:00Z | auto-update | Adjusted stale metadata."
+        "- 2026-05-27T12:00:00Z | codex | Adjusted stale metadata."
     )
-    assert render_change_history_entry(with_prior) == (
-        "- 2026-05-27T12:00:00Z | correction | Corrected prior automatic update. "
-        "Prior commit: abc1234."
+    assert render_change_history_entry(with_correction) == (
+        "- 2026-05-27T12:00:00Z | codex | Corrected prior automatic update. "
+        "Corrects: mutation abc1234."
     )
 
 
-@pytest.mark.parametrize("label", ["auto_update", "update", "auto-close:done"])
-def test_unknown_labels_and_aliases_are_rejected(label: str) -> None:
+@pytest.mark.parametrize(
+    "actor",
+    ["auto-update", "auto-close", "correction", "discussion-approved", "codex-update"],
+)
+def test_old_action_label_actors_are_rejected(actor: str) -> None:
     entry = ChangeHistoryEntry(
         timestamp="2026-05-27T12:00:00Z",
-        label=cast(ChangeHistoryLabel, label),
-        reason="Invalid label.",
+        actor=actor,
+        reason="Invalid actor.",
     )
 
-    with pytest.raises(ValueError, match="label"):
+    with pytest.raises(ValueError, match="actor"):
         render_change_history_entry(entry)
 
 
@@ -52,7 +52,7 @@ def test_unknown_labels_and_aliases_are_rejected(label: str) -> None:
 def test_reason_cannot_contain_pipe_or_newline(reason: str) -> None:
     entry = ChangeHistoryEntry(
         timestamp="2026-05-27T12:00:00Z",
-        label=ChangeHistoryLabel.AUTO_UPDATE,
+        actor="codex",
         reason=reason,
     )
 
@@ -64,7 +64,7 @@ def test_append_inserts_missing_section_after_related() -> None:
     text = "# T: Example\n\n## Problem\nText.\n\n## Related\n- T-1\n\n## Reopen History\n- old\n"
     entry = ChangeHistoryEntry(
         timestamp="2026-05-27T12:00:00Z",
-        label=ChangeHistoryLabel.AUTO_BLOCKER,
+        actor="codex",
         reason="Updated blocker.",
     )
 
@@ -79,7 +79,7 @@ def test_append_inserts_missing_section_before_reopen_history_without_related() 
     text = "# T: Example\n\n## Problem\nText.\n\n## Reopen History\n- old\n"
     entry = ChangeHistoryEntry(
         timestamp="2026-05-27T12:00:00Z",
-        label=ChangeHistoryLabel.AUTO_REOPEN,
+        actor="codex",
         reason="Reopened automatically.",
     )
 
@@ -92,7 +92,7 @@ def test_append_inserts_missing_section_at_end_without_anchor_sections() -> None
     text = "# T: Example\n\n## Problem\nText.\n"
     entry = ChangeHistoryEntry(
         timestamp="2026-05-27T12:00:00Z",
-        label=ChangeHistoryLabel.AUTO_CREATE,
+        actor="codex",
         reason="Created automatically.",
     )
 
@@ -100,7 +100,7 @@ def test_append_inserts_missing_section_at_end_without_anchor_sections() -> None
 
     assert updated.endswith(
         "\n\n## Change History\n"
-        "- 2026-05-27T12:00:00Z | auto-create | Created automatically.\n"
+        "- 2026-05-27T12:00:00Z | codex | Created automatically.\n"
     )
 
 
@@ -108,7 +108,7 @@ def test_existing_change_history_receives_appended_entry() -> None:
     text = "# T: Example\n\n## Change History\n- old entry\n\n## Reopen History\n- old\n"
     entry = ChangeHistoryEntry(
         timestamp="2026-05-27T12:00:00Z",
-        label=ChangeHistoryLabel.AUTO_UPDATE,
+        actor="codex",
         reason="Updated metadata.",
     )
 
@@ -122,33 +122,33 @@ def test_existing_change_history_exact_rendered_line_is_idempotent() -> None:
     text = (
         "# T: Example\n\n"
         "## Change History\n"
-        "- 2026-05-27T12:00:00Z | auto-update | Automatic Ticket update applied.\n"
+        "- 2026-05-27T12:00:00Z | codex | Updated ticket from candidate evidence.\n"
         "\n"
         "## Reopen History\n"
         "- old\n"
     )
     duplicate = ChangeHistoryEntry(
         timestamp="2026-05-27T12:00:00Z",
-        label=ChangeHistoryLabel.AUTO_UPDATE,
-        reason="Automatic Ticket update applied.",
+        actor="codex",
+        reason="Updated ticket from candidate evidence.",
     )
     later = ChangeHistoryEntry(
         timestamp="2026-05-27T12:00:01Z",
-        label=ChangeHistoryLabel.AUTO_UPDATE,
-        reason="Automatic Ticket update applied.",
+        actor="codex",
+        reason="Updated ticket from candidate evidence.",
     )
 
     assert append_change_history_entry(text, duplicate) == text
 
     updated = append_change_history_entry(text, later)
-    assert updated.count("Automatic Ticket update applied.") == 2
-    assert "- 2026-05-27T12:00:01Z | auto-update | Automatic Ticket update applied." in updated
+    assert updated.count("Updated ticket from candidate evidence.") == 2
+    assert "- 2026-05-27T12:00:01Z | codex | Updated ticket from candidate evidence." in updated
 
 
 def test_helper_does_not_write_containing_commit_hash() -> None:
     entry = ChangeHistoryEntry(
         timestamp="2026-05-27T12:00:00Z",
-        label=ChangeHistoryLabel.AUTO_UPDATE,
+        actor="codex",
         reason="Updated metadata.",
     )
 

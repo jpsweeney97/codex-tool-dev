@@ -10,10 +10,13 @@ import re
 from datetime import date
 from pathlib import Path
 
-from scripts.ticket_parse import extract_fenced_yaml, parse_yaml_block
+from scripts.ticket_parse import parse_yaml_block
+from scripts.ticket_target_schema import TARGET_ID_RE
 
-# ID pattern for v1.0 format.
-_DATE_ID_RE = re.compile(r"^T-(\d{8})-(\d{2,})$")
+# Canonical v1.0 id pattern (T-YYYYMMDD-NN), re-exported under the historical
+# private name for internal parsing call sites and id-format tests.
+_DATE_ID_RE = TARGET_ID_RE
+_TARGET_FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
 
 
 def allocate_id(tickets_dir: Path, today: date | None = None) -> str:
@@ -30,32 +33,26 @@ def allocate_id(tickets_dir: Path, today: date | None = None) -> str:
     prefix = f"T-{date_str}-"
 
     max_seq = 0
-    # Scan both active and archived tickets to prevent ID reuse.
-    scan_dirs = [tickets_dir]
-    closed_dir = tickets_dir / "closed-tickets"
-    if closed_dir.is_dir():
-        scan_dirs.append(closed_dir)
+    if not tickets_dir.is_dir():
+        return f"{prefix}01"
 
-    for scan_dir in scan_dirs:
-        if not scan_dir.is_dir():
+    for ticket_file in tickets_dir.glob("*.md"):
+        try:
+            text = ticket_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
             continue
-        for ticket_file in scan_dir.glob("*.md"):
-            try:
-                text = ticket_file.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                continue
-            yaml_text = extract_fenced_yaml(text)
-            if yaml_text is None:
-                continue
-            data = parse_yaml_block(yaml_text)
-            if data is None:
-                continue
-            ticket_id = data.get("id", "")
-            if isinstance(ticket_id, str) and ticket_id.startswith(prefix):
-                m = _DATE_ID_RE.match(ticket_id)
-                if m and m.group(1) == date_str:
-                    seq = int(m.group(2))
-                    max_seq = max(max_seq, seq)
+        frontmatter_match = _TARGET_FRONTMATTER_RE.match(text)
+        if frontmatter_match is None:
+            continue
+        data = parse_yaml_block(frontmatter_match.group(1))
+        if data is None:
+            continue
+        ticket_id = data.get("id", "")
+        if isinstance(ticket_id, str) and ticket_id.startswith(prefix):
+            m = _DATE_ID_RE.match(ticket_id)
+            if m and m.group(1) == date_str:
+                seq = int(m.group(2))
+                max_seq = max(max_seq, seq)
 
     return f"{prefix}{max_seq + 1:02d}"
 
@@ -85,29 +82,16 @@ def generate_slug(title: str) -> str:
 
 
 def build_filename(ticket_id: str, title: str, tickets_dir: Path | None = None) -> str:
-    """Build a ticket filename from ID and title.
-
-    Format: YYYY-MM-DD-<slug>.md (date from ID, slug from title).
-    When tickets_dir is provided, appends a collision suffix (-2, -3, ...)
-    if the filename already exists.
-    """
-    m = _DATE_ID_RE.match(ticket_id)
-    if m:
-        raw_date = m.group(1)
-        date_str = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}"
-    else:
-        date_str = date.today().strftime("%Y-%m-%d")
-
-    slug = generate_slug(title)
-    base = f"{date_str}-{slug}"
-    filename = f"{base}.md"
-
-    if tickets_dir is not None:
-        suffix = 2
-        while (tickets_dir / filename).exists():
-            filename = f"{base}-{suffix}.md"
-            suffix += 1
-
+    """Build the target ID-only ticket filename."""
+    if not _DATE_ID_RE.match(ticket_id):
+        raise ValueError(
+            f"build filename failed: invalid target ticket id. Got: {ticket_id!r:.100}"
+        )
+    filename = f"{ticket_id}.md"
+    if tickets_dir is not None and (tickets_dir / filename).exists():
+        raise ValueError(
+            f"build filename failed: target ticket already exists. Got: {filename!r:.100}"
+        )
     return filename
 
 

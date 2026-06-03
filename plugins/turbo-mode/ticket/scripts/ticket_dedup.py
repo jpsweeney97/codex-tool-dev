@@ -39,13 +39,13 @@ def normalize(text: str) -> str:
     return text
 
 
-def dedup_fingerprint(problem_text: str, key_file_paths: list[str]) -> str:
-    """Generate a dedup fingerprint: sha256(normalize(problem_text) + "|" + sorted(paths)).
+def dedup_fingerprint(problem_text: str, related_paths: list[str]) -> str:
+    """Generate a dedup fingerprint from normalized problem and target related paths.
 
     Used during `plan` stage to detect duplicate tickets within 24-hour window.
     """
     normalized = normalize(problem_text)
-    sorted_paths = sorted(key_file_paths)
+    sorted_paths = sorted(related_paths)
     payload = normalized + "|" + ",".join(sorted_paths)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

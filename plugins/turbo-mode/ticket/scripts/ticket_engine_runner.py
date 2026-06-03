@@ -10,6 +10,8 @@ The public guarded engine entrypoints are ticket_engine_user.py and ticket_engin
 Direct engine stages are low-level compatibility, debug, and agent-internal paths.
 They are not normal user-facing mutation interfaces. Agent-origin direct execute
 fails closed outside the runtime-first gateway.
+Sunset: remove direct stage dispatch once the Tasks 2-9 source/repo cutover is
+merged and no source test requires stage-specific compatibility fixtures.
 """
 
 from __future__ import annotations
@@ -28,7 +30,9 @@ from scripts.ticket_engine_core import (
     engine_execute,
     engine_plan,
     engine_preflight,
+    normalize_target_response,
 )
+from scripts.ticket_engine_gateway import apply_ingest_create
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir
 from scripts.ticket_runtime_readiness import (
     RUNTIME_ACTIVATION_BOOTSTRAP_ENV,
@@ -271,14 +275,7 @@ def _run_impl(
 def _exit_code(resp: EngineResponse) -> int:
     """Map EngineResponse to exit code. Single-sourced."""
     # Exit codes: 0=success, 1=engine error, 2=validation failure (need_fields).
-    if resp.state in (
-        "ok",
-        "ok_create",
-        "ok_update",
-        "ok_close",
-        "ok_close_archived",
-        "ok_reopen",
-    ):
+    if resp.state == "ok":
         return 0
     if resp.error_code == "need_fields":
         return 2
@@ -290,7 +287,7 @@ def _ingest_need_fields_recovery_code(resp: EngineResponse) -> str:
     validation_errors = data.get("validation_errors")
     if isinstance(validation_errors, list) and validation_errors:
         return "preflight_failed"
-    return "retry_preview"
+    return "preflight_failed"
 
 
 def _sanitize_user_facing_ingest_response(resp: EngineResponse) -> EngineResponse:
@@ -300,7 +297,7 @@ def _sanitize_user_facing_ingest_response(resp: EngineResponse) -> EngineRespons
         else recovery_hint_code_for_response(resp.to_dict())
     )
     if hint_code is None:
-        return resp
+        return normalize_target_response(resp)
     if hint_code == "trust_setup":
         resp.message = "Ticket setup needs attention before this write can continue."
     elif hint_code == "policy_blocked":
@@ -308,10 +305,8 @@ def _sanitize_user_facing_ingest_response(resp: EngineResponse) -> EngineRespons
     elif hint_code == "preflight_failed":
         resp.message = "Ticket checks did not pass."
     elif hint_code == "stale_plan":
-        resp.message = "The saved preview is no longer current."
-    elif hint_code == "retry_preview":
-        resp.message = "The saved preview state is no longer usable."
-    return attach_engine_recovery_hint(resp, hint_code)
+        resp.message = "The ticket changed since it was read."
+    return normalize_target_response(attach_engine_recovery_hint(resp, hint_code))
 
 
 def _dispatch_ingest(
@@ -321,6 +316,16 @@ def _dispatch_ingest(
     request_origin: str,
 ) -> EngineResponse:
     """Orchestrate envelope ingestion through the create pipeline."""
+    if request_origin == "agent":
+        return EngineResponse(
+            state="policy_blocked",
+            message=(
+                "Agent ingest requires a runtime-first autonomy gateway decision before "
+                "Ticket can write."
+            ),
+            error_code="gateway_required",
+        )
+
     from scripts.ticket_envelope import (
         envelope_id_from_path,
         map_envelope_to_fields,
@@ -385,72 +390,45 @@ def _dispatch_ingest(
             data={"validation_errors": errors},
         )
 
-    # Step 2: Map envelope fields to engine vocabulary.
+    # Step 2: Map envelope fields to target create fields.
     fields = map_envelope_to_fields(envelope)
 
-    # Step 3: Plan — computes dedup fingerprint, scans for duplicates.
-    plan_resp = engine_plan(
-        intent="create",
+    # Step 3: Apply the target create path through the gateway-owned helper.
+    exec_resp = apply_ingest_create(
         fields=fields,
         session_id=inp.session_id,
         request_origin=request_origin,
         tickets_dir=tickets_dir,
-        ticket_id=None,
     )
-    if plan_resp.state != "ok":
-        return plan_resp
+    if exec_resp.state != "ok":
+        data = dict(exec_resp.data or {})
+        data.update(
+            {
+                "ingest_outcome": "duplicate_candidate"
+                if exec_resp.error_code == "duplicate_candidate"
+                else "blocked",
+                "envelope_id": envelope_id,
+                "incoming_envelope_path": str(envelope_path),
+                "ticket_created": False,
+            }
+        )
+        return EngineResponse(
+            state=exec_resp.state,
+            message=exec_resp.message,
+            error_code=exec_resp.error_code,
+            ticket_id=exec_resp.ticket_id,
+            data=data,
+        )
 
-    # Extract plan outputs for preflight.
-    plan_data = plan_resp.data or {}
-    dedup_fp = plan_data.get("dedup_fingerprint")
-    duplicate_of = plan_data.get("duplicate_of")
-
-    # Step 4: Preflight — all policy checks.
-    preflight_resp = engine_preflight(
-        ticket_id=None,
-        action="create",
-        session_id=inp.session_id,
-        request_origin=request_origin,
-        classify_confidence=1.0,
-        classify_intent="create",
-        dedup_fingerprint=dedup_fp,
-        target_fingerprint=None,
-        fields=fields,
-        duplicate_of=duplicate_of,
-        dedup_override=False,
-        dependency_override=False,
-        hook_injected=inp.hook_injected,
-        tickets_dir=tickets_dir,
-    )
-    if preflight_resp.state != "ok":
-        return preflight_resp
-
-    # Step 5: Execute — create the ticket.
-    exec_resp = engine_execute(
-        action="create",
-        ticket_id=None,
-        fields=fields,
-        session_id=inp.session_id,
-        request_origin=request_origin,
-        dedup_override=False,
-        dependency_override=False,
-        tickets_dir=tickets_dir,
-        target_fingerprint=None,
-        hook_injected=inp.hook_injected,
-        hook_request_origin=inp.hook_request_origin,
-        classify_intent="create",
-        classify_confidence=1.0,
-        dedup_fingerprint=dedup_fp,
-        duplicate_of=duplicate_of,
-    )
-    if not exec_resp.state.startswith("ok"):
-        return exec_resp
-
-    # Step 6: Move envelope to processed.
+    # Step 4: Move envelope to processed.
     try:
         move_to_processed(envelope_path)
     except FileExistsError as exc:
-        # Ticket was created but another cleanup path already recorded the envelope.
+        # The .processed ledger entry already exists, which means a concurrent
+        # ingest of this envelope already recorded it. The create above can
+        # therefore have produced a duplicate ticket, so this must surface as a
+        # non-ok escalation (exit != 0), not a silent success that hides the
+        # partial outcome behind state="ok".
         data = dict(exec_resp.data or {})
         data.update(
             {
@@ -463,8 +441,12 @@ def _dispatch_ingest(
             }
         )
         return EngineResponse(
-            state=exec_resp.state,
-            message="Ticket was created, but Ticket could not finish ingest cleanup.",
+            state="escalate",
+            message=(
+                "Ticket was created, but another ingest already recorded this envelope; "
+                "a duplicate ticket may exist and manual review is required before replay."
+            ),
+            error_code="io_error",
             ticket_id=exec_resp.ticket_id,
             data=data,
         )
@@ -598,7 +580,7 @@ def _dispatch(
             return EngineResponse(
                 state=exc.state,
                 message=(
-                    "The saved preview state is no longer usable."
+                    "Ticket checks did not pass."
                     if exc.code in {"need_fields", "parse_error"}
                     else "Ticket ingest is blocked by Ticket policy."
                 ),

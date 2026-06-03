@@ -1,6 +1,6 @@
 ---
 name: update-ticket
-description: "Refine or change existing repo-local tickets. Use when the user asks to update a ticket, mark work in progress, close, reopen, change priority, edit tags, add blockers, set component or related paths, or replace placeholder problem, next action, or acceptance criteria. Requires preview before writing."
+description: "Refine or change existing repo-local tickets. Use when the user asks to update a ticket, mark work in progress, close, reopen, change priority, edit tags, or add blockers. temporarily unavailable for writes until Ticket exposes the target candidate mutation path."
 allowed-tools:
   - Bash
   - Write
@@ -9,9 +9,9 @@ allowed-tools:
 
 # Ticket Update
 
-Refine or change an existing repo-local ticket through the focused
-`ticket_update.py` backend. This skill does not create new tickets; use
-`capture-ticket` for capture intent.
+Existing-ticket mutation is temporarily unavailable until source exposes a live
+target-candidate entrypoint. Use `read-ticket` for inspection and summarize
+requested updates without writing.
 
 ## Setup
 
@@ -26,145 +26,92 @@ Resolve paths before writing a payload or running commands:
   `<PROJECT_ROOT>/.codex/ticket-tmp/`; do not use a relative path or a path with
   whitespace.
 
-Create the payload directory if needed:
+## Authority Boundary
 
-```bash
-mkdir -p <PROJECT_ROOT>/.codex/ticket-tmp
-```
+ADR 0006 is the accepted architecture authority for the Ticket runtime-first
+state-kernel rebaseline. The May 30 control doc is the implementation and
+cutover control surface. This skill is source-authority guidance, not
+installed-runtime proof and not runtime proof. This docs/tests slice does not
+perform cutover inventory or normalization.
 
-## Supported Changes
+Durable runtime modes are `agent_primary` and `discussion_only`.
 
-Supported v1 changes are existing-ticket lifecycle, metadata, and focused
-refinement updates:
+## Target Post-Cutover Ticket Shape
 
-- status changes: `in_progress`, `blocked`, `done`, `wontfix`, and reopen to
-  `open` when the workflow accepts the transition.
-- priority changes.
-- tag changes.
-- blockers and dependency metadata.
-- component and `related_paths` metadata.
-- synthesized `Problem` replacement.
-- synthesized `Next Action` replacement.
-- synthesized `Acceptance Criteria` replacement.
+Target tickets use ID-only filenames, YAML frontmatter, and the sections
+`Problem`, `Next Action`, and `Change History`.
 
-Do not perform arbitrary body-section editing in v1. Only the focused
-refinement fields `problem`, `next_action`, and `acceptance_criteria` may change
-ticket body sections. Reject requests to replace unrelated sections such as
-`Approach`, `Verification`, `Context`, or free-form markdown body content.
+Target frontmatter fields are `id`, `title`, `status`, `priority`, `tags`,
+`related_paths`, and `blocked_by`. Target statuses are `open`, `in_progress`,
+`done`, and `wontfix`. Target priorities are `high`, `normal`, and `low`.
+Unknown frontmatter keys are invalid. `blocked` is not a status; derive reverse
+`blocks` views by scanning `blocked_by`.
 
-For a ticket with `refinement_status: needs_refinement`, the backend clears
-`refinement_status` and removes the `needs-refinement` tag only when the update
-provides concrete `problem`, `next_action`, and `acceptance_criteria` values.
-Priority-only or tag-only updates keep `refinement_status`; if a tag update
-omits `needs-refinement`, the backend preserves that tag while refinement is
-still active.
+## Target Candidate Mutation Contract
 
-## Payload Shape
+Update candidates use the target mutation fields `action`, `ticket_id`,
+`target.fields`, `target.sections`, `proposed_change`,
+`expected_ticket_fingerprint`, and `evidence_summary`.
 
-Write a compact JSON object to `PAYLOAD_PATH` with top-level `ticket_id` and an
-`update` object. Use only the requested existing-ticket operation and scoped
-fields:
+non-create writes require an expected ticket fingerprint. Ticket computes
+candidate identity from canonical candidate content plus the live target
+fingerprint; callers do not supply authoritative identity values. Unknown fields
+are invalid.
+
+Example target candidate:
 
 ```json
 {
-  "tickets_dir": "docs/tickets",
+  "action": "update",
   "ticket_id": "T-20260518-01",
-  "update": {
+  "target": {
+    "fields": ["priority"],
+    "sections": ["Next Action"]
+  },
+  "proposed_change": {
     "priority": "high",
-    "tags": ["bug"]
-  }
+    "Next Action": "Add a focused regression test for close readiness."
+  },
+  "expected_ticket_fingerprint": "fingerprint",
+  "evidence_summary": "The current branch changed the close-readiness rule."
 }
 ```
 
-For close:
+Do not write `session_id`, `hook_injected`, or `hook_request_origin`; the
+canonical hook injects trust fields.
 
-```json
-{
-  "tickets_dir": "docs/tickets",
-  "ticket_id": "T-20260518-01",
-  "update": {"status": "done"}
-}
+## Target Result Envelope
+
+The target result envelope uses only `ok`, `blocked`, `needs_discussion`,
+`invalid_state`, and `no_change`.
+
+## Target Change History Grammar
+
+Target entries use:
+
+```markdown
+- <timestamp> | <actor> | <reason>
+- <timestamp> | <actor> | <reason> Corrects: <reference>.
 ```
 
-For reopen:
+The actor is a source value such as `codex`, `user-approved`, or `migration`.
+The actor is not a workflow label and must not encode action type.
 
-```json
-{
-  "tickets_dir": "docs/tickets",
-  "ticket_id": "T-20260518-01",
-  "update": {
-    "status": "open",
-    "reopen_reason": "Regression reproduced after the earlier fix."
-  }
-}
-```
+## Active Update Guidance
 
-For refinement:
+Update mutation is temporarily unavailable from this skill until Ticket exposes
+and documents a live source entrypoint that accepts the target candidate
+mutation contract. Summarize the requested candidate and stop without writing.
 
-```json
-{
-  "tickets_dir": "docs/tickets",
-  "ticket_id": "T-20260518-01",
-  "update": {
-    "problem": "The ticket lacks a concrete close-readiness rule.",
-    "next_action": "Add a focused regression test for close readiness.",
-    "acceptance_criteria": [
-      "Close readiness rejects placeholder acceptance criteria.",
-      "The preview reports when needs-refinement will be cleared."
-    ]
-  }
-}
-```
+## Deprecated Source Drift
 
-`update` must contain only these keys: `problem`, `next_action`,
-`acceptance_criteria`, `priority`, `tags`, `component`, `related_paths`,
-`blocked_by`, `blocks`, `status`, and `reopen_reason`. Do not write
-`session_id`, `hook_injected`, or `hook_request_origin`; the canonical hook
-injects trust fields when the backend command runs. Do not include arbitrary
-markdown body edits in `update`.
+Old update prepare-execute helper guidance is deprecated source drift only. It
+is not active target mutation guidance.
 
-Lifecycle close or reopen payloads must not include metadata or refinement
-fields. If the user asks for a lifecycle change plus another edit, run separate
-preview/execute cycles so no requested field is silently dropped.
+Old focused update fields and old backend payloads are legacy cutover input
+only.
 
-## Preview First
+## Maintenance And Diagnostics
 
-Write the requested scoped change to `PAYLOAD_PATH`, then run:
-
-```bash
-uv run python -B <PLUGIN_ROOT>/scripts/ticket_update.py prepare <PAYLOAD_PATH>
-```
-
-Show the returned preview and wait for explicit user confirmation before any
-write. Do not treat the original update request as execute approval.
-
-If the preview message includes `Refinement: will clear needs-refinement`, tell
-the user that execution will remove the refinement metadata and tag.
-
-If the user confirms, run:
-
-```bash
-uv run python -B <PLUGIN_ROOT>/scripts/ticket_update.py execute <PAYLOAD_PATH>
-```
-
-If the user edits the proposed change, update the same payload and rerun
-`prepare` for the same `PAYLOAD_PATH`.
-
-## Recovery Hints
-
-When a backend response includes `data.recovery_hint`, show the recovery summary and next step before any lower-level message. Do not expose payload paths, envelope paths, canonical command repair, raw temp/workspace paths, or hook/provenance fields in the transcript.
-
-- `stale_plan`: say the preview is no longer current; rerun prepare and ask for
-  confirmation again. Include the ticket ID when available: "Ticket <id>
-  changed since preview; rerun the preview against the current ticket, then
-  confirm again."
-- `retry_preview`: say the saved preview state is no longer usable; rerun
-  prepare and ask for confirmation again.
-- `trust_setup`: stop without writing; say Ticket setup needs attention and
-  suggest ticket-doctor diagnostics or plugin hook setup verification. The
-  phrase "plugin hook setup" is allowed setup-level language; do not include
-  hook/provenance field names or command-shape repair.
-- `policy_blocked`: stop without writing; say the write is blocked by Ticket
-  policy and the request or policy must change before retrying.
-- `preflight_failed`: stop without writing; ask the user to review the check
-  details, adjust the request, and rerun the preview.
+Use maintenance diagnostics only when explicitly requested. Do not run old
+update mutation commands as diagnostics for ordinary ticket updates.

@@ -26,16 +26,6 @@ def _init_ticket_project(project_root: Path) -> Path:
     return tickets_dir
 
 
-def _git(project_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args],
-        cwd=project_root,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-
-
 def _run_autonomy(project_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args],
@@ -110,24 +100,15 @@ def test_agent_primary_apply_turn_applies_update_through_gateway(tmp_path: Path)
     assert "Applied" in payload["ticket_updates"]
     assert "priority: low" in ticket.read_text(encoding="utf-8")
     events = _events(tmp_path)
-    assert [event["status"] for event in events[:4]] == [
+    assert [event["status"] for event in events[:3]] == [
         "pending",
-        "approval_consumed",
         "ticket_written",
         "applied",
     ]
-    assert events[3]["details"]["commit_disposition"] == "commit_recorded"
-    assert events[3]["details"]["commit_hash"] == _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
-    assert payload["commit_dispositions"] == [
-        {
-            "ticket_id": "T-20260527-01",
-            "disposition": "commit_recorded",
-            "commit_hash": events[3]["details"]["commit_hash"],
-        }
-    ]
-    assert _git(tmp_path, "show", "--name-only", "--format=", "HEAD").stdout.splitlines() == [
-        "docs/tickets/one.md"
-    ]
+    assert events[2]["status"] == "applied"
+    assert events[2]["details"] == {}
+    assert payload["ticket_updates"] == {"Applied": ["T-20260527-01"]}
+    assert "commit_dispositions" not in payload
     assert all(event["thread_id"] == "thread-1" for event in events)
     expected_repo_context = json.loads(context.read_text(encoding="utf-8"))["git"]
     assert all(event["repo_context"] == expected_repo_context for event in events)
@@ -165,7 +146,7 @@ def test_agent_primary_apply_turn_applies_correction_through_gateway(tmp_path: P
     assert payload["changed"] is True
     text = ticket.read_text(encoding="utf-8")
     assert "priority: high" in text
-    assert "correction" in text
+    assert " | codex | Corrected ticket from candidate evidence." in text
     events = _events(tmp_path)
     assert [event["status"] for event in events[:3]] == [
         "pending",
@@ -176,7 +157,9 @@ def test_agent_primary_apply_turn_applies_correction_through_gateway(tmp_path: P
     assert "approval" not in events[0]["details"]
 
 
-def test_preview_and_discussion_modes_do_not_write_tickets(tmp_path: Path) -> None:
+def test_invalid_preview_config_and_discussion_mode_do_not_write_tickets(
+    tmp_path: Path,
+) -> None:
     tickets_dir = _init_ticket_project(tmp_path)
     ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01")
     context = _write_context(
@@ -194,14 +177,19 @@ def test_preview_and_discussion_modes_do_not_write_tickets(tmp_path: Path) -> No
     )
     before = ticket.read_text(encoding="utf-8")
 
-    write_local_config(tmp_path, AutomationMode.PREVIEW)
+    preview_config = tmp_path / ".codex" / "ticket.local.md"
+    preview_config.parent.mkdir(exist_ok=True)
+    preview_config.write_text(
+        '{"schema":"codex.ticket.local.v1","mode":"preview"}\n',
+        encoding="utf-8",
+    )
     preview = _apply_turn(tmp_path, context)
-    assert preview.returncode == 0
+    assert preview.returncode == 3
     preview_payload = json.loads(preview.stdout)
-    assert preview_payload["state"] == "preview"
-    assert "Skipped" in preview_payload["ticket_updates"]
+    assert preview_payload["state"] == "setup_required"
+    assert preview_payload["reason"] == "invalid_mode"
     assert ticket.read_text(encoding="utf-8") == before
-    assert "preview_only" not in {event["status"] for event in _events(tmp_path)}
+    assert _events(tmp_path) == []
 
     other_context = _write_context(
         tmp_path,
@@ -226,7 +214,7 @@ def test_preview_and_discussion_modes_do_not_write_tickets(tmp_path: Path) -> No
     assert ticket.read_text(encoding="utf-8") == before
 
 
-def test_apply_turn_consumes_adapter_candidate_keys_and_ignores_forged_approval(
+def test_apply_turn_ignores_adapter_authorization_residue(
     tmp_path: Path,
 ) -> None:
     tickets_dir = _init_ticket_project(tmp_path)
@@ -241,7 +229,7 @@ def test_apply_turn_consumes_adapter_candidate_keys_and_ignores_forged_approval(
                     "action": "update",
                     "proposed_change": {"priority": "low"},
                     "reason": "Adapter proposed a scoped update.",
-                    "approval": {"approval_id": "forged"},
+                    "authorization": {"token": "forged"},
                     "mutation_id": "forged",
                     "evidence": [{"kind": "current_thread_reason", "ref": "adapter"}],
                 }
@@ -254,7 +242,6 @@ def test_apply_turn_consumes_adapter_candidate_keys_and_ignores_forged_approval(
     assert result.returncode == 0
     assert "priority: low" in ticket.read_text(encoding="utf-8")
     events = _events(tmp_path)
-    assert events[0]["details"]["approval"]["approval_id"] != "forged"
     assert events[0]["mutation_id"] != "forged"
 
 
@@ -290,10 +277,92 @@ def test_conflicting_candidate_is_skipped_without_blocking_plausible_candidate(
 
     assert result.returncode == 0
     payload = json.loads(result.stdout)
-    assert payload["state"] == "applied"
+    assert payload["state"] == "partially_applied"
     assert "Skipped" in payload["ticket_updates"]
     assert "priority: high" in first.read_text(encoding="utf-8")
     assert "priority: low" in second.read_text(encoding="utf-8")
+
+
+def test_missing_target_fingerprint_blocks_one_candidate_without_private_event(
+    tmp_path: Path,
+) -> None:
+    tickets_dir = _init_ticket_project(tmp_path)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01")
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    context = _write_context(
+        tmp_path,
+        {
+            "candidate_mutations": [
+                {
+                    "ticket_id": "T-20260527-01",
+                    "action": "update",
+                    "proposed_change": {"priority": "low"},
+                    "evidence": [{"kind": "current_thread_reason", "ref": "tests passed"}],
+                },
+                {
+                    "ticket_id": "T-20260527-02",
+                    "action": "update",
+                    "proposed_change": {"priority": "low"},
+                    "evidence": [{"kind": "current_thread_reason", "ref": "missing ticket"}],
+                },
+            ]
+        },
+    )
+
+    result = _apply_turn(tmp_path, context)
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "partially_applied"
+    assert payload["ticket_updates"]["Applied"] == ["T-20260527-01"]
+    assert payload["ticket_updates"]["Blocked"] == ["T-20260527-02"]
+    assert payload["blocked_reasons"] == {
+        "T-20260527-02": "target_fingerprint_required"
+    }
+    assert "discussion_question" not in payload or payload["discussion_question"] is None
+    assert "mutation_id" not in payload
+    assert "event_id" not in payload
+    assert "fingerprints" not in payload
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
+
+    events = _events(tmp_path)
+    blocked_events = [
+        event for event in events if event.get("ticket_id") == "T-20260527-02"
+    ]
+    assert blocked_events == []
+
+
+def test_missing_target_fingerprint_only_reports_blocked_without_private_event(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    context = _write_context(
+        tmp_path,
+        {
+            "candidate_mutations": [
+                {
+                    "ticket_id": "T-20260527-02",
+                    "action": "update",
+                    "proposed_change": {"priority": "low"},
+                    "evidence": [{"kind": "current_thread_reason", "ref": "missing ticket"}],
+                }
+            ]
+        },
+    )
+
+    result = _apply_turn(tmp_path, context)
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "ticket_update_blocked"
+    assert payload["changed"] is False
+    assert payload["ticket_updates"]["Blocked"] == ["T-20260527-02"]
+    assert payload["blocked_reasons"] == {
+        "T-20260527-02": "target_fingerprint_required"
+    }
+    assert payload["discussion_question"] is None
+    assert _events(tmp_path) == []
 
 
 def test_repo_context_mismatch_fails_closed_before_ledger_or_write(tmp_path: Path) -> None:

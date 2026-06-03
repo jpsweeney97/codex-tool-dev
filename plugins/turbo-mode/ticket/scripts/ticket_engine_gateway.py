@@ -18,15 +18,7 @@ from scripts.ticket_autonomy_runtime import (
     RuntimeDecisionKind,
     map_candidate_to_engine,
 )
-from scripts.ticket_change_history import (
-    ChangeHistoryEntry,
-    ChangeHistoryLabel,
-)
-from scripts.ticket_commit_coordinator import (
-    CommitDispositionRecord,
-    TicketChangeScope,
-    record_ticket_commit_disposition,
-)
+from scripts.ticket_change_history import ChangeHistoryEntry
 from scripts.ticket_dedup import target_fingerprint as compute_target_fingerprint
 from scripts.ticket_engine_core import (
     EngineResponse,
@@ -35,8 +27,10 @@ from scripts.ticket_engine_core import (
     _execute_reopen,
     _execute_update,
     _plan_create,
+    normalize_target_response,
 )
-from scripts.ticket_read import find_ticket_by_id
+from scripts.ticket_mutation_identity import make_candidate_mutation_identity
+from scripts.ticket_read import InvalidTicketState, find_ticket_by_id
 from scripts.ticket_turn_batch import (
     PENDING_SUMMARY_SCHEMA,
     PendingSummaryStore,
@@ -57,14 +51,29 @@ class GatewayMutation:
     fields: Mapping[str, object]
     tickets_dir: Path
     target_fingerprint: str | None
-    ticket_change_scope: TicketChangeScope = "current_branch"
 
 
 def _policy_blocked(message: str, *, data: dict[str, object] | None = None) -> EngineResponse:
     return EngineResponse(
-        state="policy_blocked",
+        state="blocked",
         message=message,
         error_code="gateway_required",
+        data=data or {},
+    )
+
+
+def _invalid_state(
+    message: str,
+    *,
+    ticket_id: str | None = None,
+    error_code: str = "invalid_state",
+    data: dict[str, object] | None = None,
+) -> EngineResponse:
+    return EngineResponse(
+        state="invalid_state",
+        message=message,
+        ticket_id=ticket_id,
+        error_code=error_code,
         data=data or {},
     )
 
@@ -97,17 +106,12 @@ def _workspace_is_paused(project_root: Path) -> bool:
     return (project_root / WORKSPACE_RELATIVE_PATH / "pause.json").is_file()
 
 
-def _approval_ticket_id(mutation: GatewayMutation) -> str | None:
-    return mutation.ticket_id
-
-
 def _mutation_fingerprint(mutation: GatewayMutation) -> str:
     return sha256_fingerprint(
         {
             "ticket_id": mutation.ticket_id,
             "action": mutation.action,
             "proposed_change": dict(mutation.fields),
-            "ticket_change_scope": mutation.ticket_change_scope,
         }
     )
 
@@ -146,45 +150,50 @@ def build_engine_dispatch(mutation: GatewayMutation) -> EngineDispatch:
         action=mutation.action,
         proposed_change=dict(mutation.fields),
         evidence=(),
-        ticket_change_scope=mutation.ticket_change_scope,
     )
     return map_candidate_to_engine(candidate)
 
 
-def _approval_error(
+def _candidate_evidence_payload(candidate: CandidateMutation) -> list[dict[str, str]]:
+    return [
+        {"kind": evidence.kind, "ref": evidence.ref, "freshness": evidence.freshness}
+        for evidence in candidate.evidence
+    ]
+
+
+def _decision_error(
     *,
     thread_id: str,
+    turn_id: str,
     mutation: GatewayMutation,
     decision: AutonomyDecision,
 ) -> str | None:
-    approval = decision.approval
     if decision.kind == RuntimeDecisionKind.APPLY_CORRECTION:
-        if decision.mutation_id is None:
-            return "mutation_id_required"
-        if approval is not None:
-            return "approval_unexpected"
         if mutation.action != "correction" or decision.candidate.action != "correction":
             return "decision_mismatch"
-        if decision.candidate.ticket_id != mutation.ticket_id:
-            return "ticket_mismatch"
-        return None
-    if decision.kind != RuntimeDecisionKind.APPLY_AUTONOMOUSLY or approval is None:
-        return "approval_required"
+    elif decision.kind != RuntimeDecisionKind.APPLY_AUTONOMOUSLY:
+        return "autonomous_decision_required"
     if decision.mutation_id is None:
         return "mutation_id_required"
-    if approval.get("thread_id") != thread_id:
-        return "thread_mismatch"
-    if approval.get("ticket_id") != _approval_ticket_id(mutation):
+    if decision.candidate.ticket_id != mutation.ticket_id:
         return "ticket_mismatch"
-    if approval.get("mutation_id") != decision.mutation_id:
-        return "mutation_mismatch"
-    if approval.get("mutation_fingerprint") != _mutation_fingerprint(mutation):
+    if decision.candidate.action != mutation.action:
+        return "action_mismatch"
+    if dict(decision.candidate.proposed_change) != dict(mutation.fields):
         return "mutation_fingerprint_mismatch"
-    if approval.get("decision") != RuntimeDecisionKind.APPLY_AUTONOMOUSLY.value:
-        return "decision_mismatch"
-    expires_at = _parse_z(approval.get("expires_at"))
-    if expires_at is None or expires_at <= datetime.now(UTC):
-        return "approval_expired"
+    if mutation.action != "create" and mutation.target_fingerprint is None:
+        return "target_fingerprint_required"
+    identity = make_candidate_mutation_identity(
+        thread_id=thread_id,
+        turn_id=turn_id,
+        ticket_id=decision.candidate.ticket_id,
+        action=decision.candidate.action,
+        proposed_change=decision.candidate.proposed_change,
+        target_fingerprint=mutation.target_fingerprint,
+        evidence=_candidate_evidence_payload(decision.candidate),
+    )
+    if decision.mutation_id != identity.mutation_id:
+        return "mutation_id_mismatch"
     return None
 
 
@@ -199,19 +208,24 @@ def _validate_target_fingerprint(mutation: GatewayMutation) -> EngineResponse | 
         )
     if mutation.target_fingerprint is None:
         return _policy_blocked(f"{mutation.action} requires target_fingerprint")
-    ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id, include_closed=True)
+    try:
+        ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id)
+    except InvalidTicketState as exc:
+        return _invalid_state(
+            "Ticket state is not target-normalized.",
+            ticket_id=mutation.ticket_id,
+            data={"reason": str(exc)},
+        )
     if ticket is None:
-        return EngineResponse(
-            state="not_found",
+        return _invalid_state(
             message=f"No ticket matching {mutation.ticket_id}",
             ticket_id=mutation.ticket_id,
             error_code="not_found",
         )
     current = compute_target_fingerprint(Path(ticket.path))
     if current != mutation.target_fingerprint:
-        return EngineResponse(
-            state="preflight_failed",
-            message="Stale fingerprint - ticket was modified since approval.",
+        return _invalid_state(
+            message="Stale fingerprint - ticket was modified since validation.",
             ticket_id=mutation.ticket_id,
             error_code="stale_plan",
         )
@@ -221,7 +235,10 @@ def _validate_target_fingerprint(mutation: GatewayMutation) -> EngineResponse | 
 def _current_ticket_fingerprint(mutation: GatewayMutation) -> str | None:
     if mutation.action == "create" or not mutation.ticket_id:
         return None
-    ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id, include_closed=True)
+    try:
+        ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id)
+    except InvalidTicketState:
+        return None
     if ticket is None:
         return None
     return compute_target_fingerprint(Path(ticket.path))
@@ -232,14 +249,8 @@ def _expected_pre_write_fingerprint(
     mutation: GatewayMutation,
     decision: AutonomyDecision,
 ) -> str | None:
-    if mutation.target_fingerprint:
-        return mutation.target_fingerprint
-    approval = decision.approval
-    if isinstance(approval, Mapping):
-        value = approval.get("ticket_state_fingerprint")
-        if isinstance(value, str) and value and value != "unknown":
-            return value
-    return None
+    del decision
+    return mutation.target_fingerprint
 
 
 def _fingerprint_details(
@@ -341,7 +352,7 @@ def _existing_mutation_recovery_response(
     thread_id: str,
 ) -> EngineResponse | None:
     if decision.mutation_id is None:
-        return _policy_blocked("Approval validation failed: mutation_id_required")
+        return _policy_blocked("Decision validation failed: mutation_id_required")
     existing_state = pending_summary.derive_mutation_state(
         thread_id=thread_id,
         mutation_id=decision.mutation_id,
@@ -420,18 +431,18 @@ def _execute_dispatch(
     return _policy_blocked(f"Unsupported dispatch action: {dispatch.action!r}")
 
 
-def _change_history_label(action: str) -> ChangeHistoryLabel:
+def _change_history_reason(action: str) -> str:
     if action == "create":
-        return ChangeHistoryLabel.AUTO_CREATE
+        return "Created ticket from candidate evidence."
     if action == "blocker_edit":
-        return ChangeHistoryLabel.AUTO_BLOCKER
+        return "Updated blocker details from candidate evidence."
     if action in {"done", "wontfix"}:
-        return ChangeHistoryLabel.AUTO_CLOSE
+        return f"Closed ticket as {action} from candidate evidence."
     if action == "reopen":
-        return ChangeHistoryLabel.AUTO_REOPEN
+        return "Reopened ticket from candidate evidence."
     if action == "correction":
-        return ChangeHistoryLabel.CORRECTION
-    return ChangeHistoryLabel.AUTO_UPDATE
+        return "Corrected ticket from candidate evidence."
+    return "Updated ticket from candidate evidence."
 
 
 def _mutation_attempt_timestamp(
@@ -454,8 +465,8 @@ def _mutation_attempt_timestamp(
 def _change_history_entry(action: str, *, timestamp: str | None = None) -> ChangeHistoryEntry:
     return ChangeHistoryEntry(
         timestamp=timestamp or _now_z(),
-        label=_change_history_label(action),
-        reason=f"Automatic Ticket {action} applied.",
+        actor="codex",
+        reason=_change_history_reason(action),
     )
 
 
@@ -467,7 +478,7 @@ def _validate_autonomous_create_dedup(
     if mutation.action != "create":
         return None
     fields = dict(mutation.fields)
-    fields.setdefault("priority", "medium")
+    fields.setdefault("priority", "normal")
     plan_response = _plan_create(fields, thread_id, "agent", mutation.tickets_dir)
     if plan_response.state == "ok":
         return None
@@ -476,41 +487,42 @@ def _validate_autonomous_create_dedup(
     return plan_response
 
 
-def _record_commit_disposition(
-    project_root: Path,
-    ticket_path_raw: object,
-    ticket_change_scope: TicketChangeScope,
-) -> CommitDispositionRecord:
-    if not isinstance(ticket_path_raw, str):
-        return CommitDispositionRecord(
-            "commit_deferred",
-            reason="Ticket path missing from engine response.",
+def apply_ingest_create(
+    *,
+    fields: Mapping[str, object],
+    session_id: str,
+    request_origin: str,
+    tickets_dir: Path,
+) -> EngineResponse:
+    """Create a ticket for ingest without exposing the old public stage pipeline."""
+    normalized_fields = dict(fields)
+    normalized_fields.setdefault("priority", "normal")
+    try:
+        plan_response = _plan_create(normalized_fields, session_id, request_origin, tickets_dir)
+    except InvalidTicketState as exc:
+        return _invalid_state(
+            "Ticket state is not target-normalized.",
+            data={"reason": str(exc)},
         )
-    return record_ticket_commit_disposition(
-        project_root=project_root,
-        touched_ticket_paths=(Path(ticket_path_raw),),
-        ticket_change_scope=ticket_change_scope,
-        create_ticket_only_commit=True,
+    if plan_response.state != "ok":
+        return normalize_target_response(plan_response)
+    return normalize_target_response(
+        _execute_create(
+            normalized_fields,
+            session_id,
+            request_origin,
+            tickets_dir,
+            change_history_entry=ChangeHistoryEntry(
+                timestamp=_now_z(),
+                actor="codex",
+                reason="Created ticket from ingest envelope.",
+            ),
+        )
     )
 
 
-def _commit_disposition_details(record: CommitDispositionRecord) -> dict[str, object]:
-    details: dict[str, object] = {"commit_disposition": record.disposition}
-    if record.commit_hash is not None:
-        details["commit_hash"] = record.commit_hash
-    if record.reason is not None:
-        details["commit_reason"] = record.reason
-    return details
-
-
 def _response_ok(response: EngineResponse) -> bool:
-    return response.state in {
-        "ok_create",
-        "ok_update",
-        "ok_close",
-        "ok_close_archived",
-        "ok_reopen",
-    }
+    return response.state == "ok"
 
 
 def apply_autonomous_mutation(
@@ -523,30 +535,39 @@ def apply_autonomous_mutation(
     decision: AutonomyDecision,
     pending_summary: PendingSummaryStore,
 ) -> EngineResponse:
-    """Apply one approved autonomous mutation through the gateway."""
-    approval_error = _approval_error(thread_id=thread_id, mutation=mutation, decision=decision)
-    if approval_error is not None:
-        return _policy_blocked(f"Approval validation failed: {approval_error}")
-    if decision.mutation_id is None:
-        return _policy_blocked("Approval validation failed: mutation_id_required")
+    """Apply one autonomous mutation through the gateway."""
+    decision_error = _decision_error(
+        thread_id=thread_id,
+        turn_id=turn_id,
+        mutation=mutation,
+        decision=decision,
+    )
+    if decision_error is not None:
+        return normalize_target_response(
+            _policy_blocked(f"Decision validation failed: {decision_error}")
+        )
     try:
         lock_path = _acquire_gateway_write_lock(project_root, mutation)
     except RuntimeError as exc:
-        return _policy_blocked(f"Gateway write lock failed: {exc}")
+        return normalize_target_response(_policy_blocked(f"Gateway write lock failed: {exc}"))
     if lock_path is None:
-        return _policy_blocked(
-            "Gateway write lock failed: lock_timeout",
-            data={"pause_reason": "lock_timeout"},
+        return normalize_target_response(
+            _policy_blocked(
+                "Gateway write lock failed: lock_timeout",
+                data={"pause_reason": "lock_timeout"},
+            )
         )
     try:
-        return _apply_autonomous_mutation_locked(
-            project_root=project_root,
-            thread_id=thread_id,
-            turn_id=turn_id,
-            repo_context=repo_context,
-            mutation=mutation,
-            decision=decision,
-            pending_summary=pending_summary,
+        return normalize_target_response(
+            _apply_autonomous_mutation_locked(
+                project_root=project_root,
+                thread_id=thread_id,
+                turn_id=turn_id,
+                repo_context=repo_context,
+                mutation=mutation,
+                decision=decision,
+                pending_summary=pending_summary,
+            )
         )
     finally:
         _release_gateway_write_lock(lock_path)
@@ -609,45 +630,19 @@ def _apply_autonomous_mutation_locked(
         turn_id=turn_id,
         repo_context=repo_context,
         reason=(
-            "Apply approved autonomous Ticket mutation."
+            "Apply autonomous Ticket mutation."
             if decision.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY
             else "Apply user-triggered autonomous Ticket correction."
         ),
         details={
             "decision": decision.kind.value,
-            "current_mode": (
-                str(decision.approval.get("current_mode", "agent_primary"))
-                if decision.approval is not None
-                else "agent_primary"
-            ),
+            "current_mode": "agent_primary",
             "evidence_kind": "runtime_context",
             **_fingerprint_details(mutation=mutation, decision=decision),
-            **({"approval": decision.approval} if decision.approval is not None else {}),
         },
     )
     if attempt_error is not None:
         return attempt_error
-
-    if decision.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY:
-        if decision.approval is None:
-            return _policy_blocked("Approval validation failed: approval_required")
-        consumed_error = _append_gateway_event(
-            pending_summary=pending_summary,
-            event_type="mutation_status",
-            status="approval_consumed",
-            mutation=mutation,
-            decision=decision,
-            thread_id=thread_id,
-            turn_id=turn_id,
-            repo_context=repo_context,
-            reason="Autonomous approval consumed.",
-            details={
-                "approval_id": str(decision.approval["approval_id"]),
-                **_fingerprint_details(mutation=mutation, decision=decision),
-            },
-        )
-        if consumed_error is not None:
-            return consumed_error
 
     if _workspace_is_paused(project_root):
         return _policy_blocked(
@@ -718,13 +713,6 @@ def _apply_autonomous_mutation_locked(
     if ticket_written_error is not None:
         return ticket_written_error
 
-    commit_record = _record_commit_disposition(
-        project_root,
-        ticket_path_raw,
-        mutation.ticket_change_scope,
-    )
-    response.data.update(_commit_disposition_details(commit_record))
-
     applied_error = _append_gateway_event(
         pending_summary=pending_summary,
         event_type="mutation_status",
@@ -735,7 +723,7 @@ def _apply_autonomous_mutation_locked(
         turn_id=turn_id,
         repo_context=repo_context,
         reason="Autonomous Ticket mutation applied.",
-        details=_commit_disposition_details(commit_record),
+        details={},
     )
     if applied_error is not None:
         return applied_error

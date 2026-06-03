@@ -11,7 +11,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -37,7 +37,8 @@ from scripts.ticket_candidate_discovery import discover_candidate_mutations  # n
 from scripts.ticket_change_history import plan_change_history_migration  # noqa: E402
 from scripts.ticket_dedup import target_fingerprint as compute_target_fingerprint  # noqa: E402
 from scripts.ticket_engine_gateway import GatewayMutation, apply_autonomous_mutation  # noqa: E402
-from scripts.ticket_read import find_ticket_by_id  # noqa: E402
+from scripts.ticket_parse import parse_ticket  # noqa: E402
+from scripts.ticket_read import InvalidTicketState, find_ticket_by_id  # noqa: E402
 from scripts.ticket_turn_batch import (  # noqa: E402
     PENDING_SUMMARY_SCHEMA,
     PendingSummaryStore,
@@ -63,6 +64,23 @@ class LedgerRecoveryItem:
     projection: RecoveryProjection
     turn_id: str
     ticket_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class TicketStateFingerprintCollection:
+    """Source-context fingerprint collection result for candidate writes."""
+
+    state: Literal["ok", "unhealthy"]
+    fingerprints: dict[str, str]
+    reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TicketStateFingerprintProbe:
+    """Synthetic candidate used to probe paused source-context health."""
+
+    ticket_id: str
+    action: str = "update"
 
 
 def _emit(payload: dict[str, Any]) -> None:
@@ -195,6 +213,9 @@ def _pause_message(reason: str) -> str:
         ),
         "repo_context_mismatch": "Ticket automation paused because repository context changed.",
         "repair": "Ticket automation paused for ledger repair.",
+        "source_context_unhealthy": (
+            "Ticket automation paused because source-context collection is unhealthy."
+        ),
     }
     return messages.get(reason, "Ticket automation paused for this workspace.")
 
@@ -274,16 +295,6 @@ def _emit_mode_projection(mode: AutomationMode, context: dict[str, Any]) -> int:
     if not _has_candidate_changes(context) or mode == AutomationMode.AGENT_PRIMARY:
         _emit(_no_change_response())
         return 0
-    if mode == AutomationMode.PREVIEW:
-        _emit(
-            {
-                "state": "preview",
-                "changed": False,
-                "ticket_updates": [],
-                "discussion_question": None,
-            }
-        )
-        return 0
     _emit(
         {
             "state": "discussion_only",
@@ -351,17 +362,9 @@ def _append_non_write_decision(
     repo_context: VerifiedRepoContext,
     current_mode: AutomationMode,
 ) -> None:
-    if decision.kind == RuntimeDecisionKind.PREVIEW_ONLY:
+    if decision.kind == RuntimeDecisionKind.SKIP_DUE_TO_CONFLICT:
         status = "skipped"
         details: dict[str, object] = {
-            "decision": RuntimeDecisionKind.PREVIEW_ONLY.value,
-            "current_mode": current_mode.value,
-            "evidence_kind": "runtime_context",
-        }
-        reason = "Preview-only Ticket mutation."
-    elif decision.kind == RuntimeDecisionKind.SKIP_DUE_TO_CONFLICT:
-        status = "skipped"
-        details = {
             "decision": RuntimeDecisionKind.SKIP_DUE_TO_CONFLICT.value,
             "current_mode": current_mode.value,
             "evidence_kind": "runtime_context",
@@ -416,73 +419,153 @@ def _append_summary_receipt(
         store.append_event(event)
 
 
-def _ticket_state_fingerprints(candidates: tuple[Any, ...], tickets_dir: Path) -> dict[str, str]:
+def _ticket_files_for_source_context(tickets_dir: Path) -> tuple[Path, ...]:
+    if not tickets_dir.is_dir():
+        return ()
+    return tuple(sorted(tickets_dir.glob("*.md")))
+
+
+def _ticket_state_fingerprints(
+    candidates: tuple[Any, ...],
+    tickets_dir: Path,
+) -> TicketStateFingerprintCollection:
+    ticket_ids = {
+        candidate.ticket_id
+        for candidate in candidates
+        if getattr(candidate, "action", None) != "create"
+        and isinstance(getattr(candidate, "ticket_id", None), str)
+    }
+    if not ticket_ids:
+        return TicketStateFingerprintCollection("ok", {})
+
+    parsed_by_id: dict[str, Any] = {}
+    for ticket_file in _ticket_files_for_source_context(tickets_dir):
+        try:
+            ticket = parse_ticket(ticket_file)
+        except InvalidTicketState:
+            return TicketStateFingerprintCollection(
+                "unhealthy",
+                {},
+                "source_context_unhealthy",
+            )
+        if ticket is None:
+            return TicketStateFingerprintCollection(
+                "unhealthy",
+                {},
+                "source_context_unhealthy",
+            )
+        parsed_by_id[ticket.id] = ticket
+
     fingerprints: dict[str, str] = {}
-    for candidate in candidates:
-        ticket_id = candidate.ticket_id
-        if not isinstance(ticket_id, str):
-            continue
-        ticket = find_ticket_by_id(tickets_dir, ticket_id, include_closed=True)
+    for ticket_id in sorted(ticket_ids):
+        ticket = parsed_by_id.get(ticket_id)
         if ticket is None:
             continue
         fingerprint = compute_target_fingerprint(Path(ticket.path))
-        if fingerprint is not None:
-            fingerprints[ticket_id] = fingerprint
-    return fingerprints
+        if fingerprint is None:
+            return TicketStateFingerprintCollection(
+                "unhealthy",
+                {},
+                "source_context_unhealthy",
+            )
+        fingerprints[ticket_id] = fingerprint
+
+    return TicketStateFingerprintCollection("ok", fingerprints)
+
+
+def _known_ticket_probe_collection(tickets_dir: Path) -> TicketStateFingerprintCollection:
+    ticket_files = _ticket_files_for_source_context(tickets_dir)
+    if not ticket_files:
+        return TicketStateFingerprintCollection(
+            "unhealthy",
+            {},
+            "source_context_unhealthy",
+        )
+    probes: list[TicketStateFingerprintProbe] = []
+    for ticket_file in ticket_files:
+        try:
+            ticket = parse_ticket(ticket_file)
+        except InvalidTicketState:
+            return TicketStateFingerprintCollection(
+                "unhealthy",
+                {},
+                "source_context_unhealthy",
+            )
+        if ticket is None:
+            return TicketStateFingerprintCollection(
+                "unhealthy",
+                {},
+                "source_context_unhealthy",
+            )
+        probes.append(TicketStateFingerprintProbe(ticket_id=ticket.id))
+    return _ticket_state_fingerprints(tuple(probes), tickets_dir)
+
+
+def _source_context_resume_collection(
+    project_root: Path,
+    context: dict[str, Any],
+) -> TicketStateFingerprintCollection:
+    tickets_dir = project_root / "docs" / "tickets"
+    try:
+        candidates = discover_candidate_mutations(context, tickets_dir)
+    except InvalidTicketState:
+        return TicketStateFingerprintCollection(
+            "unhealthy",
+            {},
+            "source_context_unhealthy",
+        )
+    if candidates:
+        return _ticket_state_fingerprints(candidates, tickets_dir)
+    return _known_ticket_probe_collection(tickets_dir)
 
 
 def _summary_payload(
     *,
     applied: list[str],
     skipped: list[str],
+    blocked: list[str],
     discussion: list[str],
     discussion_question: str | None,
-    commit_dispositions: list[dict[str, object]],
+    blocked_reasons: dict[str, str],
 ) -> dict[str, Any]:
-    if not applied and not skipped and not discussion and discussion_question is None:
+    if (
+        not applied
+        and not skipped
+        and not blocked
+        and not discussion
+        and discussion_question is None
+    ):
         return _no_change_response()
     ticket_updates: dict[str, list[str]] = {}
     if applied:
         ticket_updates["Applied"] = applied
     if skipped:
         ticket_updates["Skipped"] = skipped
+    if blocked:
+        ticket_updates["Blocked"] = blocked
     if discussion:
         ticket_updates["Discussion required"] = discussion
-    if applied:
+    if applied and (blocked or skipped):
+        state = "partially_applied"
+    elif applied:
         state = "applied"
     elif discussion:
         state = "discussion_required"
+    elif blocked:
+        state = "ticket_update_blocked"
+    elif skipped:
+        state = "skipped"
     else:
-        state = "preview"
+        state = "no_change"
     payload: dict[str, Any] = {
         "state": state,
         "changed": bool(applied),
         "ticket_updates": ticket_updates,
         "discussion_question": discussion_question,
     }
-    if commit_dispositions:
-        payload["commit_dispositions"] = commit_dispositions
+    if blocked_reasons:
+        payload["blocked_reasons"] = blocked_reasons
     return payload
-
-
-def _commit_disposition_summary(
-    ticket_id: str,
-    response_data: Mapping[str, object],
-) -> dict[str, object] | None:
-    disposition = response_data.get("commit_disposition")
-    if not isinstance(disposition, str) or not disposition:
-        return None
-    summary: dict[str, object] = {
-        "ticket_id": ticket_id,
-        "disposition": disposition,
-    }
-    commit_hash = response_data.get("commit_hash")
-    if isinstance(commit_hash, str) and commit_hash:
-        summary["commit_hash"] = commit_hash
-    commit_reason = response_data.get("commit_reason")
-    if isinstance(commit_reason, str) and commit_reason:
-        summary["reason"] = commit_reason
-    return summary
 
 
 def _ticket_label(candidate_ticket_id: str | None, response_ticket_id: str | None = None) -> str:
@@ -514,7 +597,10 @@ def _current_ticket_fingerprint_for_event(
     ticket_id = event.get("ticket_id")
     if not isinstance(ticket_id, str) or not ticket_id:
         return None
-    ticket = find_ticket_by_id(project_root / "docs" / "tickets", ticket_id, include_closed=True)
+    try:
+        ticket = find_ticket_by_id(project_root / "docs" / "tickets", ticket_id)
+    except InvalidTicketState:
+        return None
     if ticket is None:
         return None
     return compute_target_fingerprint(Path(ticket.path))
@@ -818,11 +904,6 @@ def _run_apply_turn(args: argparse.Namespace) -> int:
     if args.resume_paused and setup_choice_value is None:
         return _invalid_args("--resume-paused requires --setup-choice")
     if setup_choice_value is not None:
-        if setup_choice_value == AutomationMode.PREVIEW.value:
-            return _invalid_args(
-                "setup choice must be automatic or ask_first; "
-                "preview is configured manually in .codex/ticket.local.md"
-            )
         try:
             setup_choice = SetupChoice(setup_choice_value)
         except ValueError:
@@ -837,6 +918,11 @@ def _run_apply_turn(args: argparse.Namespace) -> int:
         if args.resume_paused and _ledger_blocks_resume(project_root):
             _emit(_paused_response("repair"))
             return 3
+        if args.resume_paused and _read_pause_reason(project_root) == "source_context_unhealthy":
+            collection = _source_context_resume_collection(project_root, context)
+            if collection.state == "unhealthy":
+                _emit(_paused_response(collection.reason or "source_context_unhealthy"))
+                return 3
         resume_workspace_automation(project_root, choice=setup_choice)
         mode = _mode_from_setup_choice(setup_choice)
         write_mode_snapshot(project_root, str(context["thread_id"]), mode)
@@ -887,14 +973,27 @@ def _run_apply_turn_with_mode(
         return 3
 
     tickets_dir = project_root / "docs" / "tickets"
-    candidates = discover_candidate_mutations(context, tickets_dir)
+    try:
+        candidates = discover_candidate_mutations(context, tickets_dir)
+    except InvalidTicketState:
+        pause_workspace_automation(project_root, reason="source_context_unhealthy")
+        _emit(_paused_response("source_context_unhealthy"))
+        return 3
     if not candidates:
         if _has_candidate_changes(context):
             return _emit_mode_projection(mode, context)
         _emit(_no_change_response())
         return 0
 
-    fingerprints = _ticket_state_fingerprints(candidates, tickets_dir)
+    fingerprint_collection = _ticket_state_fingerprints(candidates, tickets_dir)
+    if fingerprint_collection.state == "unhealthy":
+        pause_workspace_automation(
+            project_root,
+            reason=fingerprint_collection.reason or "source_context_unhealthy",
+        )
+        _emit(_paused_response(fingerprint_collection.reason or "source_context_unhealthy"))
+        return 3
+    fingerprints = fingerprint_collection.fingerprints
     decisions = evaluate_autonomy_intent(
         AutonomyIntent(
             action_kind="apply_ticket_mutations",
@@ -907,8 +1006,9 @@ def _run_apply_turn_with_mode(
     )
     applied: list[str] = []
     skipped: list[str] = []
+    blocked: list[str] = []
+    blocked_reasons: dict[str, str] = {}
     discussion: list[str] = []
-    commit_dispositions: list[dict[str, object]] = []
     summary_mutation_ids: list[str] = []
     discussion_question: str | None = None
 
@@ -928,7 +1028,6 @@ def _run_apply_turn_with_mode(
                     if isinstance(decision.candidate.ticket_id, str)
                     else None
                 ),
-                ticket_change_scope=decision.candidate.ticket_change_scope,
             )
             response = apply_autonomous_mutation(
                 project_root=project_root,
@@ -947,14 +1046,16 @@ def _run_apply_turn_with_mode(
             )
             if summary_mutation_id is not None:
                 summary_mutation_ids.append(summary_mutation_id)
-            if response.state.startswith("ok_"):
+            if response.state == "ok":
                 applied.append(ticket_id)
-                commit_summary = _commit_disposition_summary(ticket_id, response.data)
-                if commit_summary is not None:
-                    commit_dispositions.append(commit_summary)
             else:
                 discussion.append(ticket_id)
                 discussion_question = discussion_question or response.message
+            continue
+
+        if decision.kind == RuntimeDecisionKind.TICKET_UPDATE_BLOCKED:
+            blocked.append(ticket_id)
+            blocked_reasons[ticket_id] = decision.reason or "ticket_update_blocked"
             continue
 
         _append_non_write_decision(
@@ -967,28 +1068,28 @@ def _run_apply_turn_with_mode(
         )
         if decision.kind == RuntimeDecisionKind.SKIP_DUE_TO_CONFLICT:
             skipped.append(ticket_id)
-        elif decision.kind == RuntimeDecisionKind.PREVIEW_ONLY:
-            skipped.append(ticket_id)
         else:
             discussion.append(ticket_id)
             discussion_question = discussion_question or (
                 "Review the proposed Ticket update before applying it."
             )
 
-    _append_summary_receipt(
-        store=store,
-        thread_id=str(context["thread_id"]),
-        turn_id=str(context["turn_id"]),
-        repo_context=repo_context,
-        mutation_ids=tuple(summary_mutation_ids),
-    )
+    if summary_mutation_ids or skipped or discussion:
+        _append_summary_receipt(
+            store=store,
+            thread_id=str(context["thread_id"]),
+            turn_id=str(context["turn_id"]),
+            repo_context=repo_context,
+            mutation_ids=tuple(summary_mutation_ids),
+        )
     _emit(
         _summary_payload(
             applied=applied,
             skipped=skipped,
+            blocked=blocked,
             discussion=discussion,
             discussion_question=discussion_question,
-            commit_dispositions=commit_dispositions,
+            blocked_reasons=blocked_reasons,
         )
     )
     return 0

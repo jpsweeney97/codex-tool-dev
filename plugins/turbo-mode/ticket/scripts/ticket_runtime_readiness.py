@@ -504,7 +504,7 @@ def _verify_runtime_readiness_proof_fields(
     else:
         if post_smoke_status != "passed":
             return _reject("proof_invalid", "Runtime proof post-activation smoke has not passed")
-        if direct_execute_result.get("engine_state") != "ok_create":
+        if direct_execute_result.get("engine_state") != "ok":
             return _reject(
                 "proof_invalid",
                 "Runtime proof direct_execute smoke did not create a ticket",
@@ -879,7 +879,7 @@ def _verify_raw_runtime_evidence_semantics(
             "direct_execute",
             "command",
         ),
-        expected_state="ok_create",
+        expected_state="ok",
         expected_ticket_path=_get_nested_str(
             proof,
             "post_activation_gated_smokes",
@@ -938,8 +938,8 @@ def _verify_hook_membrane_semantics(
     engine_response: dict[str, Any],
     run_dir: Path,
 ) -> ReadinessFailure | None:
-    if engine_response.get("state") != "ok_create":
-        return _reject("proof_invalid", "Activation smoke engine stdout did not report ok_create")
+    if engine_response.get("state") != "ok":
+        return _reject("proof_invalid", "Activation smoke engine stdout did not report ok")
     try:
         hook_run = _ticket_hook_completed_run(rows, installed_ticket_root=installed_root)
     except RuntimeActivationError as exc:
@@ -957,7 +957,7 @@ def _verify_hook_membrane_semantics(
         rows=rows,
         label="Activation smoke transcript",
         expected_command=_get_nested_str(proof, "hook_membrane_proof", "command"),
-        expected_state="ok_create",
+        expected_state="ok",
     )
     if transcript_error is not None:
         return transcript_error
@@ -1831,7 +1831,7 @@ def run_pre_activation_direct_execute_gate_smoke(
         "fields": {
             "title": "Runtime activation pre-gate smoke",
             "problem": problem,
-            "priority": "medium",
+            "priority": "normal",
         },
         "session_id": f"{run_dir.name}-pre-direct",
         "classify_intent": "create",
@@ -1975,7 +1975,7 @@ def run_post_activation_direct_execute_smoke(
         "fields": {
             "title": "Runtime activation smoke",
             "problem": problem,
-            "priority": "medium",
+            "priority": "normal",
         },
         "session_id": f"{run_dir.name}-post-direct",
         "classify_intent": "create",
@@ -2056,7 +2056,7 @@ def run_post_activation_direct_execute_smoke(
             "deterministic_driver_unavailable",
             "Direct execute smoke returned non-object engine output",
         )
-    if engine_response.get("state") != "ok_create":
+    if engine_response.get("state") != "ok":
         raise RuntimeActivationError(
             "runtime_readiness_required",
             "Direct execute smoke did not reach an activated runtime-ready create result",
@@ -2089,7 +2089,7 @@ def run_post_activation_direct_execute_smoke(
                     "command": command,
                     "execute_surface": "direct_execute",
                     "runtime_readiness_required": True,
-                    "engine_state": "ok_create",
+                    "engine_state": "ok",
                     "raw_events_sha256": sha256_file(post_events_path),
                     "ticket_path": str(ticket_path),
                     "ticket_sha256": sha256_file(ticket_path),

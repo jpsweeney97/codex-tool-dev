@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from scripts.ticket_autonomy_runtime import CandidateMutation, EvidenceLink, TicketChangeScope
+from scripts.ticket_autonomy_runtime import CandidateMutation, EvidenceLink
 from scripts.ticket_read import list_tickets
 
 
@@ -18,12 +18,6 @@ def _string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, str) and item.strip()]
-
-
-def _ticket_change_scope(value: object) -> TicketChangeScope:
-    if value == "current_branch" or value == "unrelated_backlog":
-        return value
-    return "current_branch"
 
 
 def _normalize_path(path: str) -> str:
@@ -60,7 +54,6 @@ def _candidate_from_mapping(item: Mapping[str, object]) -> CandidateMutation | N
     proposed_change = item.get("proposed_change", {})
     reason = item.get("reason")
     conflict_reason = item.get("conflict_reason")
-    ticket_change_scope = _ticket_change_scope(item.get("ticket_change_scope"))
     if ticket_id is not None and not isinstance(ticket_id, str):
         return None
     if not isinstance(action, str) or not action:
@@ -76,7 +69,6 @@ def _candidate_from_mapping(item: Mapping[str, object]) -> CandidateMutation | N
         proposed_change=normalized_change,
         evidence=evidence,
         conflict_reason=conflict_reason if isinstance(conflict_reason, str) else None,
-        ticket_change_scope=ticket_change_scope,
     )
 
 
@@ -178,7 +170,7 @@ def _append_path_candidates(
     turn_context: Mapping[str, object],
     tickets_dir: Path,
 ) -> None:
-    tickets = sorted(list_tickets(tickets_dir, include_closed=True), key=lambda ticket: ticket.id)
+    tickets = sorted(list_tickets(tickets_dir), key=lambda ticket: ticket.id)
     ticket_paths = {ticket.id: _ticket_metadata_paths(ticket) for ticket in tickets}
     tickets_by_id = {ticket.id: ticket for ticket in tickets}
     for path, evidence_kind in _path_refs(turn_context):

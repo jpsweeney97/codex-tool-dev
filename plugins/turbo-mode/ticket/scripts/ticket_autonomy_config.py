@@ -30,7 +30,6 @@ class AutomationMode(StrEnum):
     """Runtime-first automation modes for local Ticket setup."""
 
     DISCUSSION_ONLY = "discussion_only"
-    PREVIEW = "preview"
     AGENT_PRIMARY = "agent_primary"
 
 
@@ -314,6 +313,44 @@ def _snapshot_path(project_root: Path, thread_id: str) -> Path:
     return _snapshot_dir(project_root) / f"{mode_snapshot_key(project_root, thread_id)}.json"
 
 
+def _read_mode_snapshot_data(
+    project_root: Path,
+    thread_id: str,
+) -> tuple[Path, dict[str, object] | None, str | None] | None:
+    if not thread_id.strip():
+        return None
+    path = _snapshot_path(project_root, thread_id)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return path, None, "invalid_snapshot"
+    if not isinstance(data, dict):
+        return path, None, "invalid_snapshot"
+    if set(data) != {"schema", "project_root", "thread_id", "mode"}:
+        return path, None, "invalid_snapshot"
+    if data.get("schema") != MODE_SNAPSHOT_SCHEMA:
+        return path, None, "invalid_snapshot"
+    if data.get("project_root") != _normalized_project_root(project_root):
+        return path, None, "invalid_snapshot"
+    if data.get("thread_id") != thread_id:
+        return path, None, "invalid_snapshot"
+    return path, data, None
+
+
+def _mode_snapshot_error(project_root: Path, thread_id: str) -> tuple[Path, str] | None:
+    snapshot_data = _read_mode_snapshot_data(project_root, thread_id)
+    if snapshot_data is None:
+        return None
+    path, data, reason = snapshot_data
+    if reason is not None:
+        return path, reason
+    if data is None or _parse_mode(data.get("mode")) is None:
+        return path, "invalid_snapshot_mode"
+    return None
+
+
 def read_mode_snapshot(project_root: Path, thread_id: str) -> ModeSnapshot | None:
     """Read and validate a local mode snapshot.
 
@@ -324,24 +361,11 @@ def read_mode_snapshot(project_root: Path, thread_id: str) -> ModeSnapshot | Non
     Returns:
         The valid snapshot, or `None` when missing, malformed, or stale.
     """
-    if not thread_id.strip():
+    snapshot_data = _read_mode_snapshot_data(project_root, thread_id)
+    if snapshot_data is None:
         return None
-    path = _snapshot_path(project_root, thread_id)
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    if set(data) != {"schema", "project_root", "thread_id", "mode"}:
-        return None
-    if data.get("schema") != MODE_SNAPSHOT_SCHEMA:
-        return None
-    if data.get("project_root") != _normalized_project_root(project_root):
-        return None
-    if data.get("thread_id") != thread_id:
+    path, data, reason = snapshot_data
+    if reason is not None or data is None:
         return None
     mode = _parse_mode(data.get("mode"))
     if mode is None:
@@ -410,6 +434,16 @@ def resolve_thread_mode(project_root: Path, thread_id: str) -> ResolvedMode:
     snapshot = read_mode_snapshot(project_root, thread_id)
     if snapshot is not None:
         return ResolvedMode(LocalConfigState.VALID, snapshot.mode, "snapshot", snapshot.path)
+    snapshot_error = _mode_snapshot_error(project_root, thread_id)
+    if snapshot_error is not None:
+        path, reason = snapshot_error
+        return ResolvedMode(
+            LocalConfigState.SETUP_REQUIRED,
+            None,
+            "setup_required",
+            path,
+            reason,
+        )
 
     config = read_local_config(project_root)
     if config.state != LocalConfigState.VALID or config.mode is None:

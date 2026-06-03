@@ -10,11 +10,15 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from scripts.ticket_autonomy import build_repo_context
-from scripts.ticket_autonomy_config import AutomationMode, write_local_config
+from scripts.ticket_autonomy_config import (
+    AutomationMode,
+    pause_workspace_automation,
+    write_local_config,
+)
 from scripts.ticket_dedup import target_fingerprint
 from scripts.ticket_turn_batch import PendingSummaryStore
 
-from tests.support.builders import make_ticket
+from tests.support.builders import make_legacy_ticket_for_cutover, make_ticket
 from tests.test_turn_batch import valid_attempt_event, valid_status_event
 
 SCRIPT = Path(__file__).parent.parent / "scripts" / "ticket_autonomy.py"
@@ -28,6 +32,21 @@ def _run_autonomy(project_root: Path, *args: str) -> subprocess.CompletedProcess
         text=True,
         timeout=10,
     )
+
+
+def _source_context_candidate(ticket_id: str = "T-20260527-01") -> list[dict[str, object]]:
+    return [
+        {
+            "ticket_id": ticket_id,
+            "action": "update",
+            "proposed_change": {"priority": "low"},
+            "evidence": [{"kind": "current_thread_reason", "ref": "current turn"}],
+        }
+    ]
+
+
+def _break_source_context_ticket(ticket: Path) -> None:
+    ticket.write_text("```yaml\nid: [not-valid\n```\n", encoding="utf-8")
 
 
 def _write_ticket(project_root: Path, name: str, text: str) -> Path:
@@ -89,9 +108,6 @@ def _event_with_recovery_fingerprints(
     details = dict(event["details"])
     details["expected_pre_write_fingerprint"] = pre
     details["expected_post_write_fingerprint"] = post
-    approval = details.get("approval")
-    if isinstance(approval, dict):
-        details["approval"] = {**approval, "ticket_state_fingerprint": pre}
     return {**event, "details": details}
 
 
@@ -205,6 +221,44 @@ def test_recover_returns_parseable_json(tmp_path: Path) -> None:
     assert payload["turn_id"] == "turn-1"
 
 
+def test_recover_with_invalid_active_ticket_reports_reconciliation(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    make_legacy_ticket_for_cutover(tickets_dir, "legacy-active.md")
+    store = PendingSummaryStore(tmp_path)
+    result = store.append_event(
+        _event_with_recovery_fingerprints(
+            valid_attempt_event(
+                event_id="evt_attempt",
+                mutation_id="mut_recover",
+                ticket_id="T-20260527-01",
+            ),
+            pre="pre-fp",
+            post="post-fp",
+        )
+    )
+    assert result.state == "appended"
+
+    run_result = _run_autonomy(
+        tmp_path,
+        "recover",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-2",
+    )
+
+    assert run_result.returncode == 0
+    assert run_result.stderr == ""
+    payload = json.loads(run_result.stdout)
+    assert payload["state"] == "ok"
+    assert payload["can_proceed"] is False
+    assert payload["reconciliation_count"] == 1
+
+
 def test_recover_compacts_old_correction_ready_detail(tmp_path: Path) -> None:
     _init_ticket_project(tmp_path)
     store = PendingSummaryStore(tmp_path)
@@ -271,22 +325,6 @@ def test_recover_reports_repair_required_for_unsummarized_prior_turn_mutation(
         ).state
         == "appended"
     )
-    assert (
-        store.append_event(
-            _event_with_recovery_fingerprints(
-                valid_status_event(
-                    "approval_consumed",
-                    event_id="evt_recover_approval",
-                    turn_id="turn-old",
-                    mutation_id="mut-recover",
-                ),
-                pre=pre,
-                post=post,
-            )
-        ).state
-        == "appended"
-    )
-
     result = _run_autonomy(
         tmp_path,
         "recover",
@@ -388,21 +426,6 @@ def test_apply_turn_pauses_for_prior_turn_ledger_recovery_before_new_write(
         ).state
         == "appended"
     )
-    assert (
-        store.append_event(
-            _event_with_recovery_fingerprints(
-                valid_status_event(
-                    "approval_consumed",
-                    event_id="evt_prior_approval",
-                    turn_id="turn-old",
-                    mutation_id="mut-recover",
-                ),
-                pre=pre,
-                post=post,
-            )
-        ).state
-        == "appended"
-    )
     context = _write_context(
         tmp_path,
         turn_id="turn-new",
@@ -410,7 +433,7 @@ def test_apply_turn_pauses_for_prior_turn_ledger_recovery_before_new_write(
             {
                 "ticket_id": "T-20260527-01",
                 "action": "update",
-                "proposed_change": {"priority": "medium"},
+                "proposed_change": {"priority": "normal"},
                 "evidence": [{"kind": "current_thread_reason", "ref": "current turn"}],
             }
         ],
@@ -438,10 +461,9 @@ def test_apply_turn_pauses_for_prior_turn_ledger_recovery_before_new_write(
         "Run ticket_autonomy.py doctor-ledger --confirm-repair before new automatic writes."
     )
     assert "priority: low" in ticket.read_text(encoding="utf-8")
-    assert "priority: medium" not in ticket.read_text(encoding="utf-8")
+    assert "priority: normal" not in ticket.read_text(encoding="utf-8")
     assert [event["event_id"] for event in PendingSummaryStore(tmp_path).read_events()] == [
         "evt_prior_attempt",
-        "evt_prior_approval",
     ]
 
 
@@ -570,7 +592,7 @@ def test_apply_turn_reports_created_ticket_id_in_summary(
                 "proposed_change": {
                     "title": "Created by autonomy",
                     "problem": "The automatic create path needs an observable ticket id.",
-                    "priority": "medium",
+                    "priority": "normal",
                 },
                 "evidence": [{"kind": "current_thread_reason", "ref": "current turn"}],
             }
@@ -601,7 +623,7 @@ def test_apply_turn_reports_created_ticket_id_in_summary(
     assert payload["state"] == "applied"
     assert created_id.startswith("T-")
     assert payload["ticket_updates"]["Applied"] == [created_id]
-    assert payload["commit_dispositions"][0]["ticket_id"] == created_id
+    assert "commit_dispositions" not in payload
 
 
 def test_apply_turn_id_only_ticket_mention_does_not_mutate_ticket(
@@ -860,10 +882,7 @@ def test_apply_turn_rejects_preview_setup_choice(tmp_path: Path) -> None:
     assert result.returncode == 2
     assert json.loads(result.stdout) == {
         "state": "invalid_args",
-        "message": (
-            "setup choice must be automatic or ask_first; "
-            "preview is configured manually in .codex/ticket.local.md"
-        ),
+        "message": "setup choice must be automatic or ask_first",
     }
 
 
@@ -943,6 +962,277 @@ def test_apply_turn_pause_marker_returns_paused_output(tmp_path: Path) -> None:
     }
 
 
+def test_apply_turn_collector_unhealthy_pauses_without_mutation_or_health_events(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    context = _write_context(tmp_path, candidate_mutations=_source_context_candidate())
+    _break_source_context_ticket(ticket)
+    broken_ticket = ticket.read_text(encoding="utf-8")
+
+    result = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+
+    assert result.returncode == 3
+    assert json.loads(result.stdout) == {
+        "state": "paused",
+        "pause_reason": "source_context_unhealthy",
+        "message": (
+            "Ticket automation paused because source-context collection is unhealthy."
+        ),
+        "ticket_updates": None,
+        "discussion_question": None,
+    }
+    assert (tmp_path / ".codex" / "ticket-workspace" / "pause.json").is_file()
+    assert PendingSummaryStore(tmp_path).read_events() == ()
+    assert not (
+        tmp_path / ".codex" / "ticket-workspace" / "ticket.pending-summary.jsonl"
+    ).exists()
+    assert ticket.read_text(encoding="utf-8") == broken_ticket
+
+
+def test_apply_turn_source_context_ignores_legacy_closed_tickets(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    closed_dir = tickets_dir / "closed-tickets"
+    closed_dir.mkdir()
+    make_legacy_ticket_for_cutover(
+        closed_dir,
+        "legacy-closed.md",
+        id="legacy-closed-ticket",
+        status="done",
+    )
+    context = _write_context(tmp_path, candidate_mutations=_source_context_candidate())
+
+    result = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["state"] == "applied"
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
+    assert not (tmp_path / ".codex" / "ticket-workspace" / "pause.json").exists()
+
+
+def test_apply_turn_source_context_pause_stays_paused_without_resume(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    context = _write_context(tmp_path, candidate_mutations=_source_context_candidate())
+    _break_source_context_ticket(ticket)
+    first = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+    assert first.returncode == 3
+
+    second = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+
+    assert second.returncode == 3
+    assert json.loads(second.stdout)["pause_reason"] == "source_context_unhealthy"
+    assert (tmp_path / ".codex" / "ticket-workspace" / "pause.json").is_file()
+    assert PendingSummaryStore(tmp_path).read_events() == ()
+
+
+def test_apply_turn_resume_source_context_pause_fails_closed_while_fault_remains(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    context = _write_context(tmp_path, candidate_mutations=_source_context_candidate())
+    _break_source_context_ticket(ticket)
+    first = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+    assert first.returncode == 3
+
+    resumed = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+        "--setup-choice",
+        "automatic",
+        "--resume-paused",
+    )
+
+    assert resumed.returncode == 3
+    assert json.loads(resumed.stdout)["pause_reason"] == "source_context_unhealthy"
+    assert (tmp_path / ".codex" / "ticket-workspace" / "pause.json").is_file()
+    assert PendingSummaryStore(tmp_path).read_events() == ()
+
+
+def test_apply_turn_resume_source_context_pause_after_collection_recovers(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    valid_ticket = ticket.read_text(encoding="utf-8")
+    context = _write_context(tmp_path, candidate_mutations=_source_context_candidate())
+    _break_source_context_ticket(ticket)
+    first = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+    assert first.returncode == 3
+    ticket.write_text(valid_ticket, encoding="utf-8")
+
+    resumed = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+        "--setup-choice",
+        "automatic",
+        "--resume-paused",
+    )
+
+    assert resumed.returncode == 0
+    assert json.loads(resumed.stdout)["state"] == "applied"
+    assert not (tmp_path / ".codex" / "ticket-workspace" / "pause.json").exists()
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
+    assert PendingSummaryStore(tmp_path).read_events()
+
+
+def test_apply_turn_resume_source_context_pause_with_multiple_healthy_tickets(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    make_ticket(tickets_dir, "two.md", id="T-20260527-02", priority="normal")
+    pause_workspace_automation(tmp_path, reason="source_context_unhealthy")
+    context = _write_context(tmp_path)
+
+    resumed = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+        "--setup-choice",
+        "automatic",
+        "--resume-paused",
+    )
+
+    assert resumed.returncode == 0
+    assert json.loads(resumed.stdout)["state"] == "no_change"
+    assert not (tmp_path / ".codex" / "ticket-workspace" / "pause.json").exists()
+
+
+def test_apply_turn_resume_source_context_pause_ignores_legacy_closed_tickets(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    closed_dir = tickets_dir / "closed-tickets"
+    closed_dir.mkdir()
+    make_legacy_ticket_for_cutover(
+        closed_dir,
+        "legacy-closed.md",
+        id="legacy-closed-ticket",
+        status="done",
+    )
+    pause_workspace_automation(tmp_path, reason="source_context_unhealthy")
+    context = _write_context(tmp_path)
+
+    resumed = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+        "--setup-choice",
+        "automatic",
+        "--resume-paused",
+    )
+
+    assert resumed.returncode == 0
+    assert json.loads(resumed.stdout)["state"] == "no_change"
+    assert not (tmp_path / ".codex" / "ticket-workspace" / "pause.json").exists()
+
+
 def test_host_cli_has_no_raw_clear_pause_or_ledger_commands(tmp_path: Path) -> None:
     for command in ["clear-pause", "append-event", "consume-approval", "mark-summarized"]:
         result = _run_autonomy(tmp_path, command, "--project-root", str(tmp_path))
@@ -1000,20 +1290,6 @@ def test_doctor_ledger_repairs_deterministic_recovery_gaps(tmp_path: Path) -> No
         ).state
         == "appended"
     )
-    assert (
-        store.append_event(
-            _event_with_recovery_fingerprints(
-                valid_status_event(
-                    "approval_consumed",
-                    event_id="evt_doctor_approval",
-                    mutation_id="mut-doctor",
-                ),
-                pre=pre,
-                post=post,
-            )
-        ).state
-        == "appended"
-    )
 
     dry_run = _run_autonomy(
         tmp_path,
@@ -1049,7 +1325,6 @@ def test_doctor_ledger_repairs_deterministic_recovery_gaps(tmp_path: Path) -> No
     assert repair_payload["events_appended"] == 3
     assert [event["status"] for event in PendingSummaryStore(tmp_path).read_events()] == [
         "pending",
-        "approval_consumed",
         "ticket_written",
         "applied",
         "summarized",

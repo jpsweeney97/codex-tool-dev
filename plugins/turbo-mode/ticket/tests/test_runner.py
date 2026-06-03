@@ -222,7 +222,7 @@ class TestSuccessfulDispatch:
             tmp_path,
             {
                 "action": "create",
-                "fields": {"title": "Test", "problem": problem, "priority": "medium"},
+                "fields": {"title": "Test", "problem": problem, "priority": "normal"},
                 "hook_injected": True,
                 "hook_request_origin": "user",
                 "session_id": "test-session",
@@ -234,7 +234,7 @@ class TestSuccessfulDispatch:
         code = run("user", ["execute", payload_file], prog="ticket_engine_user.py")
         assert code == 0
         out = json.loads(capsys.readouterr().out)
-        assert out["state"] == "ok_create"
+        assert out["state"] == "ok"
 
 
 class TestPayloadValidation:
@@ -334,7 +334,7 @@ def test_dispatch_stage_reuses_stage_models(tmp_tickets: Path, tmp_path: Path, m
                 "fields": {
                     "title": "Runner context",
                     "problem": "Shared dispatch should validate through stage models.",
-                    "priority": "medium",
+                    "priority": "normal",
                 },
             }
         ),

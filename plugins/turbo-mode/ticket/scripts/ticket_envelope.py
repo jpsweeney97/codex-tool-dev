@@ -13,6 +13,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from scripts.ticket_target_schema import LEGACY_PRIORITY_MAP, TARGET_PRIORITIES
+
 _ENVELOPE_VERSION = "1.0"
 
 _REQUIRED_FIELDS = ("envelope_version", "title", "problem", "source", "emitted_at")
@@ -32,11 +34,19 @@ _OPTIONAL_FIELDS = (
 
 _ALL_FIELDS = frozenset(_REQUIRED_FIELDS + _OPTIONAL_FIELDS)
 
-_VALID_PRIORITIES = frozenset({"critical", "high", "medium", "low"})
+_VALID_PRIORITIES = frozenset(TARGET_PRIORITIES)
+_LEGACY_HANDOFF_PRIORITY_MAP = LEGACY_PRIORITY_MAP
 
 _SOURCE_REQUIRED_KEYS = ("type", "ref", "session")
 
 _KEY_FILE_REQUIRED_KEYS = ("file", "role", "look_for")
+
+
+def _target_suggested_priority(value: Any) -> Any:
+    """Map Handoff v1.0 legacy priorities to target ticket priorities."""
+    if not isinstance(value, str):
+        return value
+    return _LEGACY_HANDOFF_PRIORITY_MAP.get(value, value)
 
 
 def validate_envelope(envelope: dict[str, Any]) -> list[str]:
@@ -92,7 +102,7 @@ def validate_envelope(envelope: dict[str, Any]) -> list[str]:
     # suggested_priority
     if "suggested_priority" in envelope:
         v = envelope["suggested_priority"]
-        if not isinstance(v, str) or v not in _VALID_PRIORITIES:
+        if not isinstance(v, str) or _target_suggested_priority(v) not in _VALID_PRIORITIES:
             errors.append(
                 f"suggested_priority must be one of {sorted(_VALID_PRIORITIES)}, got {v!r}"
             )
@@ -151,22 +161,16 @@ def validate_envelope(envelope: dict[str, Any]) -> list[str]:
 
 
 def map_envelope_to_fields(envelope: dict[str, Any]) -> dict[str, Any]:
-    """Map a validated envelope to the fields dict for engine_execute.
+    """Map a validated envelope to target ticket write fields.
 
-    The consumer synthesizes ticket state — the envelope carries no status.
-    Result: status=open, defer.active=true, defer.reason="deferred via envelope".
+    The envelope can carry handoff context that is useful to a reader, but only
+    target ticket fields are passed to the engine.
     """
     fields: dict[str, Any] = {
         "title": envelope["title"],
         "problem": envelope["problem"],
-        "source": envelope["source"],
-        "priority": envelope.get("suggested_priority", "medium"),
+        "priority": _target_suggested_priority(envelope.get("suggested_priority", "normal")),
         "tags": envelope.get("suggested_tags", []),
-        "defer": {
-            "active": True,
-            "reason": "deferred via envelope",
-            "deferred_at": envelope["emitted_at"],
-        },
     }
 
     # Optional content fields — only include if present
@@ -176,12 +180,8 @@ def map_envelope_to_fields(envelope: dict[str, Any]) -> dict[str, Any]:
 
     if "acceptance_criteria" in envelope:
         fields["acceptance_criteria"] = envelope["acceptance_criteria"]
-    if "key_files" in envelope:
-        fields["key_files"] = envelope["key_files"]
     if "key_file_paths" in envelope:
-        fields["key_file_paths"] = envelope["key_file_paths"]
-    if "effort" in envelope:
-        fields["effort"] = envelope["effort"]
+        fields["related_paths"] = envelope["key_file_paths"]
 
     return fields
 
