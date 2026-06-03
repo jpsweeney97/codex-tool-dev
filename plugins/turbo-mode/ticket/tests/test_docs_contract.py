@@ -8,7 +8,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from scripts.ticket_target_schema import (
-    TARGET_CANDIDATE_ACTIONS,
     TARGET_FRONTMATTER_FIELDS,
     TARGET_PRIORITIES,
     TARGET_SECTIONS_REQUIRED,
@@ -449,17 +448,6 @@ def test_project_local_ticket_tmp_payloads_are_ignored() -> None:
     gitignore = _read_text(PLUGIN_ROOT.parents[2] / ".gitignore")
 
     assert ".codex/ticket-tmp/" in gitignore.splitlines()
-
-
-def test_docs_contract_imports_source_target_vocabulary() -> None:
-    assert TARGET_CANDIDATE_ACTIONS == (
-        "create",
-        "update",
-        "done",
-        "wontfix",
-        "reopen",
-        "correct",
-    )
 
 
 def test_repo_ticket_records_are_target_normalized() -> None:

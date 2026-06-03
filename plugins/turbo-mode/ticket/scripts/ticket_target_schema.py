@@ -16,9 +16,12 @@ TARGET_FRONTMATTER_FIELDS = TARGET_FRONTMATTER_REQUIRED + TARGET_FRONTMATTER_OPT
 TARGET_SECTIONS_REQUIRED = ("Problem", "Next Action", "Change History")
 TARGET_STATUSES = ("open", "in_progress", "done", "wontfix")
 TARGET_PRIORITIES = ("high", "normal", "low")
-TARGET_CANDIDATE_ACTIONS = ("create", "update", "done", "wontfix", "reopen", "correct")
+# Canonical legacy (Handoff v1.0 / pre-cutover) -> target priority mapping.
+LEGACY_PRIORITY_MAP = {"critical": "high", "medium": "normal"}
 
-_TARGET_ID_RE = re.compile(r"^T-\d{8}-\d{2,}$")
+# Canonical target ticket id pattern (T-YYYYMMDD-NN). Capture groups expose the
+# date and daily sequence for parsing callers; recognition callers use fullmatch.
+TARGET_ID_RE = re.compile(r"^T-(\d{8})-(\d{2,})$")
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
 _LEGACY_FENCED_YAML_HEADER_RE = re.compile(r"\A(?:# [^\n]*\n+)?[ \t]*```ya?ml\b")
 _H1_RE = re.compile(r"(?m)^# ")
@@ -103,7 +106,7 @@ def validate_target_ticket_text(path: Path, text: str) -> TargetTicketValidation
         )
 
     ticket_id = str(normalized_frontmatter["id"])
-    if not _TARGET_ID_RE.fullmatch(ticket_id):
+    if not TARGET_ID_RE.fullmatch(ticket_id):
         return TargetTicketValidation(
             False,
             ticket_id=ticket_id,

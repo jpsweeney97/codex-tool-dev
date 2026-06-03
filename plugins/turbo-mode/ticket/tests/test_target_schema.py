@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 from scripts.ticket_target_schema import (
-    TARGET_CANDIDATE_ACTIONS,
     TARGET_FRONTMATTER_FIELDS,
     TARGET_FRONTMATTER_OPTIONAL,
     TARGET_FRONTMATTER_REQUIRED,
@@ -93,7 +92,6 @@ def test_target_schema_constants_match_contract_vocabulary() -> None:
     assert TARGET_SECTIONS_REQUIRED == ("Problem", "Next Action", "Change History")
     assert TARGET_STATUSES == ("open", "in_progress", "done", "wontfix")
     assert TARGET_PRIORITIES == ("high", "normal", "low")
-    assert TARGET_CANDIDATE_ACTIONS == ("create", "update", "done", "wontfix", "reopen", "correct")
 
 
 def test_target_ticket_rejects_slug_filename(tmp_path: Path) -> None:

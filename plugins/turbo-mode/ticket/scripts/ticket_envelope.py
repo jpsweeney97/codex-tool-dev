@@ -13,6 +13,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from scripts.ticket_target_schema import LEGACY_PRIORITY_MAP, TARGET_PRIORITIES
+
 _ENVELOPE_VERSION = "1.0"
 
 _REQUIRED_FIELDS = ("envelope_version", "title", "problem", "source", "emitted_at")
@@ -32,11 +34,8 @@ _OPTIONAL_FIELDS = (
 
 _ALL_FIELDS = frozenset(_REQUIRED_FIELDS + _OPTIONAL_FIELDS)
 
-_VALID_PRIORITIES = frozenset({"high", "normal", "low"})
-_LEGACY_HANDOFF_PRIORITY_MAP = {
-    "critical": "high",
-    "medium": "normal",
-}
+_VALID_PRIORITIES = frozenset(TARGET_PRIORITIES)
+_LEGACY_HANDOFF_PRIORITY_MAP = LEGACY_PRIORITY_MAP
 
 _SOURCE_REQUIRED_KEYS = ("type", "ref", "session")
 

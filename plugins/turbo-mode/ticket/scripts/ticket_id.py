@@ -11,9 +11,11 @@ from datetime import date
 from pathlib import Path
 
 from scripts.ticket_parse import parse_yaml_block
+from scripts.ticket_target_schema import TARGET_ID_RE
 
-# ID pattern for v1.0 format.
-_DATE_ID_RE = re.compile(r"^T-(\d{8})-(\d{2,})$")
+# Canonical v1.0 id pattern (T-YYYYMMDD-NN), re-exported under the historical
+# private name for internal parsing call sites and id-format tests.
+_DATE_ID_RE = TARGET_ID_RE
 _TARGET_FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
 
 

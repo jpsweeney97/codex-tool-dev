@@ -20,6 +20,8 @@ from typing import Any
 
 import yaml
 
+from scripts.ticket_target_schema import TARGET_ID_RE
+
 # Match the first ```yaml or ```yml block in markdown.
 _FENCED_YAML_RE = re.compile(
     r"^```ya?ml\s*\n(.*?)^```",
@@ -77,7 +79,6 @@ _FIELD_DEFAULTS: dict[str, Any] = {
 # ID pattern matchers for generation detection.
 _GEN2_ID_RE = re.compile(r"^T-[A-F]$")
 _GEN3_ID_RE = re.compile(r"^T-\d{1,3}$")
-_DATE_ID_RE = re.compile(r"^T-\d{8}-\d{2,}$")
 _TARGET_ID_DATE_RE = re.compile(r"^T-(\d{4})(\d{2})(\d{2})-\d{2,}$")
 
 
@@ -199,7 +200,7 @@ def detect_generation(frontmatter: dict[str, Any]) -> int:
         return 10
 
     # Gen 4: date-based ID with provenance dict
-    if _DATE_ID_RE.match(ticket_id) and "provenance" in frontmatter:
+    if TARGET_ID_RE.fullmatch(ticket_id) and "provenance" in frontmatter:
         return 4
 
     # Gen 2: letter IDs

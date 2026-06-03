@@ -23,11 +23,12 @@ from scripts.ticket_parse import (
     parse_yaml_block,
 )
 from scripts.ticket_target_schema import (
+    LEGACY_PRIORITY_MAP,
     TARGET_FRONTMATTER_FIELDS,
+    TARGET_ID_RE,
     TARGET_SECTIONS_REQUIRED,
 )
 
-_TARGET_ID_RE = re.compile(r"^T-\d{8}-\d{2,}$")
 _DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 
 
@@ -62,7 +63,7 @@ def _renamed_sections(text: str) -> dict[str, str]:
 
 def _proposed_ticket_id(frontmatter: dict[str, Any]) -> str:
     current_id = str(frontmatter.get("id", ""))
-    if _TARGET_ID_RE.match(current_id):
+    if TARGET_ID_RE.fullmatch(current_id):
         return current_id
 
     raw_date = str(frontmatter.get("date", ""))
@@ -135,7 +136,7 @@ def inspect_legacy_ticket_for_cutover(path: Path) -> CutoverInventory:
         status_mapping_needed=_mapping_needed(frontmatter.get("status"), {"deferred": "open"}),
         priority_mapping_needed=_mapping_needed(
             frontmatter.get("priority"),
-            {"medium": "normal", "critical": "high"},
+            LEGACY_PRIORITY_MAP,
         ),
         missing_required_sections=missing,
         optional_sections_to_preserve=optional_sections,
