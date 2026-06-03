@@ -164,9 +164,11 @@ helpers may diagnose source/cache/storage state, repair historical audit files,
 clean stale payloads after confirmation, or run installed-runtime activation
 when the operator explicitly asks for that proof lane.
 
-Active capture and update mutation guidance is temporarily unavailable until
-source exposes a live entrypoint that accepts the target candidate mutation
-contract.
+Tickets are still written today through the user-origin `ingest` engine path and
+the `ticket_autonomy.py apply-turn` autonomy gateway. What is unavailable is the
+literal target candidate envelope: active capture and update mutation guidance is
+temporarily unavailable until source exposes a live entrypoint that accepts the
+target candidate mutation contract.
 
 ## Autonomy Model
 

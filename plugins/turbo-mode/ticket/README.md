@@ -116,7 +116,7 @@ Host-facing autonomy commands are diagnostic or maintenance inventory here:
 
 | Script | Signature | Purpose |
 |--------|-----------|---------|
-| `ticket_read.py` | `list <tickets_dir> [--status S] [--priority P] [--tag T] [--include-closed]` | List/filter tickets |
+| `ticket_read.py` | `list <tickets_dir> [--status S] [--priority P] [--tag T]` | List/filter tickets |
 | `ticket_read.py` | `query <tickets_dir> <search_term>` | ID-prefix search |
 | `ticket_read.py` | `check <tickets_dir> <ticket_id>` | Close-readiness check |
 | `ticket_review.py` | `review <tickets_dir>` / `audit <tickets_dir> [--days N]` | User-facing read-only backlog review wrapper |
@@ -203,11 +203,13 @@ after a prose candidate summary and do not write tickets.
 
 #### Target Candidate Mutation Path
 
-This docs slice does not identify a live source entrypoint that accepts target
-candidate mutations. When source exposes that entrypoint, it must accept the
-target candidate fields `action`, `ticket_id`, `target.fields`,
-`target.sections`, `proposed_change`, `expected_ticket_fingerprint`, and
-`evidence_summary`, and it must reject unknown fields.
+Ticket writes tickets today through the user-origin `ingest` engine path and the
+`ticket_autonomy.py apply-turn` autonomy gateway. What this docs slice does not
+identify is a live source entrypoint for the literal *target candidate* envelope.
+When source exposes that entrypoint, it must accept the target candidate fields
+`action`, `ticket_id`, `target.fields`, `target.sections`, `proposed_change`,
+`expected_ticket_fingerprint`, and `evidence_summary`, and it must reject unknown
+fields.
 
 ### Hook (1)
 
@@ -236,7 +238,7 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/t
 
 | Script | Signature | Purpose |
 |--------|-----------|---------|
-| `ticket_read.py` | `list <tickets_dir> [--status S] [--priority P] [--tag T] [--include-closed]` | List/filter tickets |
+| `ticket_read.py` | `list <tickets_dir> [--status S] [--priority P] [--tag T]` | List/filter tickets |
 | `ticket_read.py` | `query <tickets_dir> <search_term>` | ID-prefix search |
 | `ticket_read.py` | `check <tickets_dir> <ticket_id>` | Close-readiness check |
 | `ticket_triage.py` | `dashboard <tickets_dir>` | Health dashboard |

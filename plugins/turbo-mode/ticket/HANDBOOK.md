@@ -198,9 +198,11 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/t
 
 ### Target Candidate Mutation Path
 
-This docs slice does not identify a live source entrypoint that accepts target
-candidate mutations. When source exposes that entrypoint, it must accept
-`action`, `ticket_id`, `target.fields`, `target.sections`, `proposed_change`,
+Ticket writes tickets today through the user-origin `ingest` engine path and the
+`ticket_autonomy.py apply-turn` autonomy gateway. What this docs slice does not
+identify is a live source entrypoint for the literal *target candidate* envelope.
+When source exposes that entrypoint, it must accept `action`, `ticket_id`,
+`target.fields`, `target.sections`, `proposed_change`,
 `expected_ticket_fingerprint`, and `evidence_summary`, and it must reject
 unknown fields.
 
