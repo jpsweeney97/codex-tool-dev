@@ -420,11 +420,9 @@ def _append_summary_receipt(
 
 
 def _ticket_files_for_source_context(tickets_dir: Path) -> tuple[Path, ...]:
-    files = list(tickets_dir.glob("*.md")) if tickets_dir.is_dir() else []
-    closed_dir = tickets_dir / "closed-tickets"
-    if closed_dir.is_dir():
-        files.extend(closed_dir.glob("*.md"))
-    return tuple(sorted(files))
+    if not tickets_dir.is_dir():
+        return ()
+    return tuple(sorted(tickets_dir.glob("*.md")))
 
 
 def _ticket_state_fingerprints(

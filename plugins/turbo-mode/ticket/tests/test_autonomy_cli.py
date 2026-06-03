@@ -18,7 +18,7 @@ from scripts.ticket_autonomy_config import (
 from scripts.ticket_dedup import target_fingerprint
 from scripts.ticket_turn_batch import PendingSummaryStore
 
-from tests.support.builders import make_ticket
+from tests.support.builders import make_legacy_ticket_for_cutover, make_ticket
 from tests.test_turn_batch import valid_attempt_event, valid_status_event
 
 SCRIPT = Path(__file__).parent.parent / "scripts" / "ticket_autonomy.py"
@@ -965,6 +965,41 @@ def test_apply_turn_collector_unhealthy_pauses_without_mutation_or_health_events
     assert ticket.read_text(encoding="utf-8") == broken_ticket
 
 
+def test_apply_turn_source_context_ignores_legacy_closed_tickets(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    closed_dir = tickets_dir / "closed-tickets"
+    closed_dir.mkdir()
+    make_legacy_ticket_for_cutover(
+        closed_dir,
+        "legacy-closed.md",
+        id="legacy-closed-ticket",
+        status="done",
+    )
+    context = _write_context(tmp_path, candidate_mutations=_source_context_candidate())
+
+    result = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["state"] == "applied"
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
+    assert not (tmp_path / ".codex" / "ticket-workspace" / "pause.json").exists()
+
+
 def test_apply_turn_source_context_pause_stays_paused_without_resume(
     tmp_path: Path,
 ) -> None:
@@ -1100,6 +1135,44 @@ def test_apply_turn_resume_source_context_pause_with_multiple_healthy_tickets(
     tickets_dir.mkdir(parents=True, exist_ok=True)
     make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
     make_ticket(tickets_dir, "two.md", id="T-20260527-02", priority="normal")
+    pause_workspace_automation(tmp_path, reason="source_context_unhealthy")
+    context = _write_context(tmp_path)
+
+    resumed = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+        "--setup-choice",
+        "automatic",
+        "--resume-paused",
+    )
+
+    assert resumed.returncode == 0
+    assert json.loads(resumed.stdout)["state"] == "no_change"
+    assert not (tmp_path / ".codex" / "ticket-workspace" / "pause.json").exists()
+
+
+def test_apply_turn_resume_source_context_pause_ignores_legacy_closed_tickets(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="high")
+    closed_dir = tickets_dir / "closed-tickets"
+    closed_dir.mkdir()
+    make_legacy_ticket_for_cutover(
+        closed_dir,
+        "legacy-closed.md",
+        id="legacy-closed-ticket",
+        status="done",
+    )
     pause_workspace_automation(tmp_path, reason="source_context_unhealthy")
     context = _write_context(tmp_path)
 
