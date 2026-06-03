@@ -75,6 +75,37 @@ class TestListTickets:
         with pytest.raises(InvalidTicketState):
             list_tickets(tmp_tickets)
 
+    def test_markdown_h1_inside_code_fence_lists_as_valid_ticket(self, tmp_tickets):
+        ticket = tmp_tickets / "T-20260302-01.md"
+        ticket.write_text(
+            "---\n"
+            "id: T-20260302-01\n"
+            "title: Test ticket\n"
+            "status: open\n"
+            "priority: normal\n"
+            "tags: []\n"
+            "related_paths: []\n"
+            "blocked_by: []\n"
+            "---\n"
+            "\n"
+            "## Problem\n"
+            "Preserve this Markdown example:\n"
+            "```markdown\n"
+            "# Example heading\n"
+            "```\n"
+            "\n"
+            "## Next Action\n"
+            "Continue work on this ticket.\n"
+            "\n"
+            "## Change History\n"
+            "- 2026-06-02T00:00:00Z | migration | Test fixture normalized to target schema.\n",
+            encoding="utf-8",
+        )
+
+        tickets = list_tickets(tmp_tickets)
+
+        assert [ticket.id for ticket in tickets] == ["T-20260302-01"]
+
     def test_closed_tickets_subdir_is_not_scanned(self, tmp_tickets):
         make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01")
         closed_dir = tmp_tickets / "closed-tickets"

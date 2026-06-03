@@ -25,6 +25,7 @@ TARGET_ID_RE = re.compile(r"^T-(\d{8})-(\d{2,})$")
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
 _LEGACY_FENCED_YAML_HEADER_RE = re.compile(r"\A(?:# [^\n]*\n+)?[ \t]*```ya?ml\b")
 _H1_RE = re.compile(r"(?m)^# ")
+_FENCE_RE = re.compile(r"^[ \t]*(```+|~~~+)")
 _SECTION_RE = re.compile(r"(?m)^## ([^\n]+)$")
 _CHANGE_HISTORY_RE = re.compile(
     r"^- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z \| ([^|]+) \| (.+)$"
@@ -81,7 +82,7 @@ def validate_target_ticket_text(path: Path, text: str) -> TargetTicketValidation
     """Validate target-shaped ticket Markdown without semantic scoring."""
     if _LEGACY_FENCED_YAML_HEADER_RE.match(text):
         return _invalid("target ticket validation", "fenced YAML is not target format", path)
-    if _H1_RE.search(text):
+    if _contains_h1_outside_fenced_code(text):
         return _invalid(
             "target ticket validation",
             "duplicated H1 title is not target format",
@@ -133,6 +134,17 @@ def validate_target_ticket_text(path: Path, text: str) -> TargetTicketValidation
 
 def _invalid(operation: str, reason: str, value: object) -> TargetTicketValidation:
     return TargetTicketValidation(False, error=f"{operation} failed: {reason}. Got: {value!r:.100}")
+
+
+def _contains_h1_outside_fenced_code(text: str) -> bool:
+    inside_fence = False
+    for line in text.splitlines():
+        if _FENCE_RE.match(line):
+            inside_fence = not inside_fence
+            continue
+        if not inside_fence and _H1_RE.match(line):
+            return True
+    return False
 
 
 def _parse_frontmatter(yaml_text: str) -> tuple[dict[str, Any] | None, str]:
