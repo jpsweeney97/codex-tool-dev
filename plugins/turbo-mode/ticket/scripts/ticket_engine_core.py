@@ -991,17 +991,12 @@ _UPDATE_SECTION_HEADINGS = {
     "next_action": "Next Action",
     "acceptance_criteria": "Acceptance Criteria",
 }
+_TARGET_FRONTMATTER_BLOCK_RE = re.compile(r"\A---\n.*?\n---\n?", re.DOTALL)
 
 
-def _render_target_ticket_text(
-    frontmatter: dict[str, Any],
-    sections: dict[str, str],
-) -> str:
-    """Render a target ticket from existing target frontmatter and sections."""
-    from scripts.ticket_render import render_frontmatter
-    from scripts.ticket_target_schema import TARGET_SECTIONS_REQUIRED
-
-    target_frontmatter = {
+def _target_frontmatter(frontmatter: dict[str, Any]) -> dict[str, Any]:
+    """Return canonical target frontmatter fields."""
+    return {
         "id": frontmatter["id"],
         "title": frontmatter["title"],
         "status": frontmatter["status"],
@@ -1010,7 +1005,46 @@ def _render_target_ticket_text(
         "related_paths": frontmatter.get("related_paths", []),
         "blocked_by": frontmatter.get("blocked_by", []),
     }
-    rendered = ["---", render_frontmatter(target_frontmatter).rstrip("\n"), "---", ""]
+
+
+def _replace_target_frontmatter_text(text: str, frontmatter: dict[str, Any]) -> str:
+    """Replace only target YAML frontmatter, preserving body bytes."""
+    from scripts.ticket_render import render_frontmatter
+
+    frontmatter_text = render_frontmatter(_target_frontmatter(frontmatter)).rstrip("\n")
+    replacement = f"---\n{frontmatter_text}\n---\n"
+    updated, replacements = _TARGET_FRONTMATTER_BLOCK_RE.subn(replacement, text, count=1)
+    if replacements != 1:
+        raise ValueError(
+            "target frontmatter replacement failed: frontmatter block not found. "
+            f"Got: {text!r:.100}"
+        )
+    return updated
+
+
+def _render_target_ticket_text(
+    frontmatter: dict[str, Any],
+    sections: dict[str, str],
+    *,
+    original_text: str | None = None,
+    targeted_headings: tuple[str, ...] = (),
+) -> str:
+    """Render a target ticket while preserving untargeted body sections."""
+    from scripts.ticket_target_schema import TARGET_SECTIONS_REQUIRED
+
+    if original_text is not None:
+        rendered_text = _replace_target_frontmatter_text(original_text, frontmatter)
+        for heading in targeted_headings:
+            rendered_text = _replace_or_append_section(
+                rendered_text,
+                heading,
+                sections.get(heading, ""),
+            )
+        return rendered_text
+
+    from scripts.ticket_render import render_frontmatter
+
+    rendered = ["---", render_frontmatter(_target_frontmatter(frontmatter)).rstrip("\n"), "---", ""]
     emitted: set[str] = set()
     for heading in TARGET_SECTIONS_REQUIRED:
         rendered.extend([f"## {heading}", sections.get(heading, "").strip(), ""])
@@ -1047,7 +1081,7 @@ def _replace_or_append_section(text: str, heading: str, content: str) -> str:
     )
     updated, count = pattern.subn(replacement, text, count=1)
     if count:
-        return updated.rstrip() + "\n"
+        return updated
     return text.rstrip() + "\n\n" + replacement
 
 
@@ -1805,6 +1839,7 @@ def _execute_update(
         return policy_error
 
     ticket_path = Path(ticket.path)
+    original_text = ticket_path.read_text(encoding="utf-8")
     (
         frontmatter_updates,
         section_fields,
@@ -1853,7 +1888,13 @@ def _execute_update(
         if old_rendered.strip() != rendered.strip():
             changes["sections_changed"].append(heading)
         sections[heading] = rendered
-    new_text = _render_target_ticket_text(data, sections)
+    targeted_headings = tuple(_UPDATE_SECTION_HEADINGS[key] for key in section_fields)
+    new_text = _render_target_ticket_text(
+        data,
+        sections,
+        original_text=original_text,
+        targeted_headings=targeted_headings,
+    )
     if change_history_entry is not None:
         new_text = append_change_history_entry(new_text, change_history_entry)
     ticket_path.write_text(new_text, encoding="utf-8")
@@ -2201,11 +2242,12 @@ def _execute_close(
         return policy_error
 
     ticket_path = Path(ticket.path)
+    original_text = ticket_path.read_text(encoding="utf-8")
     data = dict(ticket.frontmatter)
     sections = dict(ticket.sections)
     old_status = data.get("status", "")
     data["status"] = resolution
-    new_text = _render_target_ticket_text(data, sections)
+    new_text = _render_target_ticket_text(data, sections, original_text=original_text)
     if change_history_entry is not None:
         new_text = append_change_history_entry(new_text, change_history_entry)
     ticket_path.write_text(new_text, encoding="utf-8")
@@ -2260,11 +2302,12 @@ def _execute_reopen(
 
     # Write status change.
     ticket_path = Path(ticket.path)
+    original_text = ticket_path.read_text(encoding="utf-8")
     data = dict(ticket.frontmatter)
     sections = dict(ticket.sections)
     old_status = data.get("status", "")
     data["status"] = "open"
-    new_text = _render_target_ticket_text(data, sections)
+    new_text = _render_target_ticket_text(data, sections, original_text=original_text)
 
     # Append to Reopen History section (newest-last).
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")

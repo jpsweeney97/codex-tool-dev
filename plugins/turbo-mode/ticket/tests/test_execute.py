@@ -122,6 +122,15 @@ def _make_ticket_without_acceptance_criteria(
     return path
 
 
+def _section_text(text: str, heading: str) -> str:
+    marker = f"## {heading}\n"
+    start = text.index(marker)
+    next_start = text.find("\n## ", start + len(marker))
+    if next_start == -1:
+        return text[start:]
+    return text[start:next_start]
+
+
 def test_unknown_runtime_execute_surface_does_not_use_direct_execute_bypass(
     tmp_tickets: Path,
 ) -> None:
@@ -367,6 +376,62 @@ class TestUpdate:
         content = ticket_path.read_text(encoding="utf-8")
         assert "status: in_progress" in content
         assert "\ndate:" not in content
+
+    def test_update_preserves_untargeted_optional_section_bytes(
+        self,
+        tmp_tickets: Path,
+    ) -> None:
+        ticket_id = "T-20260302-01"
+        ticket_path = tmp_tickets / f"{ticket_id}.md"
+        ticket_path.write_text(
+            "\n".join(
+                [
+                    "---",
+                    f"id: {ticket_id}",
+                    "title: Preserve optional bytes",
+                    "status: open",
+                    "priority: normal",
+                    "tags: []",
+                    "related_paths: []",
+                    "blocked_by: []",
+                    "---",
+                    "",
+                    "## Problem",
+                    "Keep optional section bytes unchanged.",
+                    "",
+                    "## Next Action",
+                    "Update only frontmatter.",
+                    "",
+                    "## Change History",
+                    (
+                        "- 2026-06-02T00:00:00Z | migration | Test fixture normalized "
+                        "to target schema."
+                    ),
+                    "",
+                    "## Verification",
+                    "",
+                    "  keep leading spaces and blank lines",
+                    "",
+                    "trailing blank line remains below",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        before = ticket_path.read_text(encoding="utf-8")
+        before_verification = _section_text(before, "Verification")
+
+        response = _execute_existing(
+            tmp_tickets,
+            ticket_path,
+            action="update",
+            fields={"priority": "low"},
+        )
+
+        assert response.state == "ok"
+        after = ticket_path.read_text(encoding="utf-8")
+        assert "priority: low" in after
+        assert _section_text(after, "Verification") == before_verification
 
     def test_terminal_status_update_requires_reopen(self, tmp_tickets: Path) -> None:
         ticket_path = make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="done")

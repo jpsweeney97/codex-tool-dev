@@ -197,6 +197,8 @@ def append_change_history_entry(ticket_text: str, entry: ChangeHistoryEntry) -> 
         Updated ticket Markdown text.
     """
     entry_line = render_change_history_entry(entry)
+    if entry_line in ticket_text.splitlines():
+        return ticket_text
     existing = _find_heading(ticket_text, CHANGE_HISTORY_HEADING)
     if existing is not None:
         return _append_to_existing_change_history(ticket_text, existing, entry_line)

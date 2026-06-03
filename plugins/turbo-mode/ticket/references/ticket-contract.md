@@ -150,8 +150,8 @@ priorities are `high`, `normal`, and `low`. Blockedness derives from
 `blocked_by`; reverse blocker views are derived by scanning tickets.
 
 Required Markdown sections are `Problem`, `Next Action`, and `Change History`.
-Optional sections are preserved unless a target candidate explicitly names the
-section.
+Optional sections are preserved byte-for-byte unless a target candidate
+explicitly names the section.
 
 ## Target Interfaces
 

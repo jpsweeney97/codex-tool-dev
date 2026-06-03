@@ -222,6 +222,12 @@ def test_contract_states_supported_high_level_mutation_surfaces() -> None:
     assert "`capture`, `update`, and `ingest`" not in target
 
 
+def test_contract_preserves_optional_sections_byte_for_byte() -> None:
+    text = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
+
+    assert "Optional sections are preserved byte-for-byte" in text
+
+
 def test_readme_ticket_schema_matches_yaml_contract_boundary() -> None:
     text = _read_text(PLUGIN_ROOT / "README.md")
     schema = _section(text, "## Target Post-Cutover Ticket Shape", "\n## ")
