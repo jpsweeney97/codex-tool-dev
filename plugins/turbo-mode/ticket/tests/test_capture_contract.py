@@ -24,6 +24,7 @@ def test_capture_ticket_renders_target_sections_without_capture_metadata(tmp_pat
         next_action="Clarify the expected guard behavior.",
         related_paths=["plugins/turbo-mode/ticket/hooks/ticket_engine_guard.py"],
         acceptance_criteria=["Guard behavior is documented"],
+        change_history_entry="- 2026-06-02T00:00:00Z | codex | Created target ticket.",
     )
 
     assert "capture_confidence:" not in text

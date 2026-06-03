@@ -259,6 +259,12 @@ def test_gateway_autonomous_create_writes_ticket_without_target_fingerprint(
     ticket_text = created[0].read_text(encoding="utf-8")
     assert "Add retry to publisher" in ticket_text
     assert "| codex | Created ticket from candidate evidence." in ticket_text
+    # A freshly created ticket carries exactly one Change History entry — no
+    # fabricated render-time placeholder ahead of the real gateway entry.
+    history_section = ticket_text.split("## Change History", 1)[1].split("\n## ", 1)[0]
+    history_entries = [line for line in history_section.splitlines() if line.startswith("- ")]
+    assert len(history_entries) == 1, history_entries
+    assert "Rendered target ticket." not in ticket_text
     events = _events(project_root)
     assert [event["status"] for event in events] == [
         "pending",

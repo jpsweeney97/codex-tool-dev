@@ -168,7 +168,7 @@ def render_ticket(
     prior_investigation: str = "",
     decisions_made: str = "",
     related: str = "",
-    change_history_entry: str = "",
+    change_history_entry: str,
 ) -> str:
     """Render a complete target ticket markdown file.
 
@@ -182,8 +182,6 @@ def render_ticket(
     tags = tags or []
     blocked_by = blocked_by or []
     acceptance_criteria = _normalize_acceptance_criteria(acceptance_criteria)
-    if not change_history_entry:
-        change_history_entry = "- 2026-06-02T00:00:00Z | codex | Rendered target ticket."
 
     frontmatter: dict[str, Any] = {
         "id": id,

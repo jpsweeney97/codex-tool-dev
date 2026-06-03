@@ -20,7 +20,11 @@ from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
 from scripts.ticket_autonomy_config import AutomationMode, LocalConfigState, read_local_config
-from scripts.ticket_change_history import ChangeHistoryEntry, append_change_history_entry
+from scripts.ticket_change_history import (
+    ChangeHistoryEntry,
+    append_change_history_entry,
+    render_change_history_entry,
+)
 from scripts.ticket_id import allocate_id, build_filename
 from scripts.ticket_parse import ParsedTicket
 from scripts.ticket_paths import discover_project_root
@@ -1535,6 +1539,14 @@ def _execute_create(
     today = now.date()
     title = fields.get("title", "Untitled")
 
+    if change_history_entry is None:
+        change_history_entry = ChangeHistoryEntry(
+            timestamp=now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            actor="codex",
+            reason="Created ticket.",
+        )
+    rendered_history = render_change_history_entry(change_history_entry)
+
     for _attempt in range(_CREATE_WRITE_RETRY_LIMIT):
         ticket_id = allocate_id(tickets_dir, today)
         try:
@@ -1565,9 +1577,8 @@ def _execute_create(
             prior_investigation=fields.get("prior_investigation", ""),
             decisions_made=fields.get("decisions_made", ""),
             related=fields.get("related", ""),
+            change_history_entry=rendered_history,
         )
-        if change_history_entry is not None:
-            content = append_change_history_entry(content, change_history_entry)
         try:
             _write_text_exclusive(ticket_path, content)
         except FileExistsError:

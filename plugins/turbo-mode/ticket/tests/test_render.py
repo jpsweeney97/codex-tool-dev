@@ -6,6 +6,8 @@ import pytest
 from scripts.ticket_parse import parse_ticket
 from scripts.ticket_render import render_ticket
 
+_HISTORY = "- 2026-06-02T00:00:00Z | codex | Created target ticket."
+
 
 class TestRenderTicket:
     def test_basic_ticket(self, tmp_path):
@@ -50,6 +52,7 @@ class TestRenderTicket:
             status="open",
             priority="normal",
             problem="Something needs fixing.",
+            change_history_entry=_HISTORY,
         )
         assert "## Problem\nSomething needs fixing." in result
         assert "## Next Action\nContinue work on this ticket." in result
@@ -69,6 +72,7 @@ class TestRenderTicket:
             prior_investigation="Checked handler.py; timeout hardcoded.",
             decisions_made="Configurable timeout over fixed increase.",
             related="T-20260301-03 (API config refactor)",
+            change_history_entry=_HISTORY,
         )
         assert "## Context" in result
         assert "## Prior Investigation" in result
@@ -84,6 +88,7 @@ class TestRenderTicket:
             problem="Waiting on dependency.",
             blocked_by=["T-20260302-02"],
             blocks=["T-20260302-03"],
+            change_history_entry=_HISTORY,
         )
         assert "blocked_by: [T-20260302-02]" in result
         assert "blocks:" not in result
@@ -96,6 +101,7 @@ class TestRenderTicket:
             priority="low",
             problem="Can wait.",
             defer={"active": True, "reason": "Waiting for v2 API", "deferred_at": "2026-03-02"},
+            change_history_entry=_HISTORY,
         )
         assert "defer:" not in result
 
@@ -109,6 +115,7 @@ def test_render_ticket_yaml_injection_tags(tmp_path):
         priority="normal",
         tags=["tag: with colon", "tag\nwith\nnewline"],
         problem="Problem text.",
+        change_history_entry=_HISTORY,
     )
     ticket_file = tmp_path / "T-20260303-02.md"
     ticket_file.write_text(result, encoding="utf-8")
@@ -127,4 +134,5 @@ def test_render_ticket_rejects_scalar_acceptance_criteria():
             priority="normal",
             problem="Problem text.",
             acceptance_criteria="one criterion",  # type: ignore[arg-type]
+            change_history_entry=_HISTORY,
         )
