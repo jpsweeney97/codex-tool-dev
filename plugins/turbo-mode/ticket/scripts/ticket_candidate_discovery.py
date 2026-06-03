@@ -170,7 +170,7 @@ def _append_path_candidates(
     turn_context: Mapping[str, object],
     tickets_dir: Path,
 ) -> None:
-    tickets = sorted(list_tickets(tickets_dir, include_closed=True), key=lambda ticket: ticket.id)
+    tickets = sorted(list_tickets(tickets_dir), key=lambda ticket: ticket.id)
     ticket_paths = {ticket.id: _ticket_metadata_paths(ticket) for ticket in tickets}
     tickets_by_id = {ticket.id: ticket for ticket in tickets}
     for path, evidence_kind in _path_refs(turn_context):

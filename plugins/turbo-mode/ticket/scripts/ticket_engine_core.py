@@ -39,7 +39,7 @@ def _list_tickets_with_closed(tickets_dir: Path) -> list[ParsedTicket]:
     """List target tickets, including terminal statuses in the active directory."""
     from scripts.ticket_read import list_tickets
 
-    return list_tickets(tickets_dir, include_closed=True)
+    return list_tickets(tickets_dir)
 
 
 _V10_GENERATION = 10  # v1.0 tickets have generation=10; legacy is 1-4.

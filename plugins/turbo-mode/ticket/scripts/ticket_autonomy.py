@@ -597,7 +597,7 @@ def _current_ticket_fingerprint_for_event(
     ticket_id = event.get("ticket_id")
     if not isinstance(ticket_id, str) or not ticket_id:
         return None
-    ticket = find_ticket_by_id(project_root / "docs" / "tickets", ticket_id, include_closed=True)
+    ticket = find_ticket_by_id(project_root / "docs" / "tickets", ticket_id)
     if ticket is None:
         return None
     return compute_target_fingerprint(Path(ticket.path))

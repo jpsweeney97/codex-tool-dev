@@ -209,7 +209,7 @@ def _validate_target_fingerprint(mutation: GatewayMutation) -> EngineResponse | 
     if mutation.target_fingerprint is None:
         return _policy_blocked(f"{mutation.action} requires target_fingerprint")
     try:
-        ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id, include_closed=True)
+        ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id)
     except InvalidTicketState as exc:
         return _invalid_state(
             "Ticket state is not target-normalized.",
@@ -236,7 +236,7 @@ def _current_ticket_fingerprint(mutation: GatewayMutation) -> str | None:
     if mutation.action == "create" or not mutation.ticket_id:
         return None
     try:
-        ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id, include_closed=True)
+        ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id)
     except InvalidTicketState:
         return None
     if ticket is None:

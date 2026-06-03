@@ -22,14 +22,11 @@ class InvalidTicketState(ValueError):
     """Raised when an active ticket record is not target-normalized."""
 
 
-def list_tickets(
-    tickets_dir: Path,
-    *,
-    include_closed: bool = False,
-) -> list[ParsedTicket]:
+def list_tickets(tickets_dir: Path) -> list[ParsedTicket]:
     """List all target-normalized tickets in the tickets directory.
 
-    Scans docs/tickets/*.md. Invalid active files fail explicitly.
+    Scans docs/tickets/*.md (top level only; any closed-tickets/ subdirectory
+    is intentionally not scanned). Invalid active files fail explicitly.
     Returns tickets sorted by date (newest first), then by ID.
     """
     tickets: list[ParsedTicket] = []
@@ -43,8 +40,12 @@ def list_tickets(
         if not validation.ok:
             raise InvalidTicketState(validation.error)
         ticket = parse_ticket(ticket_file)
-        if ticket is not None:
-            tickets.append(ticket)
+        if ticket is None:
+            raise InvalidTicketState(
+                "list tickets failed: a validated ticket did not parse. "
+                f"Got: {str(ticket_file)!r:.100}"
+            )
+        tickets.append(ticket)
 
     # Sort: newest date first, then by ID.
     tickets.sort(key=lambda t: (t.date, t.id), reverse=True)
@@ -54,14 +55,12 @@ def list_tickets(
 def find_ticket_by_id(
     tickets_dir: Path,
     ticket_id: str,
-    *,
-    include_closed: bool = True,
 ) -> ParsedTicket | None:
     """Find a ticket by exact ID. Returns None if not found.
 
-    Scans all ticket files (including closed) and matches on the `id` field.
+    Scans active ticket files and matches on the `id` field.
     """
-    all_tickets = list_tickets(tickets_dir, include_closed=include_closed)
+    all_tickets = list_tickets(tickets_dir)
     for ticket in all_tickets:
         if ticket.id == ticket_id:
             return ticket
@@ -186,7 +185,6 @@ def main() -> None:
     list_p.add_argument("--status", default=None)
     list_p.add_argument("--priority", default=None)
     list_p.add_argument("--tag", default=None)
-    list_p.add_argument("--include-closed", action="store_true")
 
     query_p = subparsers.add_parser("query")
     query_p.add_argument("tickets_dir", type=Path)
@@ -230,7 +228,7 @@ def main() -> None:
 
     if args.subcommand == "list":
         try:
-            tickets = list_tickets(tickets_dir, include_closed=args.include_closed)
+            tickets = list_tickets(tickets_dir)
         except InvalidTicketState as exc:
             print(
                 json.dumps(
@@ -259,7 +257,7 @@ def main() -> None:
 
     elif args.subcommand == "query":
         try:
-            all_tickets = list_tickets(tickets_dir, include_closed=True)
+            all_tickets = list_tickets(tickets_dir)
         except InvalidTicketState as exc:
             print(
                 json.dumps(
@@ -285,7 +283,7 @@ def main() -> None:
         from scripts.ticket_ux import close_readiness
 
         try:
-            ticket = find_ticket_by_id(tickets_dir, args.ticket_id, include_closed=True)
+            ticket = find_ticket_by_id(tickets_dir, args.ticket_id)
         except InvalidTicketState as exc:
             print(
                 json.dumps(

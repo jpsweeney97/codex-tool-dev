@@ -75,15 +75,24 @@ class TestListTickets:
         with pytest.raises(InvalidTicketState):
             list_tickets(tmp_tickets)
 
-    def test_include_closed_does_not_scan_closed_tickets(self, tmp_tickets):
+    def test_closed_tickets_subdir_is_not_scanned(self, tmp_tickets):
         make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01")
         closed_dir = tmp_tickets / "closed-tickets"
         closed_dir.mkdir()
         make_ticket(closed_dir, "ignored.md", id="T-20260301-01", status="done")
 
-        tickets = list_tickets(tmp_tickets, include_closed=True)
+        tickets = list_tickets(tmp_tickets)
 
         assert [ticket.id for ticket in tickets] == ["T-20260302-01"]
+
+    def test_validated_ticket_that_fails_to_parse_raises(self, tmp_tickets, monkeypatch):
+        make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01")
+        import scripts.ticket_read as ticket_read
+
+        monkeypatch.setattr(ticket_read, "parse_ticket", lambda _path: None)
+
+        with pytest.raises(InvalidTicketState):
+            list_tickets(tmp_tickets)
 
 
 class TestFindTicketById:

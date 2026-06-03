@@ -417,13 +417,13 @@ def triage_dashboard(tickets_dir: Path) -> dict[str, Any]:
     """Generate a triage dashboard with ticket counts and alerts.
 
     Filters to non-terminal statuses (excludes done/wontfix).
-    list_tickets(include_closed=False) returns all tickets in the active
-    directory regardless of status field — filtering by status is our job.
+    list_tickets returns all tickets in the active directory regardless of
+    status field — filtering by status is our job.
     Returns dict with: counts, total, stale, blocked_chains, size_warnings.
     """
     from scripts.ticket_read import list_tickets
 
-    all_tickets = list_tickets(tickets_dir, include_closed=False)
+    all_tickets = list_tickets(tickets_dir)
     # Filter to actionable tickets (non-terminal status).
     tickets = [t for t in all_tickets if t.status not in _TERMINAL_STATUSES]
     ticket_map = {t.id: t for t in tickets}
@@ -660,7 +660,7 @@ def triage_orphan_detection(
     """
     from scripts.ticket_read import list_tickets
 
-    tickets = list_tickets(tickets_dir, include_closed=True)
+    tickets = list_tickets(tickets_dir)
     ticket_ids = {t.id for t in tickets}
     matched: list[dict[str, Any]] = []
     orphaned: list[dict[str, Any]] = []
