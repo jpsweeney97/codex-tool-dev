@@ -7,6 +7,14 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
+from scripts.ticket_target_schema import (
+    TARGET_CANDIDATE_ACTIONS,
+    TARGET_FRONTMATTER_FIELDS,
+    TARGET_PRIORITIES,
+    TARGET_SECTIONS_REQUIRED,
+    TARGET_STATUSES,
+)
+
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PLUGIN_ROOT.parents[2]
 PR22_REPAIR_CLOSEOUT = (
@@ -46,10 +54,6 @@ CORE_AUTHORITY_DOCS = (
     PLUGIN_ROOT / "HANDBOOK.md",
     PLUGIN_ROOT / "references" / "ticket-contract.md",
 )
-TARGET_TICKET_FIELDS = ("id", "title", "status", "priority", "tags", "related_paths", "blocked_by")
-TARGET_TICKET_STATUSES = ("open", "in_progress", "done", "wontfix")
-TARGET_TICKET_PRIORITIES = ("high", "normal", "low")
-TARGET_REQUIRED_SECTIONS = ("Problem", "Next Action", "Change History")
 TARGET_CANDIDATE_FIELDS = (
     "action",
     "ticket_id",
@@ -222,13 +226,13 @@ def test_readme_ticket_schema_matches_yaml_contract_boundary() -> None:
 
     assert "ID-only filenames" in normalized_schema
     assert "YAML frontmatter" in normalized_schema
-    for field in TARGET_TICKET_FIELDS:
+    for field in TARGET_FRONTMATTER_FIELDS:
         assert f"`{field}`" in schema
-    for status in TARGET_TICKET_STATUSES:
+    for status in TARGET_STATUSES:
         assert f"`{status}`" in schema
-    for priority in TARGET_TICKET_PRIORITIES:
+    for priority in TARGET_PRIORITIES:
         assert f"`{priority}`" in schema
-    for section in TARGET_REQUIRED_SECTIONS:
+    for section in TARGET_SECTIONS_REQUIRED:
         assert f"`{section}`" in schema
     assert "Unknown frontmatter keys are invalid" in normalized_schema
     assert "`blocked` is not a status" in normalized_schema
@@ -426,6 +430,17 @@ def test_project_local_ticket_tmp_payloads_are_ignored() -> None:
     assert ".codex/ticket-tmp/" in gitignore.splitlines()
 
 
+def test_docs_contract_imports_source_target_vocabulary() -> None:
+    assert TARGET_CANDIDATE_ACTIONS == (
+        "create",
+        "update",
+        "done",
+        "wontfix",
+        "reopen",
+        "correct",
+    )
+
+
 def _strip_frontmatter_scalar(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] == '"':
         return value[1:-1]
@@ -584,7 +599,7 @@ def test_ticket_capture_skill_keeps_provenance_hook_owned() -> None:
 def test_ticket_capture_skill_documents_deterministic_inference_boundaries() -> None:
     text = _read_text(CAPTURE_SKILL)
     target = _section(text, "## Target Post-Cutover Ticket Shape", "\n## ")
-    for priority in TARGET_TICKET_PRIORITIES:
+    for priority in TARGET_PRIORITIES:
         assert f"`{priority}`" in target
     assert "`medium`" not in target
     assert "`critical`" not in target
@@ -700,9 +715,9 @@ def test_ticket_find_skill_contract_is_read_only() -> None:
     assert "ticket_workflow.py" not in text
     assert "ticket_audit.py repair" not in text
     target = _section(text, "## Target Post-Cutover Ticket Shape", "\n## ")
-    for status in TARGET_TICKET_STATUSES:
+    for status in TARGET_STATUSES:
         assert f"`{status}`" in target
-    for priority in TARGET_TICKET_PRIORITIES:
+    for priority in TARGET_PRIORITIES:
         assert f"`{priority}`" in target
     assert "`blocked`" not in target
     assert "`critical`" not in target
