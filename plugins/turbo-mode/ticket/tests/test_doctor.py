@@ -1128,6 +1128,30 @@ def test_ticket_doctor_rejects_unrelated_cache_root(tmp_tickets: Path, tmp_path:
         ticket_doctor(tmp_tickets, plugin_root=plugin_root, cache_root=unrelated)
 
 
+def test_ticket_doctor_accepts_manifest_version_cache_root(
+    tmp_tickets: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    manifest = json.loads((plugin_root / ".codex-plugin" / "plugin.json").read_text())
+    cache_root = (
+        tmp_path
+        / ".codex"
+        / "plugins"
+        / "cache"
+        / "turbo-mode"
+        / "ticket"
+        / manifest["version"]
+    )
+    cache_root.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    report = ticket_doctor(tmp_tickets, plugin_root=plugin_root, cache_root=cache_root)
+
+    assert report["plugin"]["cache_root"] == str(cache_root)
+
+
 def test_cli_doctor_rejects_arbitrary_roots(tmp_tickets: Path) -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     completed = subprocess.run(
