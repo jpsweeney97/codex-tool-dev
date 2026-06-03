@@ -126,6 +126,66 @@ class EngineResponse:
         return json.dumps(self.to_dict(), indent=2)
 
 
+TARGET_RESULT_STATES = frozenset(
+    {
+        "ok",
+        "blocked",
+        "needs_discussion",
+        "invalid_state",
+        "no_change",
+    }
+)
+
+_INVALID_STATE_ERROR_CODES = frozenset(
+    {
+        "invalid_state",
+        "invalid_transition",
+        "not_found",
+        "stale_plan",
+    }
+)
+
+_TARGET_STATE_BY_STATE = {
+    "ok": "ok",
+    "blocked": "blocked",
+    "needs_discussion": "needs_discussion",
+    "discussion_required": "needs_discussion",
+    "invalid_state": "invalid_state",
+    "no_change": "no_change",
+    "policy_blocked": "blocked",
+    "need_fields": "blocked",
+    "duplicate_candidate": "blocked",
+    "preflight_failed": "invalid_state",
+    "invalid_transition": "invalid_state",
+    "not_found": "invalid_state",
+    "escalate": "blocked",
+    "unavailable": "blocked",
+}
+
+
+def target_state_for_response(state: str, error_code: str | None = None) -> str:
+    """Map diagnostic/stage response states to the target result envelope."""
+    if state in TARGET_RESULT_STATES:
+        return state
+    if error_code in _INVALID_STATE_ERROR_CODES:
+        return "invalid_state"
+    return _TARGET_STATE_BY_STATE.get(state, "blocked")
+
+
+def normalize_target_response(response: EngineResponse) -> EngineResponse:
+    """Return a target-envelope response while preserving error detail."""
+    target_state = target_state_for_response(response.state, response.error_code)
+    if target_state == response.state:
+        return response
+    return EngineResponse(
+        state=target_state,
+        message=response.message,
+        error_code=response.error_code,
+        ticket_id=response.ticket_id,
+        data=response.data,
+    )
+
+
 # Sentinel for audit read failures.
 AUDIT_UNAVAILABLE = object()
 

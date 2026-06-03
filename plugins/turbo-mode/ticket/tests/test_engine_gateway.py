@@ -28,7 +28,7 @@ from scripts.ticket_engine_gateway import (
 )
 from scripts.ticket_turn_batch import PendingSummaryStore, VerifiedRepoContext
 
-from tests.support.builders import make_ticket
+from tests.support.builders import make_legacy_ticket_for_cutover, make_ticket
 from tests.test_turn_batch import valid_attempt_event
 
 
@@ -368,7 +368,7 @@ def test_gateway_replay_after_summary_recorded_does_not_rewrite_ticket(
         pending_summary=store,
     )
 
-    assert replay.state == "policy_blocked"
+    assert replay.state == "blocked"
     assert replay.data["recovery_state"] == "healthy"
     assert ticket_path.read_text(encoding="utf-8") == before_text
     assert _events(project_root) == before_events
@@ -567,7 +567,7 @@ def test_concurrent_same_ticket_gateway_calls_serialize_and_second_sees_stale_fi
     assert isinstance(responses["first"], EngineResponse)
     assert isinstance(responses["second"], EngineResponse)
     assert responses["first"].state == "ok"
-    assert responses["second"].state == "preflight_failed"
+    assert responses["second"].state == "invalid_state"
     assert responses["second"].error_code == "stale_plan"
     assert dispatch_priorities == ["low"]
     assert max_active_dispatches == 1
@@ -618,9 +618,45 @@ def test_gateway_autonomous_create_stops_at_duplicate_candidate(tmp_tickets: Pat
         pending_summary=PendingSummaryStore(project_root),
     )
 
-    assert response.state == "duplicate_candidate"
+    assert response.state == "blocked"
     assert response.error_code == "duplicate_candidate"
     assert len(list(tmp_tickets.glob("*.md"))) == 1
+
+
+def test_gateway_returns_invalid_state_for_non_normalized_active_ticket(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    make_legacy_ticket_for_cutover(
+        tmp_tickets,
+        "legacy-active.md",
+        id="legacy-ticket",
+    )
+    target_fp = "sha256:legacy-ticket-state"
+    mutation = GatewayMutation(
+        action="update",
+        ticket_id="legacy-ticket",
+        fields={"priority": "low"},
+        tickets_dir=tmp_tickets,
+        target_fingerprint=target_fp,
+    )
+    decision = _decision_for(ticket_id="legacy-ticket", target_fp=target_fp)
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    assert response.state == "invalid_state"
+    assert response.error_code == "invalid_state"
+    assert response.ticket_id == "legacy-ticket"
+    assert _events(project_root) == []
 
 
 def test_gateway_recovers_missing_write_events_without_rewriting_ticket(
@@ -694,7 +730,7 @@ def test_pending_summary_failure_and_pause_prevent_ticket_mutation(tmp_tickets: 
         decision=decision,
         pending_summary=PendingSummaryStore(project_root, lock_timeout_seconds=0),
     )
-    assert blocked.state == "policy_blocked"
+    assert blocked.state == "blocked"
     assert ticket_path.read_text(encoding="utf-8") == before
     lock_path.unlink()
 
@@ -710,7 +746,7 @@ def test_pending_summary_failure_and_pause_prevent_ticket_mutation(tmp_tickets: 
         decision=decision,
         pending_summary=PendingSummaryStore(project_root),
     )
-    assert paused.state == "policy_blocked"
+    assert paused.state == "blocked"
     assert paused.data["pause_reason"] == "user_requested"
     assert ticket_path.read_text(encoding="utf-8") == before
     assert _events(project_root) == []
@@ -740,7 +776,7 @@ def test_gateway_rechecks_pause_after_attempt_record_before_dispatch(
         pending_summary=PendingSummaryStore(project_root),
     )
 
-    assert response.state == "policy_blocked"
+    assert response.state == "blocked"
     assert response.data["pause_reason"] == "workspace_paused"
     assert ticket_path.read_text(encoding="utf-8") == before
     assert [event["status"] for event in _events(project_root)] == ["pending"]
@@ -773,7 +809,7 @@ def test_gateway_treats_success_without_ticket_path_as_failed_mutation(
         pending_summary=PendingSummaryStore(project_root),
     )
 
-    assert response.state == "policy_blocked"
+    assert response.state == "blocked"
     assert "ticket_path_missing" in response.message
     assert ticket_path.read_text(encoding="utf-8") == before
     assert [event["status"] for event in _events(project_root)] == [

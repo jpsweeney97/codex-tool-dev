@@ -27,9 +27,10 @@ from scripts.ticket_engine_core import (
     _execute_reopen,
     _execute_update,
     _plan_create,
+    normalize_target_response,
 )
 from scripts.ticket_mutation_identity import make_candidate_mutation_identity
-from scripts.ticket_read import find_ticket_by_id
+from scripts.ticket_read import InvalidTicketState, find_ticket_by_id
 from scripts.ticket_turn_batch import (
     PENDING_SUMMARY_SCHEMA,
     PendingSummaryStore,
@@ -54,9 +55,25 @@ class GatewayMutation:
 
 def _policy_blocked(message: str, *, data: dict[str, object] | None = None) -> EngineResponse:
     return EngineResponse(
-        state="policy_blocked",
+        state="blocked",
         message=message,
         error_code="gateway_required",
+        data=data or {},
+    )
+
+
+def _invalid_state(
+    message: str,
+    *,
+    ticket_id: str | None = None,
+    error_code: str = "invalid_state",
+    data: dict[str, object] | None = None,
+) -> EngineResponse:
+    return EngineResponse(
+        state="invalid_state",
+        message=message,
+        ticket_id=ticket_id,
+        error_code=error_code,
         data=data or {},
     )
 
@@ -191,18 +208,23 @@ def _validate_target_fingerprint(mutation: GatewayMutation) -> EngineResponse | 
         )
     if mutation.target_fingerprint is None:
         return _policy_blocked(f"{mutation.action} requires target_fingerprint")
-    ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id, include_closed=True)
+    try:
+        ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id, include_closed=True)
+    except InvalidTicketState as exc:
+        return _invalid_state(
+            "Ticket state is not target-normalized.",
+            ticket_id=mutation.ticket_id,
+            data={"reason": str(exc)},
+        )
     if ticket is None:
-        return EngineResponse(
-            state="not_found",
+        return _invalid_state(
             message=f"No ticket matching {mutation.ticket_id}",
             ticket_id=mutation.ticket_id,
             error_code="not_found",
         )
     current = compute_target_fingerprint(Path(ticket.path))
     if current != mutation.target_fingerprint:
-        return EngineResponse(
-            state="preflight_failed",
+        return _invalid_state(
             message="Stale fingerprint - ticket was modified since validation.",
             ticket_id=mutation.ticket_id,
             error_code="stale_plan",
@@ -213,7 +235,10 @@ def _validate_target_fingerprint(mutation: GatewayMutation) -> EngineResponse | 
 def _current_ticket_fingerprint(mutation: GatewayMutation) -> str | None:
     if mutation.action == "create" or not mutation.ticket_id:
         return None
-    ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id, include_closed=True)
+    try:
+        ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id, include_closed=True)
+    except InvalidTicketState:
+        return None
     if ticket is None:
         return None
     return compute_target_fingerprint(Path(ticket.path))
@@ -462,6 +487,34 @@ def _validate_autonomous_create_dedup(
     return plan_response
 
 
+def apply_ingest_create(
+    *,
+    fields: Mapping[str, object],
+    session_id: str,
+    request_origin: str,
+    tickets_dir: Path,
+) -> EngineResponse:
+    """Create a ticket for ingest without exposing the old public stage pipeline."""
+    normalized_fields = dict(fields)
+    normalized_fields.setdefault("priority", "normal")
+    plan_response = _plan_create(normalized_fields, session_id, request_origin, tickets_dir)
+    if plan_response.state != "ok":
+        return normalize_target_response(plan_response)
+    return normalize_target_response(
+        _execute_create(
+            normalized_fields,
+            session_id,
+            request_origin,
+            tickets_dir,
+            change_history_entry=ChangeHistoryEntry(
+                timestamp=_now_z(),
+                actor="codex",
+                reason="Created ticket from ingest envelope.",
+            ),
+        )
+    )
+
+
 def _response_ok(response: EngineResponse) -> bool:
     return response.state == "ok"
 
@@ -484,25 +537,31 @@ def apply_autonomous_mutation(
         decision=decision,
     )
     if decision_error is not None:
-        return _policy_blocked(f"Decision validation failed: {decision_error}")
+        return normalize_target_response(
+            _policy_blocked(f"Decision validation failed: {decision_error}")
+        )
     try:
         lock_path = _acquire_gateway_write_lock(project_root, mutation)
     except RuntimeError as exc:
-        return _policy_blocked(f"Gateway write lock failed: {exc}")
+        return normalize_target_response(_policy_blocked(f"Gateway write lock failed: {exc}"))
     if lock_path is None:
-        return _policy_blocked(
-            "Gateway write lock failed: lock_timeout",
-            data={"pause_reason": "lock_timeout"},
+        return normalize_target_response(
+            _policy_blocked(
+                "Gateway write lock failed: lock_timeout",
+                data={"pause_reason": "lock_timeout"},
+            )
         )
     try:
-        return _apply_autonomous_mutation_locked(
-            project_root=project_root,
-            thread_id=thread_id,
-            turn_id=turn_id,
-            repo_context=repo_context,
-            mutation=mutation,
-            decision=decision,
-            pending_summary=pending_summary,
+        return normalize_target_response(
+            _apply_autonomous_mutation_locked(
+                project_root=project_root,
+                thread_id=thread_id,
+                turn_id=turn_id,
+                repo_context=repo_context,
+                mutation=mutation,
+                decision=decision,
+                pending_summary=pending_summary,
+            )
         )
     finally:
         _release_gateway_write_lock(lock_path)

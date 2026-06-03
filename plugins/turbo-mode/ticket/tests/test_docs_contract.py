@@ -26,6 +26,8 @@ PR22_REPAIR_CLOSEOUT = (
     / "2026-05-28-ticket-runtime-first-autonomy-pr22-review-repair.md"
 )
 ENGINE_RUNNER = PLUGIN_ROOT / "scripts" / "ticket_engine_runner.py"
+STAGE_MODELS = PLUGIN_ROOT / "scripts" / "ticket_stage_models.py"
+CUTOVER_INVENTORY = PLUGIN_ROOT / "scripts" / "ticket_cutover_inventory.py"
 TICKET_PAYLOADS = PLUGIN_ROOT / "scripts" / "ticket_payloads.py"
 CAPTURE_SKILL = PLUGIN_ROOT / "skills" / "capture-ticket" / "SKILL.md"
 FIND_SKILL = PLUGIN_ROOT / "skills" / "read-ticket" / "SKILL.md"
@@ -331,6 +333,18 @@ def test_engine_docs_state_runner_is_not_public_mutation_surface() -> None:
         "Direct engine stages are low-level compatibility, debug, and agent-internal paths."
     ) in text
     assert "not normal user-facing mutation interfaces" in text
+
+
+def test_retained_stage_scaffolding_carries_diagnostic_sunset() -> None:
+    stage_models = _read_text(STAGE_MODELS)
+    cutover_inventory = _read_text(CUTOVER_INVENTORY)
+
+    assert "diagnostic/debug compatibility" in stage_models
+    assert "not target product architecture" in stage_models
+    assert "Sunset:" in stage_models
+    assert "diagnostic cutover inventory" in cutover_inventory
+    assert "not normal Ticket runtime input" in cutover_inventory
+    assert "Sunset:" in cutover_inventory
 
 
 def test_docs_describe_direct_agent_execute_gateway_boundary() -> None:
@@ -1182,6 +1196,19 @@ def test_handbook_surface_matches_focused_backend() -> None:
     _assert_target_candidate_contract(text)
 
 
+def test_changelog_unreleased_does_not_present_deprecated_write_fields_as_current() -> None:
+    changelog = _read_text(PLUGIN_ROOT / "CHANGELOG.md")
+    unreleased = _section(changelog, "## Unreleased", "\n## ")
+
+    assert "contract_version now engine-owned and stamped on all write paths" not in unreleased
+    assert (
+        "Full contract shapes enforced for `source`, `defer`, and `key_files` fields before"
+        not in unreleased
+    )
+    assert "`contract_version`, `source`, `defer`, and `key_files`" in unreleased
+    assert "deprecated write fields" in unreleased
+
+
 def test_handbook_smoke_uses_capture_preview_with_workspace_payload() -> None:
     text = _read_text(PLUGIN_ROOT / "HANDBOOK.md")
     target = _target_sections(text)
@@ -1287,6 +1314,12 @@ def test_task4_docs_do_not_overclaim_current_placeholder_refinement() -> None:
     update_runbook = _section(handbook, "### `ticket_update.py`", "\n### ")
     assert "deprecated" in update_runbook.lower() or "unavailable" in update_runbook.lower()
     assert "performs the write after user confirmation" not in update_runbook
+    workflow_runbook = _section(handbook, "### `ticket_workflow.py`", "\n### ")
+    normalized_workflow_runbook = _normalize_whitespace(workflow_runbook).lower()
+    assert "unavailable" in normalized_workflow_runbook
+    assert "deprecated_workflow" in workflow_runbook
+    assert "prepare hydrates a legacy payload" not in normalized_workflow_runbook
+    assert "execute performs the write" not in normalized_workflow_runbook
 
 
 def test_current_facing_docs_do_not_keep_old_active_product_sections() -> None:

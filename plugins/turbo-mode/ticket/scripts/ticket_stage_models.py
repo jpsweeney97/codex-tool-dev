@@ -1,12 +1,16 @@
-"""Stage-boundary input models for the ticket engine pipeline.
+"""Stage-boundary input models for diagnostic/debug compatibility.
 
 Frozen dataclasses with from_payload() constructors that validate shape and
-presence at the dispatch boundary. Business rule validation (allowed field
-values, status transitions, etc.) remains in the engine and ticket_validate.py.
+presence at the retained direct-stage dispatch boundary. These models support
+low-level compatibility and debug calls only; they are not target product architecture.
 
 Import direction: this module imports only stdlib. Entrypoints and engine
 import from it. It must not import EngineResponse, AutonomyConfig, or any
 ticket module.
+
+Sunset: delete this module with direct stage dispatch once the Tasks 2-9
+source/repo cutover is merged and no source test requires stage-specific
+compatibility fixtures.
 """
 
 from __future__ import annotations

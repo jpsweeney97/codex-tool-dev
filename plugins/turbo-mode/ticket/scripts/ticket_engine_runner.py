@@ -30,7 +30,9 @@ from scripts.ticket_engine_core import (
     engine_execute,
     engine_plan,
     engine_preflight,
+    normalize_target_response,
 )
+from scripts.ticket_engine_gateway import apply_ingest_create
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir
 from scripts.ticket_runtime_readiness import (
     RUNTIME_ACTIVATION_BOOTSTRAP_ENV,
@@ -295,7 +297,7 @@ def _sanitize_user_facing_ingest_response(resp: EngineResponse) -> EngineRespons
         else recovery_hint_code_for_response(resp.to_dict())
     )
     if hint_code is None:
-        return resp
+        return normalize_target_response(resp)
     if hint_code == "trust_setup":
         resp.message = "Ticket setup needs attention before this write can continue."
     elif hint_code == "policy_blocked":
@@ -304,7 +306,7 @@ def _sanitize_user_facing_ingest_response(resp: EngineResponse) -> EngineRespons
         resp.message = "Ticket checks did not pass."
     elif hint_code == "stale_plan":
         resp.message = "The ticket changed since it was read."
-    return attach_engine_recovery_hint(resp, hint_code)
+    return normalize_target_response(attach_engine_recovery_hint(resp, hint_code))
 
 
 def _dispatch_ingest(
@@ -378,68 +380,37 @@ def _dispatch_ingest(
             data={"validation_errors": errors},
         )
 
-    # Step 2: Map envelope fields to engine vocabulary.
+    # Step 2: Map envelope fields to target create fields.
     fields = map_envelope_to_fields(envelope)
 
-    # Step 3: Plan — computes dedup fingerprint, scans for duplicates.
-    plan_resp = engine_plan(
-        intent="create",
+    # Step 3: Apply the target create path through the gateway-owned helper.
+    exec_resp = apply_ingest_create(
         fields=fields,
         session_id=inp.session_id,
         request_origin=request_origin,
         tickets_dir=tickets_dir,
-        ticket_id=None,
-    )
-    if plan_resp.state != "ok":
-        return plan_resp
-
-    # Extract plan outputs for preflight.
-    plan_data = plan_resp.data or {}
-    dedup_fp = plan_data.get("dedup_fingerprint")
-    duplicate_of = plan_data.get("duplicate_of")
-
-    # Step 4: Preflight — all policy checks.
-    preflight_resp = engine_preflight(
-        ticket_id=None,
-        action="create",
-        session_id=inp.session_id,
-        request_origin=request_origin,
-        classify_confidence=1.0,
-        classify_intent="create",
-        dedup_fingerprint=dedup_fp,
-        target_fingerprint=None,
-        fields=fields,
-        duplicate_of=duplicate_of,
-        dedup_override=False,
-        dependency_override=False,
-        hook_injected=inp.hook_injected,
-        tickets_dir=tickets_dir,
-    )
-    if preflight_resp.state != "ok":
-        return preflight_resp
-
-    # Step 5: Execute — create the ticket.
-    exec_resp = engine_execute(
-        action="create",
-        ticket_id=None,
-        fields=fields,
-        session_id=inp.session_id,
-        request_origin=request_origin,
-        dedup_override=False,
-        dependency_override=False,
-        tickets_dir=tickets_dir,
-        target_fingerprint=None,
-        hook_injected=inp.hook_injected,
-        hook_request_origin=inp.hook_request_origin,
-        classify_intent="create",
-        classify_confidence=1.0,
-        dedup_fingerprint=dedup_fp,
-        duplicate_of=duplicate_of,
     )
     if exec_resp.state != "ok":
-        return exec_resp
+        data = dict(exec_resp.data or {})
+        data.update(
+            {
+                "ingest_outcome": "duplicate_candidate"
+                if exec_resp.error_code == "duplicate_candidate"
+                else "blocked",
+                "envelope_id": envelope_id,
+                "incoming_envelope_path": str(envelope_path),
+                "ticket_created": False,
+            }
+        )
+        return EngineResponse(
+            state=exec_resp.state,
+            message=exec_resp.message,
+            error_code=exec_resp.error_code,
+            ticket_id=exec_resp.ticket_id,
+            data=data,
+        )
 
-    # Step 6: Move envelope to processed.
+    # Step 4: Move envelope to processed.
     try:
         move_to_processed(envelope_path)
     except FileExistsError as exc:

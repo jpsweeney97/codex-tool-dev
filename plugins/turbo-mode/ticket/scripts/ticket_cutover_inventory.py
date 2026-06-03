@@ -1,8 +1,12 @@
-"""Diagnostic inventory for pre-cutover Ticket files.
+"""Diagnostic cutover inventory for pre-cutover Ticket files.
 
-This module is intentionally read-only. It explains old fenced-YAML ticket
-records during the ADR 0006 source/repo cutover without making them valid
-normal Ticket records.
+This module is intentionally read-only. It is a diagnostic cutover inventory
+that explains old fenced-YAML ticket records during the ADR 0006 source/repo
+cutover without making them valid normal Ticket records. Its inputs are
+diagnostic/cutover evidence only, not normal Ticket runtime input.
+
+Sunset: archive or delete this helper after the ADR 0006 source/repo cutover
+closeout records that no non-normalized active `docs/tickets/*.md` files remain.
 """
 
 from __future__ import annotations

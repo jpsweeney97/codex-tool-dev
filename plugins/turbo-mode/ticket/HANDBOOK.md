@@ -398,11 +398,12 @@ runtime-first candidate path (engine gateway), not a standalone update backend.
 
 ### `ticket_workflow.py`
 
-Use as an internal/debugging legacy workflow runner when diagnosing the
-lower-level mutation pipeline. `ticket_workflow.py` is a compatibility/debug
-runner. It is not the current user-facing update path.
-`prepare` hydrates a legacy payload, `execute` performs the write after user
-confirmation, and `recover` applies supported user-selected payload patches.
+Deprecated after the ADR 0006 source cutover. `ticket_workflow.py` is an
+internal/debugging compatibility shim, not the current user-facing update path.
+`prepare` and `execute` return
+`{"state": "unavailable", "error_code": "deprecated_workflow"}`; use the
+runtime-first candidate path (engine gateway) for current target writes.
+`recover` remains only for explicit diagnostic review of stale workflow residue.
 
 ---
 

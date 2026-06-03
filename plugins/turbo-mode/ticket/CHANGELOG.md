@@ -35,6 +35,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   deterministic mutation IDs, `ticket_autonomy.py apply-turn`, engine-owned
   gateway writes, correction handling, and recovery projections. This is source
   behavior only, not installed-runtime proof.
+- Target write validation rejects deprecated write fields including
+  `contract_version`, `source`, `defer`, and `key_files`; current writes derive
+  contract and source facts from target ticket identity and supported sections.
 
 ### Changed
 
@@ -52,9 +55,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - Archived tickets included in blocker resolution and dedup scan — `_list_tickets_with_closed()` helper prevents false "missing" blocker reports and dedup false negatives on done/wontfix tickets (C-003, #68)
-- Legacy write gate rejects mutations on pre-v1.0 tickets until migrated via engine; `contract_version` now engine-owned and stamped on all write paths (C-001/C-004)
+- Legacy write gate rejects mutations on pre-v1.0 tickets until migrated via engine; target writes now reject caller-supplied `contract_version` as deprecated write input (C-001/C-004)
 - Related paths persisted in YAML frontmatter for target dedup reliability; `dedup_override` bound to `duplicate_of` field (C-002/C-008)
-- Full contract shapes enforced for `source`, `defer`, and `key_files` fields before any file mutation (C-005)
+- Deprecated write fields are rejected before mutation; target `related_paths` and supported body sections replace old `source`, `defer`, and `key_files` write contracts (C-005)
 - Contract documentation aligned with implementation; agent-preflight hook gate removed (C-006/C-007/C-009/C-010)
 - Envelope `move_to_processed` rejects overwrite of existing processed file, preventing silent data loss (code review I-1, #69)
 - Envelope move exception catch widened from `FileExistsError` to `OSError` for filesystem robustness (T-04b, #70)

@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 import pytest
+import scripts.ticket_engine_runner as ticket_engine_runner
 from scripts.ticket_engine_runner import run
 from scripts.ticket_runtime_readiness import RUNTIME_PROOF_PATH_ENV
 from scripts.ticket_ux import INTERNAL_RECOVERY_PATH_PATTERNS, INTERNAL_RECOVERY_TERMS
@@ -123,6 +124,40 @@ class TestIngestSubcommand:
         # Ticket created
         ticket_files = list(tickets_dir.glob("*.md"))
         assert len(ticket_files) == 1
+
+    def test_ingest_create_does_not_dispatch_old_stage_pipeline(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _ensure_project_root(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        tickets_dir = tmp_path / "tickets"
+        tickets_dir.mkdir()
+        envelope_path = _write_envelope(_valid_envelope(), tickets_dir / ".envelopes")
+        payload_file = tmp_path / "payload.json"
+        payload_file.write_text(
+            json.dumps(
+                {
+                    "envelope_path": str(envelope_path),
+                    "tickets_dir": str(tickets_dir),
+                    "session_id": "test-session",
+                    "hook_injected": True,
+                    "hook_request_origin": "user",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        def fail_stage(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("ingest must not call direct stage pipeline")
+
+        monkeypatch.setattr(ticket_engine_runner, "engine_plan", fail_stage)
+        monkeypatch.setattr(ticket_engine_runner, "engine_preflight", fail_stage)
+        monkeypatch.setattr(ticket_engine_runner, "engine_execute", fail_stage)
+
+        assert run("user", argv=["ingest", str(payload_file)], prog="test") == 0
 
     def test_ingest_ignores_runtime_proof_override_env(
         self,
@@ -252,7 +287,7 @@ class TestIngestSubcommand:
         )
 
         assert exit_code == 1
-        assert response["state"] == "policy_blocked"
+        assert response["state"] == "blocked"
         assert response["data"]["recovery_hint"]["code"] == "trust_setup"
         assert response["message"] == "Ticket setup needs attention before this write can continue."
         _assert_ingest_transcript_projection_safe(response)
@@ -289,7 +324,7 @@ class TestIngestSubcommand:
         )
 
         assert exit_code == 1
-        assert response["state"] == "escalate"
+        assert response["state"] == "blocked"
         assert response["error_code"] == "origin_mismatch"
         assert response["data"]["recovery_hint"]["code"] == "trust_setup"
         assert response["message"] == "Ticket setup needs attention before this write can continue."
@@ -312,7 +347,7 @@ class TestIngestSubcommand:
         )
 
         assert exit_code == 1
-        assert response["state"] == "escalate"
+        assert response["state"] == "blocked"
         assert response["error_code"] == "parse_error"
         assert response["data"]["recovery_hint"]["code"] == "preflight_failed"
         assert response["message"] == "Ticket checks did not pass."
@@ -352,7 +387,7 @@ class TestIngestSubcommand:
         )
 
         assert exit_code == 1
-        assert response["state"] == "policy_blocked"
+        assert response["state"] == "blocked"
         assert response["error_code"] == "policy_blocked"
         assert response["data"]["recovery_hint"]["code"] == "policy_blocked"
         assert response["message"] == "Ticket ingest is blocked by Ticket policy."
@@ -389,7 +424,7 @@ class TestIngestSubcommand:
         )
 
         assert exit_code == 1
-        assert response["state"] == "policy_blocked"
+        assert response["state"] == "blocked"
         assert response["error_code"] == "policy_blocked"
         assert response["data"]["recovery_hint"]["code"] == "policy_blocked"
         assert response["message"] == "Ticket ingest is blocked by Ticket policy."
@@ -425,7 +460,7 @@ class TestIngestSubcommand:
         )
 
         assert exit_code == 2
-        assert response["state"] == "need_fields"
+        assert response["state"] == "blocked"
         assert response["error_code"] == "need_fields"
         assert response["data"]["recovery_hint"]["code"] == "preflight_failed"
         assert response["message"] == "Ticket checks did not pass."
@@ -465,7 +500,7 @@ class TestIngestSubcommand:
         )
 
         assert exit_code == 2
-        assert response["state"] == "need_fields"
+        assert response["state"] == "blocked"
         assert response["error_code"] == "need_fields"
         assert response["data"]["recovery_hint"]["code"] == "preflight_failed"
         assert response["message"] == "Ticket checks did not pass."
@@ -728,7 +763,7 @@ class TestIngestSubcommand:
         response = json.loads(capsys.readouterr().out)
 
         assert exit_code == 1
-        assert response["state"] == "policy_blocked"
+        assert response["state"] == "blocked"
         assert response["data"]["recovery_hint"]["code"] == "policy_blocked"
         assert response["message"] == "Ticket ingest is blocked by Ticket policy."
         _assert_ingest_transcript_projection_safe(response)
@@ -824,7 +859,7 @@ class TestIngestSubcommand:
         response = json.loads(capsys.readouterr().out)
 
         assert exit_code == 1
-        assert response["state"] == "duplicate_candidate"
+        assert response["state"] == "blocked"
         assert response["error_code"] == "duplicate_candidate"
         assert response.get("data", {}).get("ingest_outcome") != "duplicate_replay"
         assert response["data"]["duplicate_of"] == response["ticket_id"]
@@ -882,7 +917,7 @@ class TestIngestSubcommand:
         response = json.loads(capsys.readouterr().out)
 
         assert exit_code == 1
-        assert response["state"] == "escalate"
+        assert response["state"] == "blocked"
         assert response["error_code"] == "io_error"
         assert response["data"]["ingest_outcome"] == "created_envelope_move_failed"
         assert response["data"]["ticket_created"] is True
