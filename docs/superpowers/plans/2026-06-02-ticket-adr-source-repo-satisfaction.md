@@ -1,10 +1,10 @@
 # Ticket ADR Source/Repo Satisfaction Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans. Task 0 and Task 1 may be handled as separate setup/checkpoint work. Tasks 2-9 are one source/repo cutover execution unit unless a full Ticket-suite gate proves a smaller boundary is independently green. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Bring the local source/repo Ticket lane into honest satisfaction of ADR 0006 and the May 30 state-kernel control doc, without claiming installed runtime proof.
 
-**Architecture:** This is a source/repo cutover plan, not a cache-refresh or live-runtime plan. It normalizes repo ticket records first, then makes normal Ticket product surfaces reject non-normalized active ticket files while leaving explicit diagnostic/cutover inventory able to explain invalid legacy files. After the repo records and schema boundary are stable, Tasks 3-9 run as one atomic source cutover band unless an intermediate boundary passes the full Ticket suite and residue gates; shared write, candidate, result-state, Change History, hook-guard, ingest, and workflow surfaces are too coupled for narrow per-task green claims.
+**Architecture:** This is a source/repo cutover plan, not a cache-refresh or live-runtime plan. It adds target schema guards first, then normalizes repo ticket records and source behavior together. Tasks 2-9 run as one atomic source/repo cutover band unless an intermediate boundary passes the full Ticket suite and residue gates; Task 2 cannot be a standalone commit because it rewrites repo tickets to frontmatter before Task 3 teaches normal readers that shape. Shared ticket records, read/write, candidate, result-state, Change History, hook-guard, ingest, and workflow surfaces are too coupled for narrow per-task green claims.
 
 **Tech Stack:** Python >=3.11, PyYAML, dataclasses, Markdown/YAML parsing, existing Ticket scripts, pytest, ruff, `git mv`, bytecode-safe `uv run` verification.
 
@@ -20,7 +20,7 @@ In scope:
 - Prove no noncanonical Ticket storage remains under `docs/`.
 - Add deterministic target-ticket validation and make normal Ticket read/mutation/product surfaces reject non-normalized active tickets after cutover.
 - Normalize read/write/persistence surfaces so `ParsedTicket.date` is derived from the target ID, `validate_fields()`, `render_ticket()`, ID filename helpers, engine create/update/defaults, gateway create defaults, and envelope-to-ticket mapping cannot persist old ticket shapes.
-- Keep explicit diagnostic/cutover inventory able to inspect invalid files and report why they are invalid.
+- Keep explicit diagnostic/cutover inventory able to inspect invalid files and report why they are invalid during the cutover, with an explicit sunset for legacy-generation parsing after normalized records and strict target validation are in place.
 - Move the live source candidate contract toward `action`, `ticket_id`, `target`, `proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`, with unknown-field rejection.
 - Collapse normal result states toward `ok`, `blocked`, `needs_discussion`, `invalid_state`, and `no_change`.
 - Replace controlled `Change History` labels with the target dated prose grammar.
@@ -159,7 +159,7 @@ Stop before implementation edits if:
 Stop during implementation if:
 
 - Normal ticket readers would silently skip invalid active ticket files instead of returning `invalid_state` or an equivalent explicit block.
-- Diagnostic/cutover inventory can no longer inspect invalid old files.
+- Diagnostic/cutover inventory can no longer inspect invalid old files before its sunset, or legacy-generation parsing remains in the plugin runtime path after normalized records and strict target validation are in place.
 - Ticket normalization would carry old metadata forward as opaque comments, appendices, or runtime-significant fields.
 - A non-create write can pass without `expected_ticket_fingerprint`.
 - Unknown candidate fields are accepted on normal mutation paths after the candidate-contract task.
@@ -176,22 +176,21 @@ Stop during implementation if:
 - Deprecated prepare/execute behavior remains as a usable normal product path without a narrow diagnostic label and sunset condition.
 - `hooks/ticket_engine_guard.py` still allowlists removed prepare/execute scripts as normal mutation commands.
 - `ticket_stage_models.py`, `ticket_engine_runner.py` stage dispatch, or the stage tests are retained without an explicit diagnostic/debug label and sunset condition.
-- Tasks 3-9 are committed as independent source commits without either full Ticket-suite proof at each intermediate boundary or an explicit atomic cutover-band closeout.
+- Tasks 2-9 are committed as independent source commits without either full Ticket-suite proof at each intermediate boundary or an explicit atomic cutover-band closeout.
 - Target docs claim installed runtime success or cache refresh.
 
 ## Commit Boundaries
 
-Use coherent commits by proof boundary. Tasks 3-9 are one atomic source cutover band by default because their shared surfaces are non-adjacent: strict reads affect builder callers, target write validation affects capture/workflow/ingest, candidate shape affects corrections and Change History, result-state collapse affects runner/audit/ingest/autonomy, and workflow removal affects hook allowlists and docs.
+Use coherent commits by proof boundary. Tasks 2-9 are one atomic source/repo cutover band by default because their shared surfaces are non-adjacent: repo ticket normalization affects current read/query behavior, strict reads affect builder callers, target write validation affects capture/workflow/ingest, candidate shape affects corrections and Change History, result-state collapse affects runner/audit/ingest/autonomy, and workflow removal affects hook allowlists and docs.
 
 1. `docs(ticket): plan adr source repo satisfaction`
 2. `test(ticket): add target ticket schema guards`
-3. `docs(ticket): normalize repo ticket records`
-4. Atomic cutover band, committed only after Tasks 3-9 pass their selectors, full Ticket suite, ruff, diff checks, and residue scans:
+3. Atomic cutover band, committed only after Tasks 2-9 pass their selectors, full Ticket suite, ruff, diff checks, and residue scans:
    - `fix(ticket): complete adr source repo cutover`
-5. Optional closeout/docs-only follow-up only if Task 9 documentation changes are intentionally split after a full green cutover:
+4. Optional closeout/docs-only follow-up only if Task 9 documentation changes are intentionally split after a full green cutover:
    - `docs(ticket): close adr source repo cutover`
 
-Do not create separate commits for Tasks 3, 4, 5, 6, 7, 8, or 9 unless the proposed boundary has already passed:
+Do not create separate commits for Tasks 2, 3, 4, 5, 6, 7, 8, or 9 unless the proposed boundary has already passed:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest -q
@@ -199,7 +198,21 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 git diff --check
 ```
 
-If an executor chooses to keep local work checkpoints during Tasks 3-9, leave them uncommitted or clearly label them as uncommitted work. The closeout must not claim intermediate commits are independently bisectable unless the full gate above passed at that exact boundary.
+If an executor chooses to keep local work checkpoints during Tasks 2-9, leave them uncommitted or clearly label them as uncommitted work. The closeout must not claim intermediate commits are independently bisectable unless the full gate above passed at that exact boundary.
+
+### Cutover Band Execution Rule
+
+Tasks 2-9 are a single execution unit. In subagent-driven mode, assign Tasks 2-9 to one cutover worker or to coordinated workers that share one uncommitted branch state and one final full-suite gate. Do not dispatch a fresh independent subagent per task inside this band and ask it to prove a green task-local commit.
+
+The verification commands inside Tasks 2-9 are progress selectors. They are useful for finding remaining work owned by the band, but a selector PASS is not a commit boundary and a selector FAIL may be expected until adjacent in-band changes land. A smaller boundary is independently committable only after it passes:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket
+git diff --check
+```
+
+Any closeout for Tasks 2-9 must say whether the band was committed atomically or name the exact smaller boundaries that passed the full gate above.
 
 ## Task 0: Reconfirm Inventory Before Edits
 
@@ -345,6 +358,7 @@ Implement `ticket_target_schema.py` with:
 - `TARGET_FRONTMATTER_OPTIONAL = ("tags", "related_paths", "blocked_by")`
 - `TARGET_FRONTMATTER_FIELDS = TARGET_FRONTMATTER_REQUIRED + TARGET_FRONTMATTER_OPTIONAL`
 - `TARGET_SECTIONS_REQUIRED = ("Problem", "Next Action", "Change History")`
+- `validate_target_section_name(name: str) -> bool`
 - `TARGET_STATUSES = ("open", "in_progress", "done", "wontfix")`
 - `TARGET_PRIORITIES = ("high", "normal", "low")`
 - `TARGET_CANDIDATE_ACTIONS = ("create", "update", "done", "wontfix", "reopen", "correct")`
@@ -352,6 +366,8 @@ Implement `ticket_target_schema.py` with:
 - `validate_target_ticket_text(path: Path, text: str) -> TargetTicketValidation`
 
 Validation must be deterministic and mechanical. It must not score ticket semantics or decide priority.
+
+Do not define an exhaustive optional-section enum. ADR 0006 leaves optional Markdown sections open as human prose. `TARGET_SECTIONS_REQUIRED` names the required sections only. `validate_target_section_name()` should accept a non-empty, line-shaped level-2 section name and reject malformed names; non-create candidate validation later decides whether an optional section may be targeted by checking the live ticket's actual sections or an explicit create candidate.
 
 - [ ] **Step 3: De-duplicate docs-contract vocabulary**
 
@@ -454,6 +470,8 @@ find docs/tickets -maxdepth 2 -type f -print
 ```
 
 Expected: pytest PASS, only `docs/tickets` for Ticket storage, and seven ID-only `docs/tickets/T-*.md` files.
+
+This is a record-shape progress check inside the Tasks 2-9 cutover band, not a commit boundary. Do not commit after Task 2 alone unless normal readers already understand target frontmatter and the full Ticket-suite gate in `Commit Boundaries` passes at this exact boundary.
 
 ## Task 3: Add Diagnostic Cutover Inventory And Normal-Surface Rejection
 
@@ -582,6 +600,12 @@ Tests must prove:
 
 Keep legacy fenced-YAML parsing available only through diagnostic/cutover inventory helpers. Name the helper accordingly, for example `parse_legacy_ticket_for_cutover()`, so normal product surfaces cannot accidentally rely on it as valid ticket authority.
 
+Add an explicit sunset next to the helper and inventory entrypoint. Use this boundary:
+
+- before Tasks 2-9 finish, legacy parsing may exist only to inventory and explain pre-cutover files;
+- at Task 10 closeout, either remove `ticket_cutover_inventory.py` and legacy generation helpers from the plugin runtime path, or move/archive them outside normal plugin runtime code with a source-visible reason;
+- after normalized repo tickets and strict target validation pass, permanent diagnosis should use target validation errors, not Gen 1-4 conversion parsing.
+
 - [ ] **Step 6: Resolve migration-suite ownership**
 
 Repoint `test_migration.py` to the diagnostic/cutover parser or delete obsolete direct-normal-parser assertions and replace them with equivalent `test_cutover_inventory.py` coverage. The retained tests must prove legacy generations can be inventoried and mapped, not that `parse_ticket()` accepts them as normal active tickets.
@@ -635,7 +659,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   -q
 ```
 
-Expected: PASS.
+Expected at the end of the Tasks 2-9 cutover band: PASS. During an in-band checkpoint, failures that point to Tasks 4-9 shared surfaces are expected remaining work, not proof that Task 3 should be committed or scoped independently.
 
 Then run:
 
@@ -880,7 +904,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   -q
 ```
 
-Expected: PASS.
+Expected at the end of the Tasks 2-9 cutover band: PASS. During an in-band checkpoint, failures that point to Tasks 5-9 shared surfaces are expected remaining work, not proof that Task 4 should be committed or scoped independently.
 
 Then run:
 
@@ -939,7 +963,7 @@ class CandidateMutation:
     evidence_summary: str
 ```
 
-`CandidateTarget` should hold only `fields: tuple[str, ...]` and `sections: tuple[str, ...]`, with names validated against target frontmatter fields and allowed section names from `ticket_target_schema.py`.
+`CandidateTarget` should hold only `fields: tuple[str, ...]` and `sections: tuple[str, ...]`. Validate field names against `TARGET_FRONTMATTER_FIELDS`. Validate section names with `validate_target_section_name()` from `ticket_target_schema.py`, then check operation-specific targetability against the live ticket or explicit create payload. Do not treat optional sections as a closed enum.
 
 Update `ticket_mutation_identity.py` so the canonical mutation payload includes exactly:
 
@@ -969,7 +993,7 @@ Map legacy gateway dispatch only at the internal engine boundary:
 - candidate `correct` is an update or terminal correction with a `Corrects:` fact in Change History after Task 7;
 - no normal candidate may expose `close`, `correction`, `reprioritize`, `blocker_edit`, `stale_cleanup`, or `refine`.
 
-Correction flow is a first-class write consumer. Update `test_autonomy_corrections.py` in this task, not later, so `action="correct"` and the new `CandidateTarget` / `evidence_summary` shape are covered before gateway validation is considered done. If `_change_history_label()` still branches on `correction` before Task 7, do not commit this task separately; it remains inside the atomic Tasks 3-9 band.
+Correction flow is a first-class write consumer. Update `test_autonomy_corrections.py` in this task, not later, so `action="correct"` and the new `CandidateTarget` / `evidence_summary` shape are covered before gateway validation is considered done. If `_change_history_label()` still branches on `correction` before Task 7, do not commit this task separately; it remains inside the atomic Tasks 2-9 band.
 
 - [ ] **Step 5: Verify candidate-contract selector**
 
@@ -988,7 +1012,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   -q
 ```
 
-Expected: PASS.
+Expected at the end of the Tasks 2-9 cutover band: PASS. During an in-band checkpoint, failures that point to Tasks 6-9 shared surfaces are expected remaining work, not proof that Task 5 should be committed or scoped independently.
 
 Then run:
 
@@ -1141,7 +1165,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   -q
 ```
 
-Expected: PASS.
+Expected at the end of the Tasks 2-9 cutover band: PASS. During an in-band checkpoint, failures that point to Tasks 7-9 shared surfaces are expected remaining work, not proof that Task 6 should be committed or scoped independently.
 
 Then run:
 
@@ -1206,7 +1230,7 @@ Run:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_change_history.py tests/test_target_schema.py tests/test_engine_gateway.py tests/test_execute.py -q
 ```
 
-Expected: PASS.
+Expected at the end of the Tasks 2-9 cutover band: PASS. During an in-band checkpoint, failures that point to Tasks 8-9 shared surfaces are expected remaining work, not proof that Task 7 should be committed or scoped independently.
 
 Then run:
 
@@ -1287,7 +1311,7 @@ The four-stage `classify | plan | preflight | execute` machinery may remain only
 1. delete or make unavailable low-level stage dispatch and remove/update `ticket_stage_models.py`, `test_classify.py`, `test_preflight.py`, `test_stage_models.py`, `test_runner.py`, and affected `test_engine_runner.py` cases; or
 2. retain it behind an explicit diagnostic/debug label with a source-visible sunset condition, plus tests proving normal product docs, skills, hook allowlists, and gateway/autonomy paths do not present it as current product architecture.
 
-If shape 2 is used, add a comment near the retained dispatch that names the sunset trigger: remove the stage dispatch once Tasks 3-9 source cutover is merged and no source test requires stage-specific compatibility fixtures.
+If shape 2 is used, add a comment near the retained dispatch that names the sunset trigger: remove the stage dispatch once Tasks 2-9 source/repo cutover is merged and no source test requires stage-specific compatibility fixtures.
 
 - [ ] **Step 5: Keep read/query/report surfaces**
 
@@ -1320,7 +1344,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   -q
 ```
 
-Expected: PASS.
+Expected at the end of the Tasks 2-9 cutover band: PASS. During an in-band checkpoint, failures that point to Task 9 docs/static alignment are expected remaining work, not proof that Task 8 should be committed or scoped independently.
 
 ## Task 9: Align Active Docs, Skills, And Tests
 
@@ -1380,7 +1404,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 rg -n "capture_confidence|capture_source|ticket_capture.py prepare|ticket_update.py prepare|ticket_workflow.py prepare|ready_to_execute|retry_preview|cleanup_stale_preview|stale_plan|ok_create|ok_update|preflight_failed|stale_cleanup|DeferredWorkEnvelope|suggested_priority|key_file_paths|defer\.active|read-validate-map-plan-preflight-execute" plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/CHANGELOG.md plugins/turbo-mode/ticket/references plugins/turbo-mode/ticket/skills plugins/turbo-mode/ticket/.codex-plugin/plugin.json
 ```
 
-Expected: pytest PASS. The `rg` command has no matches in current/target sections; historical changelog matches are allowed only when immediately labeled as historical and not current behavior.
+Expected at the end of the Tasks 2-9 cutover band: pytest PASS. The `rg` command has no matches in current/target sections; historical changelog matches are allowed only when immediately labeled as historical and not current behavior. Do not commit Task 9 separately unless the full Ticket-suite gate in `Commit Boundaries` also passes at this exact boundary.
 
 ## Task 10: Final Source/Repo Verification
 
@@ -1418,7 +1442,7 @@ Run:
 ```bash
 find docs -maxdepth 4 -type d -iname '*ticket*' -print
 find docs/tickets -maxdepth 2 -type f -print
-rg -n "ready_to_execute|ticket_capture.py prepare|ticket_capture.py execute|ticket_update.py prepare|ticket_update.py execute|ticket_workflow.py prepare|ticket_workflow.py execute|retry_preview|cleanup_stale_preview|stale_plan|stale_cleanup|correction|fenced YAML|capture_confidence|contract_version|ChangeHistoryLabel|auto-create|auto-update|auto-blocker|auto-close|auto-reopen|discussion-approved|ok_create|ok_update|ok_close|ok_close_archived|ok_reopen|policy_blocked|need_fields|preflight_failed|dependency_blocked|invalid_transition|escalate|duplicate_candidate|not_found|gateway_required|runtime_readiness_required|ticket_update_blocked|ticket_written|discussion_required|skipped|ticket_change_scope|commit_disposition|ticket_stage_models|classify_confidence|priority_counts|refinement_status|DeferredWorkEnvelope|suggested_priority|key_file_paths|defer\.active|read-validate-map-plan-preflight-execute" \
+rg -n "ready_to_execute|ticket_capture.py prepare|ticket_capture.py execute|ticket_update.py prepare|ticket_update.py execute|ticket_workflow.py prepare|ticket_workflow.py execute|retry_preview|cleanup_stale_preview|stale_plan|stale_cleanup|correction|fenced YAML|capture_confidence|contract_version|ChangeHistoryLabel|auto-create|auto-update|auto-blocker|auto-close|auto-reopen|discussion-approved|ok_create|ok_update|ok_close|ok_close_archived|ok_reopen|policy_blocked|need_fields|preflight_failed|dependency_blocked|invalid_transition|escalate|duplicate_candidate|not_found|gateway_required|runtime_readiness_required|ticket_update_blocked|ticket_written|discussion_required|skipped|ticket_change_scope|commit_disposition|ticket_stage_models|classify_confidence|priority_counts|refinement_status|DeferredWorkEnvelope|suggested_priority|key_file_paths|defer\.active|read-validate-map-plan-preflight-execute|ticket_cutover_inventory|parse_legacy_ticket_for_cutover|make_gen[1-4]_ticket" \
   docs/tickets plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/hooks plugins/turbo-mode/ticket/tests plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/CHANGELOG.md plugins/turbo-mode/ticket/references plugins/turbo-mode/ticket/skills plugins/turbo-mode/ticket/.codex-plugin/plugin.json
 rg -n "\b(close|correction|reprioritize|blocker_edit|stale_cleanup|refine|archive|delete|history_repair)\b" \
   plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py \
@@ -1460,8 +1484,9 @@ Expected: no whitespace errors; diff is scoped to the source/repo Ticket cutover
 
 ## Known Limitations And Residual Risks
 
-- Tasks 3-9 are intentionally one atomic cutover band unless a full Ticket-suite gate proves an intermediate boundary is independently green. The closeout must say whether the band was committed atomically or which intermediate boundaries passed full-suite proof.
+- Tasks 2-9 are intentionally one atomic source/repo cutover band unless a full Ticket-suite gate proves an intermediate boundary is independently green. The closeout must say whether the band was committed atomically or which intermediate boundaries passed full-suite proof.
 - Installed runtime and local plugin cache are still out of scope. Source success does not prove that the active Codex thread or `/Users/jp/.codex/plugins/cache` exposes the new Ticket behavior.
+- Temporary cutover inventory and legacy generation parsing may remain only for the Tasks 2-9 cutover. The closeout must either remove `ticket_cutover_inventory.py` and legacy helpers from the plugin runtime path, or name the non-runtime archive/tooling location and removal trigger.
 - Low-level `classify | plan | preflight | execute` machinery may remain only as diagnostic/debug scaffolding with a sunset. If retained, the closeout must name the exact retained files, tests, diagnostic label, and removal trigger.
 - Historical `CHANGELOG.md` entries may retain old vocabulary only when clearly historical. They must not be cited by README, skills, plugin metadata, or contract docs as current behavior.
 - Runtime-readiness scripts and tests may keep old state strings as installed-runtime fixture history only when classified in the final residue table. They do not prove installed runtime behavior in this source/repo lane and must not leak into current source/repo authority docs.
@@ -1471,8 +1496,8 @@ Expected: no whitespace errors; diff is scoped to the source/repo Ticket cutover
 
 Plan complete and saved to `docs/superpowers/plans/2026-06-02-ticket-adr-source-repo-satisfaction.md`. Two execution options:
 
-1. Subagent-Driven (recommended) - dispatch a fresh subagent per task, review between tasks, fast iteration.
-2. Inline Execution - execute tasks in this session using executing-plans, with checkpoints after each commit boundary.
+1. Subagent-Driven (recommended) - use one cutover worker for Tasks 2-9, or coordinated workers sharing one uncommitted branch state and one final full-suite gate. Task 0 and Task 1 may be reviewed separately.
+2. Inline Execution - execute Tasks 2-9 in this session using executing-plans, with checkpoints after the schema-guard commit and after the atomic cutover commit.
 
 Before implementation, choose one execution option. Do not begin implementation edits from this plan without that cue.
 
@@ -1483,7 +1508,7 @@ Spec coverage:
 - Source/repo satisfaction is covered by Tasks 1 through 10.
 - Runtime/cache proof is explicitly out of scope.
 - Ticket normalization, strict normal-surface rejection, derived read dates, diagnostic inventory, write/persistence normalization, target dedup, archive-write removal, candidate contract and identity, response envelope, Change History grammar, hook guard, `ingest`, runtime-readiness/triage residue, `ticket_review.py` stale cleanup, low-level stage retention, workflow removal, docs/tests, and final verification each have explicit task ownership and stop conditions after this revision.
-- Tasks 3-9 are not claimed as independently committable unless the executor runs and records full Ticket-suite proof at that boundary.
+- Tasks 2-9 are not claimed as independently committable unless the executor runs and records full Ticket-suite proof at that boundary.
 
 Placeholder scan:
 
