@@ -6,7 +6,7 @@ from datetime import UTC
 
 from scripts.ticket_engine_core import engine_plan
 
-from tests.support.builders import make_ticket
+from tests.support.builders import make_legacy_ticket_for_cutover, make_ticket
 
 
 class TestEnginePlan:
@@ -233,6 +233,21 @@ class TestEnginePlan:
         assert resp.state == "ok"
         # No dedup for non-create.
         assert resp.data.get("dedup_fingerprint") is None
+
+    def test_non_create_invalid_active_ticket_returns_invalid_state(self, tmp_tickets):
+        make_legacy_ticket_for_cutover(tmp_tickets, "legacy-active.md")
+
+        resp = engine_plan(
+            intent="update",
+            fields={"ticket_id": "T-20260302-01"},
+            session_id="test-session",
+            request_origin="user",
+            tickets_dir=tmp_tickets,
+        )
+
+        assert resp.state == "invalid_state"
+        assert resp.error_code == "invalid_state"
+        assert resp.data["reason"]
 
     def test_plan_create_dedup_includes_terminal_tickets(self, tmp_tickets):
         """Dedup scan includes terminal target tickets in docs/tickets/."""

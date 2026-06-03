@@ -221,6 +221,44 @@ def test_recover_returns_parseable_json(tmp_path: Path) -> None:
     assert payload["turn_id"] == "turn-1"
 
 
+def test_recover_with_invalid_active_ticket_reports_reconciliation(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    tickets_dir = tmp_path / "docs" / "tickets"
+    tickets_dir.mkdir(parents=True)
+    make_legacy_ticket_for_cutover(tickets_dir, "legacy-active.md")
+    store = PendingSummaryStore(tmp_path)
+    result = store.append_event(
+        _event_with_recovery_fingerprints(
+            valid_attempt_event(
+                event_id="evt_attempt",
+                mutation_id="mut_recover",
+                ticket_id="T-20260527-01",
+            ),
+            pre="pre-fp",
+            post="post-fp",
+        )
+    )
+    assert result.state == "appended"
+
+    run_result = _run_autonomy(
+        tmp_path,
+        "recover",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-2",
+    )
+
+    assert run_result.returncode == 0
+    assert run_result.stderr == ""
+    payload = json.loads(run_result.stdout)
+    assert payload["state"] == "ok"
+    assert payload["can_proceed"] is False
+    assert payload["reconciliation_count"] == 1
+
+
 def test_recover_compacts_old_correction_ready_detail(tmp_path: Path) -> None:
     _init_ticket_project(tmp_path)
     store = PendingSummaryStore(tmp_path)

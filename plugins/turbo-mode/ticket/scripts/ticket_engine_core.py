@@ -35,13 +35,6 @@ from scripts.ticket_validate import validate_fields
 # --- Helpers ---
 
 
-def _list_tickets_with_closed(tickets_dir: Path) -> list[ParsedTicket]:
-    """List target tickets, including terminal statuses in the active directory."""
-    from scripts.ticket_read import list_tickets
-
-    return list_tickets(tickets_dir)
-
-
 _V10_GENERATION = 10  # v1.0 tickets have generation=10; legacy is 1-4.
 _CONTRACT_VERSION = "1.0"  # Current contract version; stamped on every write.
 RuntimeExecuteSurface: TypeAlias = Literal["direct_execute"]
@@ -124,6 +117,45 @@ class EngineResponse:
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2)
+
+
+def _invalid_ticket_state_response(
+    reason: object,
+    *,
+    ticket_id: str | None = None,
+) -> EngineResponse:
+    return EngineResponse(
+        state="invalid_state",
+        message="Ticket state is not target-normalized.",
+        ticket_id=ticket_id,
+        error_code="invalid_state",
+        data={"reason": str(reason)},
+    )
+
+
+def _find_ticket_by_id_for_engine(
+    tickets_dir: Path,
+    ticket_id: str,
+) -> tuple[ParsedTicket | None, EngineResponse | None]:
+    from scripts.ticket_read import InvalidTicketState, find_ticket_by_id
+
+    try:
+        return find_ticket_by_id(tickets_dir, ticket_id), None
+    except InvalidTicketState as exc:
+        return None, _invalid_ticket_state_response(exc, ticket_id=ticket_id)
+
+
+def _list_tickets_for_engine(
+    tickets_dir: Path,
+    *,
+    ticket_id: str | None = None,
+) -> tuple[list[ParsedTicket], EngineResponse | None]:
+    from scripts.ticket_read import InvalidTicketState, list_tickets
+
+    try:
+        return list_tickets(tickets_dir), None
+    except InvalidTicketState as exc:
+        return [], _invalid_ticket_state_response(exc, ticket_id=ticket_id)
 
 
 TARGET_RESULT_STATES = frozenset(
@@ -326,9 +358,10 @@ def engine_plan(
     computed_fp: str | None = None
     if resolved_id:
         from scripts.ticket_dedup import target_fingerprint as compute_fp
-        from scripts.ticket_read import find_ticket_by_id
 
-        ticket = find_ticket_by_id(tickets_dir, resolved_id)
+        ticket, invalid_state = _find_ticket_by_id_for_engine(tickets_dir, resolved_id)
+        if invalid_state is not None:
+            return invalid_state
         if ticket is not None:
             computed_fp = compute_fp(Path(ticket.path))
 
@@ -384,7 +417,9 @@ def _plan_create(
     now = datetime.now(UTC)
     cutoff = now - timedelta(hours=_DEDUP_WINDOW_HOURS)
 
-    existing = _list_tickets_with_closed(tickets_dir)
+    existing, invalid_state = _list_tickets_for_engine(tickets_dir)
+    if invalid_state is not None:
+        return invalid_state
     for ticket in existing:
         # Check if ticket is within dedup window.
         # Primary: created_at (ISO 8601 UTC, second-level precision).
@@ -703,9 +738,9 @@ def engine_preflight(
 
     # --- Ticket existence check (non-create) ---
     if action != "create" and ticket_id:
-        from scripts.ticket_read import find_ticket_by_id
-
-        ticket = find_ticket_by_id(tickets_dir, ticket_id)
+        ticket, invalid_state = _find_ticket_by_id_for_engine(tickets_dir, ticket_id)
+        if invalid_state is not None:
+            return invalid_state
         if ticket is None:
             return EngineResponse(
                 state="not_found",
@@ -725,7 +760,12 @@ def engine_preflight(
             if resolution == "wontfix":
                 checks_passed.append("dependencies_not_required_for_wontfix")
             else:
-                all_tickets = _list_tickets_with_closed(tickets_dir)
+                all_tickets, invalid_state = _list_tickets_for_engine(
+                    tickets_dir,
+                    ticket_id=ticket_id,
+                )
+                if invalid_state is not None:
+                    return invalid_state
                 ticket_map = {t.id: t for t in all_tickets}
                 missing, unresolved = _classify_blockers(ticket.blocked_by, ticket_map)
                 if missing or unresolved:
@@ -932,7 +972,16 @@ def _check_transition_preconditions_with_detail(
 
     if precondition == "blockers_resolved_required":
         if ticket.blocked_by:
-            all_tickets = _list_tickets_with_closed(tickets_dir)
+            all_tickets, invalid_state = _list_tickets_for_engine(
+                tickets_dir,
+                ticket_id=ticket.id,
+            )
+            if invalid_state is not None:
+                return (
+                    invalid_state.message,
+                    invalid_state.error_code or "invalid_state",
+                    invalid_state.data,
+                )
             ticket_map = {t.id: t for t in all_tickets}
             missing, unresolved = _classify_blockers(ticket.blocked_by, ticket_map)
             if missing or unresolved:
@@ -1524,9 +1573,10 @@ def engine_execute(
                 error_code="need_fields",
             )
         from scripts.ticket_dedup import target_fingerprint as compute_fp
-        from scripts.ticket_read import find_ticket_by_id
 
-        target_ticket = find_ticket_by_id(tickets_dir, ticket_id)
+        target_ticket, invalid_state = _find_ticket_by_id_for_engine(tickets_dir, ticket_id)
+        if invalid_state is not None:
+            return invalid_state
         if target_ticket is None:
             return EngineResponse(
                 state="not_found",
@@ -1753,6 +1803,9 @@ def _evaluate_update_policy(
             )
         )
         if precondition_error:
+            if precondition_code == "invalid_state":
+                reason = (precondition_detail or {}).get("reason", precondition_error)
+                return _invalid_ticket_state_response(reason, ticket_id=ticket_id)
             return EngineResponse(
                 state="invalid_transition",
                 message=precondition_error,
@@ -1823,9 +1876,9 @@ def _execute_update(
             state="need_fields", message="ticket_id required for update", error_code="need_fields"
         )
 
-    from scripts.ticket_read import find_ticket_by_id
-
-    ticket = find_ticket_by_id(tickets_dir, ticket_id)
+    ticket, invalid_state = _find_ticket_by_id_for_engine(tickets_dir, ticket_id)
+    if invalid_state is not None:
+        return invalid_state
     if ticket is None:
         return EngineResponse(
             state="not_found",
@@ -1938,7 +1991,12 @@ def _evaluate_close_policy(
     requires_reopen = ticket.status in _TERMINAL_STATUSES
 
     if ticket.blocked_by and resolution != "wontfix":
-        all_tickets = _list_tickets_with_closed(tickets_dir)
+        all_tickets, invalid_state = _list_tickets_for_engine(
+            tickets_dir,
+            ticket_id=ticket_id,
+        )
+        if invalid_state is not None:
+            return invalid_state
         ticket_map = {item.id: item for item in all_tickets}
         missing, unresolved = _classify_blockers(ticket.blocked_by, ticket_map)
         if (missing or unresolved) and not dependency_override:
@@ -1994,6 +2052,9 @@ def _evaluate_close_policy(
         )
     )
     if precondition_error:
+        if precondition_code == "invalid_state":
+            reason = (precondition_detail or {}).get("reason", precondition_error)
+            return _invalid_ticket_state_response(reason, ticket_id=ticket_id)
         return EngineResponse(
             state="invalid_transition",
             message=precondition_error,
@@ -2128,9 +2189,9 @@ def _evaluate_workflow_policy(
             data={"missing_fields": ["ticket_id"]},
         )
 
-    from scripts.ticket_read import find_ticket_by_id
-
-    ticket = find_ticket_by_id(tickets_dir, ticket_id)
+    ticket, invalid_state = _find_ticket_by_id_for_engine(tickets_dir, ticket_id)
+    if invalid_state is not None:
+        return invalid_state
     if ticket is None:
         return EngineResponse(
             state="not_found",
@@ -2220,9 +2281,10 @@ def _execute_close(
         )
 
     resolution = fields.get("resolution", "done")
-    from scripts.ticket_read import find_ticket_by_id
 
-    ticket = find_ticket_by_id(tickets_dir, ticket_id)
+    ticket, invalid_state = _find_ticket_by_id_for_engine(tickets_dir, ticket_id)
+    if invalid_state is not None:
+        return invalid_state
     if ticket is None:
         return EngineResponse(
             state="not_found",
@@ -2285,9 +2347,9 @@ def _execute_reopen(
             error_code="need_fields",
         )
 
-    from scripts.ticket_read import find_ticket_by_id
-
-    ticket = find_ticket_by_id(tickets_dir, ticket_id)
+    ticket, invalid_state = _find_ticket_by_id_for_engine(tickets_dir, ticket_id)
+    if invalid_state is not None:
+        return invalid_state
     if ticket is None:
         return EngineResponse(
             state="not_found",

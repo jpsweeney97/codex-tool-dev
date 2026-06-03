@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from scripts.ticket_engine_core import (
     _evaluate_close_policy,
     _evaluate_reopen_policy,
@@ -12,7 +11,6 @@ from scripts.ticket_engine_core import (
     _execute_update,
 )
 from scripts.ticket_parse import parse_legacy_ticket_for_cutover, parse_ticket
-from scripts.ticket_read import InvalidTicketState
 
 from tests.support.builders import make_gen1_ticket, make_ticket
 
@@ -164,14 +162,18 @@ def test_close_runtime_rejects_legacy_ticket_outside_cutover_reader(tmp_tickets:
     legacy_ticket = parse_legacy_ticket_for_cutover(path)
     assert legacy_ticket is not None
 
-    with pytest.raises(InvalidTicketState):
-        _execute_close(
-            legacy_ticket.id,
-            {"resolution": "done"},
-            "session",
-            "user",
-            tmp_tickets,
-        )
+    response = _execute_close(
+        legacy_ticket.id,
+        {"resolution": "done"},
+        "session",
+        "user",
+        tmp_tickets,
+    )
+
+    assert response.state == "invalid_state"
+    assert response.error_code == "invalid_state"
+    assert response.ticket_id == legacy_ticket.id
+    assert response.data["reason"]
 
 
 def test_reopen_evaluator_matches_execute_rejection(tmp_tickets: Path) -> None:
