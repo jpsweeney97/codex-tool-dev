@@ -92,9 +92,9 @@ def validate_target_ticket_text(path: Path, text: str) -> TargetTicketValidation
     if frontmatter_match is None:
         return _invalid("target ticket validation", "YAML frontmatter is required", path)
 
-    frontmatter = _parse_frontmatter(frontmatter_match.group(1), path)
-    if not isinstance(frontmatter, dict):
-        return _invalid("target ticket validation", "frontmatter must be a mapping", path)
+    frontmatter, frontmatter_error = _parse_frontmatter(frontmatter_match.group(1))
+    if frontmatter is None:
+        return _invalid("target ticket validation", frontmatter_error, path)
 
     normalized_frontmatter = _normalize_yaml_scalars(frontmatter)
     field_error = _validate_frontmatter(normalized_frontmatter)
@@ -135,14 +135,15 @@ def _invalid(operation: str, reason: str, value: object) -> TargetTicketValidati
     return TargetTicketValidation(False, error=f"{operation} failed: {reason}. Got: {value!r:.100}")
 
 
-def _parse_frontmatter(yaml_text: str, path: Path) -> dict[str, Any] | None:
+def _parse_frontmatter(yaml_text: str) -> tuple[dict[str, Any] | None, str]:
+    """Parse frontmatter YAML into (mapping, error). On success error is empty."""
     try:
         parsed = yaml.safe_load(yaml_text)
-    except yaml.YAMLError:
-        return None
+    except yaml.YAMLError as exc:
+        return None, f"invalid YAML frontmatter: {' '.join(str(exc).split())}"
     if not isinstance(parsed, dict):
-        return None
-    return parsed
+        return None, f"frontmatter must be a mapping; got {type(parsed).__name__}"
+    return parsed, ""
 
 
 def _normalize_yaml_scalars(frontmatter: dict[str, Any]) -> dict[str, Any]:

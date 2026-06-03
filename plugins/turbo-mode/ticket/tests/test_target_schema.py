@@ -319,3 +319,105 @@ def test_target_ticket_rejects_invalid_change_history_actor_label(tmp_path: Path
 
     assert result.ok is False
     assert "Change History actor" in result.error
+
+
+def test_target_ticket_rejects_missing_frontmatter(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    ticket.write_text(
+        "## Problem\nText.\n\n## Next Action\nDo it.\n\n"
+        "## Change History\n- 2026-06-02T00:00:00Z | migration | x.\n",
+        encoding="utf-8",
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is False
+    assert "YAML frontmatter is required" in result.error
+
+
+def test_target_ticket_rejects_non_mapping_frontmatter(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    _write_target_ticket(ticket, frontmatter="---\n- a\n- b\n---\n")
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is False
+    assert "frontmatter must be a mapping" in result.error
+
+
+def test_target_ticket_surfaces_yaml_syntax_error(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    _write_target_ticket(ticket, frontmatter='---\nid: "unterminated\nstatus: open\n---\n')
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is False
+    assert "invalid YAML frontmatter" in result.error
+
+
+def test_target_ticket_rejects_missing_required_field(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    _write_target_ticket(
+        ticket,
+        frontmatter=(
+            "---\nid: T-20260508-01\ntitle: Example\npriority: normal\n"
+            "tags: []\nrelated_paths: []\nblocked_by: []\n---\n"
+        ),
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is False
+    assert "missing required frontmatter: status" in result.error
+
+
+def test_target_ticket_rejects_empty_required_field(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    _write_target_ticket(
+        ticket,
+        frontmatter=(
+            "---\nid: T-20260508-01\ntitle: ''\nstatus: open\npriority: normal\n"
+            "tags: []\nrelated_paths: []\nblocked_by: []\n---\n"
+        ),
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is False
+    assert "title must be a non-empty string" in result.error
+
+
+def test_target_ticket_rejects_non_target_id(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-2026-01.md"
+    _write_target_ticket(
+        ticket,
+        frontmatter=(
+            "---\nid: T-2026-01\ntitle: Example\nstatus: open\npriority: normal\n"
+            "tags: []\nrelated_paths: []\nblocked_by: []\n---\n"
+        ),
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is False
+    assert "target id is invalid" in result.error
+
+
+def test_target_ticket_rejects_empty_change_history(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    _write_target_ticket(
+        ticket,
+        body="\n## Problem\nText.\n\n## Next Action\nDo it.\n\n## Change History\n",
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is False
+    assert "Change History must contain at least one entry" in result.error
+
+
+def test_target_ticket_read_failure_surfaces_error(tmp_path: Path) -> None:
+    result = validate_target_ticket_file(tmp_path / "does-not-exist.md")
+
+    assert result.ok is False
+    assert "read target ticket failed" in result.error

@@ -52,3 +52,12 @@ def test_candidate_payload_excludes_branch_scope() -> None:
         "proposed_change": {"priority": "high"},
         "target_fingerprint": "ticket-state-a",
     }
+
+
+def test_identity_is_deterministic_for_identical_inputs() -> None:
+    first = _identity(target_fingerprint="ticket-state-a")
+    second = _identity(target_fingerprint="ticket-state-a")
+
+    assert first.mutation_id == second.mutation_id
+    assert first.mutation_fingerprint == second.mutation_fingerprint
+    assert first.evidence_fingerprint == second.evidence_fingerprint

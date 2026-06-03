@@ -81,3 +81,68 @@ def test_inventory_rejects_missing_fenced_yaml(tmp_tickets) -> None:
 
     with pytest.raises(ValueError, match="fenced YAML"):
         inspect_legacy_ticket_for_cutover(path)
+
+
+def test_inventory_reports_blocked_without_derivable_id(tmp_tickets) -> None:
+    path = tmp_tickets / "legacy-no-date.md"
+    path.write_text(
+        "# legacy: Legacy\n\n"
+        "```yaml\n"
+        "id: legacy-slug\n"
+        "status: open\n"
+        "priority: medium\n"
+        "```\n\n"
+        "## Problem\nSomething.\n",
+        encoding="utf-8",
+    )
+
+    inventory = inspect_legacy_ticket_for_cutover(path)
+
+    assert inventory.state == "blocked"
+    assert inventory.proposed_target_path == path.parent
+
+
+def test_inventory_maps_critical_priority_to_high(tmp_tickets) -> None:
+    path = make_legacy_ticket_for_cutover(
+        tmp_tickets,
+        filename="2026-03-02-legacy.md",
+        id="T-20260302-01",
+        priority="critical",
+    )
+
+    inventory = inspect_legacy_ticket_for_cutover(path)
+
+    assert inventory.priority_mapping_needed == "critical->high"
+
+
+def test_inventory_preserves_populated_blocker_list(tmp_tickets) -> None:
+    path = tmp_tickets / "2026-03-02-legacy.md"
+    path.write_text(
+        "# T-20260302-01: Legacy\n\n"
+        "```yaml\n"
+        "id: T-20260302-01\n"
+        'date: "2026-03-02"\n'
+        "status: open\n"
+        "priority: medium\n"
+        "blocked_by:\n"
+        "  - T-20260301-01\n"
+        "  - T-20260301-02\n"
+        "```\n\n"
+        "## Problem\nSomething.\n",
+        encoding="utf-8",
+    )
+
+    inventory = inspect_legacy_ticket_for_cutover(path)
+
+    assert inventory.blocked_by == ("T-20260301-01", "T-20260301-02")
+
+
+def test_inventory_rejects_invalid_fenced_yaml(tmp_tickets) -> None:
+    path = tmp_tickets / "bad-yaml.md"
+    path.write_text(
+        "# legacy: Legacy\n\n```yaml\nid: [unterminated\n```\n\n## Problem\nx\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="invalid fenced YAML"):
+        inspect_legacy_ticket_for_cutover(path)
