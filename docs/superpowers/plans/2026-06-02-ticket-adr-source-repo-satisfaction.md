@@ -19,13 +19,14 @@ In scope:
 - Normalize the seven current `docs/tickets/*.md` records into ADR 0006 target schema and ID-only filenames.
 - Prove no noncanonical Ticket storage remains under `docs/`.
 - Add deterministic target-ticket validation and make normal Ticket read/mutation/product surfaces reject non-normalized active tickets after cutover.
-- Normalize write/persistence surfaces so `validate_fields()`, `render_ticket()`, ID filename helpers, engine create/update/defaults, gateway create defaults, and envelope-to-ticket mapping cannot persist old ticket shapes.
+- Normalize read/write/persistence surfaces so `ParsedTicket.date` is derived from the target ID, `validate_fields()`, `render_ticket()`, ID filename helpers, engine create/update/defaults, gateway create defaults, and envelope-to-ticket mapping cannot persist old ticket shapes.
 - Keep explicit diagnostic/cutover inventory able to inspect invalid files and report why they are invalid.
 - Move the live source candidate contract toward `action`, `ticket_id`, `target`, `proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`, with unknown-field rejection.
 - Collapse normal result states toward `ok`, `blocked`, `needs_discussion`, `invalid_state`, and `no_change`.
 - Replace controlled `Change History` labels with the target dated prose grammar.
 - Delete deprecated prepare/execute/workflow architecture unless a narrow diagnostic/cutover use remains with a sunset condition.
 - Tighten hook allowlists, low-level stage/runner retention, `ingest`, and read-only hygiene candidate surfaces so removed mutation vocabulary cannot survive as source drift.
+- Remove or explicitly demote `closed-tickets/` archive writes so closed tickets stay canonical under `docs/tickets/`.
 - Update active README, contract, changelog, plugin metadata, skills, and docs-contract tests so old behavior is not presented as target authority.
 
 Out of scope:
@@ -49,11 +50,11 @@ Do not use this claim until every verification gate in this plan passes.
 Baseline checked in this session:
 
 - Branch: `chore/ticket-runtime-first-rebaseline-adr`
-- HEAD before this revision: `26b1c130`
+- HEAD before this revision: `7a664b69`
 - Tracked worktree before this plan file: clean
 - Installed runtime: not inspected
 - Cache state: not inspected
-- Plan revision source: `docs/reviews/2026-06-02-ticket-adr-source-repo-satisfaction-plan-review.md` plus review-reviewer adjudication against current HEAD `26b1c130`; the review confirmed the revised plan still under-scoped shared-surface blast radius, `ingest`, hook guard ownership, `ticket_review.py` stale-cleanup emission, stage-model sunset ownership, and commit-boundary honesty.
+- Plan revision source: `docs/reviews/2026-06-02-ticket-adr-source-repo-satisfaction-plan-review.md`, review-reviewer adjudication against current HEAD `26b1c130`, and a second review-reviewer pass against current HEAD `7a664b69`. The first review confirmed the revised plan still under-scoped shared-surface blast radius, `ingest`, hook guard ownership, `ticket_review.py` stale-cleanup emission, stage-model sunset ownership, and commit-boundary honesty. The second review confirmed remaining gaps around derived read dates, dedup after `key_file_paths` removal, omitted result/error vocabulary, bare-form `correction` residue, archive writes, Task 2 guard execution, runtime-readiness/triage residue ownership, `DeferredWorkEnvelope`, and mutation identity inputs.
 
 Primary authority:
 
@@ -105,7 +106,8 @@ Current schema/parser/write drift:
 - `plugins/turbo-mode/ticket/scripts/ticket_id.py` still builds `YYYY-MM-DD-<slug>.md` filenames through `build_filename()` instead of target ID-only filenames.
 - `plugins/turbo-mode/ticket/scripts/ticket_envelope.py` accepts `critical` and `medium`, defaults envelope-created tickets to `medium`, and maps old deferred envelope fields into engine create fields.
 - `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py` exposes `ingest`, sanitizes old state/recovery hints, and maps old `ok_*` states in `_exit_code()`.
-- `plugins/turbo-mode/ticket/scripts/ticket_read.py` silently skips unparseable files, scans `closed-tickets` when requested, and returns old fields such as `date`, `blocks`, `capture.confidence`, and `capture.component`.
+- `plugins/turbo-mode/ticket/scripts/ticket_read.py` silently skips unparseable files, scans `closed-tickets` when requested, sorts by `ParsedTicket.date`, and returns old fields such as `date`, `blocks`, `capture.confidence`, and `capture.component`. After cutover, any exposed `date` value must be derived from `T-YYYYMMDD-NN`, not stored frontmatter.
+- `plugins/turbo-mode/ticket/scripts/ticket_dedup.py` currently fingerprints `problem_text` plus `key_file_paths`; after `key_file_paths` is removed from frontmatter, dedup must use the target ticket shape instead of regex-scraping old prose.
 - `plugins/turbo-mode/ticket/tests/support/builders.py` also contains `expected_canonical_yaml()`, a legacy expected-output emitter that must be migrated or restricted to legacy rejection tests.
 
 Current candidate/runtime drift:
@@ -122,7 +124,10 @@ Current workflow/response drift:
 - `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py` still dispatches low-level stage commands for compatibility/debug surfaces.
 - `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py` still stores repo context with branch/head and old pending-summary states such as `skipped`, `discussion_required`, `ticket_written`, and `applied`, while already rejecting old `commit_disposition`, `commit_hash`, `commit_reason`, and `ticket_change_scope` details.
 - `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py` and `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py` still emit or validate `ticket_update_blocked`; this token is not emitted by `ticket_turn_batch.py`.
-- `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`, `ticket_workflow.py`, and tests still use states such as `ok_create`, `ok_update`, `ok_close`, `ok_close_archived`, `ok_reopen`, `policy_blocked`, `need_fields`, `preflight_failed`, `dependency_blocked`, and `invalid_transition`.
+- `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`, `ticket_workflow.py`, and tests still use states and error vocabulary such as `ok_create`, `ok_update`, `ok_close`, `ok_close_archived`, `ok_reopen`, `policy_blocked`, `need_fields`, `preflight_failed`, `dependency_blocked`, `invalid_transition`, `escalate`, `duplicate_candidate`, `not_found`, and `gateway_required`.
+- `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py` still supports `_execute_close(..., archive=True)` moving tickets into `closed-tickets/`, and reopen/dedup helpers still account for archived tickets as normal lifecycle storage.
+- `plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py` and `tests/test_runtime_readiness.py` preserve installed-runtime fixture vocabulary such as old priorities and `runtime_readiness_required`; this may remain only as runtime-proof fixture history and must be classified in final residue.
+- `plugins/turbo-mode/ticket/scripts/ticket_triage.py` still uses old priority buckets such as `critical` and `medium` plus `refinement_status` rows; Task 6/9 must decide whether these are removed, mapped, or diagnostic-only.
 - `plugins/turbo-mode/ticket/hooks/ticket_engine_guard.py` still allowlists `ticket_workflow.py`, `ticket_capture.py`, and `ticket_update.py` prepare/execute/recover commands.
 - `plugins/turbo-mode/ticket/scripts/ticket_review.py` still emits `"action": "stale_cleanup"` in read-only hygiene candidates.
 
@@ -134,6 +139,7 @@ Current Change History drift:
 Docs/tests state:
 
 - README and `references/ticket-contract.md` already describe the target schema, target candidate contract, target result envelope, and target Change History grammar.
+- `references/ticket-contract.md` Section 11 `DeferredWorkEnvelope` still presents old envelope fields, `suggested_priority: medium`, `key_file_paths`, and `defer.active` behavior as current authority and must be patched or explicitly superseded.
 - They also preserve old surfaces as deprecated/diagnostic source facts. That is acceptable only until source removal finishes; the final source/repo closeout must not leave old behavior usable as normal product authority.
 - `plugins/turbo-mode/ticket/tests/test_docs_contract.py` already guards many target-doc sections and should be extended from docs-only target claims into source/repo guards after implementation.
 - `plugins/turbo-mode/ticket/tests/support/builders.py` emits legacy fenced-YAML tickets by default, so strict reads require a builder migration plus explicit legacy/cutover fixtures.
@@ -158,12 +164,15 @@ Stop during implementation if:
 - A non-create write can pass without `expected_ticket_fingerprint`.
 - Unknown candidate fields are accepted on normal mutation paths after the candidate-contract task.
 - Normal create or update can persist fenced YAML, slug filenames, H1 title lines, `priority: medium`, `priority: critical`, `status: blocked`, `blocks`, `source`, `date`, `created_at`, `contract_version`, `capture_confidence`, `component`, `defer`, or other non-target storage fields.
+- Normal reads expose a stored `date` field rather than deriving read-only date/sort output from `T-YYYYMMDD-NN`.
+- Dedup either depends on persisted `key_file_paths` or silently falls back to regex-scraped old prose after target tickets no longer store `key_file_paths`.
 - `build_filename()` or the engine create path can produce anything other than `T-YYYYMMDD-NN.md` after write-path normalization.
 - Strict-read changes leave `tests/support/builders.py` generating invalid normal tickets by default or leave `test_migration.py` asserting direct normal parsing of legacy tickets.
 - A changed shared surface has unassigned live consumers. Shared surfaces include `make_ticket()`, `expected_canonical_yaml()`, `render_ticket()`, `validate_fields()`, `CandidateMutation`, result-state strings, `ingest`, hook allowlists, and low-level stage models.
 - `ingest` can still map old envelope fields into target frontmatter, return old normal result states, or use old recovery hints as current product guidance.
 - `ChangeHistoryLabel` is deleted before `ticket_engine_gateway.py` and gateway tests are updated to the actor grammar.
 - `ticket_review.py` or any normal candidate source can still emit old action values such as `stale_cleanup`, `correction`, `close`, `refine`, `archive`, `delete`, or `history_repair`.
+- Normal close/update paths can still move active tickets into `closed-tickets/` through `archive=True`, or normal reopen/dedup/id allocation treats `closed-tickets/` as current lifecycle storage instead of diagnostic legacy residue.
 - Deprecated prepare/execute behavior remains as a usable normal product path without a narrow diagnostic label and sunset condition.
 - `hooks/ticket_engine_guard.py` still allowlists removed prepare/execute scripts as normal mutation commands.
 - `ticket_stage_models.py`, `ticket_engine_runner.py` stage dispatch, or the stage tests are retained without an explicit diagnostic/debug label and sunset condition.
@@ -214,6 +223,7 @@ If an executor chooses to keep local work checkpoints during Tasks 3-9, leave th
 - Read: `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py`
 - Read: `plugins/turbo-mode/ticket/scripts/ticket_stage_models.py`
 - Read: `plugins/turbo-mode/ticket/scripts/ticket_review.py`
+- Read: `plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py`
 - Read: `plugins/turbo-mode/ticket/hooks/ticket_engine_guard.py`
 - Read: `plugins/turbo-mode/ticket/tests/test_ingest.py`
 - Read: `plugins/turbo-mode/ticket/tests/test_audit.py`
@@ -230,7 +240,9 @@ If an executor chooses to keep local work checkpoints during Tasks 3-9, leave th
 - Read: `plugins/turbo-mode/ticket/tests/test_classify.py`
 - Read: `plugins/turbo-mode/ticket/tests/test_stage_models.py`
 - Read: `plugins/turbo-mode/ticket/tests/test_runner.py`
+- Read: `plugins/turbo-mode/ticket/tests/test_runtime_readiness.py`
 - Read: `plugins/turbo-mode/ticket/CHANGELOG.md`
+- Read: `plugins/turbo-mode/ticket/references/ticket-contract.md`
 - Read: `plugins/turbo-mode/ticket/.codex-plugin/plugin.json`
 
 - [ ] **Step 1: Confirm branch and cleanliness**
@@ -260,19 +272,20 @@ Expected: seven active ticket files before Task 2, no `docs/tickets/closed-ticke
 Run:
 
 ```bash
-rg -n "fenced YAML|closed-tickets|capture_confidence|component|contract_version|build_filename|expected_canonical_yaml|suggested_priority|ready_to_execute|prepare|execute|ingest|IngestInput|retry_preview|stale_cleanup|classify_confidence|ticket_stage_models|ok_create|ok_update|ok_close|ok_close_archived|ok_reopen|policy_blocked|need_fields|preflight_failed|dependency_blocked|invalid_transition|auto-create|auto-update|discussion-approved|ChangeHistoryLabel|ticket_update_blocked|commit_disposition|ticket_change_scope" \
+rg -n "fenced YAML|closed-tickets|archive=True|archive\": (true|True)|capture_confidence|component|contract_version|build_filename|expected_canonical_yaml|suggested_priority|DeferredWorkEnvelope|key_file_paths|ready_to_execute|prepare|execute|ingest|IngestInput|retry_preview|stale_cleanup|correction|classify_confidence|ticket_stage_models|ok_create|ok_update|ok_close|ok_close_archived|ok_reopen|policy_blocked|need_fields|preflight_failed|dependency_blocked|invalid_transition|escalate|duplicate_candidate|gateway_required|not_found|runtime_readiness_required|auto-create|auto-update|discussion-approved|ChangeHistoryLabel|ticket_update_blocked|commit_disposition|ticket_change_scope|refinement_status|priority_counts" \
   plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/hooks plugins/turbo-mode/ticket/tests plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/CHANGELOG.md plugins/turbo-mode/ticket/references plugins/turbo-mode/ticket/skills plugins/turbo-mode/ticket/.codex-plugin/plugin.json
 ```
 
 Expected: hits are assignable to this plan, diagnostic/historical docs, or already-accepted target guards. In particular:
 
-- `ticket_validate.py`, `ticket_render.py`, `ticket_id.py`, `ticket_engine_core.py`, `ticket_engine_gateway.py`, and `ticket_envelope.py` are assigned to Task 4.
+- `ticket_validate.py`, `ticket_render.py`, `ticket_id.py`, `ticket_engine_core.py`, `ticket_engine_gateway.py`, `ticket_envelope.py`, `ticket_dedup.py`, and archive/closed-ticket write helpers are assigned to Task 4.
+- `ticket_read.py` `date` sorting/output is assigned to Task 3, with `date` derived from target IDs rather than persisted frontmatter.
 - `tests/support/builders.py`, `expected_canonical_yaml()`, every `make_ticket()` caller, and `test_migration.py` are assigned to Task 3.
 - `ticket_engine_runner.py`, `ticket_stage_models.py`, and `test_ingest.py` ingest/write-shape hits are assigned to Tasks 4, 6, and 8 as specified below.
-- `ticket_autonomy.py`, `ticket_autonomy_runtime.py`, `ticket_turn_batch.py`, `ticket_engine_runner.py`, `ticket_stage_models.py`, and state-asserting tests are assigned to Task 6.
+- `ticket_autonomy.py`, `ticket_autonomy_runtime.py`, `ticket_turn_batch.py`, `ticket_engine_runner.py`, `ticket_stage_models.py`, `ticket_runtime_readiness.py`, `ticket_triage.py`, and state-asserting tests are assigned to Task 6.
 - `ticket_engine_gateway.py` Change History hits are assigned to Task 7.
 - `hooks/ticket_engine_guard.py`, `ticket_doctor.py`, low-level stage dispatch, and stale-payload cleanup hits are assigned to Task 8.
-- `ticket_review.py` `stale_cleanup`, candidate-action docs, `CHANGELOG.md`, and plugin metadata hits are assigned to Tasks 5 and 9.
+- `ticket_review.py` `stale_cleanup`, candidate-action docs, `CHANGELOG.md`, `references/ticket-contract.md` Section 11, and plugin metadata hits are assigned to Tasks 5 and 9.
 
 ## Task 1: Add Target Ticket Schema Validation
 
@@ -430,16 +443,17 @@ def test_repo_ticket_records_are_target_normalized() -> None:
     assert failures == []
 ```
 
-- [ ] **Step 4: Verify no noncanonical Ticket storage remains**
+- [ ] **Step 4: Verify normalized records and no noncanonical Ticket storage remains**
 
 Run:
 
 ```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_docs_contract.py tests/test_target_schema.py -q
 find docs -maxdepth 4 -type d -iname '*ticket*' -print
 find docs/tickets -maxdepth 2 -type f -print
 ```
 
-Expected: only `docs/tickets` for Ticket storage, and seven ID-only `docs/tickets/T-*.md` files.
+Expected: pytest PASS, only `docs/tickets` for Ticket storage, and seven ID-only `docs/tickets/T-*.md` files.
 
 ## Task 3: Add Diagnostic Cutover Inventory And Normal-Surface Rejection
 
@@ -542,11 +556,33 @@ Change normal `list_tickets()` / `find_ticket_by_id()` behavior so active ticket
 
 Do not silently skip invalid active files.
 
-- [ ] **Step 4: Preserve diagnostic parsing**
+- [ ] **Step 4: Derive read-only date from target ID**
+
+Remove persisted `date` from the normal parsed ticket contract. If existing `ParsedTicket` callers still need a `date` attribute or JSON payload field for sorting/display, derive it from the target ID:
+
+```python
+def date_from_ticket_id(ticket_id: str) -> str:
+    match = re.fullmatch(r"T-(\d{4})(\d{2})(\d{2})-\d{2}", ticket_id)
+    if not match:
+        raise ValueError(
+            f"date derivation failed: invalid target ticket id. Got: {ticket_id!r:.100}"
+        )
+    year, month, day = match.groups()
+    return f"{year}-{month}-{day}"
+```
+
+Tests must prove:
+
+- target frontmatter containing `date:` is invalid;
+- `list_tickets()` sort order uses the derived date and ID;
+- `_ticket_to_dict()` may expose `"date"` only as a derived compatibility display value, not as persisted frontmatter;
+- invalid IDs fail with `invalid_state` instead of silently sorting as an empty or stale date.
+
+- [ ] **Step 5: Preserve diagnostic parsing**
 
 Keep legacy fenced-YAML parsing available only through diagnostic/cutover inventory helpers. Name the helper accordingly, for example `parse_legacy_ticket_for_cutover()`, so normal product surfaces cannot accidentally rely on it as valid ticket authority.
 
-- [ ] **Step 5: Resolve migration-suite ownership**
+- [ ] **Step 6: Resolve migration-suite ownership**
 
 Repoint `test_migration.py` to the diagnostic/cutover parser or delete obsolete direct-normal-parser assertions and replace them with equivalent `test_cutover_inventory.py` coverage. The retained tests must prove legacy generations can be inventoried and mapped, not that `parse_ticket()` accepts them as normal active tickets.
 
@@ -559,7 +595,7 @@ assert inventory.metadata_container == "fenced_yaml"
 assert inventory.proposed_target_path.name.startswith("T-")
 ```
 
-- [ ] **Step 6: Verify strict read behavior and fixture blast radius**
+- [ ] **Step 7: Verify strict read behavior and fixture blast radius**
 
 Run:
 
@@ -604,7 +640,7 @@ Expected: PASS.
 Then run:
 
 ```bash
-rg -n "```ya?ml|contract_version|priority: medium|status: blocked|^# T-|expected_canonical_yaml" plugins/turbo-mode/ticket/tests/support plugins/turbo-mode/ticket/tests/test_read.py plugins/turbo-mode/ticket/tests/test_parse.py plugins/turbo-mode/ticket/tests/test_migration.py plugins/turbo-mode/ticket/tests/test_integration.py
+rg -n "```ya?ml|contract_version|priority: medium|status: blocked|^date:|^# T-|expected_canonical_yaml" plugins/turbo-mode/ticket/tests/support plugins/turbo-mode/ticket/tests/test_read.py plugins/turbo-mode/ticket/tests/test_parse.py plugins/turbo-mode/ticket/tests/test_migration.py plugins/turbo-mode/ticket/tests/test_integration.py
 ```
 
 Expected: matches appear only in diagnostic/cutover fixture helpers or tests explicitly named as legacy inventory tests.
@@ -619,6 +655,7 @@ Expected: matches appear only in diagnostic/cutover fixture helpers or tests exp
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_envelope.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_dedup.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_stage_models.py`
 - Delete or narrow old-field writers in same cutover band: `plugins/turbo-mode/ticket/scripts/ticket_capture.py`
@@ -630,6 +667,10 @@ Expected: matches appear only in diagnostic/cutover fixture helpers or tests exp
 - Modify: `plugins/turbo-mode/ticket/tests/test_engine_gateway.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_envelope.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_ingest.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_dedup_persistence.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_blocker_resolution.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_plan.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_review_findings.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_capture_contract.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_update_refinement.py`
 - Modify/delete coupled prepare/execute tests if the capture/workflow path is made unavailable here:
@@ -703,6 +744,8 @@ Update engine/gateway/envelope tests to prove:
 - envelope mapping does not persist `source`, `defer`, `effort`, or `key_file_paths` as frontmatter fields;
 - gateway autonomous create defaults to `normal`, not `medium`.
 - `ingest` routes envelope-originated creates through the target render path, writes an ID-only file, does not persist `defer`, `source`, `effort`, `key_file_paths`, or `key_files` as frontmatter, and returns target-shaped normal result states after Task 6 mapping.
+- dedup fingerprints use normalized `Problem` plus sorted target `related_paths` only; they do not read persisted `key_file_paths` or regex-scrape optional prose sections.
+- old envelope `key_file_paths`, when accepted for a migration/ingest compatibility input, is either rejected as non-target input or deterministically mapped to target `related_paths` with tests proving no `key_file_paths` frontmatter is persisted.
 - old direct `render_ticket(date=..., source=..., capture_confidence=..., component=...)` tests in `test_capture_contract.py` and `test_update_refinement.py` are either rewritten as legacy-rejection tests or removed with equivalent target-render coverage.
 
 Expected assertion shape:
@@ -714,7 +757,7 @@ response = _execute_create(
     request_origin="user",
     tickets_dir=tmp_tickets,
 )
-assert response.state in {"ok", "ok_create"}
+assert response.state == "ok"
 ticket_path = Path(response.data["ticket_path"])
 assert ticket_path.name == f"{response.ticket_id}.md"
 assert validate_target_ticket_file(ticket_path).ok is True
@@ -784,7 +827,31 @@ Change engine and gateway create paths so:
 - `IngestInput` and `_dispatch_ingest()` do not require or preserve old ticket storage fields as normal frontmatter; if the envelope contains old metadata, expose it only in diagnostic output or optional prose.
 - `_sanitize_user_facing_ingest_response()` must not emit `retry_preview` or `stale_plan` as current product guidance after prepare/execute removal. Map those cases to target states and target recovery copy.
 
-- [ ] **Step 8: Verify write-path normalization**
+- [ ] **Step 8: Implement target dedup and remove normal archive storage**
+
+Change dedup behavior so the post-cutover fingerprint source is:
+
+```python
+payload = normalize(problem_text) + "|" + ",".join(sorted(related_paths))
+```
+
+where `related_paths` comes only from target frontmatter/input. Do not derive dedup inputs from `key_file_paths`, `key_files`, or regex-scraped optional prose after cutover. Update `test_dedup_persistence.py` so it proves:
+
+- created tickets do not persist `key_file_paths`;
+- `related_paths` round trips when supplied as target frontmatter;
+- duplicate detection distinguishes matching problems by target `related_paths`;
+- optional `Key Files` prose, if preserved, does not affect the dedup fingerprint.
+
+Remove or make unavailable normal archive lifecycle writes:
+
+- `_execute_close(..., archive=True)` must not move files into `closed-tickets/`;
+- normal close with an `archive` field returns `invalid_state` or rejects the field through `validate_fields()`;
+- reopen no longer treats `closed-tickets/` as normal lifecycle storage;
+- ID allocation and dedup no longer scan `closed-tickets/` as current storage. If diagnostic inventory still scans `closed-tickets/`, name it as legacy inventory only.
+
+Update `test_execute.py`, `test_engine_gateway.py`, `test_blocker_resolution.py`, `test_plan.py`, `test_id.py`, and `test_review_findings.py` to delete archive-as-normal assertions or replace them with archive-rejection/diagnostic-inventory assertions.
+
+- [ ] **Step 9: Verify write-path normalization**
 
 Run:
 
@@ -797,6 +864,10 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   tests/test_engine_gateway.py \
   tests/test_envelope.py \
   tests/test_ingest.py \
+  tests/test_dedup_persistence.py \
+  tests/test_blocker_resolution.py \
+  tests/test_plan.py \
+  tests/test_review_findings.py \
   tests/test_capture_contract.py \
   tests/test_update_refinement.py \
   tests/test_capture.py \
@@ -814,7 +885,7 @@ Expected: PASS.
 Then run:
 
 ```bash
-rg -n "priority: (medium|critical)|status: blocked|^blocks:|^source:|^date:|^created_at:|^contract_version:|^capture_confidence:|^component:|^defer:|key_file_paths|key_files|```ya?ml|^# T-" plugins/turbo-mode/ticket/tests/test_validate.py plugins/turbo-mode/ticket/tests/test_render.py plugins/turbo-mode/ticket/tests/test_id.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_envelope.py plugins/turbo-mode/ticket/tests/test_ingest.py plugins/turbo-mode/ticket/tests/test_capture_contract.py plugins/turbo-mode/ticket/tests/test_update_refinement.py plugins/turbo-mode/ticket/tests/test_capture.py plugins/turbo-mode/ticket/tests/test_workflow.py plugins/turbo-mode/ticket/tests/test_workflow_cli.py plugins/turbo-mode/ticket/tests/test_workflow_execute.py plugins/turbo-mode/ticket/tests/test_workflow_recovery.py
+rg -n "priority: (medium|critical)|status: blocked|^blocks:|^source:|^date:|^created_at:|^contract_version:|^capture_confidence:|^component:|^defer:|key_file_paths|key_files|closed-tickets|archive=True|archive\": (true|True)|```ya?ml|^# T-" plugins/turbo-mode/ticket/tests/test_validate.py plugins/turbo-mode/ticket/tests/test_render.py plugins/turbo-mode/ticket/tests/test_id.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_envelope.py plugins/turbo-mode/ticket/tests/test_ingest.py plugins/turbo-mode/ticket/tests/test_dedup_persistence.py plugins/turbo-mode/ticket/tests/test_blocker_resolution.py plugins/turbo-mode/ticket/tests/test_plan.py plugins/turbo-mode/ticket/tests/test_review_findings.py plugins/turbo-mode/ticket/tests/test_capture_contract.py plugins/turbo-mode/ticket/tests/test_update_refinement.py plugins/turbo-mode/ticket/tests/test_capture.py plugins/turbo-mode/ticket/tests/test_workflow.py plugins/turbo-mode/ticket/tests/test_workflow_cli.py plugins/turbo-mode/ticket/tests/test_workflow_execute.py plugins/turbo-mode/ticket/tests/test_workflow_recovery.py
 ```
 
 Expected: matches appear only in tests proving legacy rejection or diagnostic/cutover behavior.
@@ -870,6 +941,18 @@ class CandidateMutation:
 
 `CandidateTarget` should hold only `fields: tuple[str, ...]` and `sections: tuple[str, ...]`, with names validated against target frontmatter fields and allowed section names from `ticket_target_schema.py`.
 
+Update `ticket_mutation_identity.py` so the canonical mutation payload includes exactly:
+
+- `action`;
+- `ticket_id`;
+- `target.fields` and `target.sections`, canonicalized as sorted tuples or lists;
+- `proposed_change`, canonicalized with stable key order;
+- `expected_ticket_fingerprint`;
+- the runtime-resolved live target fingerprint used for stale-write protection;
+- `evidence_summary`.
+
+Tests in `test_mutation_identity.py` and `test_autonomy_ids.py` must prove changing any of `target`, `expected_ticket_fingerprint`, or `evidence_summary` changes the identity, and that callers cannot supply an authoritative mutation ID or omit the live fingerprint for non-create writes.
+
 - [ ] **Step 3: Update discovery**
 
 `ticket_candidate_discovery.py` may continue to extract deterministic candidates from turn context, but normal structured candidates must reject unknown fields and old action values. Diagnostic inventory can still report old shapes.
@@ -911,9 +994,20 @@ Then run:
 
 ```bash
 rg -n "\"action\": \"(close|correction|reprioritize|blocker_edit|stale_cleanup|refine|archive|delete|history_repair)\"|action=\"correction\"|stale_cleanup|CandidateMutation\\(" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
+rg -n "\b(close|correction|reprioritize|blocker_edit|stale_cleanup|refine|archive|delete|history_repair)\b" \
+  plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py \
+  plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py \
+  plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py \
+  plugins/turbo-mode/ticket/scripts/ticket_review.py \
+  plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
+  plugins/turbo-mode/ticket/tests/test_candidate_discovery.py \
+  plugins/turbo-mode/ticket/tests/test_engine_gateway.py \
+  plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py \
+  plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py \
+  plugins/turbo-mode/ticket/tests/test_review_findings.py
 ```
 
-Expected: old actions are absent from normal candidate producers and appear only in explicit legacy-rejection tests. Every `CandidateMutation(` construction uses the target dataclass shape.
+Expected: old actions are absent from normal candidate producers and appear only in explicit legacy-rejection tests or internal comments naming removed behavior. Every `CandidateMutation(` construction uses the target dataclass shape. Bare `correction` forms in `frozenset`, equality comparisons, branch labels, or review hygiene payloads are blockers unless explicitly confined to legacy-rejection tests.
 
 ## Task 6: Collapse Normal Result States
 
@@ -928,6 +1022,7 @@ Expected: old actions are absent from normal candidate producers and appear only
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_ux.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_runner.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_stage_models.py`
+- Modify/classify: `plugins/turbo-mode/ticket/scripts/ticket_runtime_readiness.py`
 - Modify/classify diagnostic-only state surfaces:
   - `plugins/turbo-mode/ticket/scripts/ticket_read.py`
   - `plugins/turbo-mode/ticket/scripts/ticket_review.py`
@@ -959,6 +1054,7 @@ Expected: old actions are absent from normal candidate producers and appear only
   - `plugins/turbo-mode/ticket/tests/test_autonomy_integration.py`
   - `plugins/turbo-mode/ticket/tests/test_preflight.py`
   - `plugins/turbo-mode/ticket/tests/test_stage_models.py`
+  - `plugins/turbo-mode/ticket/tests/test_runtime_readiness.py`
   - `plugins/turbo-mode/ticket/tests/support/workflow.py`
 
 - [ ] **Step 1: Add state-envelope tests**
@@ -971,17 +1067,25 @@ Normal mutation results must use only:
 - `invalid_state`
 - `no_change`
 
-Old states such as `ok_create`, `ok_update`, `ok_close`, `ok_close_archived`, `ok_reopen`, `policy_blocked`, `need_fields`, `preflight_failed`, `dependency_blocked`, and `invalid_transition` may remain only in diagnostic/deprecated surfaces until those surfaces are removed.
+Old states or normal-response error vocabulary such as `ok_create`, `ok_update`, `ok_close`, `ok_close_archived`, `ok_reopen`, `policy_blocked`, `need_fields`, `preflight_failed`, `dependency_blocked`, `invalid_transition`, `escalate`, `duplicate_candidate`, `not_found`, `gateway_required`, and `runtime_readiness_required` may remain only in diagnostic/deprecated surfaces until those surfaces are removed.
 
 Tests must also prove:
 
 - `EngineResponse._OK_STATES` contains only `ok` for normal success after this task, or old ok states are isolated behind explicitly named diagnostic response classes;
 - gateway normal output maps old internal success helpers to `ok`;
 - old failure states map to `blocked`, `needs_discussion`, `invalid_state`, or `no_change`;
+- mapping is explicit for the omitted live vocabulary:
+  - `escalate` -> `blocked` unless the surface is an explicit diagnostic parser/stage result;
+  - `duplicate_candidate` -> `needs_discussion` for normal create candidates, with duplicate details in `data`;
+  - `not_found` -> `invalid_state`;
+  - `gateway_required` -> `blocked` as an internal error/reason, not a public state;
+  - `runtime_readiness_required` remains only in installed-runtime readiness fixtures, not normal source/repo mutation output;
 - `ticket_engine_runner._exit_code()` treats only `ok` as normal success after boundary mapping; old `ok_*` values remain only in diagnostic/legacy fixture handling when explicitly classified;
 - `IngestInput`, `_dispatch_ingest()`, and `_sanitize_user_facing_ingest_response()` return or translate target result states and do not expose `retry_preview`, `stale_plan`, `need_fields`, or `policy_blocked` as normal mutation states;
 - `ticket_autonomy.py` no longer emits normal summary state `ticket_update_blocked`;
 - `ticket_autonomy_runtime.py` no longer uses `RuntimeDecisionKind.TICKET_UPDATE_BLOCKED` as a normal public state. If a private internal decision remains, normal output must map it to `blocked`.
+- `ticket_triage.py` removes old `critical`/`medium` priority buckets and `refinement_status` as current target concepts, or labels them diagnostic-only with docs/tests proving they do not shape normal mutation behavior.
+- `ticket_runtime_readiness.py` and `test_runtime_readiness.py` classify old state/priority strings only as installed-runtime fixture history; those strings must not be cited by README, skills, contract, or normal source tests as target behavior.
 
 - [ ] **Step 2: Normalize gateway result envelopes**
 
@@ -1033,6 +1137,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
   tests/test_autonomy_integration.py \
   tests/test_preflight.py \
   tests/test_stage_models.py \
+  tests/test_runtime_readiness.py \
   -q
 ```
 
@@ -1041,7 +1146,7 @@ Expected: PASS.
 Then run:
 
 ```bash
-rg -n "ok_create|ok_update|ok_close|ok_close_archived|ok_reopen|policy_blocked|need_fields|preflight_failed|dependency_blocked|invalid_transition|ticket_update_blocked|discussion_required|skipped" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
+rg -n "ok_create|ok_update|ok_close|ok_close_archived|ok_reopen|policy_blocked|need_fields|preflight_failed|dependency_blocked|invalid_transition|escalate|duplicate_candidate|not_found|gateway_required|runtime_readiness_required|ticket_update_blocked|discussion_required|skipped|priority_counts|refinement_status" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 ```
 
 Expected: matches are absent from normal product surfaces or explicitly classified as diagnostic/private/deprecated in comments and tests.
@@ -1247,6 +1352,7 @@ Docs must say:
 - Change History entries use actor prose grammar, not controlled labels;
 - old prepare/execute workflow paths are removed or diagnostic-only with a sunset;
 - `ingest`, if retained, is described as target-write envelope ingestion rather than a legacy read-validate-map-plan-preflight-execute pipeline;
+- `references/ticket-contract.md` Section 11 `DeferredWorkEnvelope` is either rewritten to target vocabulary or explicitly superseded. It must not present `suggested_priority: medium`, `critical`, `key_file_paths`, `defer.active`, or read-validate-map-plan-preflight-execute ingestion as current target authority.
 - low-level stage dispatch, if retained, is described only as diagnostic/debug scaffolding with a sunset, not product architecture;
 - installed runtime proof remains unclaimed.
 
@@ -1263,6 +1369,7 @@ Add guards that fail if target/current sections present:
 - old Change History labels as valid target grammar.
 - old candidate actions `close`, `correction`, `reprioritize`, `blocker_edit`, `stale_cleanup`, `refine`, `archive`, `delete`, or `history_repair` as normal candidate actions.
 - the old `ingest` changelog description as current target behavior.
+- `DeferredWorkEnvelope` sections that preserve `medium`, `critical`, `key_file_paths`, or `defer.active` without an explicit deprecated/historical label.
 
 - [ ] **Step 3: Verify docs/static selector**
 
@@ -1270,7 +1377,7 @@ Run:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest tests/test_docs_contract.py tests/test_static_autonomy_boundaries.py -q
-rg -n "capture_confidence|capture_source|ticket_capture.py prepare|ticket_update.py prepare|ticket_workflow.py prepare|ready_to_execute|retry_preview|cleanup_stale_preview|stale_plan|ok_create|ok_update|preflight_failed|stale_cleanup|read-validate-map-plan-preflight-execute" plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/CHANGELOG.md plugins/turbo-mode/ticket/references plugins/turbo-mode/ticket/skills plugins/turbo-mode/ticket/.codex-plugin/plugin.json
+rg -n "capture_confidence|capture_source|ticket_capture.py prepare|ticket_update.py prepare|ticket_workflow.py prepare|ready_to_execute|retry_preview|cleanup_stale_preview|stale_plan|ok_create|ok_update|preflight_failed|stale_cleanup|DeferredWorkEnvelope|suggested_priority|key_file_paths|defer\.active|read-validate-map-plan-preflight-execute" plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/CHANGELOG.md plugins/turbo-mode/ticket/references plugins/turbo-mode/ticket/skills plugins/turbo-mode/ticket/.codex-plugin/plugin.json
 ```
 
 Expected: pytest PASS. The `rg` command has no matches in current/target sections; historical changelog matches are allowed only when immediately labeled as historical and not current behavior.
@@ -1311,11 +1418,22 @@ Run:
 ```bash
 find docs -maxdepth 4 -type d -iname '*ticket*' -print
 find docs/tickets -maxdepth 2 -type f -print
-rg -n "ready_to_execute|ticket_capture.py prepare|ticket_capture.py execute|ticket_update.py prepare|ticket_update.py execute|ticket_workflow.py prepare|ticket_workflow.py execute|retry_preview|cleanup_stale_preview|stale_plan|stale_cleanup|fenced YAML|capture_confidence|contract_version|ChangeHistoryLabel|auto-create|auto-update|auto-blocker|auto-close|auto-reopen|discussion-approved|ok_create|ok_update|ok_close|ok_close_archived|ok_reopen|policy_blocked|need_fields|preflight_failed|dependency_blocked|invalid_transition|ticket_update_blocked|ticket_written|discussion_required|skipped|ticket_change_scope|commit_disposition|ticket_stage_models|classify_confidence|read-validate-map-plan-preflight-execute" \
+rg -n "ready_to_execute|ticket_capture.py prepare|ticket_capture.py execute|ticket_update.py prepare|ticket_update.py execute|ticket_workflow.py prepare|ticket_workflow.py execute|retry_preview|cleanup_stale_preview|stale_plan|stale_cleanup|correction|fenced YAML|capture_confidence|contract_version|ChangeHistoryLabel|auto-create|auto-update|auto-blocker|auto-close|auto-reopen|discussion-approved|ok_create|ok_update|ok_close|ok_close_archived|ok_reopen|policy_blocked|need_fields|preflight_failed|dependency_blocked|invalid_transition|escalate|duplicate_candidate|not_found|gateway_required|runtime_readiness_required|ticket_update_blocked|ticket_written|discussion_required|skipped|ticket_change_scope|commit_disposition|ticket_stage_models|classify_confidence|priority_counts|refinement_status|DeferredWorkEnvelope|suggested_priority|key_file_paths|defer\.active|read-validate-map-plan-preflight-execute" \
   docs/tickets plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/hooks plugins/turbo-mode/ticket/tests plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/CHANGELOG.md plugins/turbo-mode/ticket/references plugins/turbo-mode/ticket/skills plugins/turbo-mode/ticket/.codex-plugin/plugin.json
+rg -n "\b(close|correction|reprioritize|blocker_edit|stale_cleanup|refine|archive|delete|history_repair)\b" \
+  plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py \
+  plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py \
+  plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py \
+  plugins/turbo-mode/ticket/scripts/ticket_review.py \
+  plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py \
+  plugins/turbo-mode/ticket/tests/test_candidate_discovery.py \
+  plugins/turbo-mode/ticket/tests/test_engine_gateway.py \
+  plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py \
+  plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py \
+  plugins/turbo-mode/ticket/tests/test_review_findings.py
 rg -n "(^|[\"'`])component([\"'`]|:)" \
   docs/tickets plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/hooks plugins/turbo-mode/ticket/tests plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/CHANGELOG.md plugins/turbo-mode/ticket/references plugins/turbo-mode/ticket/skills plugins/turbo-mode/ticket/.codex-plugin/plugin.json
-rg -n "^```ya?ml|^# T-|^date:|^created_at:|^source:|^blocks:|^defer:|priority: (medium|critical)|status: blocked" \
+rg -n "^```ya?ml|^# T-|^date:|^created_at:|^source:|^blocks:|^defer:|priority: (medium|critical)|status: blocked|closed-tickets" \
   docs/tickets plugins/turbo-mode/ticket/tests/support
 ```
 
@@ -1346,7 +1464,8 @@ Expected: no whitespace errors; diff is scoped to the source/repo Ticket cutover
 - Installed runtime and local plugin cache are still out of scope. Source success does not prove that the active Codex thread or `/Users/jp/.codex/plugins/cache` exposes the new Ticket behavior.
 - Low-level `classify | plan | preflight | execute` machinery may remain only as diagnostic/debug scaffolding with a sunset. If retained, the closeout must name the exact retained files, tests, diagnostic label, and removal trigger.
 - Historical `CHANGELOG.md` entries may retain old vocabulary only when clearly historical. They must not be cited by README, skills, plugin metadata, or contract docs as current behavior.
-- Runtime-readiness tests may keep old state strings as installed-runtime fixture history only when classified in the final residue table. They do not prove installed runtime behavior in this source/repo lane.
+- Runtime-readiness scripts and tests may keep old state strings as installed-runtime fixture history only when classified in the final residue table. They do not prove installed runtime behavior in this source/repo lane and must not leak into current source/repo authority docs.
+- `DeferredWorkEnvelope` compatibility text may remain only when explicitly labeled historical or superseded; current contract sections must use target priorities, target result states, target write paths, and no `defer.active` persistence.
 
 ## Execution Choice
 
@@ -1363,7 +1482,7 @@ Spec coverage:
 
 - Source/repo satisfaction is covered by Tasks 1 through 10.
 - Runtime/cache proof is explicitly out of scope.
-- Ticket normalization, strict normal-surface rejection, diagnostic inventory, write/persistence normalization, candidate contract, response envelope, Change History grammar, hook guard, `ingest`, `ticket_review.py` stale cleanup, low-level stage retention, workflow removal, docs/tests, and final verification each have explicit task ownership and stop conditions after this revision.
+- Ticket normalization, strict normal-surface rejection, derived read dates, diagnostic inventory, write/persistence normalization, target dedup, archive-write removal, candidate contract and identity, response envelope, Change History grammar, hook guard, `ingest`, runtime-readiness/triage residue, `ticket_review.py` stale cleanup, low-level stage retention, workflow removal, docs/tests, and final verification each have explicit task ownership and stop conditions after this revision.
 - Tasks 3-9 are not claimed as independently committable unless the executor runs and records full Ticket-suite proof at that boundary.
 
 Placeholder scan:
@@ -1375,4 +1494,4 @@ Type consistency:
 
 - `validate_target_ticket_file()` and `TargetTicketValidation` are introduced before use in docs-contract tests.
 - Target ticket schema names match ADR 0006, and target candidate field/action names match the May 30 control doc.
-- Result state names match the control doc.
+- Result state names match the control doc, and the plan now explicitly maps or classifies live legacy vocabulary including `escalate`, `duplicate_candidate`, `not_found`, `gateway_required`, and `runtime_readiness_required`.
