@@ -241,6 +241,38 @@ def test_target_ticket_rejects_blocks_reverse_edge(tmp_path: Path) -> None:
     assert "blocks" in result.error
 
 
+@pytest.mark.parametrize("field", TARGET_FRONTMATTER_OPTIONAL)
+def test_target_ticket_rejects_null_optional_frontmatter_lists(
+    tmp_path: Path, field: str
+) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    optional_values = {
+        "tags": "[]",
+        "related_paths": "[]",
+        "blocked_by": "[]",
+    }
+    optional_values[field] = "null"
+    _write_target_ticket(
+        ticket,
+        frontmatter=(
+            "---\n"
+            "id: T-20260508-01\n"
+            "title: Example\n"
+            "status: open\n"
+            "priority: normal\n"
+            f"tags: {optional_values['tags']}\n"
+            f"related_paths: {optional_values['related_paths']}\n"
+            f"blocked_by: {optional_values['blocked_by']}\n"
+            "---\n"
+        ),
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is False
+    assert f"{field} must be a list of strings" in result.error
+
+
 @pytest.mark.parametrize(
     ("body", "expected_error"),
     [

@@ -176,8 +176,6 @@ def _validate_frontmatter(frontmatter: dict[str, Any]) -> str:
 
     for field in TARGET_FRONTMATTER_OPTIONAL:
         value = frontmatter.get(field, [])
-        if value is None:
-            value = []
         if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
             return f"{field} must be a list of strings"
 

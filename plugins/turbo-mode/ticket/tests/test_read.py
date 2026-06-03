@@ -48,6 +48,33 @@ class TestListTickets:
         with pytest.raises(InvalidTicketState):
             list_tickets(tmp_tickets)
 
+    def test_null_optional_frontmatter_list_fails_explicitly(self, tmp_tickets):
+        ticket = tmp_tickets / "T-20260302-01.md"
+        ticket.write_text(
+            "---\n"
+            "id: T-20260302-01\n"
+            "title: Test ticket\n"
+            "status: open\n"
+            "priority: normal\n"
+            "tags: null\n"
+            "related_paths: []\n"
+            "blocked_by: []\n"
+            "---\n"
+            "\n"
+            "## Problem\n"
+            "Test problem.\n"
+            "\n"
+            "## Next Action\n"
+            "Test next action.\n"
+            "\n"
+            "## Change History\n"
+            "- 2026-06-02T00:00:00Z | migration | Normalized ticket into ADR 0006 schema.\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(InvalidTicketState):
+            list_tickets(tmp_tickets)
+
     def test_include_closed_does_not_scan_closed_tickets(self, tmp_tickets):
         make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01")
         closed_dir = tmp_tickets / "closed-tickets"
