@@ -109,7 +109,7 @@ Rules:
   `id` is kernel-owned; callers do not target or propose it.
 - `target.sections` names exact level-2 Markdown section headings. Required
   target sections are `Problem`, `Next Action`, and `Change History`; optional
-  sections may be targeted only by exact heading.
+  sections, including `Blocked On`, may be targeted only by exact heading.
 - `target` names the user-visible ticket fields or sections the candidate
   intends to change. The deterministic `Change History` append for a successful
   write is a kernel side effect, not a caller-owned raw section rewrite.
@@ -131,8 +131,9 @@ Action-specific rules:
   `status`, `tags`, `related_paths`, `blocked_by`, `Problem`, `Next Action`,
   and optional prose sections. New ticket status is `open` by default and may be
   `idea` when Codex chooses a visible parking status for a real but not-yet
-  actionable follow-up. Ticket allocates `id`, validates the status, and appends
-  the first `Change History` entry.
+  actionable follow-up, or `blocked` when the follow-up is active but not
+  currently actionable. Ticket allocates `id`, validates the status-specific
+  shape, and appends the first `Change History` entry.
 - `update`: `ticket_id` and `expected_ticket_fingerprint` are present.
   `proposed_change` may touch only the named target fields or sections. It may
   set non-terminal `status` values only when the deterministic transition policy
@@ -142,20 +143,54 @@ Action-specific rules:
   fingerprint, rewrites `Problem` and `Next Action` into normal actionable
   ticket language, and supplies a clear human reason for the `Change History`
   entry explaining why the idea became actionable. After promotion to `open`,
-  the ticket follows the normal lifecycle.
-- `done`: `target.fields` is `["status"]`, `proposed_change.status` is `done`,
-  the target ticket is `open`, and deterministic close-readiness checks pass.
-- `wontfix`: `target.fields` is `["status"]`,
-  `proposed_change.status` is `wontfix`, the target ticket is `open`, and
-  deterministic close-readiness checks pass.
-- `reopen`: `target.fields` is `["status"]`, `proposed_change.status` is
-  `open`, and deterministic reopen checks pass. The human reason belongs in
-  `evidence_summary`, not in a separate `reopen_reason` field.
+  the ticket follows the normal lifecycle. `open` and `blocked` are both active
+  work states: `open` is currently actionable, and `blocked` is active but stuck.
+  A ticket may move `open -> blocked` when a blocker appears and
+  `blocked -> open` when the blocker resolves.
+- `done`: `proposed_change.status` is `done`, the target ticket is `open` or
+  `blocked`, and deterministic close-readiness checks pass. An `open` target
+  names `status`; a `blocked` target also names `blocked_by` and `Blocked On`
+  cleanup so the same write clears live blocker shape.
+- `wontfix`: `proposed_change.status` is `wontfix`, the target ticket is `open`
+  or `blocked`, and deterministic close-readiness checks pass. An `open` target
+  names `status`; a `blocked` target also names `blocked_by` and `Blocked On`
+  cleanup so the same write clears live blocker shape.
+- `reopen`: `proposed_change.status` is `open` or `blocked`, and deterministic
+  reopen checks pass. `reopen -> open` names normal open-ticket shape with no
+  `Blocked On` and no live blocker fields. `reopen -> blocked` names valid
+  blocked-ticket shape, including `Blocked On` and `blocked_by` when ticket-ID
+  dependencies are present. The human reason belongs in `evidence_summary`, not
+  in a separate `reopen_reason` field.
 - `correct`: an ordinary candidate mutation that repairs a recent Ticket write.
   Its `target` and `proposed_change` follow the same rules as the underlying
   content change. If recent operation-log context identifies the corrected
   mutation, Ticket may use it to append `Corrects:` in `Change History`; callers
   do not add a separate correction-control field.
+
+Status-specific ticket shape:
+
+- `idea`: visible parking status for real but not-yet actionable work. It is not
+  active work. `Next Action` should describe the condition that would make the
+  idea worth promoting to `open`; Codex owns that writing convention.
+- `open`: active and currently actionable work. It must not carry `Blocked On`
+  or live blocker fields.
+- `blocked`: active work that is not currently actionable. It requires
+  `Blocked On` and `Next Action`. `Blocked On` is the visible prose condition
+  stopping progress. `Next Action` should use a two-part convention: how to
+  unblock the ticket, then what work resumes after unblocking. Codex owns that
+  writing convention; Ticket validates only the required section shape.
+- `done` and `wontfix`: terminal states. They must not carry `Blocked On` or
+  live blocker fields.
+
+`blocked_by` contains only ticket IDs. It is optional for `blocked` tickets and
+invalid as a live blocker field on non-blocked tickets. Codex may unblock a
+`blocked` ticket when the exact `blocked_by` ticket references are resolved or
+when the ticket's `Blocked On` prose condition is no longer true. Unblocking
+requires `blocked -> open`, with `target` naming `status`, `blocked_by`,
+`Blocked On`, and `Next Action`; the same write clears `blocked_by`, removes
+`Blocked On`, rewrites `Next Action` to the continuation step, and appends a
+`Change History` reason. Historical blocker context belongs only in
+`Change History`.
 
 These legacy actions and fields are not aliases: `close`, `correction`,
 `reprioritize`, `stale_cleanup`, `blocker_edit`, `refine`, `archive`, `delete`,
@@ -250,10 +285,11 @@ recovered independently.
 Reconciliation must actively look for relevant tickets instead of updating only
 the ticket Codex already has in mind. Relevant tickets include tickets matching
 the current user request, touched files, branch or worktree context, explicit
-ticket links, and any open ticket whose problem overlaps with what Codex learned
-during the turn. Reconciliation normally focuses on active `open` tickets. It
-inspects `idea` tickets only when the current work could plausibly promote them
-to `open`.
+ticket links, and any `open` or `blocked` ticket whose problem overlaps with
+what Codex learned during the turn. Reconciliation normally focuses on active
+`open` and `blocked` tickets, including unblocking blocked tickets when their
+blockers have resolved. It inspects `idea` tickets only when the current work
+could plausibly promote them to `open`.
 
 At reconciliation points, Codex should update every relevant ticket it can
 safely update and create missing tickets for every relevant follow-up it can
@@ -297,8 +333,9 @@ Hard stops:
 - no automatic history repair;
 - no write to noncanonical active ticket paths after cutover;
 - no write to unknown frontmatter keys;
-- no persisted `blocked` status;
 - no persisted `blocks` reverse edge;
+- no `Blocked On` section on non-blocked tickets;
+- no `blocked_by` value outside ticket IDs or live blocked-ticket shape;
 - no persistent `preview` mode.
 
 Per-candidate limits:
@@ -309,6 +346,8 @@ Per-candidate limits:
 - optional sections are preserved byte-for-byte unless explicitly targeted;
 - terminal transitions require an expected ticket fingerprint and current
   deterministic preconditions;
+- blocked transitions require status-specific shape, including `Blocked On` for
+  `blocked` targets and no `Blocked On` for non-blocked targets;
 - non-create writes fail with `invalid_state` when the target ticket is missing,
   non-normalized after cutover, or fingerprint-stale.
 
@@ -340,11 +379,11 @@ The inventory must report:
 - current metadata container, including fenced YAML versus YAML frontmatter;
 - unknown frontmatter keys;
 - status and priority values requiring mapping;
-- persisted `blocked`, `blocks`, `component`, confidence, refinement,
-  workflow-stage, action-tier, commit-disposition, approval-state,
+- invalid `blocked` ticket shapes, persisted `blocks`, `component`, confidence,
+  refinement, workflow-stage, action-tier, commit-disposition, approval-state,
   classifier-output, or `ticket_change_scope` fields;
 - missing or disordered `Problem`, `Next Action`, and `Change History`
-  sections;
+  sections, plus missing `Blocked On` when status is `blocked`;
 - optional sections to preserve;
 - deterministic move or rewrite proposal;
 - precise blocker when deterministic normalization is impossible;
