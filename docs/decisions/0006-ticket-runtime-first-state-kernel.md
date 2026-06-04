@@ -99,23 +99,26 @@ YAML frontmatter is closed and intentionally small:
 - optional: `tags`, `related_paths`, `blocked_by`
 
 Unknown frontmatter keys are invalid after cutover. The persisted lifecycle
-statuses are `open`, `in_progress`, `done`, and `wontfix`. `blocked` is not a
-status; blockedness is derived from non-empty `blocked_by`. Store only
-`blocked_by`; derive reverse `blocks` views by scanning tickets. `priority` is
+statuses are `idea`, `open`, `blocked`, `done`, and `wontfix`. `idea` is
+pre-lifecycle parking for real but not-yet actionable work. `open` is active and
+currently actionable. `blocked` is active but not currently actionable;
+`blocked_by` contains only ticket-ID dependencies and is optional for blocked
+tickets. Derive reverse `blocks` views by scanning tickets. `priority` is
 limited to `high`, `normal`, and `low`.
 
-Required Markdown sections are exactly:
+Required Markdown sections for every target ticket are:
 
 - `## Problem`
 - `## Next Action`
 - `## Change History`
 
-Those three sections must exist and remain well-ordered. Other Markdown
-sections are allowed as optional human prose, but they have no runtime meaning
-unless a candidate mutation explicitly targets that section. By default,
-automatic mutations may touch only frontmatter, `Problem`, `Next Action`, and
-append to `Change History`. Optional sections are preserved byte-for-byte unless
-explicitly targeted.
+Those three sections must exist and remain well-ordered. `blocked` tickets also
+require `## Blocked On` as the visible blocker condition. Other Markdown sections
+are allowed as optional human prose, but they have no runtime meaning unless a
+candidate mutation explicitly targets that section. By default, automatic
+mutations may touch only frontmatter, `Problem`, `Next Action`, `Blocked On`
+when changing blocked lifecycle shape, and append to `Change History`. Optional
+sections are preserved byte-for-byte unless explicitly targeted.
 
 `Change History` uses minimal dated prose entries: timestamp, actor/source such
 as `codex` or `user-approved`, and a short reason. It does not use controlled
@@ -174,7 +177,7 @@ contract. They may exist temporarily only as removal or cutover scaffolding:
 - Persistent `preview` mode.
 - Legacy generation support, gates, and permanent conversion accommodations.
 - `closed-tickets/` as normal lifecycle storage.
-- `blocked` as a persisted status.
+- `in_progress` as a target active-work status.
 - Persisted `blocks` reverse edges.
 - `component`.
 - Confidence, refinement-status, action-tier, workflow-stage, commit-disposition,

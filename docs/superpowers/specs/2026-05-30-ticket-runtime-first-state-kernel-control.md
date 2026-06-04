@@ -459,5 +459,8 @@ Before implementation uses this document as authority, verify:
 - ADR 0006 links to this document.
 - `git diff --check` passes.
 - Any changed Markdown renders as ordinary Markdown.
+- Target status, action, and result vocabulary agrees across ADR 0006, this
+  control document, and the Ticket contract reference, or the implementation
+  slice names the source/test constants intentionally deferred.
 - The first implementation slice names which conflicting contract sections it
   updates or supersedes.

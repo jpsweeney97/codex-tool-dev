@@ -25,11 +25,12 @@ Post-cutover active tickets use ID-only filenames under
 by Markdown sections. Closed YAML frontmatter keys are `id`, `title`, `status`,
 `priority`, `tags`, `related_paths`, and `blocked_by`.
 
-Target statuses are `open`, `in_progress`, `done`, and `wontfix`. Target
-priorities are `high`, `normal`, and `low`. Required sections are `Problem`,
-`Next Action`, and `Change History`. Unknown frontmatter keys are invalid.
-`blocked` is not a status; blockedness derives from `blocked_by`. Store
-`blocked_by` only and derive reverse `blocks` views by scanning tickets.
+Target statuses are `idea`, `open`, `blocked`, `done`, and `wontfix`. Target
+priorities are `high`, `normal`, and `low`. Every target ticket requires
+`Problem`, `Next Action`, and `Change History`; `blocked` tickets additionally
+require `Blocked On`. Unknown frontmatter keys are invalid. `blocked_by`
+contains only ticket-ID dependencies and is optional for blocked tickets. Derive
+reverse `blocks` views by scanning tickets.
 
 ## Target Candidate Mutation Contract
 
@@ -145,13 +146,15 @@ Target tickets use ID-only filenames and closed YAML frontmatter. Required
 frontmatter keys are `id`, `title`, `status`, and `priority`. Optional
 frontmatter keys are `tags`, `related_paths`, and `blocked_by`.
 
-Target statuses are `open`, `in_progress`, `done`, and `wontfix`. Target
-priorities are `high`, `normal`, and `low`. Blockedness derives from
-`blocked_by`; reverse blocker views are derived by scanning tickets.
+Target statuses are `idea`, `open`, `blocked`, `done`, and `wontfix`. Target
+priorities are `high`, `normal`, and `low`. `blocked` tickets additionally
+require `Blocked On`; `blocked_by` contains only ticket-ID dependencies and is
+optional for blocked tickets. Reverse blocker views are derived by scanning
+tickets.
 
-Required Markdown sections are `Problem`, `Next Action`, and `Change History`.
-Optional sections are preserved byte-for-byte unless a target candidate
-explicitly names the section.
+Every target ticket requires `Problem`, `Next Action`, and `Change History`.
+`blocked` tickets additionally require `Blocked On`. Optional sections are
+preserved byte-for-byte unless a target candidate explicitly names the section.
 
 ## Target Interfaces
 
