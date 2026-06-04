@@ -107,12 +107,15 @@ Rules:
 - `target.fields` names target frontmatter fields from the target ticket schema:
   `title`, `status`, `priority`, `tags`, `related_paths`, or `blocked_by`.
   `id` is kernel-owned; callers do not target or propose it.
-- `target.sections` names exact level-2 Markdown section headings. Required
-  target sections are `Problem`, `Next Action`, and `Change History`; optional
-  sections, including `Blocked On`, may be targeted only by exact heading.
+- `target.sections` names exact level-2 Markdown section headings the candidate
+  intends to rewrite, such as `Problem`, `Next Action`, or optional sections
+  including `Blocked On`. It does not name `Change History` for the automatic
+  append Ticket performs after a successful write.
 - `target` names the user-visible ticket fields or sections the candidate
   intends to change. The deterministic `Change History` append for a successful
   write is a kernel side effect, not a caller-owned raw section rewrite.
+- Target ticket files must still contain the required `Problem`, `Next Action`,
+  and `Change History` sections.
 - `proposed_change` contains only values for the named target fields or
   sections. It must not contain control keys, workflow labels, generated IDs,
   mutation IDs, evidence objects, or raw operation-log data.
