@@ -137,8 +137,12 @@ Action-specific rules:
   `proposed_change` may touch only the named target fields or sections. It may
   set non-terminal `status` values only when the deterministic transition policy
   allows it. `idea` is pre-lifecycle: it may move to `open` when the user asks
-  or when later work makes the idea concrete and actionable. After promotion to
-  `open`, the ticket follows the normal lifecycle.
+  or when later work makes the idea concrete and actionable. An `idea -> open`
+  promotion is an ordinary non-create write: it requires an expected ticket
+  fingerprint, rewrites `Problem` and `Next Action` into normal actionable
+  ticket language, and supplies a clear human reason for the `Change History`
+  entry explaining why the idea became actionable. After promotion to `open`,
+  the ticket follows the normal lifecycle.
 - `done`: `target.fields` is `["status"]`, `proposed_change.status` is `done`,
   the target ticket is `open`, and deterministic close-readiness checks pass.
 - `wontfix`: `target.fields` is `["status"]`,
@@ -247,7 +251,9 @@ Reconciliation must actively look for relevant tickets instead of updating only
 the ticket Codex already has in mind. Relevant tickets include tickets matching
 the current user request, touched files, branch or worktree context, explicit
 ticket links, and any open ticket whose problem overlaps with what Codex learned
-during the turn.
+during the turn. Reconciliation normally focuses on active `open` tickets. It
+inspects `idea` tickets only when the current work could plausibly promote them
+to `open`.
 
 At reconciliation points, Codex should update every relevant ticket it can
 safely update and create missing tickets for every relevant follow-up it can
@@ -261,7 +267,16 @@ unsupported ticket content remain blockers.
 `idea` is a visible parking status in the same ticket board, not a second board
 or private backlog. `idea` tickets are not expected to move unless the user asks
 or later work makes the idea concrete and actionable. Ideas only move
-`idea -> open`; they do not move directly to `done` or `wontfix`.
+`idea -> open`; they do not move directly to `done` or `wontfix`. For an
+`idea` ticket, `Next Action` should describe the condition that would make the
+idea worth promoting to `open`, not the task to execute now. Codex owns that
+writing convention; Ticket validates that the required section exists.
+
+`reconcile_board` may automatically promote an `idea` to `open` when the current
+work makes it concrete and actionable. That promotion is an ordinary
+reconciliation write with no special cap, and it still obeys ordinary
+non-create write safety rules, including expected fingerprint, valid target, and
+deterministic transition checks.
 
 Reconciliation is best-effort across the whole relevant set. If one relevant
 ticket is blocked by a concrete safety issue, Codex still updates the other
