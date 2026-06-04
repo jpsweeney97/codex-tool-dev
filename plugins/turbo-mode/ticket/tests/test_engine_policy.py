@@ -11,6 +11,7 @@ from scripts.ticket_engine_core import (
     _execute_update,
 )
 from scripts.ticket_parse import parse_legacy_ticket_for_cutover, parse_ticket
+from scripts.ticket_target_schema import validate_target_ticket_file
 
 from tests.support.builders import make_gen1_ticket, make_ticket
 
@@ -23,14 +24,14 @@ def test_update_invalid_transition_returns_structured_policy_data(tmp_tickets: P
     response = _evaluate_update_policy(
         "T-20260503-21",
         ticket,
-        {"status": "in_progress"},
+        {"status": "open"},
         tmp_tickets,
     )
 
     assert response is not None
     assert response.state == "invalid_transition"
     assert response.data["current_status"] == "done"
-    assert response.data["requested_status"] == "in_progress"
+    assert response.data["requested_status"] == "open"
     assert response.data["valid_recovery_statuses"] == []
     assert response.data["requires_reopen"] is True
     assert response.data["precondition_code"] == "none"
@@ -80,7 +81,7 @@ def test_close_policy_rejects_idea_as_terminal_source(tmp_tickets: Path) -> None
 
 
 def test_close_missing_acceptance_criteria_returns_precondition_detail(tmp_tickets: Path) -> None:
-    path = make_ticket(tmp_tickets, "no-ac.md", id="T-20260503-23", status="in_progress")
+    path = make_ticket(tmp_tickets, "no-ac.md", id="T-20260503-23", status="open")
     text = path.read_text(encoding="utf-8")
     path.write_text(
         text.replace("## Acceptance Criteria\n- [ ] Issue resolved\n\n", ""), encoding="utf-8"
@@ -97,7 +98,7 @@ def test_close_missing_acceptance_criteria_returns_precondition_detail(tmp_ticke
 
     assert response is not None
     assert response.state == "invalid_transition"
-    assert response.data["current_status"] == "in_progress"
+    assert response.data["current_status"] == "open"
     assert response.data["requested_status"] == "done"
     assert response.data["valid_recovery_statuses"] == ["done", "wontfix"]
     assert response.data["requires_reopen"] is False
@@ -111,8 +112,9 @@ def test_close_dependency_blocked_returns_blocker_detail(tmp_tickets: Path) -> N
         tmp_tickets,
         "blocked.md",
         id="T-20260503-25",
-        status="in_progress",
+        status="blocked",
         blocked_by=["T-20260503-24"],
+        blocked_on="Waiting for blocker resolution.",
     )
     ticket = parse_ticket(path)
     assert ticket is not None
@@ -126,7 +128,7 @@ def test_close_dependency_blocked_returns_blocker_detail(tmp_tickets: Path) -> N
 
     assert response is not None
     assert response.state == "dependency_blocked"
-    assert response.data["current_status"] == "in_progress"
+    assert response.data["current_status"] == "blocked"
     assert response.data["requested_status"] == "done"
     assert response.data["valid_recovery_statuses"] == ["done", "wontfix"]
     assert response.data["requires_reopen"] is False
@@ -158,6 +160,127 @@ def test_reopen_invalid_transition_returns_structured_policy_data(tmp_tickets: P
     assert response.data["requires_reopen"] is False
     assert response.data["precondition_code"] == "none"
     assert response.data["precondition_detail"] is None
+
+
+def test_update_blocked_transition_requires_visible_blocker(tmp_tickets: Path) -> None:
+    path = make_ticket(tmp_tickets, "open.md", id="T-20260503-29", status="open")
+    ticket = parse_ticket(path)
+    assert ticket is not None
+
+    response = _evaluate_update_policy(
+        "T-20260503-29",
+        ticket,
+        {"status": "blocked"},
+        tmp_tickets,
+    )
+
+    assert response is not None
+    assert response.state == "invalid_transition"
+    assert response.data["current_status"] == "open"
+    assert response.data["requested_status"] == "blocked"
+    assert response.data["precondition_code"] == "blocked_on_required"
+    assert response.data["precondition_detail"] == {"missing": ["blocked_on"]}
+
+
+def test_update_allows_blocked_to_open_with_blocker_cleanup(tmp_tickets: Path) -> None:
+    path = make_ticket(
+        tmp_tickets,
+        "blocked.md",
+        id="T-20260503-30",
+        status="blocked",
+        blocked_by=["T-20260503-31"],
+        blocked_on="Waiting for the upstream fix.",
+    )
+    assert validate_target_ticket_file(path).ok
+    ticket = parse_ticket(path)
+    assert ticket is not None
+
+    response = _evaluate_update_policy(
+        "T-20260503-30",
+        ticket,
+        {"status": "open", "blocked_by": [], "blocked_on": None, "next_action": "Continue."},
+        tmp_tickets,
+    )
+
+    assert response is None
+
+
+def test_update_allows_blocked_to_open_without_blocked_by_field_when_already_empty(
+    tmp_tickets: Path,
+) -> None:
+    path = make_ticket(
+        tmp_tickets,
+        "blocked.md",
+        id="T-20260503-33",
+        status="blocked",
+        blocked_by=[],
+        blocked_on="Waiting for the upstream fix.",
+    )
+    assert validate_target_ticket_file(path).ok
+    ticket = parse_ticket(path)
+    assert ticket is not None
+
+    response = _evaluate_update_policy(
+        "T-20260503-33",
+        ticket,
+        {"status": "open", "blocked_on": None, "next_action": "Continue."},
+        tmp_tickets,
+    )
+
+    assert response is None
+
+
+def test_update_rejects_blocked_to_open_without_clearing_existing_blocked_by(
+    tmp_tickets: Path,
+) -> None:
+    path = make_ticket(
+        tmp_tickets,
+        "blocked.md",
+        id="T-20260503-34",
+        status="blocked",
+        blocked_by=["T-20260503-31"],
+        blocked_on="Waiting for the upstream fix.",
+    )
+    assert validate_target_ticket_file(path).ok
+    ticket = parse_ticket(path)
+    assert ticket is not None
+
+    response = _evaluate_update_policy(
+        "T-20260503-34",
+        ticket,
+        {"status": "open", "blocked_on": None, "next_action": "Continue."},
+        tmp_tickets,
+    )
+
+    assert response is not None
+    assert response.state == "invalid_transition"
+    assert response.data["precondition_code"] == "blocker_cleanup_required"
+
+
+def test_update_rejects_blocked_to_done_with_close_action_hint(tmp_tickets: Path) -> None:
+    path = make_ticket(
+        tmp_tickets,
+        "blocked.md",
+        id="T-20260503-32",
+        status="blocked",
+        blocked_by=["T-20260503-31"],
+        blocked_on="Waiting for the upstream fix.",
+    )
+    assert validate_target_ticket_file(path).ok
+    ticket = parse_ticket(path)
+    assert ticket is not None
+
+    response = _evaluate_update_policy(
+        "T-20260503-32",
+        ticket,
+        {"status": "done"},
+        tmp_tickets,
+    )
+
+    assert response is not None
+    assert response.state == "invalid_transition"
+    assert response.data["valid_recovery_statuses"] == ["open"]
+    assert "use close action" in response.message
 
 
 def test_update_evaluator_matches_execute_rejection(tmp_tickets: Path) -> None:

@@ -873,11 +873,14 @@ _UPDATE_FRONTMATTER_KEYS = frozenset(
 )
 _UPDATE_FOCUSED_MODE = "focused_refinement"
 _UPDATE_INTERNAL_FIELDS = frozenset({"_update_mode", "_clear_refinement_status"})
-_UPDATE_FOCUSED_SECTION_FIELDS = frozenset({"problem", "next_action", "acceptance_criteria"})
+_UPDATE_FOCUSED_SECTION_FIELDS = frozenset(
+    {"problem", "next_action", "acceptance_criteria", "blocked_on"}
+)
 _UPDATE_SECTION_FIELDS = frozenset(
     {
         "problem",
         "next_action",
+        "blocked_on",
         "context",
         "prior_investigation",
         "approach",
@@ -893,10 +896,11 @@ _UPDATE_IGNORED_FIELDS = frozenset({"ticket_id", "id"})
 # Valid status transitions for update action (from -> set of valid to statuses).
 # done/wontfix are terminal — only reopen (separate action) can transition out.
 _VALID_TRANSITIONS: dict[str, set[str]] = {
-    "open": {"in_progress", "wontfix"},
-    "in_progress": {"open", "done", "wontfix"},
-    "done": set(),  # Terminal — reopen action required.
-    "wontfix": set(),  # Terminal — reopen action required.
+    "idea": {"open"},
+    "open": {"blocked"},
+    "blocked": {"open"},
+    "done": set(),
+    "wontfix": set(),
 }
 
 # Bounds archive collision search to avoid infinite loops in pathological trees.
@@ -905,7 +909,10 @@ _CREATE_WRITE_RETRY_LIMIT = 3
 
 # Transitions that require preconditions.
 # Pair-keyed: specific (current, target) combinations.
-_TRANSITION_PRECONDITIONS: dict[tuple[str, str], str] = {}
+_TRANSITION_PRECONDITIONS: dict[tuple[str, str], str] = {
+    ("open", "blocked"): "blocked_on_required",
+    ("blocked", "open"): "blocker_cleanup_required",
+}
 # Target-keyed: preconditions that apply regardless of current status.
 _TARGET_PRECONDITIONS: dict[str, str] = {
     "done": "acceptance_criteria_required",
@@ -989,44 +996,25 @@ def _check_transition_preconditions_with_detail(
     if precondition is None:
         return (None, "none", None)
 
-    if precondition == "blocked_by_required":
-        blocked_by = _fields.get("blocked_by", ticket.blocked_by)
-        if not blocked_by:
+    if precondition == "blocked_on_required":
+        blocked_on = _fields.get("blocked_on")
+        if not isinstance(blocked_on, str) or not blocked_on.strip():
             return (
-                "Transition to 'blocked' requires non-empty blocked_by",
-                "blocked_by_required",
-                {"missing": ["blocked_by"]},
+                "Transition to 'blocked' requires blocked_on",
+                "blocked_on_required",
+                {"missing": ["blocked_on"]},
             )
         return (None, "none", None)
 
-    if precondition == "blockers_resolved_required":
-        if ticket.blocked_by:
-            all_tickets, invalid_state = _list_tickets_for_engine(
-                tickets_dir,
-                ticket_id=ticket.id,
+    if precondition == "blocker_cleanup_required":
+        blocked_by = _fields.get("blocked_by", ticket.blocked_by)
+        blocked_on_present = "blocked_on" in _fields
+        if blocked_by != [] or not blocked_on_present or _fields.get("blocked_on") is not None:
+            return (
+                "Transition to 'open' from blocked requires clearing blocked_by and Blocked On",
+                "blocker_cleanup_required",
+                {"required": ["blocked_by: []", "blocked_on: null"]},
             )
-            if invalid_state is not None:
-                return (
-                    invalid_state.message,
-                    invalid_state.error_code or "invalid_state",
-                    invalid_state.data,
-                )
-            ticket_map = {t.id: t for t in all_tickets}
-            missing, unresolved = _classify_blockers(ticket.blocked_by, ticket_map)
-            if missing or unresolved:
-                return (
-                    _format_blocker_message(
-                        unresolved=unresolved,
-                        missing=missing,
-                        include_override=False,
-                    ),
-                    "dependency_blocked",
-                    {
-                        "blocking_ids": unresolved + missing,
-                        "unresolved_blockers": unresolved,
-                        "missing_blockers": missing,
-                    },
-                )
         return (None, "none", None)
 
     return (None, "none", None)
@@ -1067,6 +1055,7 @@ def _classify_update_fields(
 _UPDATE_SECTION_HEADINGS = {
     "problem": "Problem",
     "next_action": "Next Action",
+    "blocked_on": "Blocked On",
     "acceptance_criteria": "Acceptance Criteria",
 }
 _TARGET_FRONTMATTER_BLOCK_RE = re.compile(r"\A---\n.*?\n---\n?", re.DOTALL)
@@ -1102,7 +1091,7 @@ def _replace_target_frontmatter_text(text: str, frontmatter: dict[str, Any]) -> 
 
 def _render_target_ticket_text(
     frontmatter: dict[str, Any],
-    sections: dict[str, str],
+    sections: dict[str, str | None],
     *,
     original_text: str | None = None,
     targeted_headings: tuple[str, ...] = (),
@@ -1113,11 +1102,14 @@ def _render_target_ticket_text(
     if original_text is not None:
         rendered_text = _replace_target_frontmatter_text(original_text, frontmatter)
         for heading in targeted_headings:
-            rendered_text = _replace_or_append_section(
-                rendered_text,
-                heading,
-                sections.get(heading, ""),
-            )
+            if heading in sections and sections[heading] is None:
+                rendered_text = _remove_section(rendered_text, heading)
+            else:
+                rendered_text = _replace_or_append_section(
+                    rendered_text,
+                    heading,
+                    str(sections.get(heading, "")),
+                )
         return rendered_text
 
     from scripts.ticket_render import render_frontmatter
@@ -1125,24 +1117,33 @@ def _render_target_ticket_text(
     rendered = ["---", render_frontmatter(_target_frontmatter(frontmatter)).rstrip("\n"), "---", ""]
     emitted: set[str] = set()
     for heading in TARGET_SECTIONS_REQUIRED:
-        rendered.extend([f"## {heading}", sections.get(heading, "").strip(), ""])
+        body = sections.get(heading, "")
+        if body is None:
+            body = ""
+        rendered.extend([f"## {heading}", body.strip(), ""])
         emitted.add(heading)
     for heading, body in sections.items():
-        if heading in emitted:
+        if heading in emitted or body is None:
             continue
         rendered.extend([f"## {heading}", body.strip(), ""])
     return "\n".join(rendered).rstrip() + "\n"
 
 
 def _focused_section_fields_allowed(fields: dict[str, Any], section_fields: list[str]) -> bool:
-    """Return True only for the ticket_update.py focused refinement section path."""
-    return fields.get("_update_mode") == _UPDATE_FOCUSED_MODE and all(
+    """Return True for focused refinement or status-specific blocker section writes."""
+    if fields.get("_update_mode") == _UPDATE_FOCUSED_MODE and all(
         field in _UPDATE_FOCUSED_SECTION_FIELDS for field in section_fields
-    )
+    ):
+        return True
+    if fields.get("status") in {"blocked", "open"}:
+        return all(field in {"blocked_on", "next_action"} for field in section_fields)
+    return False
 
 
-def _render_update_section_value(key: str, value: Any) -> str:
+def _render_update_section_value(key: str, value: Any) -> str | None:
     """Render focused section update values into markdown section content."""
+    if value is None:
+        return None
     if key == "acceptance_criteria":
         if not isinstance(value, list):
             return ""
@@ -1161,6 +1162,15 @@ def _replace_or_append_section(text: str, heading: str, content: str) -> str:
     if count:
         return updated
     return text.rstrip() + "\n\n" + replacement
+
+
+def _remove_section(text: str, heading: str) -> str:
+    pattern = re.compile(
+        rf"^## {re.escape(heading)}\n.*?(?=^## |\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    updated, _count = pattern.subn("", text, count=1)
+    return updated.rstrip() + "\n"
 
 
 def _is_valid_transition(current: str, target: str, action: str) -> bool:
@@ -1818,9 +1828,15 @@ def _evaluate_update_policy(
         )
         requires_reopen = ticket.status in _TERMINAL_STATUSES
         if not _is_valid_transition(ticket.status, new_status, "update"):
+            close_hint = (
+                " (use close action)"
+                if ticket.status in {"open", "blocked"} and new_status in _TERMINAL_STATUSES
+                else ""
+            )
             return EngineResponse(
                 state="invalid_transition",
                 message=f"Cannot transition from {ticket.status} to {new_status} via update"
+                + close_hint
                 + (" (use reopen action)" if requires_reopen else ""),
                 ticket_id=ticket_id,
                 error_code="invalid_transition",
@@ -1976,7 +1992,7 @@ def _execute_update(
         heading = _UPDATE_SECTION_HEADINGS[key]
         rendered = _render_update_section_value(key, fields[key])
         old_rendered = ticket.sections.get(heading, "")
-        if old_rendered.strip() != rendered.strip():
+        if rendered is None or old_rendered.strip() != rendered.strip():
             changes["sections_changed"].append(heading)
         sections[heading] = rendered
     targeted_headings = tuple(_UPDATE_SECTION_HEADINGS[key] for key in section_fields)
@@ -2352,12 +2368,30 @@ def _execute_close(
     sections = dict(ticket.sections)
     old_status = data.get("status", "")
     data["status"] = resolution
-    new_text = _render_target_ticket_text(data, sections, original_text=original_text)
+    changes_blocked_by = None
+    if old_status == "blocked":
+        previous_blocked_by = data.get("blocked_by", [])
+        if previous_blocked_by:
+            changes_blocked_by = [previous_blocked_by, []]
+        data["blocked_by"] = []
+        sections["Blocked On"] = None
+
+    targeted_headings = ("Blocked On",) if old_status == "blocked" else ()
+    new_text = _render_target_ticket_text(
+        data,
+        sections,
+        original_text=original_text,
+        targeted_headings=targeted_headings,
+    )
     if change_history_entry is not None:
         new_text = append_change_history_entry(new_text, change_history_entry)
     ticket_path.write_text(new_text, encoding="utf-8")
 
-    changes = {"frontmatter": {"status": [old_status, resolution]}}
+    changes = {"frontmatter": {"status": [old_status, resolution]}, "sections_changed": []}
+    if old_status == "blocked":
+        changes["sections_changed"].append("Blocked On")
+        if changes_blocked_by is not None:
+            changes["frontmatter"]["blocked_by"] = changes_blocked_by
 
     return EngineResponse(
         state="ok",

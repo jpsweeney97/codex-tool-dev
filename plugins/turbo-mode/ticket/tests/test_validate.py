@@ -17,11 +17,14 @@ class TestValidateFields:
             assert any("priority" in error for error in validate_fields({"priority": priority}))
 
     def test_valid_statuses(self):
-        for status in ("open", "in_progress", "done", "wontfix"):
+        for status in ("idea", "open", "blocked", "done", "wontfix"):
             assert validate_fields({"status": status}) == []
 
-    def test_deprecated_blocked_status_rejected(self):
-        assert any("status" in error for error in validate_fields({"status": "blocked"}))
+    def test_deprecated_in_progress_status_rejected(self):
+        assert any("status" in error for error in validate_fields({"status": "in_progress"}))
+
+    def test_blocked_on_none_is_valid_section_removal_input(self):
+        assert validate_fields({"blocked_on": None}) == []
 
     def test_valid_resolutions(self):
         for resolution in ("done", "wontfix"):

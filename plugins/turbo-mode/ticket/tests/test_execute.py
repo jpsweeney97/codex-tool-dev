@@ -478,19 +478,19 @@ class TestCreate:
 
 
 class TestUpdate:
-    def test_update_ticket_frontmatter(self, tmp_tickets: Path) -> None:
-        ticket_path = make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="open")
+    def test_update_promotes_idea_to_open(self, tmp_tickets: Path) -> None:
+        ticket_path = make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="idea")
 
         response = _execute_existing(
             tmp_tickets,
             ticket_path,
             action="update",
-            fields={"status": "in_progress"},
+            fields={"status": "open"},
         )
 
         assert response.state == "ok"
         content = ticket_path.read_text(encoding="utf-8")
-        assert "status: in_progress" in content
+        assert "status: open" in content
         assert "\ndate:" not in content
 
     def test_update_preserves_untargeted_optional_section_bytes(
@@ -556,14 +556,37 @@ class TestUpdate:
             tmp_tickets,
             ticket_path,
             action="update",
-            fields={"status": "in_progress"},
+            fields={"status": "open"},
         )
 
         assert response.state == "invalid_transition"
         assert response.error_code == "invalid_transition"
         assert "reopen" in response.message.lower()
 
-    def test_removed_blocked_status_is_rejected_by_schema(self, tmp_tickets: Path) -> None:
+    def test_update_blocks_open_ticket_with_visible_blocker(self, tmp_tickets: Path) -> None:
+        ticket_path = make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="open")
+
+        response = _execute_existing(
+            tmp_tickets,
+            ticket_path,
+            action="update",
+            fields={
+                "status": "blocked",
+                "blocked_on": "Waiting for the user to provide credentials.",
+                "next_action": "Ask for credentials, then run the smoke test.",
+            },
+        )
+
+        assert response.state == "ok"
+        text = ticket_path.read_text(encoding="utf-8")
+        assert "status: blocked" in text
+        assert "## Blocked On\nWaiting for the user to provide credentials." in text
+        assert validate_target_ticket_file(ticket_path).ok
+
+    def test_update_rejects_blocked_transition_without_blocked_on(
+        self,
+        tmp_tickets: Path,
+    ) -> None:
         ticket_path = make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="open")
 
         response = _execute_existing(
@@ -573,9 +596,61 @@ class TestUpdate:
             fields={"status": "blocked"},
         )
 
-        assert response.state == "need_fields"
-        assert response.error_code == "need_fields"
-        assert "status" in response.message
+        assert response.state == "invalid_transition"
+        assert response.error_code == "invalid_transition"
+        assert "blocked_on" in response.message
+
+    def test_update_rejects_open_to_wontfix_because_terminal_writes_use_close(
+        self,
+        tmp_tickets: Path,
+    ) -> None:
+        ticket_path = make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="open")
+
+        response = _execute_existing(
+            tmp_tickets,
+            ticket_path,
+            action="update",
+            fields={"status": "wontfix"},
+        )
+
+        assert response.state == "invalid_transition"
+        assert response.error_code == "invalid_transition"
+        assert response.data["current_status"] == "open"
+        assert response.data["requested_status"] == "wontfix"
+        assert response.data["valid_recovery_statuses"] == ["blocked"]
+        assert "use close action" in response.message
+
+    def test_update_unblocks_ticket_and_removes_live_blocker_shape(
+        self,
+        tmp_tickets: Path,
+    ) -> None:
+        ticket_path = make_ticket(
+            tmp_tickets,
+            "ignored.md",
+            id="T-20260302-01",
+            status="blocked",
+            blocked_by=["T-20260302-02"],
+            blocked_on="Waiting for the user to provide credentials.",
+        )
+
+        response = _execute_existing(
+            tmp_tickets,
+            ticket_path,
+            action="update",
+            fields={
+                "status": "open",
+                "blocked_by": [],
+                "blocked_on": None,
+                "next_action": "Run the deployment smoke.",
+            },
+        )
+
+        assert response.state == "ok"
+        text = ticket_path.read_text(encoding="utf-8")
+        assert "status: open" in text
+        assert "blocked_by: []" in text
+        assert "## Blocked On" not in text
+        assert validate_target_ticket_file(ticket_path).ok
 
     def test_update_rejects_section_field_and_leaves_file_unchanged(
         self,
@@ -705,7 +780,7 @@ class TestCloseAndReopen:
             tmp_tickets,
             "ignored.md",
             id="T-20260302-01",
-            status="in_progress",
+            status="open",
         )
 
         response = _execute_existing(
@@ -725,7 +800,7 @@ class TestCloseAndReopen:
             tmp_tickets,
             "ignored.md",
             id="T-20260302-01",
-            status="in_progress",
+            status="open",
         )
 
         response = _execute_existing(
@@ -750,8 +825,9 @@ class TestCloseAndReopen:
             tmp_tickets,
             "ignored.md",
             id="T-20260302-02",
-            status="in_progress",
+            status="blocked",
             blocked_by=["T-20260302-01"],
+            blocked_on="Waiting for blocker resolution.",
         )
 
         response = _execute_existing(
@@ -772,8 +848,9 @@ class TestCloseAndReopen:
             tmp_tickets,
             "ignored.md",
             id="T-20260302-02",
-            status="in_progress",
+            status="blocked",
             blocked_by=["T-20260302-01"],
+            blocked_on="Waiting for blocker resolution.",
         )
 
         response = _execute_existing(
@@ -793,8 +870,9 @@ class TestCloseAndReopen:
             tmp_tickets,
             "ignored.md",
             id="T-20260302-02",
-            status="in_progress",
+            status="blocked",
             blocked_by=["T-20260302-01"],
+            blocked_on="Waiting for blocker resolution.",
         )
 
         response = _execute_existing(
@@ -813,8 +891,9 @@ class TestCloseAndReopen:
             tmp_tickets,
             "ignored.md",
             id="T-20260302-02",
-            status="in_progress",
-            blocked_by=["T-MISSING-01"],
+            status="blocked",
+            blocked_by=["T-20260302-99"],
+            blocked_on="Waiting for missing blocker resolution.",
         )
 
         response = _execute_existing(
@@ -826,8 +905,47 @@ class TestCloseAndReopen:
         )
 
         assert response.state == "dependency_blocked"
-        assert response.data["missing_blockers"] == ["T-MISSING-01"]
+        assert response.data["missing_blockers"] == ["T-20260302-99"]
         assert response.data["unresolved_blockers"] == []
+
+    def test_close_rejects_idea_ticket(self, tmp_tickets: Path) -> None:
+        ticket_path = make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="idea")
+
+        response = _execute_existing(
+            tmp_tickets,
+            ticket_path,
+            action="close",
+            fields={"resolution": "wontfix"},
+        )
+
+        assert response.state == "invalid_transition"
+        assert response.error_code == "invalid_transition"
+        assert response.data["current_status"] == "idea"
+        assert response.data["valid_recovery_statuses"] == ["open"]
+
+    def test_close_blocked_ticket_clears_live_blocker_shape(self, tmp_tickets: Path) -> None:
+        ticket_path = make_ticket(
+            tmp_tickets,
+            "ignored.md",
+            id="T-20260302-01",
+            status="blocked",
+            blocked_by=["T-20260302-02"],
+            blocked_on="Waiting for upstream work.",
+        )
+
+        response = _execute_existing(
+            tmp_tickets,
+            ticket_path,
+            action="close",
+            fields={"resolution": "wontfix"},
+        )
+
+        assert response.state == "ok"
+        text = ticket_path.read_text(encoding="utf-8")
+        assert "status: wontfix" in text
+        assert "blocked_by: []" in text
+        assert "## Blocked On" not in text
+        assert validate_target_ticket_file(ticket_path).ok
 
     def test_close_terminal_ticket_rejected(self, tmp_tickets: Path) -> None:
         ticket_path = make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="done")
