@@ -975,6 +975,8 @@ Replace `test_removed_blocked_status_is_rejected_by_schema` with:
 
 In `class TestCloseAndReopen`, change `in_progress` fixtures to `open` or `blocked`, then add:
 
+Any new or changed close-to-`done` fixture must keep a concrete `## Acceptance Criteria` section because `_TARGET_PRECONDITIONS["done"]` still requires it. The examples below close to `wontfix`, so they do not prove the `done` precondition.
+
 ```python
     def test_close_rejects_idea_ticket(self, tmp_tickets: Path) -> None:
         ticket_path = make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="idea")
@@ -1431,6 +1433,7 @@ plugins/turbo-mode/ticket/tests/test_blocker_resolution.py:
 
 plugins/turbo-mode/ticket/tests/test_capture_contract.py:
   Replace close-readiness current target fixtures using status="in_progress" with status="open".
+  Keep concrete Acceptance Criteria in any fixture that checks close-readiness for resolution="done"; `done` still requires the target AC precondition.
   Do not change capture-field rejection tests unless their fixture status blocks target validation.
 
 plugins/turbo-mode/ticket/tests/support/builders.py:
@@ -1453,8 +1456,9 @@ plugins/turbo-mode/ticket/HANDBOOK.md:
 plugins/turbo-mode/ticket/tests/test_docs_contract.py:
   Remove assertions that require `in_progress` in current target docs.
   In OLD_SCHEMA_TERMS, remove "blocked status" and "`blocked` status" because those phrases are valid under the new target model; keep or replace only guards that still prohibit a persisted reverse `blocks` field/edge.
-  In test_core_docs_document_target_ticket_shape(), remove the assertions for "`blocked` is not a status" and "derive reverse `blocks`"; replace them with positive assertions for `blocked`, `status: blocked`, and `Blocked On`.
-  Replace any triage or skill-doc assertions requiring "Persisted `blocked` status and reverse `blocks` edges are not target schema" and "target blockedness derives from `blocked_by`" with assertions that triage remains read/query/reporting-only over first-class blocked tickets and does not write persisted reverse `blocks` edges.
+  In test_readme_ticket_schema_matches_yaml_contract_boundary(), remove the assertions for "`blocked` is not a status" and "derive reverse `blocks`"; replace them with positive assertions for `blocked`, `status: blocked`, and `Blocked On`.
+  In test_ticket_review_skill_contract_is_read_only_and_capture_prompt_only(), replace assertions requiring "Persisted `blocked` status and reverse `blocks` edges are not target schema" and "target blockedness derives from `blocked_by`" with assertions that triage remains read/query/reporting-only over first-class blocked tickets and does not write persisted reverse `blocks` edges.
+  Keep the new README/HANDBOOK/SKILL prose strings identical to the new assertions; do not assert paraphrases that the docs step does not write.
   Add assertions that README and HANDBOOK include idea/open/blocked/done/wontfix as current target statuses.
   Add assertions that current docs describe `status: blocked` plus visible `Blocked On` rather than deriving blockedness only from blocked_by.
 ```
