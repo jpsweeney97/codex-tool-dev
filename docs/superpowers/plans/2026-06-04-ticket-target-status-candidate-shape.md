@@ -56,7 +56,7 @@ Baseline from the planning and review-adjudication turns:
   - `plugins/turbo-mode/ticket/scripts/ticket_target_schema.py` still defines `TARGET_STATUSES = ("open", "in_progress", "done", "wontfix")`.
   - `plugins/turbo-mode/ticket/tests/test_target_schema.py` still asserts the old status tuple.
   - `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py` still uses `in_progress` in transition policy and create always renders `status="open"`.
-  - `plugins/turbo-mode/ticket/scripts/ticket_parse.py` still treats `in_progress` as canonical parse vocabulary and lacks `idea` in `CANONICAL_STATUSES`.
+  - `plugins/turbo-mode/ticket/scripts/ticket_parse.py` still treats `in_progress` as canonical parse vocabulary, already includes `blocked`, and lacks `idea` in `CANONICAL_STATUSES`.
   - `plugins/turbo-mode/ticket/scripts/ticket_triage.py` still counts, staleness-checks, and suggests actions around `open/in_progress` instead of `idea/open/blocked`.
   - `plugins/turbo-mode/ticket/scripts/ticket_read.py` still ranks `in_progress` and lacks `idea` and `blocked` ordering.
   - `plugins/turbo-mode/ticket/README.md`, `plugins/turbo-mode/ticket/HANDBOOK.md`, and `plugins/turbo-mode/ticket/tests/test_docs_contract.py` still present or require the old current target status set in user-facing docs, including docs-contract guards that say `blocked` is not a status and blockedness derives from `blocked_by`.
@@ -304,7 +304,7 @@ def test_target_ticket_rejects_deprecated_in_progress_status(tmp_path: Path) -> 
     assert "in_progress" in result.error
 ```
 
-Keep the existing priority rejection parametrization, but remove `("status", "blocked")` from it because `blocked` is now valid when the ticket has valid blocked shape.
+Keep the existing priority rejection parametrization, but remove `("status", "blocked")` from it because `blocked` is now valid when the ticket has valid blocked shape. Rename `test_target_ticket_rejects_deprecated_status_and_priority()` to `test_target_ticket_rejects_deprecated_priorities()` so the test name no longer claims it rejects statuses.
 
 - [ ] **Step 2: Write failing schema tests for blocked shape**
 
@@ -828,20 +828,56 @@ In `plugins/turbo-mode/ticket/tests/support/builders.py`, add `blocked_on` to `m
     blocked_on: str = "",
 ```
 
-Build a local section string before `content = textwrap.dedent(...)`:
+Do not interpolate a zero-indented `## Blocked On` string inside the `textwrap.dedent(...)` f-string. That defeats dedent and leaves the whole fixture indented. Build the normal fixture first, then insert the optional section after dedent:
 
-```python
-    blocked_on_section = f"\n## Blocked On\n{blocked_on}\n" if blocked_on else ""
-```
+````python
+    content = textwrap.dedent(f"""\
+        ---
+        id: {id}
+        title: {title}
+        status: {status}
+        priority: {priority}
+        tags: {tags}
+        related_paths: {related_paths}
+        blocked_by: {blocked_by}
+        {extra_yaml}---
 
-Insert it between `## Next Action` and `## Change History`:
+        ## Problem
+        {problem}
 
-```python
         ## Next Action
         Continue work on this ticket.
-        {blocked_on_section}
+
         ## Change History
-```
+        - 2026-06-02T00:00:00Z | migration | Test fixture normalized to target schema.
+
+        ## Approach
+        Fix the issue.
+
+        ## Acceptance Criteria
+        - [ ] Issue resolved
+
+        ## Verification
+        ```bash
+        echo "verified"
+        ```
+
+        ## Key Files
+        | File | Role | Look For |
+        |------|------|----------|
+        | test.py | Test | Test code |
+        {extra_sections}
+    """)
+    if blocked_on:
+        marker = "\n## Change History\n"
+        content = content.replace(
+            marker,
+            f"\n## Blocked On\n{blocked_on.strip()}\n{marker}",
+            1,
+        )
+````
+
+The final file must still start with `---` when `blocked_on` is set. Do not keep any pre-dedent helper that injects a raw newline followed by an unindented `## Blocked On` heading.
 
 - [ ] **Step 7: Run create tests and target schema tests**
 
@@ -875,7 +911,9 @@ Commit succeeds with create/render behavior and direct tests staged.
 ## Task 3: Lifecycle Transitions And Blocker Cleanup
 
 **Files:**
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_validate.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
+- Modify: `plugins/turbo-mode/ticket/tests/test_validate.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_execute.py`
 - Modify: `plugins/turbo-mode/ticket/tests/test_engine_policy.py`
 
@@ -939,6 +977,26 @@ Replace `test_removed_blocked_status_is_rejected_by_schema` with:
         assert response.state == "invalid_transition"
         assert response.error_code == "invalid_transition"
         assert "blocked_on" in response.message
+
+    def test_update_rejects_open_to_wontfix_because_terminal_writes_use_close(
+        self,
+        tmp_tickets: Path,
+    ) -> None:
+        ticket_path = make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="open")
+
+        response = _execute_existing(
+            tmp_tickets,
+            ticket_path,
+            action="update",
+            fields={"status": "wontfix"},
+        )
+
+        assert response.state == "invalid_transition"
+        assert response.error_code == "invalid_transition"
+        assert response.data["current_status"] == "open"
+        assert response.data["requested_status"] == "wontfix"
+        assert response.data["valid_recovery_statuses"] == ["blocked"]
+        assert "use close action" in response.message
 
     def test_update_unblocks_ticket_and_removes_live_blocker_shape(
         self,
@@ -1018,9 +1076,16 @@ Any new or changed close-to-`done` fixture must keep a concrete `## Acceptance C
         assert validate_target_ticket_file(ticket_path).ok
 ```
 
-- [ ] **Step 2: Add failing policy evaluator tests**
+- [ ] **Step 2: Add failing validation and policy evaluator tests**
 
-In `plugins/turbo-mode/ticket/tests/test_engine_policy.py`, replace `in_progress` fixtures with `open` or `blocked`, then add:
+In `plugins/turbo-mode/ticket/tests/test_validate.py`, add this direct guard for section removal input:
+
+```python
+    def test_blocked_on_none_is_valid_section_removal_input(self):
+        assert validate_fields({"blocked_on": None}) == []
+```
+
+In `plugins/turbo-mode/ticket/tests/test_engine_policy.py`, import `validate_target_ticket_file` from `scripts.ticket_target_schema`, replace `in_progress` fixtures with `open` or `blocked`, then add:
 
 ```python
 def test_update_blocked_transition_requires_visible_blocker(tmp_tickets: Path) -> None:
@@ -1052,6 +1117,7 @@ def test_update_allows_blocked_to_open_with_blocker_cleanup(tmp_tickets: Path) -
         blocked_by=["T-20260503-31"],
         blocked_on="Waiting for the upstream fix.",
     )
+    assert validate_target_ticket_file(path).ok
     ticket = parse_ticket(path)
     assert ticket is not None
 
@@ -1063,6 +1129,32 @@ def test_update_allows_blocked_to_open_with_blocker_cleanup(tmp_tickets: Path) -
     )
 
     assert response is None
+
+
+def test_update_rejects_blocked_to_done_with_close_action_hint(tmp_tickets: Path) -> None:
+    path = make_ticket(
+        tmp_tickets,
+        "blocked.md",
+        id="T-20260503-32",
+        status="blocked",
+        blocked_by=["T-20260503-31"],
+        blocked_on="Waiting for the upstream fix.",
+    )
+    assert validate_target_ticket_file(path).ok
+    ticket = parse_ticket(path)
+    assert ticket is not None
+
+    response = _evaluate_update_policy(
+        "T-20260503-32",
+        ticket,
+        {"status": "done"},
+        tmp_tickets,
+    )
+
+    assert response is not None
+    assert response.state == "invalid_transition"
+    assert response.data["valid_recovery_statuses"] == ["open"]
+    assert "use close action" in response.message
 
 
 def test_close_policy_rejects_idea_as_terminal_source(tmp_tickets: Path) -> None:
@@ -1088,7 +1180,7 @@ def test_close_policy_rejects_idea_as_terminal_source(tmp_tickets: Path) -> None
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_execute.py::TestUpdate plugins/turbo-mode/ticket/tests/test_execute.py::TestCloseAndReopen plugins/turbo-mode/ticket/tests/test_engine_policy.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_validate.py plugins/turbo-mode/ticket/tests/test_execute.py::TestUpdate plugins/turbo-mode/ticket/tests/test_execute.py::TestCloseAndReopen plugins/turbo-mode/ticket/tests/test_engine_policy.py -q
 ```
 
 Expected:
@@ -1120,7 +1212,7 @@ _TRANSITION_PRECONDITIONS: dict[tuple[str, str], str] = {
 }
 ```
 
-Remove the old `blocked_by_required` branch in `_check_transition_preconditions_with_detail()` and add:
+Remove the old `blocked_by_required` and `blockers_resolved_required` branches in `_check_transition_preconditions_with_detail()` and add:
 
 ```python
     if precondition == "blocked_on_required":
@@ -1158,7 +1250,25 @@ def _is_valid_transition(current: str, target: str, action: str) -> bool:
     return target in valid
 ```
 
-Update close recovery statuses:
+In `_evaluate_update_policy()`, keep `valid_recovery_statuses` as update-action recovery states only, but add a close-action hint when the requested target is terminal:
+
+```python
+        close_hint = (
+            " (use close action)"
+            if ticket.status in {"open", "blocked"} and new_status in _TERMINAL_STATUSES
+            else ""
+        )
+```
+
+Then build the invalid-transition message with `close_hint` before the existing reopen hint:
+
+```python
+                message=f"Cannot transition from {ticket.status} to {new_status} via update"
+                + close_hint
+                + (" (use reopen action)" if requires_reopen else ""),
+```
+
+Update close recovery statuses in `_evaluate_close_policy()`, immediately after `validation_errors` handling where the live code currently assigns `valid_recovery_statuses`. Land this change together with the `_is_valid_transition()` close allowlist above; do not leave `idea` close validity and recovery hints split across commits:
 
 ```python
     if ticket.status == "idea":
@@ -1180,7 +1290,7 @@ In `plugins/turbo-mode/ticket/scripts/ticket_validate.py`, allow nullable `block
         _validate_string_field(fields, "blocked_on", errors)
 ```
 
-Remove `blocked_on` from the main string-field tuple if Step 3 added it there.
+Remove `blocked_on` from the main string-field tuple unconditionally. Final state: `blocked_on` is validated only by the nullable guard above, so `validate_fields({"blocked_on": None})` returns `[]` and unblock writes can remove the `Blocked On` section.
 
 In `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`, add `blocked_on` to focused section fields:
 
@@ -1308,7 +1418,7 @@ Build `changes` before returning:
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_execute.py::TestUpdate plugins/turbo-mode/ticket/tests/test_execute.py::TestCloseAndReopen plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_target_schema.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_validate.py plugins/turbo-mode/ticket/tests/test_execute.py::TestUpdate plugins/turbo-mode/ticket/tests/test_execute.py::TestCloseAndReopen plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_target_schema.py -q
 ```
 
 Expected:
@@ -1322,7 +1432,7 @@ All selected tests pass.
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_validate.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_policy.py
+git add plugins/turbo-mode/ticket/scripts/ticket_validate.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/tests/test_validate.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_policy.py
 git commit -m "feat(ticket): enforce blocked lifecycle shape"
 ```
 
@@ -1389,7 +1499,12 @@ plugins/turbo-mode/ticket/tests/test_parse.py:
 
 plugins/turbo-mode/ticket/tests/test_validate.py:
   Replace accepted status loop ("open", "in_progress", "done", "wontfix") with ("idea", "open", "blocked", "done", "wontfix").
+  Replace test_deprecated_blocked_status_rejected() with test_deprecated_in_progress_status_rejected().
   Add or keep a rejection assertion that validate_fields({"status": "in_progress"}) reports an invalid status.
+  Keep test_blocked_on_none_is_valid_section_removal_input() from Task 3.
+
+  The replacement status rejection test should be named test_deprecated_in_progress_status_rejected and assert:
+    assert any("status" in error for error in validate_fields({"status": "in_progress"}))
 
 plugins/turbo-mode/ticket/scripts/ticket_triage.py:
   Replace counts {"open": 0, "in_progress": 0} with {"idea": 0, "open": 0, "blocked": 0}.
@@ -1439,7 +1554,8 @@ plugins/turbo-mode/ticket/tests/test_capture_contract.py:
 plugins/turbo-mode/ticket/tests/support/builders.py:
   Leave make_ticket() default status as "open"; it is already the desired active default.
   Preserve make_gen3_ticket() status: in_progress as legacy fenced-YAML evidence for migration tests.
-  Add a blocked_on parameter when not already added by Task 2, and render ## Blocked On only when blocked_on is not None.
+  Add a blocked_on parameter when not already added by Task 2, and render ## Blocked On only for a non-empty blocked_on string.
+  Keep the Task 2 post-dedent insertion pattern; do not interpolate a zero-indented blocked_on_section inside the textwrap.dedent f-string.
 
 plugins/turbo-mode/ticket/README.md:
   Replace current status prose and schema tables so target statuses are idea, open, blocked, done, and wontfix.
@@ -1491,7 +1607,21 @@ Expected:
 The command still finds old candidate-contract vocabulary. That is expected in this plan. Do not patch those hits here; record them in closeout as the required next source slice.
 ```
 
-- [ ] **Step 5: Run focused source/docs tests**
+- [ ] **Step 5: Run deferred-boundary smoke**
+
+Run:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_candidate_discovery.py -q
+```
+
+Expected:
+
+```text
+The deferred candidate-contract suites still pass. A failure here means the status/read/list changes leaked into the deferred autonomous candidate surface and must be understood before closeout; do not patch candidate-contract source in this plan unless the failure is caused by the status/read/list changes just made.
+```
+
+- [ ] **Step 6: Run focused source/docs tests**
 
 Run:
 
@@ -1505,7 +1635,7 @@ Expected:
 All selected status-shape tests pass.
 ```
 
-- [ ] **Step 6: Run full Ticket suite**
+- [ ] **Step 7: Run full Ticket suite**
 
 Run:
 
@@ -1519,7 +1649,7 @@ Expected:
 Full Ticket test suite passes. Record the exact pass count and warning count in closeout.
 ```
 
-- [ ] **Step 7: Run ruff and diff check**
+- [ ] **Step 8: Run ruff and diff check**
 
 Run:
 
@@ -1535,7 +1665,7 @@ Expected:
 ruff reports no issues, and git diff --check reports no whitespace errors.
 ```
 
-- [ ] **Step 8: Inspect final diff before closeout**
+- [ ] **Step 9: Inspect final diff before closeout**
 
 Run:
 
@@ -1550,19 +1680,19 @@ Expected:
 Diff shows only source/test/docs updates for target status and blocked-ticket shape. It does not touch autonomous candidate runtime, installed cache, local runtime state, marketplace metadata, or unrelated handoff artifacts.
 ```
 
-- [ ] **Step 9: Commit Task 4**
+- [ ] **Step 10: Commit Task 4**
 
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_target_schema.py plugins/turbo-mode/ticket/scripts/ticket_validate.py plugins/turbo-mode/ticket/scripts/ticket_render.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_parse.py plugins/turbo-mode/ticket/scripts/ticket_triage.py plugins/turbo-mode/ticket/scripts/ticket_read.py plugins/turbo-mode/ticket/tests plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md
+git add plugins/turbo-mode/ticket/scripts/ticket_target_schema.py plugins/turbo-mode/ticket/scripts/ticket_validate.py plugins/turbo-mode/ticket/scripts/ticket_render.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_parse.py plugins/turbo-mode/ticket/scripts/ticket_triage.py plugins/turbo-mode/ticket/scripts/ticket_read.py plugins/turbo-mode/ticket/tests/support/builders.py plugins/turbo-mode/ticket/tests/test_target_schema.py plugins/turbo-mode/ticket/tests/test_parse.py plugins/turbo-mode/ticket/tests/test_validate.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_triage.py plugins/turbo-mode/ticket/tests/test_read.py plugins/turbo-mode/ticket/tests/test_integration.py plugins/turbo-mode/ticket/tests/test_entrypoints.py plugins/turbo-mode/ticket/tests/test_ux.py plugins/turbo-mode/ticket/tests/test_blocker_resolution.py plugins/turbo-mode/ticket/tests/test_capture_contract.py plugins/turbo-mode/ticket/tests/test_docs_contract.py plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md
 git commit -m "fix(ticket): align target status source drift"
 ```
 
 Expected:
 
 ```text
-Commit succeeds with only target status and blocked-ticket shape source/test/docs files staged. Candidate-contract runtime files are not staged.
+Commit succeeds with only the named target status and blocked-ticket shape source/test/docs files staged. Candidate-contract runtime files and deferred candidate-contract tests are not staged.
 ```
 
 ## Deferred Follow-Up: Candidate Contract Migration
@@ -1589,9 +1719,9 @@ The follow-up plan must explicitly resolve `reopen`: either migrate it to `evide
 - Create accepts explicit `idea`.
 - Create accepts explicit `blocked` only with visible blocker prose.
 - Create rejects `done` and `wontfix` in normal mutation flow.
-- `idea` can promote only to `open`.
-- `open` can move to `blocked`.
-- `blocked` can move to `open`, `done`, or `wontfix`.
+- `idea` can promote only to `open` through `update`.
+- `open` can move to `blocked` through `update`; `update` rejects `open -> done` and `open -> wontfix` because terminal writes use `close`.
+- `blocked` can move to `open` through `update` or to `done`/`wontfix` through `close`.
 - `done` and `wontfix` remain terminal except existing `reopen -> open`.
 - Moving from `blocked` to `open`, `done`, or `wontfix` clears non-empty `blocked_by` and removes `Blocked On`.
 - Triage counts and read/list ordering expose `idea`, `open`, and `blocked` without normal `in_progress` buckets or ranks.
@@ -1605,6 +1735,7 @@ The follow-up plan must explicitly resolve `reopen`: either migrate it to `evide
 Run these before closeout:
 
 ```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_candidate_discovery.py -q
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_target_schema.py plugins/turbo-mode/ticket/tests/test_parse.py plugins/turbo-mode/ticket/tests/test_validate.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_triage.py plugins/turbo-mode/ticket/tests/test_read.py plugins/turbo-mode/ticket/tests/test_integration.py plugins/turbo-mode/ticket/tests/test_entrypoints.py plugins/turbo-mode/ticket/tests/test_ux.py plugins/turbo-mode/ticket/tests/test_blocker_resolution.py plugins/turbo-mode/ticket/tests/test_capture_contract.py plugins/turbo-mode/ticket/tests/test_docs_contract.py -q
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest -q
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket
