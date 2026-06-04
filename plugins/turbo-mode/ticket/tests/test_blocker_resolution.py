@@ -39,8 +39,8 @@ class TestClassifyBlockers:
         assert unresolved == []
 
     def test_unresolved_blocker_still_detected(self):
-        """In-progress blocker in ticket_map is reported as unresolved."""
-        ticket_map = {"T-20260301-01": FakeTicket("T-20260301-01", "in_progress")}
+        """Open blocker in ticket_map is reported as unresolved."""
+        ticket_map = {"T-20260301-01": FakeTicket("T-20260301-01", "open")}
         missing, unresolved = _classify_blockers(["T-20260301-01"], ticket_map)
         assert missing == []
         assert unresolved == ["T-20260301-01"]
@@ -63,8 +63,9 @@ class TestPreflightCloseWithBlocker:
             tmp_tickets,
             "T-20260310-01.md",
             id="T-20260310-01",
-            status="in_progress",
+            status="blocked",
             blocked_by=["T-20260301-01"],
+            blocked_on="Waiting for terminal blocker confirmation.",
             title="Blocked task",
         )
 
@@ -91,7 +92,7 @@ class TestPreflightCloseWithBlocker:
             tmp_tickets,
             "T-20260301-99.md",
             id="T-20260301-99",
-            status="in_progress",
+            status="open",
             title="Not actually done",
         )
 
@@ -99,8 +100,9 @@ class TestPreflightCloseWithBlocker:
             tmp_tickets,
             "T-20260310-01.md",
             id="T-20260310-01",
-            status="in_progress",
+            status="blocked",
             blocked_by=["T-20260301-99"],
+            blocked_on="Waiting for non-terminal blocker.",
             title="Blocked task",
         )
 

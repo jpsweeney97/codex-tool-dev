@@ -76,8 +76,6 @@ OLD_MUTATION_SURFACE_TERMS = (
     "classify`/`plan`/`preflight`/`execute",
 )
 OLD_SCHEMA_TERMS = (
-    "blocked status",
-    "`blocked` status",
     "`blocks` reverse",
     "`component`",
     "`refinement_status`",
@@ -243,11 +241,39 @@ def test_readme_ticket_schema_matches_yaml_contract_boundary() -> None:
     for section in TARGET_SECTIONS_REQUIRED:
         assert f"`{section}`" in schema
     assert "Unknown frontmatter keys are invalid" in normalized_schema
-    assert "`blocked` is not a status" in normalized_schema
-    assert "derive reverse `blocks`" in normalized_schema
+    assert "`status: blocked`" in normalized_schema
+    assert "`Blocked On`" in schema
+    assert "non-empty `Blocked On` section" in normalized_schema
+    assert "optional ticket-ID dependency data" in normalized_schema
+    assert "no persisted reverse `blocks` edge" in normalized_schema
 
     for term in OLD_SCHEMA_TERMS:
         assert term not in schema
+
+
+def test_current_docs_document_target_status_vocabulary_and_blocked_shape() -> None:
+    docs = (
+        PLUGIN_ROOT / "README.md",
+        PLUGIN_ROOT / "HANDBOOK.md",
+        PLUGIN_ROOT / "references" / "ticket-contract.md",
+        CAPTURE_SKILL,
+        UPDATE_SKILL,
+        FIND_SKILL,
+        REVIEW_SKILL,
+    )
+    for path in docs:
+        text = _read_text(path)
+        target = (
+            _section(text, "## Target Post-Cutover Ticket Shape", "\n## ")
+            if "## Target Post-Cutover Ticket Shape" in text
+            else text
+        )
+        normalized_target = _normalize_whitespace(target)
+        for status in TARGET_STATUSES:
+            assert f"`{status}`" in normalized_target, str(path)
+        assert "`status: blocked`" in normalized_target, str(path)
+        assert "`Blocked On`" in normalized_target, str(path)
+        assert "`in_progress`" not in normalized_target, str(path)
 
 
 def test_core_docs_document_target_candidate_mutation_contract() -> None:
@@ -618,8 +644,13 @@ def test_ticket_capture_skill_keeps_provenance_hook_owned() -> None:
 def test_ticket_capture_skill_documents_deterministic_inference_boundaries() -> None:
     text = _read_text(CAPTURE_SKILL)
     target = _section(text, "## Target Post-Cutover Ticket Shape", "\n## ")
+    for status in TARGET_STATUSES:
+        assert f"`{status}`" in target
     for priority in TARGET_PRIORITIES:
         assert f"`{priority}`" in target
+    assert "`status: blocked`" in target
+    assert "`Blocked On`" in target
+    assert "`blocked_by`" in target
     assert "`medium`" not in target
     assert "`critical`" not in target
     assert "`component`" not in target
@@ -738,7 +769,10 @@ def test_ticket_find_skill_contract_is_read_only() -> None:
         assert f"`{status}`" in target
     for priority in TARGET_PRIORITIES:
         assert f"`{priority}`" in target
-    assert "`blocked`" not in target
+    assert "`status: blocked`" in target
+    assert "`Blocked On`" in target
+    assert "`blocked_by`" in target
+    assert "--status idea|open|blocked|done|wontfix" in text
     assert "`critical`" not in target
     assert "`medium`" not in target
     assert "`refinement_status`" not in target
@@ -754,7 +788,7 @@ def test_ticket_update_skill_contract_is_preview_first_and_scoped() -> None:
     assert isinstance(description, str)
     for snippet in (
         "update a ticket",
-        "mark work in progress",
+        "mark work open or blocked",
         "close",
         "reopen",
         "change priority",
@@ -777,6 +811,8 @@ def test_ticket_update_skill_contract_is_preview_first_and_scoped() -> None:
     assert "target.sections" in normalized
     assert "expected_ticket_fingerprint" in normalized
     assert "evidence_summary" in normalized
+    assert "`blocked_on` is the writable adapter" in normalized
+    assert "`Blocked On`" in text
     candidate_contract = _section(text, "## Target Candidate Mutation Contract", "\n## ")
     assert "acceptance_criteria" not in candidate_contract
     for block in _json_code_blocks(text):
@@ -823,11 +859,12 @@ def test_ticket_review_skill_contract_is_read_only_and_capture_prompt_only() -> 
     assert "ADR 0006" in normalized
     assert "May 30 control doc" in normalized
     assert "Backlog triage is read/query/reporting" in normalized
-    assert (
-        "Persisted `blocked` status and reverse `blocks` edges are not target schema"
-        in normalized
-    )
-    assert "target blockedness derives from `blocked_by`" in normalized
+    for status in TARGET_STATUSES:
+        assert f"`{status}`" in normalized
+    assert "first-class `status: blocked` tickets" in normalized
+    assert "visible `Blocked On` section" in normalized
+    assert "reports `blocked_by` dependency chains" in normalized
+    assert "never writes tickets or persisted reverse `blocks` edges" in normalized
     assert "blocked-chain analysis" not in normalized
     assert "Do not create, update, close, reopen, doctor, or repair tickets" in normalized
     assert "suggest a concrete `capture-ticket` prompt instead of writing the ticket" in normalized

@@ -47,10 +47,12 @@ Target tickets use ID-only filenames, YAML frontmatter, and the sections
 `Problem`, `Next Action`, and `Change History`.
 
 Target frontmatter fields are `id`, `title`, `status`, `priority`, `tags`,
-`related_paths`, and `blocked_by`. Target statuses are `open`, `in_progress`,
-`done`, and `wontfix`. Target priorities are `high`, `normal`, and `low`.
-Unknown frontmatter keys are invalid. `blocked` is not a status; derive reverse
-`blocks` views by scanning `blocked_by`.
+`related_paths`, and `blocked_by`. Target statuses are `idea`, `open`,
+`blocked`, `done`, and `wontfix`. Target priorities are `high`, `normal`, and
+`low`. `status: blocked` requires a non-empty `Blocked On` section, and
+`blocked_by` is optional ticket-ID dependency data for blocked tickets. Unknown
+frontmatter keys are invalid. There is no persisted reverse `blocks` edge;
+reverse blocker views are derived by scanning tickets.
 
 ## Target Candidate Mutation Contract
 

@@ -46,13 +46,13 @@ SECTION_RENAMES: dict[str, str] = {
     "Risks": "Context",
 }
 
-# Canonical statuses (v1.0).
-CANONICAL_STATUSES = frozenset({"open", "in_progress", "blocked", "done", "wontfix"})
+# Canonical statuses (v1.0 target tickets).
+CANONICAL_STATUSES = frozenset({"idea", "open", "blocked", "done", "wontfix"})
 
 # Legacy status normalization map.
 _STATUS_MAP: dict[str, str] = {
     "planning": "open",
-    "implementing": "in_progress",
+    "implementing": "open",
     "complete": "done",
     "closed": "done",
     "deferred": "open",

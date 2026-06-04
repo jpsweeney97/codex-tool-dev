@@ -428,7 +428,7 @@ def triage_dashboard(tickets_dir: Path) -> dict[str, Any]:
     tickets = [t for t in all_tickets if t.status not in _TERMINAL_STATUSES]
     ticket_map = {t.id: t for t in tickets}
 
-    counts: dict[str, int] = {"open": 0, "in_progress": 0}
+    counts: dict[str, int] = {"idea": 0, "open": 0, "blocked": 0}
     priority_counts: dict[str, int] = {"high": 0, "normal": 0, "low": 0}
     active_ticket_rows: list[dict[str, Any]] = []
     stale: list[dict[str, str]] = []
@@ -497,28 +497,24 @@ def _next_actions(active_ticket_rows: list[dict[str, Any]]) -> list[dict[str, st
                 {
                     "action": "start_or_assign_high",
                     "ticket_id": row["id"],
-                    "reason": "High-priority ticket is open and not in progress",
+                    "reason": "High-priority ticket is open and ready to start or assign",
                 }
             )
     for row in active_ticket_rows:
-        if row["blocked_by"]:
+        if row["status"] == "blocked":
             actions.append(
                 {
                     "action": "resolve_blocker",
                     "ticket_id": row["id"],
-                    "reason": "Blocked ticket has unresolved blockers",
+                    "reason": "Blocked ticket needs blocker resolution",
                 }
             )
-    for row in active_ticket_rows:
-        if row["status"] == "in_progress":
+        elif row["blocked_by"]:
             actions.append(
                 {
-                    "action": "review_in_progress",
+                    "action": "resolve_blocker",
                     "ticket_id": row["id"],
-                    "reason": (
-                        "In-progress ticket should have recent activity or be moved "
-                        "back to open"
-                    ),
+                    "reason": "Ticket has unresolved blocked_by dependencies",
                 }
             )
     return actions[:5]
@@ -535,11 +531,11 @@ def _suggested_capture_prompts(active_ticket_rows: list[dict[str, Any]]) -> list
 
 
 def _is_stale(ticket: Any, cutoff_days: int = 7) -> bool:
-    """Check if ticket is stale (open/in_progress >7 days by ticket date).
+    """Check if ticket is stale (open/blocked >7 days by ticket date).
 
     Returns True for unparseable dates (fail toward visibility).
     """
-    if ticket.status not in ("open", "in_progress"):
+    if ticket.status not in ("open", "blocked"):
         return False
     try:
         ticket_date = datetime.strptime(ticket.date, "%Y-%m-%d").replace(tzinfo=UTC)

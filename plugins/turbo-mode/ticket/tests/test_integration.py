@@ -168,14 +168,14 @@ class TestFullCreatePipeline:
         assert preflight_resp.state == "policy_blocked"
 
     def test_update_then_close_pipeline(self, tmp_tickets):
-        """Create -> update to in_progress -> close."""
+        """Create -> update to blocked -> close."""
         make_ticket(tmp_tickets, "2026-03-02-test.md", id="T-20260302-01", status="open")
 
-        # Update to in_progress.
+        # Update to blocked.
         update_resp = engine_execute(
             action="update",
             ticket_id="T-20260302-01",
-            fields={"status": "in_progress"},
+            fields={"status": "blocked", "blocked_on": "Waiting for upstream work."},
             session_id="test",
             request_origin="user",
             dedup_override=False,
@@ -331,11 +331,11 @@ class TestEngineExecuteIntegration:
         ticket_path = Path(resp.data["ticket_path"])
         assert ticket_path.exists()
 
-        # Update status to in_progress.
+        # Update status to blocked.
         resp = engine_execute(
             action="update",
             ticket_id=ticket_id,
-            fields={"status": "in_progress"},
+            fields={"status": "blocked", "blocked_on": "Waiting for upstream work."},
             session_id="test-session",
             request_origin="user",
             dedup_override=False,
@@ -432,7 +432,7 @@ class TestEngineExecuteIntegration:
         resp = engine_execute(
             action="update",
             ticket_id=ticket_id,
-            fields={"status": "in_progress"},
+            fields={"status": "blocked", "blocked_on": "Waiting for upstream work."},
             session_id="test-session",
             request_origin="user",
             dedup_override=False,
@@ -447,7 +447,7 @@ class TestEngineExecuteIntegration:
         assert resp.state == "ok"
         ticket = parse_ticket(ticket_path)
         assert ticket is not None
-        assert ticket.status == "in_progress"
+        assert ticket.status == "blocked"
 
         resp = engine_execute(
             action="close",

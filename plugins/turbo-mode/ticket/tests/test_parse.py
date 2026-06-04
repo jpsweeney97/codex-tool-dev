@@ -6,6 +6,7 @@ import textwrap
 
 import pytest
 from scripts.ticket_parse import (
+    CANONICAL_STATUSES,
     date_from_ticket_id,
     extract_fenced_yaml,
     extract_sections,
@@ -67,9 +68,18 @@ class TestExtractTitle:
 
 
 class TestNormalizeStatus:
+    def test_canonical_statuses_match_target_contract(self):
+        assert CANONICAL_STATUSES == frozenset({"idea", "open", "blocked", "done", "wontfix"})
+
     def test_target_statuses_unchanged(self):
-        for status in ("open", "in_progress", "done", "wontfix"):
+        for status in ("idea", "open", "blocked", "done", "wontfix"):
             assert normalize_status(status) == (status, None)
+
+    def test_legacy_in_progress_passes_through_for_diagnostics(self):
+        assert normalize_status("in_progress") == ("in_progress", None)
+
+    def test_legacy_implementing_does_not_normalize_to_in_progress(self):
+        assert normalize_status("implementing") == ("open", None)
 
     def test_legacy_deferred_maps_to_open_for_cutover(self):
         status, defer_info = normalize_status("deferred")

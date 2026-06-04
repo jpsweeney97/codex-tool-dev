@@ -27,8 +27,8 @@ by Markdown sections. Closed YAML frontmatter keys are `id`, `title`, `status`,
 
 Target statuses are `idea`, `open`, `blocked`, `done`, and `wontfix`. Target
 priorities are `high`, `normal`, and `low`. Every target ticket requires
-`Problem`, `Next Action`, and `Change History`; `blocked` tickets additionally
-require `Blocked On`. Unknown frontmatter keys are invalid. `blocked_by`
+`Problem`, `Next Action`, and `Change History`; tickets with `status: blocked`
+additionally require `Blocked On`. Unknown frontmatter keys are invalid. `blocked_by`
 contains only ticket-ID dependencies and is optional for blocked tickets. Derive
 reverse `blocks` views by scanning tickets.
 
@@ -147,14 +147,13 @@ frontmatter keys are `id`, `title`, `status`, and `priority`. Optional
 frontmatter keys are `tags`, `related_paths`, and `blocked_by`.
 
 Target statuses are `idea`, `open`, `blocked`, `done`, and `wontfix`. Target
-priorities are `high`, `normal`, and `low`. `blocked` tickets additionally
-require `Blocked On`; `blocked_by` contains only ticket-ID dependencies and is
-optional for blocked tickets. Reverse blocker views are derived by scanning
-tickets.
+priorities are `high`, `normal`, and `low`. Tickets with `status: blocked`
+additionally require `Blocked On`; `blocked_by` contains only ticket-ID
+dependencies and is optional for blocked tickets. Reverse blocker views are
+derived by scanning tickets.
 
 Every target ticket requires `Problem`, `Next Action`, and `Change History`.
-`blocked` tickets additionally require `Blocked On`. Optional sections are
-preserved byte-for-byte unless a target candidate explicitly names the section.
+Tickets with `status: blocked` additionally require `Blocked On`. Optional sections are preserved byte-for-byte unless a target candidate explicitly names the section.
 
 ## Target Interfaces
 

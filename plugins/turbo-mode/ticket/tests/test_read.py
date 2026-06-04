@@ -187,6 +187,34 @@ def test_list_includes_display_sort_key_and_identity(tmp_tickets: Path) -> None:
     assert payload[0]["display"]["status_label"] == "Open"
 
 
+def test_display_sort_key_uses_target_status_rank(tmp_tickets: Path) -> None:
+    make_ticket(tmp_tickets, "ignored.md", id="T-20260503-10", status="idea")
+    make_ticket(tmp_tickets, "ignored.md", id="T-20260503-11", status="open")
+    make_ticket(
+        tmp_tickets,
+        "ignored.md",
+        id="T-20260503-12",
+        status="blocked",
+        blocked_on="Waiting for upstream work.",
+    )
+    make_ticket(tmp_tickets, "ignored.md", id="T-20260503-13", status="done")
+    make_ticket(tmp_tickets, "ignored.md", id="T-20260503-14", status="wontfix")
+
+    payload_by_status = {
+        item["status"]: item
+        for item in (
+            _ticket_to_dict(ticket)
+            for ticket in list_tickets(tmp_tickets)
+        )
+    }
+
+    assert payload_by_status["idea"]["display"]["sort_key"].startswith("0-idea")
+    assert payload_by_status["open"]["display"]["sort_key"].startswith("1-open")
+    assert payload_by_status["blocked"]["display"]["sort_key"].startswith("2-blocked")
+    assert payload_by_status["done"]["display"]["sort_key"].startswith("8-done")
+    assert payload_by_status["wontfix"]["display"]["sort_key"].startswith("9-wontfix")
+
+
 def test_query_marks_ambiguous_prefix_matches(tmp_tickets: Path) -> None:
     make_ticket(tmp_tickets, "ignored.md", id="T-20260503-11", title="First match")
     make_ticket(tmp_tickets, "ignored.md", id="T-20260503-12", title="Second match")

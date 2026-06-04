@@ -21,8 +21,10 @@ installed-runtime proof and not runtime proof. This docs/tests slice does not
 perform cutover inventory or normalization.
 
 Backlog triage is read/query/reporting unless it produces candidate mutations
-for the future runtime path. Persisted `blocked` status and reverse `blocks`
-edges are not target schema; target blockedness derives from `blocked_by`.
+for the future runtime path. Target statuses are `idea`, `open`, `blocked`,
+`done`, and `wontfix`. Triage reads first-class `status: blocked` tickets with
+their visible `Blocked On` section and reports `blocked_by` dependency chains,
+but it never writes tickets or persisted reverse `blocks` edges.
 
 ## Setup
 

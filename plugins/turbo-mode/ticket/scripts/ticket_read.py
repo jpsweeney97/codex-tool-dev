@@ -111,8 +111,9 @@ def _ticket_to_dict(ticket: ParsedTicket) -> dict:
 
     priority_rank = {"high": "0", "normal": "1", "low": "2"}.get(ticket.priority, "9")
     status_rank = {
-        "open": "0",
-        "in_progress": "1",
+        "idea": "0",
+        "open": "1",
+        "blocked": "2",
         "done": "8",
         "wontfix": "9",
     }.get(ticket.status, "7")

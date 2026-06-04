@@ -39,11 +39,13 @@ Post-cutover active tickets use ID-only filenames under
 by Markdown sections. Closed YAML frontmatter keys are `id`, `title`, `status`,
 `priority`, `tags`, `related_paths`, and `blocked_by`.
 
-Target statuses are `open`, `in_progress`, `done`, and `wontfix`. Target
+Target statuses are `idea`, `open`, `blocked`, `done`, and `wontfix`. Target
 priorities are `high`, `normal`, and `low`. Required sections are `Problem`,
-`Next Action`, and `Change History`. Unknown frontmatter keys are invalid.
-`blocked` is not a status; blockedness derives from `blocked_by`. Store
-`blocked_by` only and derive reverse `blocks` views by scanning tickets.
+`Next Action`, and `Change History`. `status: blocked` also requires a
+non-empty `Blocked On` section. Unknown frontmatter keys are invalid.
+`blocked_by` is optional ticket-ID dependency data for blocked tickets. There
+is no persisted reverse `blocks` edge; reverse blocker views are derived by
+scanning tickets.
 
 ## Target Candidate Mutation Contract
 
@@ -129,7 +131,7 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_doctor.py activate-runtime <TICKET
 
 `ticket_doctor.py diagnose` reports source/cache parity, runtime-proof status,
 installed Ticket runtime facts when supplied, and stale `.codex/ticket-tmp/`
-payloads older than 24 hours. It may mention target statuses such as
+payloads older than 24 hours. It may mention old statuses such as
 `in_progress` only while diagnosing existing files.
 
 The backend/diagnostic path
@@ -492,7 +494,7 @@ List or query tickets without triggering the mutation pipeline. Safe to run at a
 
 **Inputs**
 ```bash
-uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <tickets_dir> [--status open|in_progress|done|wontfix] [--priority high|normal|low] [--tag <tag>]
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <tickets_dir> [--status idea|open|blocked|done|wontfix] [--priority high|normal|low] [--tag <tag>]
 uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py query <tickets_dir> <id_prefix>
 uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py check <tickets_dir> <ticket_id> [--resolution done|wontfix]
 ```
@@ -585,8 +587,10 @@ state. It should not own semantic discovery, ranking, or workflow sequencing.
 
 ### Status Values
 
-Target persisted statuses are `open`, `in_progress`, `done`, and `wontfix`.
-Blockedness derives from `blocked_by`; it is not a persisted status.
+Target persisted statuses are `idea`, `open`, `blocked`, `done`, and
+`wontfix`. Tickets with `status: blocked` require a non-empty `Blocked On`
+section. `blocked_by` is optional ticket-ID dependency data for blocked
+tickets; there is no persisted reverse `blocks` edge.
 
 ### ID Allocation
 

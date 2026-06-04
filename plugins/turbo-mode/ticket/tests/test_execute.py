@@ -967,7 +967,7 @@ class TestCloseAndReopen:
             tmp_tickets,
             ticket_path,
             action="close",
-            fields={"resolution": "in_progress"},
+            fields={"resolution": "blocked"},
         )
 
         assert response.state == "need_fields"
@@ -1215,7 +1215,7 @@ class TestTransportAndPrerequisites:
         response = engine_execute(
             action="update",
             ticket_id="T-20260302-01",
-            fields={"status": "in_progress"},
+            fields={"priority": "low"},
             session_id="sess",
             request_origin="user",
             dedup_override=False,
@@ -1293,7 +1293,7 @@ class TestFieldValidation:
             tmp_tickets,
             "ignored.md",
             id="T-20260302-01",
-            status="in_progress",
+            status="open",
         )
 
         response = _execute_existing(
@@ -1340,7 +1340,7 @@ class TestFieldValidation:
             tmp_tickets,
             "ignored.md",
             id="T-20260302-01",
-            status="in_progress",
+            status="open",
         )
 
         response = _execute_existing(
