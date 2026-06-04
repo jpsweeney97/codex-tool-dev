@@ -175,6 +175,18 @@ post-write fingerprint, or discussion prompt facts. It must not carry a semantic
 classification taxonomy, runtime decision taxonomy, candidate-routing label, or
 stage-pipeline output.
 
+`needs_discussion` is reserved for mechanical or policy boundaries where Ticket
+understands the candidate but cannot apply it automatically without an explicit
+human choice. Examples include candidates above the per-turn cap, terminal
+lifecycle batches without explicit linked-batch intent, operations outside the
+v1 write envelope, or missing target choices that Ticket cannot infer
+mechanically. `needs_discussion` is not a Codex confidence state, uncertainty
+score, semantic hesitation label, or substitute for judging whether the
+human-readable reason is strong enough. If Codex can make a bounded allowed
+write and state the reason honestly, it should emit a valid candidate; if it
+cannot formulate the target or reason honestly, Codex should discuss in ordinary
+chat instead of encoding uncertainty in Ticket state.
+
 ## Private Operation Log
 
 The private operation log supports retry, idempotency, crash recovery before the
