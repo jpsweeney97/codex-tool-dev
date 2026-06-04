@@ -14,7 +14,7 @@ TARGET_FRONTMATTER_REQUIRED = ("id", "title", "status", "priority")
 TARGET_FRONTMATTER_OPTIONAL = ("tags", "related_paths", "blocked_by")
 TARGET_FRONTMATTER_FIELDS = TARGET_FRONTMATTER_REQUIRED + TARGET_FRONTMATTER_OPTIONAL
 TARGET_SECTIONS_REQUIRED = ("Problem", "Next Action", "Change History")
-TARGET_STATUSES = ("open", "in_progress", "done", "wontfix")
+TARGET_STATUSES = ("idea", "open", "blocked", "done", "wontfix")
 TARGET_PRIORITIES = ("high", "normal", "low")
 # Canonical legacy (Handoff v1.0 / pre-cutover) -> target priority mapping.
 LEGACY_PRIORITY_MAP = {"critical": "high", "medium": "normal"}
@@ -129,6 +129,10 @@ def validate_target_ticket_text(path: Path, text: str) -> TargetTicketValidation
     if history_error:
         return TargetTicketValidation(False, ticket_id=ticket_id, error=history_error)
 
+    status_shape_error = _validate_status_specific_shape(normalized_frontmatter, body)
+    if status_shape_error:
+        return TargetTicketValidation(False, ticket_id=ticket_id, error=status_shape_error)
+
     return TargetTicketValidation(True, ticket_id=ticket_id)
 
 
@@ -216,6 +220,41 @@ def _validate_required_sections(body: str) -> str:
     ordered_positions = [positions[section] for section in TARGET_SECTIONS_REQUIRED]
     if ordered_positions != sorted(ordered_positions):
         return "required sections are not in target section order"
+    return ""
+
+
+def _section_bodies(body: str) -> dict[str, str]:
+    sections = list(_SECTION_RE.finditer(body))
+    bodies: dict[str, str] = {}
+    for index, match in enumerate(sections):
+        heading = match.group(1).strip()
+        section_start = match.end()
+        section_end = sections[index + 1].start() if index + 1 < len(sections) else len(body)
+        bodies.setdefault(heading, body[section_start:section_end].strip())
+    return bodies
+
+
+def _validate_status_specific_shape(frontmatter: dict[str, Any], body: str) -> str:
+    status = frontmatter["status"]
+    blocked_by = frontmatter.get("blocked_by", [])
+    section_bodies = _section_bodies(body)
+    blocked_on = section_bodies.get("Blocked On")
+
+    invalid_blocked_by = [
+        ticket_id for ticket_id in blocked_by if not TARGET_ID_RE.fullmatch(ticket_id)
+    ]
+    if invalid_blocked_by:
+        return f"blocked_by entries must be target ticket IDs. Got: {invalid_blocked_by!r:.100}"
+
+    if status == "blocked":
+        if not blocked_on:
+            return "blocked tickets require non-empty Blocked On section"
+        return ""
+
+    if blocked_on is not None:
+        return f"Blocked On section is only valid for blocked tickets. Got: {status!r:.100}"
+    if blocked_by:
+        return f"blocked_by is only valid for blocked tickets. Got: {blocked_by!r:.100}"
     return ""
 
 

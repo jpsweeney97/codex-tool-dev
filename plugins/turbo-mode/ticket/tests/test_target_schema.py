@@ -90,8 +90,55 @@ def test_target_schema_constants_match_contract_vocabulary() -> None:
         "blocked_by",
     )
     assert TARGET_SECTIONS_REQUIRED == ("Problem", "Next Action", "Change History")
-    assert TARGET_STATUSES == ("open", "in_progress", "done", "wontfix")
+    assert TARGET_STATUSES == ("idea", "open", "blocked", "done", "wontfix")
     assert TARGET_PRIORITIES == ("high", "normal", "low")
+
+
+def test_target_ticket_accepts_idea_status(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    _write_target_ticket(
+        ticket,
+        frontmatter=(
+            "---\n"
+            "id: T-20260508-01\n"
+            "title: Example\n"
+            "status: idea\n"
+            "priority: normal\n"
+            "tags: []\n"
+            "related_paths: []\n"
+            "blocked_by: []\n"
+            "---\n"
+        ),
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is True
+    assert result.error == ""
+
+
+def test_target_ticket_rejects_deprecated_in_progress_status(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    _write_target_ticket(
+        ticket,
+        frontmatter=(
+            "---\n"
+            "id: T-20260508-01\n"
+            "title: Example\n"
+            "status: in_progress\n"
+            "priority: normal\n"
+            "tags: []\n"
+            "related_paths: []\n"
+            "blocked_by: []\n"
+            "---\n"
+        ),
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is False
+    assert "status" in result.error
+    assert "in_progress" in result.error
 
 
 def test_target_ticket_rejects_slug_filename(tmp_path: Path) -> None:
@@ -213,10 +260,9 @@ def test_target_ticket_rejects_unknown_frontmatter_key(tmp_path: Path) -> None:
     [
         ("priority", "medium"),
         ("priority", "critical"),
-        ("status", "blocked"),
     ],
 )
-def test_target_ticket_rejects_deprecated_status_and_priority(
+def test_target_ticket_rejects_deprecated_priorities(
     tmp_path: Path, field: str, value: str
 ) -> None:
     ticket = tmp_path / "T-20260508-01.md"
@@ -239,6 +285,190 @@ def test_target_ticket_rejects_deprecated_status_and_priority(
 
     assert result.ok is False
     assert field in result.error
+
+
+def test_target_ticket_accepts_blocked_status_with_blocked_on(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    _write_target_ticket(
+        ticket,
+        frontmatter=(
+            "---\n"
+            "id: T-20260508-01\n"
+            "title: Example\n"
+            "status: blocked\n"
+            "priority: normal\n"
+            "tags: []\n"
+            "related_paths: []\n"
+            "blocked_by: [T-20260508-02]\n"
+            "---\n"
+        ),
+        body=(
+            "\n"
+            "## Problem\n"
+            "Example problem.\n"
+            "\n"
+            "## Next Action\n"
+            "Ask for the missing deploy credentials, then continue implementation.\n"
+            "\n"
+            "## Blocked On\n"
+            "Waiting for deploy credentials from the user.\n"
+            "\n"
+            "## Change History\n"
+            "- 2026-06-02T00:00:00Z | migration | Normalized ticket into ADR 0006 schema.\n"
+        ),
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is True
+    assert result.error == ""
+
+
+def test_target_ticket_rejects_blocked_status_without_blocked_on(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    _write_target_ticket(
+        ticket,
+        frontmatter=(
+            "---\n"
+            "id: T-20260508-01\n"
+            "title: Example\n"
+            "status: blocked\n"
+            "priority: normal\n"
+            "tags: []\n"
+            "related_paths: []\n"
+            "blocked_by: []\n"
+            "---\n"
+        ),
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is False
+    assert "Blocked On" in result.error
+
+
+def test_target_ticket_rejects_blocked_status_with_empty_blocked_on(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    _write_target_ticket(
+        ticket,
+        frontmatter=(
+            "---\n"
+            "id: T-20260508-01\n"
+            "title: Example\n"
+            "status: blocked\n"
+            "priority: normal\n"
+            "tags: []\n"
+            "related_paths: []\n"
+            "blocked_by: []\n"
+            "---\n"
+        ),
+        body=(
+            "\n"
+            "## Problem\n"
+            "Example problem.\n"
+            "\n"
+            "## Next Action\n"
+            "Ask for the missing deploy credentials, then continue implementation.\n"
+            "\n"
+            "## Blocked On\n"
+            "\n"
+            "## Change History\n"
+            "- 2026-06-02T00:00:00Z | migration | Normalized ticket into ADR 0006 schema.\n"
+        ),
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is False
+    assert "Blocked On" in result.error
+
+
+def test_target_ticket_rejects_blocked_on_for_non_blocked_status(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    _write_target_ticket(
+        ticket,
+        body=(
+            "\n"
+            "## Problem\n"
+            "Example problem.\n"
+            "\n"
+            "## Next Action\n"
+            "Example next action.\n"
+            "\n"
+            "## Blocked On\n"
+            "This stale blocker section must be removed before the ticket is open.\n"
+            "\n"
+            "## Change History\n"
+            "- 2026-06-02T00:00:00Z | migration | Normalized ticket into ADR 0006 schema.\n"
+        ),
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is False
+    assert "Blocked On" in result.error
+
+
+def test_target_ticket_rejects_non_empty_blocked_by_for_non_blocked_status(
+    tmp_path: Path,
+) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    _write_target_ticket(
+        ticket,
+        frontmatter=(
+            "---\n"
+            "id: T-20260508-01\n"
+            "title: Example\n"
+            "status: open\n"
+            "priority: normal\n"
+            "tags: []\n"
+            "related_paths: []\n"
+            "blocked_by: [T-20260508-02]\n"
+            "---\n"
+        ),
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is False
+    assert "blocked_by" in result.error
+
+
+def test_target_ticket_rejects_invalid_blocked_by_ids(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    _write_target_ticket(
+        ticket,
+        frontmatter=(
+            "---\n"
+            "id: T-20260508-01\n"
+            "title: Example\n"
+            "status: blocked\n"
+            "priority: normal\n"
+            "tags: []\n"
+            "related_paths: []\n"
+            "blocked_by: [not-a-ticket-id]\n"
+            "---\n"
+        ),
+        body=(
+            "\n"
+            "## Problem\n"
+            "Example problem.\n"
+            "\n"
+            "## Next Action\n"
+            "Ask for the missing deploy credentials, then continue implementation.\n"
+            "\n"
+            "## Blocked On\n"
+            "Waiting for deploy credentials from the user.\n"
+            "\n"
+            "## Change History\n"
+            "- 2026-06-02T00:00:00Z | migration | Normalized ticket into ADR 0006 schema.\n"
+        ),
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is False
+    assert "blocked_by" in result.error
 
 
 def test_target_ticket_rejects_blocks_reverse_edge(tmp_path: Path) -> None:

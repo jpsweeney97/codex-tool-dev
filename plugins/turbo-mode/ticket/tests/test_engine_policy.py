@@ -61,6 +61,24 @@ def test_close_terminal_invalid_transition_returns_structured_policy_data(
     assert response.data["precondition_detail"] is None
 
 
+def test_close_policy_rejects_idea_as_terminal_source(tmp_tickets: Path) -> None:
+    path = make_ticket(tmp_tickets, "idea.md", id="T-20260503-31", status="idea")
+    ticket = parse_ticket(path)
+    assert ticket is not None
+
+    response = _evaluate_close_policy(
+        "T-20260503-31",
+        ticket,
+        {"resolution": "wontfix"},
+        tmp_tickets,
+    )
+
+    assert response is not None
+    assert response.state == "invalid_transition"
+    assert response.data["current_status"] == "idea"
+    assert response.data["valid_recovery_statuses"] == ["open"]
+
+
 def test_close_missing_acceptance_criteria_returns_precondition_detail(tmp_tickets: Path) -> None:
     path = make_ticket(tmp_tickets, "no-ac.md", id="T-20260503-23", status="in_progress")
     text = path.read_text(encoding="utf-8")

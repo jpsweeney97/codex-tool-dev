@@ -1137,9 +1137,7 @@ def _replace_or_append_section(text: str, heading: str, content: str) -> str:
 def _is_valid_transition(current: str, target: str, action: str) -> bool:
     """Check if a status transition is valid per the contract."""
     if action == "close":
-        if current in _TERMINAL_STATUSES:
-            return False
-        return target in ("done", "wontfix")
+        return current in {"open", "blocked"} and target in ("done", "wontfix")
     if action == "reopen":
         return current in ("done", "wontfix") and target == "open"
     # Update: follow transition table.
@@ -1987,7 +1985,12 @@ def _evaluate_close_policy(
             data={"validation_errors": validation_errors},
         )
 
-    valid_recovery_statuses = [] if ticket.status in _TERMINAL_STATUSES else ["done", "wontfix"]
+    if ticket.status == "idea":
+        valid_recovery_statuses = ["open"]
+    elif ticket.status in _TERMINAL_STATUSES:
+        valid_recovery_statuses = []
+    else:
+        valid_recovery_statuses = ["done", "wontfix"]
     requires_reopen = ticket.status in _TERMINAL_STATUSES
 
     if ticket.blocked_by and resolution != "wontfix":
