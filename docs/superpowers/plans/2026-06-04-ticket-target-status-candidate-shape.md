@@ -658,6 +658,8 @@ Update close recovery statuses in `_evaluate_close_policy()` immediately after `
 
 This is an atomicity requirement, not an optional cleanup. If the status schema accepts `idea`, close policy and close recovery hints must reject `idea` in the same behavioral commit.
 
+Note: narrowing the close allowlist to `{open, blocked}` here also makes the not-yet-migrated `in_progress` close fixtures in `test_ux.py` (including the close-parity test) and `test_capture_contract.py` fail. Those files are not in the Task 1-3 focused gates and are repaired in Task 4 Step 2, so the Task 1 focused gate stays green. Expect the full suite to show those extra `in_progress` close failures, beyond the Task 0 docs-contract baseline, until Task 4 lands; this is not a regression to debug.
+
 - [ ] **Step 6: Run the schema and close-policy tests and verify pass**
 
 Run:
@@ -1650,6 +1652,8 @@ Before this task, the command may find current-facing target status drift in sch
 - [ ] **Step 2: Patch status-only source, tests, fixtures, and docs**
 
 Apply these status-only replacements. Do not edit candidate-contract tests or runtime/gateway/discovery code in this plan.
+
+The quoted find-strings below describe sentences that may be soft-wrapped across multiple lines in the source docs; several SKILL.md status sentences and the triage `blocked` sentence already wrap (for example `capture-ticket/SKILL.md`, `update-ticket/SKILL.md`, and `ticket-backlog-triage/SKILL.md`). Match the sentence, not a literal single line, and reflow each replacement to the repo's one-sentence-per-line Markdown convention.
 
 ```text
 plugins/turbo-mode/ticket/scripts/ticket_parse.py:
