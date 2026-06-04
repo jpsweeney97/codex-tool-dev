@@ -1,10 +1,10 @@
-# Ticket Target Status And Candidate Shape Implementation Plan
+# Ticket Target Status Source Slice Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Bring Ticket source/tests into the new target status and candidate-shape contract for `idea`, `open`, `blocked`, `done`, and `wontfix`, without claiming installed-runtime proof.
+**Goal:** Bring Ticket source/tests into the new target status and blocked-ticket shape contract for `idea`, `open`, `blocked`, `done`, and `wontfix`, without claiming installed-runtime proof.
 
-**Architecture:** This is a source/repo implementation slice, not a cache refresh or runtime inventory slice. It updates target ticket validation first, then teaches create/update/close code to preserve blocked-ticket shape, then tightens autonomous candidate shape so `target` and `proposed_change` are closed and explicit. Operation-log recovery fingerprints and `reconcile_board` batching are separate follow-up slices because they touch retry semantics and wrapper-level result aggregation.
+**Architecture:** This is a source/repo implementation slice, not a cache refresh or runtime inventory slice. It updates target ticket validation first, then teaches create/update/close code to preserve blocked-ticket shape, then sweeps status-only source/test drift so the focused and full Ticket suites can pass. The autonomous candidate contract is a separate follow-up slice because it is a shared API migration across evaluator, gateway, discovery, identity, correction/reopen semantics, and integration tests.
 
 **Tech Stack:** Python >=3.11, dataclasses, PyYAML, existing Ticket scripts, pytest, ruff, bytecode-safe `uv run` verification.
 
@@ -12,7 +12,7 @@
 
 ## Scope Check
 
-This plan covers one coherent source/test slice.
+This plan covers one coherent source/test slice: target status vocabulary, blocked-ticket file shape, create behavior, direct lifecycle transitions, and status-only source/test drift. It intentionally does not migrate the autonomous candidate contract.
 
 In scope:
 
@@ -26,10 +26,10 @@ In scope:
 - Reject normal create with `status: done` or `status: wontfix`.
 - Update lifecycle transitions so `idea` is pre-lifecycle, `open` and `blocked` are active states, and terminal states remain `done`/`wontfix`.
 - Clear live blocker shape when a blocked ticket moves to `open`, `done`, or `wontfix`.
-- Replace the flat autonomous candidate shape with explicit `target.fields`, `target.sections`, `proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary` validation.
 
 Out of scope:
 
+- Autonomous candidate contract migration, including `CandidateMutation`, `evaluate_autonomy_intent()`, gateway dispatch, discovery, mutation identity, `correct`, and `reopen`.
 - Private operation-log retention, post-write fingerprints, and summary-emission recovery.
 - `reconcile_board` discovery, ordering, caps, and compact overflow.
 - Installed plugin cache mutation under `/Users/jp/.codex/plugins/cache`.
@@ -39,7 +39,7 @@ Out of scope:
 Closeout claim for this plan:
 
 ```text
-The local source/repo Ticket lane now enforces the new target status vocabulary, validates visible blocked-ticket shape, rejects terminal normal creates, clears blocker shape on unblocking and terminal writes, and validates autonomous candidates against the explicit target/proposed_change contract. Installed runtime remains unclaimed.
+The local source/repo Ticket lane now enforces the new target status vocabulary, validates visible blocked-ticket shape, rejects terminal normal creates, and clears blocker shape on unblocking and terminal writes. Autonomous candidate-contract migration and installed runtime behavior remain unclaimed.
 ```
 
 Do not use that claim until every verification gate in this plan passes.
@@ -49,14 +49,14 @@ Do not use that claim until every verification gate in this plan passes.
 Baseline from the planning turn:
 
 - Branch: `chore/ticket-candidate-contract-control-doc`
-- HEAD: `06a0a9ed`
+- HEAD at plan revision: `3f2303be`
 - Worktree: clean before this plan file
 - Primary authority: `docs/superpowers/specs/2026-05-30-ticket-runtime-first-state-kernel-control.md`
 - Known source drift:
   - `plugins/turbo-mode/ticket/scripts/ticket_target_schema.py` still defines `TARGET_STATUSES = ("open", "in_progress", "done", "wontfix")`.
   - `plugins/turbo-mode/ticket/tests/test_target_schema.py` still asserts the old status tuple.
   - `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py` still uses `in_progress` in transition policy and create always renders `status="open"`.
-  - `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py` still models candidates as flat `proposed_change` plus internal evidence links.
+  - `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py` still models candidates as flat `proposed_change` plus internal evidence links. That drift is now explicitly deferred to a separate candidate-contract migration plan.
 
 ## File Structure
 
@@ -80,7 +80,7 @@ Modify these files:
 
 - `plugins/turbo-mode/ticket/tests/support/builders.py`
   - Owns test ticket fixtures.
-  - Add a `blocked_on` fixture parameter so blocked tests are explicit and readable.
+  - Add a `blocked_on` fixture parameter so blocked tests are explicit and readable, and default normal active fixtures to `open` instead of `in_progress`.
 
 - `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
   - Owns plan/preflight/execute policy and direct write behavior.
@@ -94,31 +94,47 @@ Modify these files:
   - Owns shared read-only policy evaluator expectations.
   - Add policy-data coverage for `idea`, `blocked`, and invalid legacy `in_progress`.
 
+- `plugins/turbo-mode/ticket/tests/test_parse.py`
+  - Owns parse-level accepted target statuses.
+  - Replace old status acceptance with `idea/open/blocked/done/wontfix` and reject `in_progress` as a target status.
+
+- `plugins/turbo-mode/ticket/tests/test_validate.py`
+  - Owns writable-field validation coverage.
+  - Replace old status validation with `idea/open/blocked/done/wontfix` and make `in_progress` invalid.
+
+- `plugins/turbo-mode/ticket/tests/test_triage.py`
+  - Owns board counts and status grouping expectations.
+  - Replace active `in_progress` expectations with `open` or `blocked` according to fixture intent.
+
+- `plugins/turbo-mode/ticket/tests/test_integration.py`
+  - Owns end-to-end direct Ticket flows.
+  - Replace `open -> in_progress -> done` flows with valid `open`, `open -> blocked`, `blocked -> open`, and close flows.
+
+- `plugins/turbo-mode/ticket/tests/test_entrypoints.py`
+  - Owns command-entry status payload examples.
+  - Replace normal `in_progress` writes with valid `blocked` writes that include blocker shape, or with `open` where no blocker exists.
+
+- `plugins/turbo-mode/ticket/tests/test_ux.py`
+  - Owns user-facing direct-read/write messages.
+  - Replace normal `in_progress` fixtures with `open` or mechanically valid `blocked` fixtures.
+
+- `plugins/turbo-mode/ticket/tests/test_blocker_resolution.py`
+  - Owns blocker dependency read behavior.
+  - Use `blocked` status for blocked-dependency fixtures and include visible blocker shape when target validation is in play.
+
+Deferred candidate-contract migration surfaces, not modified in this plan:
+
 - `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py`
-  - Owns candidate dataclasses, fanout policy, runtime decision selection, and candidate-to-engine dispatch.
-  - Add explicit candidate target shape and reject old action aliases as normal candidate actions.
-
 - `plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py`
-  - Owns structured candidate extraction from turn context.
-  - Parse only the new explicit candidate shape for `candidate_mutations`.
-
 - `plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py`
-  - Owns deterministic mutation identity input.
-  - Include `target` and `evidence_summary` in the mutation fingerprint.
-
+- `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`
 - `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py`
-  - Owns runtime decision and mapping tests.
-  - Update candidate fixtures to use explicit targets and assert closure failures.
-
 - `plugins/turbo-mode/ticket/tests/test_mutation_identity.py`
-  - Owns identity payload regression tests.
-  - Add target/evidence-summary identity binding.
-
 - `plugins/turbo-mode/ticket/tests/test_engine_gateway.py`
-  - Owns gateway validation against runtime decisions.
-  - Update candidate construction and gateway mutation fields to the explicit candidate shape.
+- `plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py`
+- `plugins/turbo-mode/ticket/tests/test_candidate_discovery.py`
 
-Do not create new source modules in this slice. The existing files already define the ownership boundaries, and a new abstraction would mostly hide contract changes that should remain visible at these boundaries.
+Do not create new source modules in this slice. The existing files already define the ownership boundaries, and a new abstraction would hide status-shape changes that should remain visible at the schema, engine, and test boundaries.
 
 ## Task 0: Preflight And Authority Check
 
@@ -140,8 +156,7 @@ git rev-parse --short HEAD
 Expected:
 
 ```text
-## chore/ticket-candidate-contract-control-doc
-06a0a9ed
+`git status --short --branch` prints `## chore/ticket-candidate-contract-control-doc` with no dirty file lines, and `git rev-parse --short HEAD` prints the current short commit. Record the commit in closeout instead of hard-coding an older planning-turn SHA.
 ```
 
 If `git status --short --branch` shows unrelated dirty files, inspect before editing and do not stage them.
@@ -933,7 +948,8 @@ In `class TestCloseAndReopen`, change `in_progress` fixtures to `open` or `block
 
         assert response.state == "invalid_transition"
         assert response.error_code == "invalid_transition"
-        assert "idea" in response.message
+        assert response.data["current_status"] == "idea"
+        assert response.data["valid_recovery_statuses"] == ["open"]
 
     def test_close_blocked_ticket_clears_live_blocker_shape(self, tmp_tickets: Path) -> None:
         ticket_path = make_ticket(
@@ -1274,569 +1290,118 @@ Expected:
 Commit succeeds with lifecycle policy and tests staged.
 ```
 
-## Task 4: Explicit Candidate Target Shape
+## Task 4: Status Drift Scan And Source-Slice Verification
 
 **Files:**
-- Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py`
-- Modify: `plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py`
-- Modify: `plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py`
-- Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`
-- Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py`
-- Modify: `plugins/turbo-mode/ticket/tests/test_mutation_identity.py`
-- Modify: `plugins/turbo-mode/ticket/tests/test_engine_gateway.py`
-- Modify: `plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py`
+- Modify as status-only drift requires: `plugins/turbo-mode/ticket/tests/test_parse.py`
+- Modify as status-only drift requires: `plugins/turbo-mode/ticket/tests/test_validate.py`
+- Modify as status-only drift requires: `plugins/turbo-mode/ticket/tests/test_triage.py`
+- Modify as status-only drift requires: `plugins/turbo-mode/ticket/tests/test_integration.py`
+- Modify as status-only drift requires: `plugins/turbo-mode/ticket/tests/test_entrypoints.py`
+- Modify as status-only drift requires: `plugins/turbo-mode/ticket/tests/test_ux.py`
+- Modify as status-only drift requires: `plugins/turbo-mode/ticket/tests/test_blocker_resolution.py`
+- Modify as status-only drift requires: `plugins/turbo-mode/ticket/tests/support/builders.py`
+- Read-only in this plan: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py`
+- Read-only in this plan: `plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py`
+- Read-only in this plan: `plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py`
+- Read-only in this plan: `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`
 
-- [ ] **Step 1: Add failing runtime tests for candidate target closure**
-
-In `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py`, change `_candidate()` to accept explicit target defaults:
-
-```python
-def _candidate(
-    action: str,
-    *,
-    ticket_id: str = "T-20260527-01",
-    target: dict[str, tuple[str, ...]] | None = None,
-    proposed_change: dict[str, object] | None = None,
-    evidence_summary: str = "Current turn supports this ticket mutation.",
-    evidence: tuple[EvidenceLink, ...] | None = None,
-    conflict_reason: str | None = None,
-) -> CandidateMutation:
-    change = {"priority": "low"} if proposed_change is None else proposed_change
-    target_shape = target or {"fields": tuple(change), "sections": ()}
-    return CandidateMutation(
-        ticket_id=ticket_id,
-        action=action,
-        target=target_shape,
-        proposed_change=change,
-        expected_ticket_fingerprint=None,
-        evidence_summary=evidence_summary,
-        evidence=evidence or _evidence("current_thread_reason"),
-        conflict_reason=conflict_reason,
-    )
-```
-
-Then add:
-
-```python
-def test_candidate_requires_target_keys_to_match_proposed_change() -> None:
-    candidate = _candidate(
-        "update",
-        target={"fields": ("priority",), "sections": ("Next Action",)},
-        proposed_change={"priority": "low"},
-    )
-
-    dispatch = map_candidate_to_engine(candidate)
-
-    assert dispatch.state == "policy_blocked"
-    assert dispatch.reason == "candidate_shape_invalid"
-
-
-def test_candidate_rejects_unknown_target_field() -> None:
-    candidate = _candidate(
-        "update",
-        target={"fields": ("candidate_id",), "sections": ()},
-        proposed_change={"candidate_id": "bad"},
-    )
-
-    dispatch = map_candidate_to_engine(candidate)
-
-    assert dispatch.state == "policy_blocked"
-    assert dispatch.reason == "candidate_shape_invalid"
-
-
-def test_candidate_allows_optional_section_removal_with_null() -> None:
-    candidate = _candidate(
-        "update",
-        target={"fields": ("status", "blocked_by"), "sections": ("Blocked On", "Next Action")},
-        proposed_change={
-            "status": "open",
-            "blocked_by": [],
-            "Blocked On": None,
-            "Next Action": "Continue the implementation.",
-        },
-    )
-
-    dispatch = map_candidate_to_engine(candidate)
-
-    assert dispatch.state == "ok"
-    assert dispatch.action == EngineAction.UPDATE
-    assert dispatch.fields == {
-        "status": "open",
-        "blocked_by": [],
-        "blocked_on": None,
-        "next_action": "Continue the implementation.",
-    }
-```
-
-- [ ] **Step 2: Add failing identity tests for target and evidence summary**
-
-In `plugins/turbo-mode/ticket/tests/test_mutation_identity.py`, update `_identity()` to pass target and evidence summary:
-
-```python
-def _identity(
-    *,
-    target_fingerprint: str | None = "ticket-state-a",
-    target: dict[str, tuple[str, ...]] | None = None,
-    evidence_summary: str = "Current turn supports this ticket mutation.",
-):
-    return make_candidate_mutation_identity(
-        thread_id="thread-1",
-        turn_id="turn-1",
-        ticket_id="T-20260527-01",
-        action="update",
-        target=target or {"fields": ("priority",), "sections": ()},
-        proposed_change={"priority": "high"},
-        expected_ticket_fingerprint=target_fingerprint,
-        evidence_summary=evidence_summary,
-        evidence=(
-            {"kind": "current_thread_reason", "ref": "test", "freshness": "fresh"},
-        ),
-    )
-```
-
-Replace `test_candidate_payload_excludes_branch_scope()` with:
-
-```python
-def test_candidate_payload_includes_target_and_evidence_summary() -> None:
-    payload = candidate_mutation_payload(
-        ticket_id="T-20260527-01",
-        action="update",
-        target={"fields": ("priority",), "sections": ()},
-        proposed_change={"priority": "high"},
-        expected_ticket_fingerprint="ticket-state-a",
-        evidence_summary="Current turn supports this ticket mutation.",
-    )
-
-    assert payload == {
-        "ticket_id": "T-20260527-01",
-        "action": "update",
-        "target": {"fields": ["priority"], "sections": []},
-        "proposed_change": {"priority": "high"},
-        "expected_ticket_fingerprint": "ticket-state-a",
-        "evidence_summary": "Current turn supports this ticket mutation.",
-    }
-
-
-def test_target_shape_binds_mutation_identity() -> None:
-    first = _identity(target={"fields": ("priority",), "sections": ()})
-    second = _identity(target={"fields": (), "sections": ("Next Action",)})
-
-    assert first.mutation_id != second.mutation_id
-    assert first.mutation_fingerprint != second.mutation_fingerprint
-
-
-def test_evidence_summary_binds_mutation_identity() -> None:
-    first = _identity(evidence_summary="Priority changed because the user asked.")
-    second = _identity(evidence_summary="Priority changed because tests failed.")
-
-    assert first.mutation_id != second.mutation_id
-    assert first.mutation_fingerprint != second.mutation_fingerprint
-```
-
-- [ ] **Step 3: Run autonomy and identity tests and verify failure**
+- [ ] **Step 1: Scan for stale normal target-status vocabulary**
 
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py -q
+rg -n "\bin_progress\b" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests plugins/turbo-mode/ticket/references plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/CHANGELOG.md
 ```
 
 Expected:
 
 ```text
-Fails because CandidateMutation has no target, expected_ticket_fingerprint, or evidence_summary fields, and identity helpers do not accept target.
+Before this task, the command may find current-facing target status drift in schema, validation, direct engine tests, integration tests, entrypoint examples, UX tests, blocker tests, triage tests, and fixture builders. It may also find unrelated historical strings such as activation_in_progress in runtime-readiness proof tests. Only current-facing target-ticket status drift is patched in this plan.
 ```
 
-- [ ] **Step 4: Add CandidateTarget and candidate-shape validation**
+- [ ] **Step 2: Patch status-only tests and fixtures**
 
-In `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py`, import target schema constants:
+Apply these status-only replacements. Do not edit candidate-contract tests or runtime/gateway/discovery code in this plan.
 
-```python
-from scripts.ticket_target_schema import TARGET_FRONTMATTER_FIELDS, validate_target_section_name
+```text
+plugins/turbo-mode/ticket/tests/test_parse.py:
+  Replace accepted status loop ("open", "in_progress", "done", "wontfix") with ("idea", "open", "blocked", "done", "wontfix").
+  Add or keep a rejection assertion for "in_progress" as an invalid target status.
+
+plugins/turbo-mode/ticket/tests/test_validate.py:
+  Replace accepted status loop ("open", "in_progress", "done", "wontfix") with ("idea", "open", "blocked", "done", "wontfix").
+  Add or keep a rejection assertion that validate_fields({"status": "in_progress"}) reports an invalid status.
+
+plugins/turbo-mode/ticket/tests/test_triage.py:
+  Replace active in_progress fixtures with open when the ticket is actionable.
+  Replace active in_progress fixtures with blocked plus blocked_by/Blocked On when the test is about stuck work.
+  Replace count assertions for counts["in_progress"] with counts["blocked"] or counts["open"] to match the rewritten fixture.
+
+plugins/turbo-mode/ticket/tests/test_integration.py:
+  Replace "Create -> update to in_progress -> close" with "Create -> update to blocked -> unblock or close".
+  For open -> blocked writes, include fields {"status": "blocked", "blocked_on": "Waiting for upstream work."} and blocked_by when the test needs ticket-ID dependency data.
+  For unblock writes, include fields {"status": "open", "blocked_by": [], "blocked_on": None, "next_action": "Continue."}.
+
+plugins/turbo-mode/ticket/tests/test_entrypoints.py:
+  Replace normal JSON payloads that set {"status": "in_progress"} with {"status": "blocked", "blocked_on": "Waiting for upstream work."} when they test blocked flow, or {"status": "open"} when they test generic status update plumbing.
+
+plugins/turbo-mode/ticket/tests/test_ux.py:
+  Replace user-visible in_progress fixtures with open for normal active tickets.
+  Use blocked plus visible Blocked On only when the expected UX text is about blocker state.
+
+plugins/turbo-mode/ticket/tests/test_blocker_resolution.py:
+  Replace FakeTicket("...", "in_progress") and target fixtures that model blocked work with status "blocked".
+  Ensure any real target file with status "blocked" has blocked_by values that are target ticket IDs and a non-empty Blocked On section.
+
+plugins/turbo-mode/ticket/tests/support/builders.py:
+  Change default active example text from status: in_progress to status: open.
+  Add a blocked_on parameter when not already added by Task 2, and render ## Blocked On only when blocked_on is not None.
 ```
 
-Add:
-
-```python
-_CANDIDATE_ACTIONS = frozenset({"create", "update", "done", "wontfix", "reopen", "correct"})
-_CANDIDATE_TARGET_FIELDS = frozenset(TARGET_FRONTMATTER_FIELDS) - {"id"}
-_SECTION_FIELD_TO_ENGINE_FIELD = {
-    "Problem": "problem",
-    "Next Action": "next_action",
-    "Blocked On": "blocked_on",
-    "Acceptance Criteria": "acceptance_criteria",
-}
-
-
-@dataclass(frozen=True, slots=True)
-class CandidateTarget:
-    """User-visible target fields and sections named by a candidate."""
-
-    fields: tuple[str, ...]
-    sections: tuple[str, ...]
-
-    @classmethod
-    def from_mapping(cls, value: Mapping[str, object]) -> CandidateTarget:
-        fields = value.get("fields")
-        sections = value.get("sections")
-        if set(value) != {"fields", "sections"}:
-            raise ValueError("target must have exactly fields and sections")
-        if not isinstance(fields, (list, tuple)) or not all(isinstance(item, str) for item in fields):
-            raise ValueError("target.fields must be a list of strings")
-        if not isinstance(sections, (list, tuple)) or not all(isinstance(item, str) for item in sections):
-            raise ValueError("target.sections must be a list of strings")
-        return cls(tuple(fields), tuple(sections))
-
-    def as_payload(self) -> dict[str, list[str]]:
-        return {"fields": list(self.fields), "sections": list(self.sections)}
-
-
-def _candidate_shape_errors(candidate: CandidateMutation) -> list[str]:
-    errors: list[str] = []
-    if candidate.action not in _CANDIDATE_ACTIONS:
-        errors.append(f"unsupported action: {candidate.action}")
-    for field in candidate.target.fields:
-        if field not in _CANDIDATE_TARGET_FIELDS:
-            errors.append(f"unknown target field: {field}")
-    for section in candidate.target.sections:
-        if not validate_target_section_name(section):
-            errors.append(f"invalid target section: {section}")
-    expected_keys = set(candidate.target.fields) | set(candidate.target.sections)
-    actual_keys = set(candidate.proposed_change)
-    if expected_keys != actual_keys:
-        errors.append(
-            f"proposed_change keys must match target keys: expected {sorted(expected_keys)!r}, got {sorted(actual_keys)!r}"
-        )
-    if "\n" in candidate.evidence_summary or not candidate.evidence_summary.strip():
-        errors.append("evidence_summary must be one non-empty line")
-    if candidate.action == "create":
-        if candidate.ticket_id is not None:
-            errors.append("create ticket_id must be null")
-        if candidate.expected_ticket_fingerprint is not None:
-            errors.append("create expected_ticket_fingerprint must be null")
-    else:
-        if not candidate.ticket_id:
-            errors.append(f"{candidate.action} ticket_id is required")
-        if not candidate.expected_ticket_fingerprint:
-            errors.append(f"{candidate.action} expected_ticket_fingerprint is required")
-    return errors
-```
-
-Then replace `CandidateMutation` with:
-
-```python
-@dataclass(frozen=True, slots=True)
-class CandidateMutation:
-    """A proposed Ticket mutation candidate."""
-
-    ticket_id: str | None
-    action: str
-    target: CandidateTarget | Mapping[str, object]
-    proposed_change: Mapping[str, object]
-    expected_ticket_fingerprint: str | None
-    evidence_summary: str
-    evidence: tuple[EvidenceLink, ...]
-    conflict_reason: str | None = None
-
-    def __post_init__(self) -> None:
-        if isinstance(self.target, Mapping):
-            object.__setattr__(self, "target", CandidateTarget.from_mapping(self.target))
-```
-
-Do not raise in `__post_init__`; runtime policy should return a blocked dispatch/decision rather than making candidate construction a crash path.
-
-- [ ] **Step 5: Map target sections to engine fields**
-
-In `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py`, add:
-
-```python
-def _engine_fields_from_candidate(candidate: CandidateMutation) -> dict[str, object]:
-    fields: dict[str, object] = {}
-    for key, value in candidate.proposed_change.items():
-        if key in candidate.target.fields:
-            fields[key] = value
-            continue
-        if key in candidate.target.sections:
-            engine_key = _SECTION_FIELD_TO_ENGINE_FIELD.get(key)
-            if engine_key is None:
-                fields[key] = value
-            else:
-                fields[engine_key] = value
-    return fields
-```
-
-At the top of `map_candidate_to_engine()`, validate candidate shape:
-
-```python
-    shape_errors = _candidate_shape_errors(candidate)
-    if shape_errors:
-        return EngineDispatch("policy_blocked", None, {}, "candidate_shape_invalid")
-    fields = _engine_fields_from_candidate(candidate)
-```
-
-Replace the old `fields = dict(candidate.proposed_change)` line with the new helper.
-
-Change the `done` and `wontfix` mapping to use the control-doc shape:
-
-```python
-    if candidate.action == "done":
-        if fields.get("status") != "done":
-            return EngineDispatch("policy_blocked", None, {}, "close_fields_not_allowlisted")
-        return EngineDispatch("ok", EngineAction.CLOSE, {"resolution": "done"})
-    if candidate.action == "wontfix":
-        if fields.get("status") != "wontfix":
-            return EngineDispatch("policy_blocked", None, {}, "close_fields_not_allowlisted")
-        return EngineDispatch("ok", EngineAction.CLOSE, {"resolution": "wontfix"})
-```
-
-Change correction action spelling from `correction` to `correct`:
-
-```python
-    if candidate.action == "correct" and fields.get("status") in {"done", "wontfix"}:
-        return EngineDispatch("ok", EngineAction.CLOSE, {"resolution": fields["status"]})
-```
-
-- [ ] **Step 6: Bind target and evidence summary into mutation identity**
-
-In `plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py`, change signatures:
-
-```python
-def _target_payload(target: Mapping[str, object]) -> dict[str, list[str]]:
-    fields = target.get("fields", ())
-    sections = target.get("sections", ())
-    return {
-        "fields": list(fields) if isinstance(fields, (list, tuple)) else [],
-        "sections": list(sections) if isinstance(sections, (list, tuple)) else [],
-    }
-
-
-def candidate_mutation_payload(
-    *,
-    ticket_id: str | None,
-    action: str,
-    target: Mapping[str, object],
-    proposed_change: Mapping[str, object],
-    expected_ticket_fingerprint: str | None,
-    evidence_summary: str,
-) -> dict[str, object]:
-    """Return the canonical payload used for mutation identity."""
-    return {
-        "ticket_id": ticket_id,
-        "action": action,
-        "target": _target_payload(target),
-        "proposed_change": dict(proposed_change),
-        "expected_ticket_fingerprint": expected_ticket_fingerprint,
-        "evidence_summary": evidence_summary,
-    }
-```
-
-Then update `make_candidate_mutation_identity()` to accept `target`, `expected_ticket_fingerprint`, and `evidence_summary`, and pass those into `candidate_mutation_payload()`.
-
-In `ticket_autonomy_runtime._identity_for_candidate()`, call:
-
-```python
-    return make_candidate_mutation_identity(
-        thread_id=thread_id,
-        turn_id=turn_id,
-        action=candidate.action,
-        ticket_id=candidate.ticket_id,
-        target=candidate.target.as_payload(),
-        proposed_change=candidate.proposed_change,
-        expected_ticket_fingerprint=target_fingerprint,
-        evidence_summary=candidate.evidence_summary,
-        evidence=_evidence_payload(candidate),
-    )
-```
-
-- [ ] **Step 7: Parse explicit candidate shape in discovery**
-
-In `plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py`, change `_candidate_from_mapping()` so it requires the new top-level keys:
-
-```python
-def _candidate_from_mapping(item: Mapping[str, object]) -> CandidateMutation | None:
-    required_keys = {
-        "action",
-        "ticket_id",
-        "target",
-        "proposed_change",
-        "expected_ticket_fingerprint",
-        "evidence_summary",
-    }
-    if set(item) - (required_keys | {"evidence", "conflict_reason"}):
-        return None
-    if not required_keys.issubset(item):
-        return None
-    ticket_id = item.get("ticket_id")
-    action = item.get("action")
-    target = item.get("target")
-    proposed_change = item.get("proposed_change")
-    expected_ticket_fingerprint = item.get("expected_ticket_fingerprint")
-    evidence_summary = item.get("evidence_summary")
-    conflict_reason = item.get("conflict_reason")
-    if ticket_id is not None and not isinstance(ticket_id, str):
-        return None
-    if expected_ticket_fingerprint is not None and not isinstance(expected_ticket_fingerprint, str):
-        return None
-    if not isinstance(action, str) or not action:
-        return None
-    if not isinstance(target, Mapping):
-        return None
-    if not isinstance(proposed_change, Mapping):
-        return None
-    if not isinstance(evidence_summary, str) or not evidence_summary.strip():
-        return None
-    evidence = _evidence_from_mapping(item, default_ref=evidence_summary)
-    return CandidateMutation(
-        ticket_id=ticket_id,
-        action=action,
-        target=target,
-        proposed_change=dict(proposed_change),
-        expected_ticket_fingerprint=expected_ticket_fingerprint,
-        evidence_summary=evidence_summary,
-        evidence=evidence,
-        conflict_reason=conflict_reason if isinstance(conflict_reason, str) else None,
-    )
-```
-
-Remove `_normalize_candidate_change()`. Candidate callers must supply `status` for terminal writes rather than relying on `resolution` adaptation.
-
-- [ ] **Step 8: Update gateway and tests to pass explicit candidate shape**
-
-In `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`, update `build_engine_dispatch()`:
-
-```python
-    target = {
-        "fields": tuple(dict(mutation.fields)),
-        "sections": (),
-    }
-    candidate = CandidateMutation(
-        ticket_id=mutation.ticket_id,
-        action=mutation.action,
-        target=target,
-        proposed_change=dict(mutation.fields),
-        expected_ticket_fingerprint=mutation.target_fingerprint,
-        evidence_summary="Gateway mutation dispatch.",
-        evidence=(),
-    )
-```
-
-In tests, every `CandidateMutation(...)` construction must include these fields:
-
-```python
-target={"fields": tuple(fields), "sections": ()},
-expected_ticket_fingerprint=target_fp,
-evidence_summary="Current turn supports this ticket mutation.",
-```
-
-For create candidates, pass `expected_ticket_fingerprint=None`.
-
-For unblocking candidates, use section names:
-
-```python
-target={"fields": ("status", "blocked_by"), "sections": ("Blocked On", "Next Action")},
-proposed_change={
-    "status": "open",
-    "blocked_by": [],
-    "Blocked On": None,
-    "Next Action": "Continue the implementation.",
-},
-```
-
-- [ ] **Step 9: Run autonomy, identity, gateway, and correction tests**
+- [ ] **Step 3: Re-run the stale status scan**
 
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py -q
+rg -n "\bin_progress\b" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests plugins/turbo-mode/ticket/references plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/CHANGELOG.md
 ```
 
 Expected:
 
 ```text
-All selected tests pass with explicit candidate target shape.
+No remaining hit represents a current-facing target status, normal mutation fixture, or ordinary Ticket board status. Allowed remaining hits are explicitly historical, diagnostic, or unrelated strings such as activation_in_progress. If a hit is ambiguous, either patch it in this task or add a short test/doc comment explaining why it is diagnostic rather than a valid target status.
 ```
 
-- [ ] **Step 10: Commit Task 4**
+- [ ] **Step 4: Confirm candidate-contract migration stayed deferred**
 
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py
-git commit -m "feat(ticket): require explicit candidate target shape"
+rg -n "CandidateMutation|evaluate_autonomy_intent|build_engine_dispatch|discover_candidate_mutations|make_candidate_mutation_identity|reopen_reason|correction\b|blocker_edit|reprioritize|stale_cleanup|refine" plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_candidate_discovery.py
 ```
 
 Expected:
 
 ```text
-Commit succeeds with candidate runtime and tests staged.
+The command still finds old candidate-contract vocabulary. That is expected in this plan. Do not patch those hits here; record them in closeout as the required next source slice.
 ```
 
-## Task 5: Static Drift Scans And Focused Verification
-
-**Files:**
-- Possibly modify: `plugins/turbo-mode/ticket/tests/test_static_autonomy_boundaries.py`
-- Possibly modify: `plugins/turbo-mode/ticket/CHANGELOG.md`
-- Possibly modify: `plugins/turbo-mode/ticket/references/ticket-contract.md`
-
-- [ ] **Step 1: Scan for stale status and action vocabulary**
+- [ ] **Step 5: Run focused source tests**
 
 Run:
 
 ```bash
-rg -n "in_progress|blocker_edit|reprioritize|stale_cleanup|correction\\b|reopen_reason|resolution" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests plugins/turbo-mode/ticket/references plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/CHANGELOG.md
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_target_schema.py plugins/turbo-mode/ticket/tests/test_parse.py plugins/turbo-mode/ticket/tests/test_validate.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_triage.py plugins/turbo-mode/ticket/tests/test_integration.py plugins/turbo-mode/ticket/tests/test_entrypoints.py plugins/turbo-mode/ticket/tests/test_ux.py plugins/turbo-mode/ticket/tests/test_blocker_resolution.py -q
 ```
 
 Expected:
 
 ```text
-Remaining hits are either historical legacy fixtures, diagnostic repair references, or close-engine translation details. Any hit in current candidate contract, target schema, normal runtime tests, or user-facing contract prose is source drift and must be patched in this task.
+All selected status-shape tests pass.
 ```
 
-- [ ] **Step 2: Add or adjust static drift tests**
-
-If stale vocabulary survives in current-facing docs or runtime surfaces, add a focused static assertion to `plugins/turbo-mode/ticket/tests/test_static_autonomy_boundaries.py`:
-
-```python
-def test_current_candidate_contract_uses_target_shape_vocabulary() -> None:
-    for path in CURRENT_FACING_DOCS:
-        target = _target_sections(_read(path))
-        normalized = _normalize(target).lower()
-        assert "proposed_change" in normalized
-        assert "expected_ticket_fingerprint" in normalized
-        assert "evidence_summary" in normalized
-        assert "blocker_edit" not in normalized
-        assert "reprioritize" not in normalized
-        assert "stale_cleanup" not in normalized
-        assert "reopen_reason" not in normalized
-```
-
-Run:
-
-```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_static_autonomy_boundaries.py -q
-```
-
-Expected:
-
-```text
-The static boundary tests pass, or fail only on current-facing stale text that this task then patches.
-```
-
-- [ ] **Step 3: Run focused source tests**
-
-Run:
-
-```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_target_schema.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_static_autonomy_boundaries.py -q
-```
-
-Expected:
-
-```text
-All selected tests pass.
-```
-
-- [ ] **Step 4: Run full Ticket suite**
+- [ ] **Step 6: Run full Ticket suite**
 
 Run:
 
@@ -1850,12 +1415,13 @@ Expected:
 Full Ticket test suite passes. Record the exact pass count and warning count in closeout.
 ```
 
-- [ ] **Step 5: Run ruff and diff check**
+- [ ] **Step 7: Run ruff and diff check**
 
 Run:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket
+
 git diff --check
 ```
 
@@ -1865,35 +1431,47 @@ Expected:
 ruff reports no issues, and git diff --check reports no whitespace errors.
 ```
 
-- [ ] **Step 6: Inspect final diff before closeout**
+- [ ] **Step 8: Inspect final diff before closeout**
 
 Run:
 
 ```bash
 git diff --stat HEAD
-git diff -- plugins/turbo-mode/ticket/scripts/ticket_target_schema.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py
+git diff -- plugins/turbo-mode/ticket/scripts/ticket_target_schema.py plugins/turbo-mode/ticket/scripts/ticket_validate.py plugins/turbo-mode/ticket/scripts/ticket_render.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/tests
 ```
 
 Expected:
 
 ```text
-Diff shows only source/test/doc updates for this slice. It does not touch installed cache, local runtime state, or unrelated handoff artifacts.
+Diff shows only source/test updates for target status and blocked-ticket shape. It does not touch autonomous candidate runtime, installed cache, local runtime state, marketplace metadata, or unrelated handoff artifacts.
 ```
 
-- [ ] **Step 7: Commit final drift/doc cleanup if needed**
+- [ ] **Step 9: Commit Task 4**
 
-If Task 5 changed only docs/static drift tests, commit it separately:
+Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/tests/test_static_autonomy_boundaries.py plugins/turbo-mode/ticket/CHANGELOG.md plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/README.md
-git commit -m "docs(ticket): align candidate status source drift"
+git add plugins/turbo-mode/ticket/scripts/ticket_target_schema.py plugins/turbo-mode/ticket/scripts/ticket_validate.py plugins/turbo-mode/ticket/scripts/ticket_render.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/tests
+git commit -m "test(ticket): align target status source drift"
 ```
 
 Expected:
 
 ```text
-Commit succeeds only if Task 5 made additional tracked changes.
+Commit succeeds with only target status and blocked-ticket shape source/test files staged. Candidate-contract runtime files are not staged.
 ```
+
+## Deferred Follow-Up: Candidate Contract Migration
+
+The next plan must migrate the autonomous candidate contract as a whole-surface API change. It must cover at least these surfaces in one coherent source/test slice:
+
+- `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py`: `CandidateMutation`, `CandidateTarget`, `_candidate_shape_errors()`, `evaluate_autonomy_intent()`, terminal-action allowlisting, `correct`, `reopen`, fanout, evidence floor, and identity calls.
+- `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`: `GatewayMutation` field/section split or an equivalent dispatch boundary, `build_engine_dispatch()`, `_decision_error()`, `_change_history_reason()`, mutation identity recomputation, and gateway application tests.
+- `plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py`: `_candidate_from_mapping()`, `_possible_candidate_from_mapping()`, `_append_path_candidates()`, exact top-level candidate shape, and `test_candidate_discovery.py`.
+- `plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py`: payload fields `target`, `proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`.
+- `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py`, `test_engine_gateway.py`, `test_autonomy_corrections.py`, `test_mutation_identity.py`, `test_candidate_discovery.py`, and at least one integration path through `evaluate_autonomy_intent()` plus `apply_autonomous_mutation()`.
+
+The follow-up plan must explicitly resolve `reopen`: either migrate it to `evidence_summary` and `status`-targeted shape per the control doc, including `reopen -> blocked`, or state a temporary source-level deferral with failing/xfail-free tests that keep the old behavior out of normal candidate migration claims.
 
 ## Acceptance Criteria
 
@@ -1911,10 +1489,6 @@ Commit succeeds only if Task 5 made additional tracked changes.
 - `blocked` can move to `open`, `done`, or `wontfix`.
 - `done` and `wontfix` remain terminal except existing `reopen -> open`.
 - Moving from `blocked` to `open`, `done`, or `wontfix` clears non-empty `blocked_by` and removes `Blocked On`.
-- Autonomous candidates validate explicit `target.fields` and `target.sections`.
-- `proposed_change` keys exactly equal the union of target fields and sections.
-- Optional section removal is represented by a targeted section with `None`.
-- Mutation identity includes `target`, `proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`.
 - Focused tests, full Ticket suite, ruff, and `git diff --check` pass before any completion claim.
 
 ## Verification Commands
@@ -1922,7 +1496,7 @@ Commit succeeds only if Task 5 made additional tracked changes.
 Run these before closeout:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_target_schema.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_static_autonomy_boundaries.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_target_schema.py plugins/turbo-mode/ticket/tests/test_parse.py plugins/turbo-mode/ticket/tests/test_validate.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_triage.py plugins/turbo-mode/ticket/tests/test_integration.py plugins/turbo-mode/ticket/tests/test_entrypoints.py plugins/turbo-mode/ticket/tests/test_ux.py plugins/turbo-mode/ticket/tests/test_blocker_resolution.py -q
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run --directory plugins/turbo-mode/ticket pytest -q
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run ruff check plugins/turbo-mode/ticket
 git diff --check
@@ -1937,9 +1511,10 @@ Spec coverage:
 - Target status model: covered by Tasks 1, 2, and 3.
 - Visible `Blocked On` truth and optional `blocked_by`: covered by Tasks 1, 2, and 3.
 - Terminal normal create rejection: covered by Task 2.
-- Strict nested candidate closure: covered by Task 4.
+- Status-only source/test drift: covered by Task 4.
+- Strict nested candidate closure: intentionally excluded because it is a shared API migration across evaluator, gateway, discovery, identity, correction/reopen semantics, and integration tests.
 - Operation-log recovery facts: intentionally excluded because they require canonical post-write fingerprint design.
-- Reconciliation caps and overflow: intentionally excluded because they are wrapper behavior, not single-candidate schema behavior.
+- Reconciliation caps and overflow: intentionally excluded because they are wrapper behavior, not direct target status or blocked-ticket shape behavior.
 
 Placeholder scan:
 
@@ -1948,9 +1523,9 @@ Placeholder scan:
 
 Type consistency:
 
-- Candidate target shape uses `CandidateTarget(fields: tuple[str, ...], sections: tuple[str, ...])`.
-- External candidate mapping accepts `target={"fields": (...), "sections": (...)}` and normalizes through `CandidateTarget.from_mapping()`.
-- Mutation identity uses `expected_ticket_fingerprint`, matching the control doc. Existing internal variable names such as `target_fingerprint` may remain local only where they describe the current ticket fingerprint, but identity payload output must use `expected_ticket_fingerprint`.
+- Target status vocabulary is `idea/open/blocked/done/wontfix` across schema, writable-field validation, direct engine tests, and status-only fixtures.
+- `blocked_on` is a write-field adapter for the visible `Blocked On` section. `Blocked On` remains the target-ticket section heading in file content.
+- Candidate target shape, mutation identity, `correct`, and `reopen` are deferred. This plan must not claim `CandidateTarget`, `expected_ticket_fingerprint`, or `evidence_summary` runtime support.
 
 ## Execution Handoff
 
