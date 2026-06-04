@@ -69,6 +69,7 @@ This document controls:
 - the runtime-first candidate mutation contract;
 - the target result envelope;
 - the minimal private operation-log facts;
+- the board reconciliation wrapper;
 - the hard write envelope for `agent_primary`;
 - the cutover inventory and completion gate;
 - preview as a diagnostic affordance;
@@ -127,18 +128,22 @@ Action-specific rules:
 
 - `create`: `ticket_id` and `expected_ticket_fingerprint` are `null`.
   `proposed_change` supplies target ticket content such as `title`, `priority`,
-  `tags`, `related_paths`, `blocked_by`, `Problem`, `Next Action`, and optional
-  prose sections. Ticket allocates `id`, initializes `status`, and appends the
-  first `Change History` entry.
+  `status`, `tags`, `related_paths`, `blocked_by`, `Problem`, `Next Action`,
+  and optional prose sections. New ticket status is `open` by default and may be
+  `idea` when Codex chooses a visible parking status for a real but not-yet
+  actionable follow-up. Ticket allocates `id`, validates the status, and appends
+  the first `Change History` entry.
 - `update`: `ticket_id` and `expected_ticket_fingerprint` are present.
   `proposed_change` may touch only the named target fields or sections. It may
   set non-terminal `status` values only when the deterministic transition policy
-  allows it.
+  allows it. `idea` is pre-lifecycle: it may move to `open` when the user asks
+  or when later work makes the idea concrete and actionable. After promotion to
+  `open`, the ticket follows the normal lifecycle.
 - `done`: `target.fields` is `["status"]`, `proposed_change.status` is `done`,
-  and deterministic close-readiness checks pass.
+  the target ticket is `open`, and deterministic close-readiness checks pass.
 - `wontfix`: `target.fields` is `["status"]`,
-  `proposed_change.status` is `wontfix`, and deterministic close-readiness
-  checks pass.
+  `proposed_change.status` is `wontfix`, the target ticket is `open`, and
+  deterministic close-readiness checks pass.
 - `reopen`: `target.fields` is `["status"]`, `proposed_change.status` is
   `open`, and deterministic reopen checks pass. The human reason belongs in
   `evidence_summary`, not in a separate `reopen_reason` field.
@@ -177,15 +182,15 @@ stage-pipeline output.
 
 `needs_discussion` is reserved for mechanical or policy boundaries where Ticket
 understands the candidate but cannot apply it automatically without an explicit
-human choice. Examples include candidates above the per-turn cap, terminal
-lifecycle batches without explicit linked-batch intent, operations outside the
-v1 write envelope, or missing target choices that Ticket cannot infer
-mechanically. `needs_discussion` is not a Codex confidence state, uncertainty
-score, semantic hesitation label, or substitute for judging whether the
-human-readable reason is strong enough. If Codex can make a bounded allowed
-write and state the reason honestly, it should emit a valid candidate; if it
-cannot formulate the target or reason honestly, Codex should discuss in ordinary
-chat instead of encoding uncertainty in Ticket state.
+human choice. Examples include ordinary candidates above the applicable per-turn
+cap, terminal lifecycle batches outside reconciliation without explicit
+linked-batch intent, operations outside the v1 write envelope, or missing target
+choices that Ticket cannot infer mechanically. `needs_discussion` is not a Codex
+confidence state, uncertainty score, semantic hesitation label, or substitute
+for judging whether the human-readable reason is strong enough. If Codex can
+make a bounded allowed write and state the reason honestly, it should emit a
+valid candidate; if it cannot formulate the target or reason honestly, Codex
+should discuss in ordinary chat instead of encoding uncertainty in Ticket state.
 
 ## Private Operation Log
 
@@ -229,6 +234,42 @@ Bounded correction detail expires after 14 days or the most recent 500 retained
 correction-ready events, whichever is smaller. Compaction may retain only
 lightweight facts: ticket ID, action, timestamp, reason, and correction target.
 
+## Board Reconciliation Wrapper
+
+`reconcile_board` is a wrapper operation for handoff, status, completion, and
+other claim points where Codex asks the user, future Codex, or the repository to
+trust current ticket state. It is not a seventh candidate action. It finds
+relevant tickets and emits ordinary `create`, `update`, `done`, `wontfix`,
+`reopen`, or `correct` candidates, each validated, applied, reported, and
+recovered independently.
+
+Reconciliation must actively look for relevant tickets instead of updating only
+the ticket Codex already has in mind. Relevant tickets include tickets matching
+the current user request, touched files, branch or worktree context, explicit
+ticket links, and any open ticket whose problem overlaps with what Codex learned
+during the turn.
+
+At reconciliation points, Codex should update every relevant ticket it can
+safely update and create missing tickets for every relevant follow-up it can
+honestly describe. New follow-ups may be created directly as `open` when they
+are actionable now or as `idea` when they are real enough to remember but not
+yet actionable. Low importance, speculative value, or "maybe later" uncertainty
+is not by itself a reason to drop a follow-up; Codex expresses that in visible
+ticket content, priority, tags, or `idea` status. Duplicates and malformed or
+unsupported ticket content remain blockers.
+
+`idea` is a visible parking status in the same ticket board, not a second board
+or private backlog. `idea` tickets are not expected to move unless the user asks
+or later work makes the idea concrete and actionable. Ideas only move
+`idea -> open`; they do not move directly to `done` or `wontfix`.
+
+Reconciliation is best-effort across the whole relevant set. If one relevant
+ticket is blocked by a concrete safety issue, Codex still updates the other
+relevant tickets and reports the blocked item in the final message or handoff.
+Incomplete ticket reconciliation qualifies claims about board freshness, but it
+does not automatically invalidate claims about the underlying work. Ticket must
+not persist reconciliation blockers as a separate workflow state.
+
 ## Agent-Primary Write Envelope
 
 `agent_primary` authorizes valid candidate writes after deterministic runtime
@@ -261,7 +302,10 @@ Per-turn limits:
 - default automatic writes are capped at five candidates per turn;
 - terminal lifecycle writes are capped at one per turn unless the user
   explicitly requested a linked batch;
-- candidates above the cap return `needs_discussion`;
+- `reconcile_board` at handoff, status, completion, or other claim points updates
+  every relevant ticket it can safely update instead of stopping at the default
+  automatic write cap or terminal lifecycle cap;
+- candidates above the applicable cap return `needs_discussion`;
 - a wrapper list reports independent per-candidate results and never hides
   partial failure.
 
