@@ -49,8 +49,8 @@ Do not use that claim until every verification gate in this plan passes.
 Baseline from the planning and review-adjudication turns:
 
 - Branch: `chore/ticket-candidate-contract-control-doc`
-- HEAD at current plan revision: `cf55d475`
-- Worktree: clean before this plan file
+- Last reviewed docs-only plan commit before this follow-up patch: `180634bb`
+- Worktree: clean before this follow-up plan patch
 - Primary authority: `docs/superpowers/specs/2026-05-30-ticket-runtime-first-state-kernel-control.md`
 - Known source drift:
   - `plugins/turbo-mode/ticket/scripts/ticket_target_schema.py` still defines `TARGET_STATUSES = ("open", "in_progress", "done", "wontfix")`.
@@ -59,7 +59,7 @@ Baseline from the planning and review-adjudication turns:
   - `plugins/turbo-mode/ticket/scripts/ticket_parse.py` still treats `in_progress` as canonical parse vocabulary and lacks `idea` in `CANONICAL_STATUSES`.
   - `plugins/turbo-mode/ticket/scripts/ticket_triage.py` still counts, staleness-checks, and suggests actions around `open/in_progress` instead of `idea/open/blocked`.
   - `plugins/turbo-mode/ticket/scripts/ticket_read.py` still ranks `in_progress` and lacks `idea` and `blocked` ordering.
-  - `plugins/turbo-mode/ticket/README.md`, `plugins/turbo-mode/ticket/HANDBOOK.md`, and `plugins/turbo-mode/ticket/tests/test_docs_contract.py` still present or require the old current target status set in user-facing docs.
+  - `plugins/turbo-mode/ticket/README.md`, `plugins/turbo-mode/ticket/HANDBOOK.md`, and `plugins/turbo-mode/ticket/tests/test_docs_contract.py` still present or require the old current target status set in user-facing docs, including docs-contract guards that say `blocked` is not a status and blockedness derives from `blocked_by`.
   - `plugins/turbo-mode/ticket/tests/test_capture_contract.py` still has a current target fixture with `status="in_progress"`.
   - `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py` still models candidates as flat `proposed_change` plus internal evidence links. That drift is now explicitly deferred to a separate candidate-contract migration plan.
 
@@ -160,6 +160,7 @@ Modify these files:
 - `plugins/turbo-mode/ticket/tests/test_docs_contract.py`
   - Owns static guards for README/HANDBOOK authority claims.
   - Update assertions so docs no longer require `in_progress` as a current status and do require the new blocked-status documentation.
+  - Remove or invert the old docs-contract guards that made `blocked` a derived non-status: `OLD_SCHEMA_TERMS` entries `"blocked status"` and ``"`blocked` status"``, the positive assertions for ``"`blocked` is not a status"`` and `"derive reverse `blocks`"`, and the triage-doc assertions that say persisted `blocked` status is not target schema and target blockedness derives from `blocked_by`.
 
 Deferred candidate-contract migration surfaces, not modified in this plan:
 
@@ -1358,13 +1359,13 @@ Commit succeeds with lifecycle policy and tests staged.
 Run:
 
 ```bash
-rg -n "\bin_progress\b" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests plugins/turbo-mode/ticket/references plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/CHANGELOG.md
+rg -in "in[_ -]progress" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests plugins/turbo-mode/ticket/references plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/CHANGELOG.md
 ```
 
 Expected:
 
 ```text
-Before this task, the command may find current-facing target status drift in schema, validation, direct engine tests, parse tests, read/list tests, triage source/tests, integration tests, entrypoint examples, UX tests, blocker tests, capture-contract tests, fixture builders, README, HANDBOOK, and docs-contract assertions. It may also find unrelated historical strings such as activation_in_progress in runtime-readiness proof tests. Only current-facing target-ticket status drift is patched in this plan.
+Before this task, the command may find current-facing target status drift in schema, validation, direct engine tests, parse tests, read/list tests, triage source/tests, integration tests, entrypoint examples, UX tests, blocker tests, capture-contract tests, fixture builders, README, HANDBOOK, and docs-contract assertions. It should also catch prose forms such as "in progress" and "In-progress" in triage wording. It may find unrelated historical strings such as activation_in_progress or activation-in-progress in runtime-readiness proof paths. Only current-facing target-ticket status drift is patched in this plan.
 ```
 
 - [ ] **Step 2: Patch status-only source, tests, fixtures, and docs**
@@ -1393,6 +1394,7 @@ plugins/turbo-mode/ticket/scripts/ticket_triage.py:
   Keep non-terminal filtering broad enough to include idea/open/blocked.
   Treat stale tickets as open or blocked only; idea tickets are visible parked work and should not be stale by default.
   Remove review_in_progress suggestions.
+  Replace the _next_actions high-priority reason "High-priority ticket is open and not in progress" with wording that treats open high-priority work as ready to start or assign, without referencing in-progress work.
   Suggest blocker resolution from status == "blocked" and/or non-empty blocked_by, with wording that does not mention in-progress work.
 
 plugins/turbo-mode/ticket/tests/test_triage.py:
@@ -1439,15 +1441,20 @@ plugins/turbo-mode/ticket/tests/support/builders.py:
 plugins/turbo-mode/ticket/README.md:
   Replace current status prose and schema tables so target statuses are idea, open, blocked, done, and wontfix.
   Document blocked tickets as status: blocked with a non-empty ## Blocked On section and optional blocked_by ticket IDs.
+  Delete or invert the old target-shape sentence that says `blocked` is not a status and blockedness derives from `blocked_by`; if reverse blockers are mentioned, state only that there is no persisted reverse `blocks` edge.
   Leave old statuses only in explicitly historical or diagnostic sections.
 
 plugins/turbo-mode/ticket/HANDBOOK.md:
   Replace current status prose, status values, and command examples with idea/open/blocked/done/wontfix.
   Update any --status examples that still list in_progress.
+  Delete or invert the old target-shape sentence that says `blocked` is not a status and blockedness derives from `blocked_by`; if reverse blockers are mentioned, state only that there is no persisted reverse `blocks` edge.
   Leave in_progress only in explicitly historical or diagnostic language.
 
 plugins/turbo-mode/ticket/tests/test_docs_contract.py:
   Remove assertions that require `in_progress` in current target docs.
+  In OLD_SCHEMA_TERMS, remove "blocked status" and "`blocked` status" because those phrases are valid under the new target model; keep or replace only guards that still prohibit a persisted reverse `blocks` field/edge.
+  In test_core_docs_document_target_ticket_shape(), remove the assertions for "`blocked` is not a status" and "derive reverse `blocks`"; replace them with positive assertions for `blocked`, `status: blocked`, and `Blocked On`.
+  Replace any triage or skill-doc assertions requiring "Persisted `blocked` status and reverse `blocks` edges are not target schema" and "target blockedness derives from `blocked_by`" with assertions that triage remains read/query/reporting-only over first-class blocked tickets and does not write persisted reverse `blocks` edges.
   Add assertions that README and HANDBOOK include idea/open/blocked/done/wontfix as current target statuses.
   Add assertions that current docs describe `status: blocked` plus visible `Blocked On` rather than deriving blockedness only from blocked_by.
 ```
@@ -1457,13 +1464,13 @@ plugins/turbo-mode/ticket/tests/test_docs_contract.py:
 Run:
 
 ```bash
-rg -n "\bin_progress\b" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests plugins/turbo-mode/ticket/references plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/CHANGELOG.md
+rg -in "in[_ -]progress" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests plugins/turbo-mode/ticket/references plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/CHANGELOG.md
 ```
 
 Expected:
 
 ```text
-No remaining hit represents a current-facing target status, normal mutation fixture, or ordinary Ticket board status. Allowed remaining hits are explicitly historical, diagnostic, or unrelated strings such as activation_in_progress. If a hit is ambiguous, either patch it in this task or add a short test/doc comment explaining why it is diagnostic rather than a valid target status.
+No remaining hit represents a current-facing target status, normal mutation fixture, ordinary Ticket board status, or current-facing prose phrase like "in progress" / "In-progress". Allowed remaining hits are explicitly historical, diagnostic, or unrelated strings such as activation_in_progress and activation-in-progress. If a hit is ambiguous, either patch it in this task or add a short test/doc comment explaining why it is diagnostic rather than a valid target status.
 ```
 
 - [ ] **Step 4: Confirm candidate-contract migration stayed deferred**
@@ -1545,7 +1552,7 @@ Run:
 
 ```bash
 git add plugins/turbo-mode/ticket/scripts/ticket_target_schema.py plugins/turbo-mode/ticket/scripts/ticket_validate.py plugins/turbo-mode/ticket/scripts/ticket_render.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_parse.py plugins/turbo-mode/ticket/scripts/ticket_triage.py plugins/turbo-mode/ticket/scripts/ticket_read.py plugins/turbo-mode/ticket/tests plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md
-git commit -m "test(ticket): align target status source drift"
+git commit -m "fix(ticket): align target status source drift"
 ```
 
 Expected:
@@ -1584,7 +1591,9 @@ The follow-up plan must explicitly resolve `reopen`: either migrate it to `evide
 - `done` and `wontfix` remain terminal except existing `reopen -> open`.
 - Moving from `blocked` to `open`, `done`, or `wontfix` clears non-empty `blocked_by` and removes `Blocked On`.
 - Triage counts and read/list ordering expose `idea`, `open`, and `blocked` without normal `in_progress` buckets or ranks.
+- The stale-status scan catches `in_progress`, `in progress`, and `In-progress` current-facing drift, with only explicit historical/diagnostic/unrelated hits remaining.
 - README, HANDBOOK, and docs-contract tests present `idea/open/blocked/done/wontfix` as current target authority and describe visible blocked-ticket shape.
+- README/HANDBOOK/docs-contract assertions no longer encode the old rule that `blocked` is not a status or that target blockedness derives only from `blocked_by`; docs may still prohibit persisted reverse `blocks` edges.
 - Focused tests, full Ticket suite, ruff, and `git diff --check` pass before any completion claim.
 
 ## Verification Commands
