@@ -200,6 +200,95 @@ class TestCreate:
         assert ticket.priority == "high"
         assert ticket.related_paths == ["handler.py"]
 
+    def test_create_can_write_idea_ticket(self, tmp_tickets: Path) -> None:
+        response = _create_response(
+            tmp_tickets,
+            {
+                "title": "Park design follow-up",
+                "problem": "The design question is real but not actionable yet.",
+                "status": "idea",
+                "next_action": "Promote when the user chooses the direction.",
+            },
+        )
+
+        assert response.state == "ok"
+        ticket_path = Path(response.data["ticket_path"])
+        text = ticket_path.read_text(encoding="utf-8")
+        assert "status: idea" in text
+        assert "## Blocked On" not in text
+        assert validate_target_ticket_file(ticket_path).ok
+
+    def test_create_can_write_blocked_ticket_with_visible_blocker(
+        self,
+        tmp_tickets: Path,
+    ) -> None:
+        response = _create_response(
+            tmp_tickets,
+            {
+                "title": "Wait for deployment access",
+                "problem": "Deployment validation cannot proceed without access.",
+                "status": "blocked",
+                "next_action": "Ask for access, then run the deployment smoke.",
+                "blocked_on": "Waiting for deployment credentials from the user.",
+                "blocked_by": ["T-20260508-02"],
+            },
+        )
+
+        assert response.state == "ok"
+        ticket_path = Path(response.data["ticket_path"])
+        text = ticket_path.read_text(encoding="utf-8")
+        assert "status: blocked" in text
+        assert "blocked_by: [T-20260508-02]" in text
+        assert "## Blocked On\nWaiting for deployment credentials from the user." in text
+        assert validate_target_ticket_file(ticket_path).ok
+
+    @pytest.mark.parametrize("status", ["done", "wontfix"])
+    def test_create_rejects_terminal_statuses(self, tmp_tickets: Path, status: str) -> None:
+        response = _create_response(
+            tmp_tickets,
+            {
+                "title": "Terminal create",
+                "problem": "Normal create must not create historical terminal records.",
+                "status": status,
+            },
+        )
+
+        assert response.state == "need_fields"
+        assert response.error_code == "need_fields"
+        assert "create status" in response.message
+        assert list(tmp_tickets.glob("*.md")) == []
+
+    def test_create_rejects_blocked_without_visible_blocker(self, tmp_tickets: Path) -> None:
+        response = _create_response(
+            tmp_tickets,
+            {
+                "title": "Missing blocker prose",
+                "problem": "Blocked tickets need visible blocker truth.",
+                "status": "blocked",
+            },
+        )
+
+        assert response.state == "need_fields"
+        assert response.error_code == "need_fields"
+        assert "blocked_on" in response.message
+        assert list(tmp_tickets.glob("*.md")) == []
+
+    def test_create_rejects_live_blocker_fields_for_open_ticket(self, tmp_tickets: Path) -> None:
+        response = _create_response(
+            tmp_tickets,
+            {
+                "title": "Open ticket with stale blocker",
+                "problem": "Open tickets must not retain live blocker fields.",
+                "blocked_on": "This stale blocker should not be accepted.",
+                "blocked_by": ["T-20260508-02"],
+            },
+        )
+
+        assert response.state == "need_fields"
+        assert response.error_code == "need_fields"
+        assert "blocked" in response.message
+        assert list(tmp_tickets.glob("*.md")) == []
+
     def test_create_defaults_priority_to_normal(self, tmp_tickets: Path) -> None:
         response = _create_response(tmp_tickets)
 

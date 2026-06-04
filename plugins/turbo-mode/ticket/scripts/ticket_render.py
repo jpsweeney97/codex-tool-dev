@@ -162,6 +162,7 @@ def render_ticket(
     approach: str = "",
     acceptance_criteria: list[str] | None = None,
     next_action: str = "",
+    blocked_on: str = "",
     verification: str = "",
     key_files: list[dict[str, str]] | None = None,
     context: str = "",
@@ -205,6 +206,8 @@ def render_ticket(
     # --- Required sections ---
     lines.extend(["## Problem", problem, ""])
     lines.extend(["## Next Action", next_action or "Continue work on this ticket.", ""])
+    if blocked_on:
+        lines.extend(["## Blocked On", blocked_on, ""])
     lines.extend(["## Change History", change_history_entry, ""])
 
     # --- Optional sections (in contract order) ---

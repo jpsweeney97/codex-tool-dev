@@ -326,9 +326,29 @@ def engine_classify(
 
 # Required fields for create.
 _CREATE_REQUIRED = ("title", "problem")
+_CREATE_STATUSES = frozenset({"idea", "open", "blocked"})
 
 # Dedup window.
 _DEDUP_WINDOW_HOURS = 24
+
+
+def _validate_create_status_shape(fields: dict[str, Any]) -> list[str]:
+    status = fields.get("status", "open")
+    blocked_on = fields.get("blocked_on")
+    blocked_by = fields.get("blocked_by", [])
+    errors: list[str] = []
+
+    if status not in _CREATE_STATUSES:
+        errors.append("create status must be one of ['blocked', 'idea', 'open']")
+    if status == "blocked":
+        if not isinstance(blocked_on, str) or not blocked_on.strip():
+            errors.append("blocked create requires blocked_on")
+    else:
+        if blocked_on:
+            errors.append("blocked_on is only valid for blocked create")
+        if blocked_by:
+            errors.append("blocked_by is only valid for blocked create")
+    return errors
 
 
 def engine_plan(
@@ -395,6 +415,15 @@ def _plan_create(
             message=f"Missing required fields: {', '.join(missing)}",
             error_code="need_fields",
             data={"missing_fields": missing},
+        )
+
+    create_shape_errors = _validate_create_status_shape(fields)
+    if create_shape_errors:
+        return EngineResponse(
+            state="need_fields",
+            message=f"Field validation failed: {'; '.join(create_shape_errors)}",
+            error_code="need_fields",
+            data={"missing_fields": [], "validation_errors": create_shape_errors},
         )
 
     validation_errors = validate_fields(fields)
@@ -1666,6 +1695,15 @@ def _execute_create(
             error_code="need_fields",
         )
 
+    create_shape_errors = _validate_create_status_shape(fields)
+    if create_shape_errors:
+        return EngineResponse(
+            state="need_fields",
+            message=f"Field validation failed: {'; '.join(create_shape_errors)}",
+            error_code="need_fields",
+            data={"validation_errors": create_shape_errors},
+        )
+
     validation_errors = validate_fields(fields)
     if validation_errors:
         return EngineResponse(
@@ -1680,6 +1718,7 @@ def _execute_create(
     now = datetime.now(UTC)
     today = now.date()
     title = fields.get("title", "Untitled")
+    status = fields.get("status", "open")
 
     if change_history_entry is None:
         change_history_entry = ChangeHistoryEntry(
@@ -1703,7 +1742,7 @@ def _execute_create(
         content = render_ticket(
             id=ticket_id,
             title=title,
-            status="open",
+            status=status,
             priority=fields.get("priority", "normal"),
             related_paths=fields.get("related_paths"),
             tags=fields.get("tags", []),
@@ -1713,6 +1752,7 @@ def _execute_create(
             approach=fields.get("approach", ""),
             acceptance_criteria=fields.get("acceptance_criteria"),
             next_action=fields.get("next_action", ""),
+            blocked_on=fields.get("blocked_on", ""),
             verification=fields.get("verification", ""),
             key_files=fields.get("key_files"),
             context=fields.get("context", ""),
