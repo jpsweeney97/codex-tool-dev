@@ -29,6 +29,7 @@ from scripts.ticket_id import allocate_id, build_filename
 from scripts.ticket_parse import ParsedTicket
 from scripts.ticket_paths import discover_project_root
 from scripts.ticket_render import render_ticket
+from scripts.ticket_target_schema import validate_target_ticket_text
 from scripts.ticket_trust import collect_trust_triple_errors
 from scripts.ticket_validate import validate_fields
 
@@ -130,6 +131,28 @@ def _invalid_ticket_state_response(
         ticket_id=ticket_id,
         error_code="invalid_state",
         data={"reason": str(reason)},
+    )
+
+
+def _invalid_rendered_ticket_response(
+    operation: str,
+    ticket_path: Path,
+    text: str,
+    *,
+    ticket_id: str | None = None,
+) -> EngineResponse | None:
+    validation = validate_target_ticket_text(ticket_path, text)
+    if validation.ok:
+        return None
+    return EngineResponse(
+        state="invalid_state",
+        message=(
+            f"{operation} failed: rendered ticket is not target-normalized: "
+            f"{validation.error}. Got: {text!r:.100}"
+        ),
+        ticket_id=ticket_id or validation.ticket_id or None,
+        error_code="invalid_state",
+        data={"reason": validation.error},
     )
 
 
@@ -1771,6 +1794,14 @@ def _execute_create(
             related=fields.get("related", ""),
             change_history_entry=rendered_history,
         )
+        invalid_render = _invalid_rendered_ticket_response(
+            "create",
+            ticket_path,
+            content,
+            ticket_id=ticket_id,
+        )
+        if invalid_render is not None:
+            return invalid_render
         try:
             _write_text_exclusive(ticket_path, content)
         except FileExistsError:
@@ -2004,6 +2035,14 @@ def _execute_update(
     )
     if change_history_entry is not None:
         new_text = append_change_history_entry(new_text, change_history_entry)
+    invalid_render = _invalid_rendered_ticket_response(
+        "update",
+        ticket_path,
+        new_text,
+        ticket_id=ticket_id,
+    )
+    if invalid_render is not None:
+        return invalid_render
     ticket_path.write_text(new_text, encoding="utf-8")
 
     return EngineResponse(
@@ -2385,6 +2424,14 @@ def _execute_close(
     )
     if change_history_entry is not None:
         new_text = append_change_history_entry(new_text, change_history_entry)
+    invalid_render = _invalid_rendered_ticket_response(
+        "close",
+        ticket_path,
+        new_text,
+        ticket_id=ticket_id,
+    )
+    if invalid_render is not None:
+        return invalid_render
     ticket_path.write_text(new_text, encoding="utf-8")
 
     changes = {"frontmatter": {"status": [old_status, resolution]}, "sections_changed": []}
@@ -2466,6 +2513,14 @@ def _execute_reopen(
         new_text += reopen_entry
     if change_history_entry is not None:
         new_text = append_change_history_entry(new_text, change_history_entry)
+    invalid_render = _invalid_rendered_ticket_response(
+        "reopen",
+        ticket_path,
+        new_text,
+        ticket_id=ticket_id,
+    )
+    if invalid_render is not None:
+        return invalid_render
 
     try:
         ticket_path.write_text(new_text, encoding="utf-8")

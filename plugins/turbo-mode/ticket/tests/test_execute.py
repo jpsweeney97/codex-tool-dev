@@ -600,6 +600,29 @@ class TestUpdate:
         assert response.error_code == "invalid_transition"
         assert "blocked_on" in response.message
 
+    def test_update_rejects_same_status_open_blocked_on_write(
+        self,
+        tmp_tickets: Path,
+    ) -> None:
+        ticket_path = make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="open")
+        before = ticket_path.read_text(encoding="utf-8")
+
+        response = _execute_existing(
+            tmp_tickets,
+            ticket_path,
+            action="update",
+            fields={
+                "status": "open",
+                "blocked_on": "This blocker section would corrupt an open ticket.",
+            },
+        )
+
+        assert response.state == "invalid_state"
+        assert response.error_code == "invalid_state"
+        assert "Blocked On" in response.message
+        assert ticket_path.read_text(encoding="utf-8") == before
+        assert validate_target_ticket_file(ticket_path).ok
+
     def test_update_rejects_open_to_wontfix_because_terminal_writes_use_close(
         self,
         tmp_tickets: Path,
@@ -650,6 +673,36 @@ class TestUpdate:
         assert "status: open" in text
         assert "blocked_by: []" in text
         assert "## Blocked On" not in text
+        assert validate_target_ticket_file(ticket_path).ok
+
+    def test_update_rejects_same_status_blocked_blocked_on_removal(
+        self,
+        tmp_tickets: Path,
+    ) -> None:
+        ticket_path = make_ticket(
+            tmp_tickets,
+            "ignored.md",
+            id="T-20260302-01",
+            status="blocked",
+            blocked_by=["T-20260302-02"],
+            blocked_on="Waiting for the user to provide credentials.",
+        )
+        before = ticket_path.read_text(encoding="utf-8")
+
+        response = _execute_existing(
+            tmp_tickets,
+            ticket_path,
+            action="update",
+            fields={
+                "status": "blocked",
+                "blocked_on": None,
+            },
+        )
+
+        assert response.state == "invalid_state"
+        assert response.error_code == "invalid_state"
+        assert "Blocked On" in response.message
+        assert ticket_path.read_text(encoding="utf-8") == before
         assert validate_target_ticket_file(ticket_path).ok
 
     def test_update_rejects_section_field_and_leaves_file_unchanged(
