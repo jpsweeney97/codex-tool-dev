@@ -638,7 +638,7 @@ Then call it in `validate_target_ticket_text()` after `history_error`:
         return TargetTicketValidation(False, ticket_id=ticket_id, error=status_shape_error)
 ```
 
-In `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`, narrow the close allowlist in `_is_valid_transition()` in the same Task 1 commit:
+In `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`, narrow the close allowlist in `_is_valid_transition()` in the same Task 1 commit. Replace the existing close branch that starts with `if action == "close":` and currently checks terminal status before returning `target in ("done", "wontfix")`; do not insert a second close branch beside it:
 
 ```python
     if action == "close":
@@ -658,7 +658,7 @@ Update close recovery statuses in `_evaluate_close_policy()` immediately after `
 
 This is an atomicity requirement, not an optional cleanup. If the status schema accepts `idea`, close policy and close recovery hints must reject `idea` in the same behavioral commit.
 
-Note: narrowing the close allowlist to `{open, blocked}` here also makes the not-yet-migrated `in_progress` close fixtures in `test_ux.py` (including the close-parity test) and `test_capture_contract.py` fail. Those files are not in the Task 1-3 focused gates and are repaired in Task 4 Step 2, so the Task 1 focused gate stays green. Expect the full suite to show those extra `in_progress` close failures, beyond the Task 0 docs-contract baseline, until Task 4 lands; this is not a regression to debug.
+Note: after Task 1, the full suite is expected red beyond the Task 0 docs-contract baseline. Do not use the full suite as the authoritative gate between Tasks 1-4; use the focused gate named in each task. Known extra-red surfaces are `tests/test_execute.py::TestCloseAndReopen` (six current `status="in_progress"` close fixtures, repaired in Task 3), `tests/test_docs_contract.py::test_readme_ticket_schema_matches_yaml_contract_boundary` and `::test_ticket_find_skill_contract_is_read_only` (both iterate `TARGET_STATUSES` before README/SKILL prose is updated in Task 4), plus the not-yet-migrated `in_progress` close fixtures in `test_ux.py` and `test_capture_contract.py` repaired in Task 4. If a focused gate fails, debug it; if the full suite shows failures outside these expected surfaces, stop and patch this plan before continuing.
 
 - [ ] **Step 6: Run the schema and close-policy tests and verify pass**
 
@@ -1745,6 +1745,7 @@ plugins/turbo-mode/ticket/HANDBOOK.md:
   Replace current status prose, status values, and command examples with idea/open/blocked/done/wontfix.
   Update any --status examples that still list in_progress.
   Delete or invert the old target-shape sentence that says `blocked` is not a status and blockedness derives from `blocked_by`; if reverse blockers are mentioned, state only that there is no persisted reverse `blocks` edge.
+  Also update the `Internals` -> `Status Values` sentence that says `Blockedness derives from blocked_by; it is not a persisted status`; this stale claim does not contain `in_progress`, so the stale-status scan will not find it.
   Leave in_progress only in explicitly historical or diagnostic language.
 
 plugins/turbo-mode/ticket/references/ticket-contract.md:
@@ -1773,11 +1774,12 @@ plugins/turbo-mode/ticket/skills/ticket-backlog-triage/SKILL.md:
 
 plugins/turbo-mode/ticket/tests/test_docs_contract.py:
   Remove assertions that require `in_progress` in current target docs.
-  In OLD_SCHEMA_TERMS, remove "blocked status" and "`blocked` status" because those phrases are valid under the new target model; keep or replace only guards that still prohibit a persisted reverse `blocks` field/edge. Do not delete the confinement guard that intentionally keeps `in_progress` in deprecated/diagnostic sections only.
+  In OLD_SCHEMA_TERMS, remove "blocked status" and "`blocked` status" because those phrases are valid under the new target model; keep or replace only guards that still prohibit a persisted reverse `blocks` field/edge.
+  Do not delete the confinement guard in test_handbook_documents_runtime_activation_operator_flow() that intentionally keeps `in_progress` in deprecated/diagnostic sections only.
   Keep or update test_contract_preserves_optional_sections_byte_for_byte so it matches the one-line contract prose above.
   In test_readme_ticket_schema_matches_yaml_contract_boundary(), remove the assertions for "`blocked` is not a status" and "derive reverse `blocks`"; replace them with positive assertions for `blocked`, `status: blocked`, and `Blocked On`.
   In test_ticket_find_skill_contract_is_read_only(), remove the contradictory assertion `assert "`blocked`" not in target`; replace it with positive assertions that read-ticket documents `status: blocked`, `Blocked On`, and the updated `--status idea|open|blocked|done|wontfix` example.
-  In test_ticket_review_skill_contract_is_read_only_and_capture_prompt_only(), replace assertions requiring "Persisted `blocked` status and reverse `blocks` edges are not target schema" and "target blockedness derives from `blocked_by`" with assertions that triage remains read/query/reporting-only over first-class blocked tickets and does not write persisted reverse `blocks` edges.
+  In test_ticket_review_skill_contract_is_read_only_and_capture_prompt_only(), replace the full parenthesized assert that requires "Persisted `blocked` status and reverse `blocks` edges are not target schema", not just the inner string, and replace the "target blockedness derives from `blocked_by`" assertion with assertions that triage remains read/query/reporting-only over first-class blocked tickets and does not write persisted reverse `blocks` edges.
   Keep the new README/HANDBOOK/SKILL prose strings identical to the new assertions; do not assert paraphrases that the docs step does not write.
   Add assertions that README, HANDBOOK, ticket-contract.md, capture-ticket, update-ticket, read-ticket, and ticket-backlog-triage include idea/open/blocked/done/wontfix as current target statuses where they document target shape.
   Add assertions that current docs and SKILL files describe `status: blocked` plus visible `Blocked On` rather than deriving blockedness only from blocked_by.
