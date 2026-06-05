@@ -87,7 +87,8 @@ Modify these files:
 - `plugins/turbo-mode/ticket/references/ticket-contract.md`
 - `plugins/turbo-mode/ticket/skills/capture-ticket/SKILL.md`
 - `plugins/turbo-mode/ticket/skills/update-ticket/SKILL.md`
-  - Update source-availability prose after the live source entrypoint exists. Do not claim installed runtime availability.
+  - Update source-availability prose and lifecycle docs after the live source
+    entrypoint exists. Do not claim installed runtime availability.
 
 Test these files:
 
@@ -228,8 +229,11 @@ same task that removes the behavior. Do not defer them to Task 7 as
 
 **Files:**
 - Read: `docs/tickets/*.md`
+- Read: `docs/decisions/0006-ticket-runtime-first-state-kernel.md`
 - Read: `docs/superpowers/specs/2026-05-30-ticket-runtime-first-state-kernel-control.md`
 - Read: `docs/superpowers/plans/2026-06-04-ticket-target-status-candidate-shape.md`
+- Read: `plugins/turbo-mode/ticket/references/ticket-contract.md`
+- Read: `plugins/turbo-mode/ticket/tests/test_docs_contract.py`
 
 - [ ] **Step 1: Confirm clean source state**
 
@@ -256,7 +260,27 @@ continuing. If normal status is dirty before implementation, inspect the dirty
 files and stop unless they are this plan or intentional implementation work for
 the active task.
 
-- [ ] **Step 2: Re-run the active ticket inventory**
+- [ ] **Step 2: Confirm authority surfaces still agree**
+
+Read the May 30 control doc, ADR 0006, `ticket-contract.md`, and the
+docs-contract lifecycle assertions before touching source. Confirm the active
+status set is still `idea`, `open`, `blocked`, `done`, and `wontfix`, and that
+this plan's source changes either update every conflicting lifecycle doc/test
+assertion in the same slice or name an intentional deferral.
+
+Record the exact current conflict before implementation:
+
+```text
+ticket-contract.md currently says `done` and `wontfix` reopen to `open`;
+test_docs_contract.py currently asserts that sentence. Task 6 must update both
+to document terminal reopen to `open` or `blocked` before final verification.
+```
+
+If ADR 0006, the May 30 control doc, `ticket-contract.md`, or
+`test_docs_contract.py` disagree on target status/action/result vocabulary in a
+way not already named by this plan, stop and patch the plan before source work.
+
+- [ ] **Step 3: Re-run the active ticket inventory**
 
 Run this read-only inventory:
 
@@ -331,11 +355,11 @@ docs/tickets/T-20260518-02.md status='open' invalid=[]
 docs/tickets/T-20260526-01.md status='open' invalid=[]
 ```
 
-- [ ] **Step 3: Stop if active ticket inventory is not clean**
+- [ ] **Step 4: Stop if active ticket inventory is not clean**
 
 If any active ticket line has a non-empty `invalid=[...]`, stop this plan and create a separate diagnostic inventory or ticket-data migration plan. Do not silently repair `docs/tickets/` inside this candidate-contract slice.
 
-- [ ] **Step 4: Run the migration coverage and construction-site greps**
+- [ ] **Step 5: Run the migration coverage and construction-site greps**
 
 Run both `rg` commands from `Migration Coverage Map` and paste the hit summaries
 into the active implementation notes. The output does not need to be clean at
@@ -344,7 +368,7 @@ engine/diagnostic surface intentionally kept" disposition before source edits
 start. Do not start Task 1 until `ticket_autonomy.py` and every
 `GatewayMutation(...)` construction site have an assigned task.
 
-- [ ] **Step 5: Commit Task 0 only if it changed this plan**
+- [ ] **Step 6: Commit Task 0 only if it changed this plan**
 
 Task 0 normally makes no source changes and should not be committed by itself. If Task 0 is only a preflight run, continue to Task 1.
 
@@ -1624,6 +1648,68 @@ def test_gateway_removes_exact_optional_target_section(tmp_tickets: Path) -> Non
     assert "| codex | Updated ticket from candidate evidence." in text
 ```
 
+Add this blocked-to-open update test. This is the policy bridge guard: the
+candidate names `Blocked On` as a target section, but update policy must still
+see `blocked_on: null` before transition validation:
+
+```python
+def test_gateway_updates_blocked_ticket_to_open_with_target_section_cleanup(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    blocker = make_ticket(tmp_tickets, "blocker.md", id="T-20260527-02", status="open")
+    assert blocker.exists()
+    ticket_path = make_ticket(
+        tmp_tickets,
+        "one.md",
+        id="T-20260527-01",
+        status="blocked",
+        blocked_by=["T-20260527-02"],
+        blocked_on="Waiting for T-20260527-02.",
+    )
+    target = CandidateTarget(
+        fields=("status", "blocked_by"),
+        sections=("Blocked On", "Next Action"),
+    )
+    proposed_change = {
+        "status": "open",
+        "blocked_by": [],
+        "Blocked On": None,
+        "Next Action": "Continue the candidate-contract migration.",
+    }
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        target=target,
+        proposed_change=proposed_change,
+    )
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint or "",
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    text = ticket_path.read_text(encoding="utf-8")
+    assert response.state == "ok"
+    assert "status: open" in text
+    assert "blocked_by: []" in text
+    assert "## Blocked On" not in text
+    assert "## Next Action\nContinue the candidate-contract migration." in text
+    assert "| codex | Updated ticket from candidate evidence." in text
+```
+
 Add this full create-section projection test so create projection matches every
 section the source create renderer can emit, instead of only the four-section
 helper:
@@ -1744,12 +1830,13 @@ updating shared helpers.
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_applies_exact_target_section_update plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_removes_exact_optional_target_section plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_create_accepts_every_source_supported_target_section plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_collector_unhealthy_pauses_without_mutation_or_health_events plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_summarizes_applied_mutation_before_next_turn plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py::test_agent_primary_apply_turn_applies_update_through_gateway -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_applies_exact_target_section_update plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_removes_exact_optional_target_section plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_updates_blocked_ticket_to_open_with_target_section_cleanup plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_create_accepts_every_source_supported_target_section plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_collector_unhealthy_pauses_without_mutation_or_health_events plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_summarizes_applied_mutation_before_next_turn plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py::test_agent_primary_apply_turn_applies_update_through_gateway -q
 ```
 
 Expected: fail because `GatewayMutation` has no `target`, `proposed_change`, or
-`expected_ticket_fingerprint` fields and `ticket_autonomy.py` still constructs
-the old `fields`/`target_fingerprint` gateway shape. The
+`expected_ticket_fingerprint` fields, `ticket_autonomy.py` still constructs the
+old `fields`/`target_fingerprint` gateway shape, and blocked-to-open target
+sections are not yet projected into update policy. The
 `source_context_unhealthy` collector test must keep passing throughout this
 task; a failure there means the health gate was weakened while removing the
 fingerprint side channel.
@@ -1958,16 +2045,40 @@ health and identity fingerprint sourcing are separate boundaries.
 - [ ] **Step 6: Add exact target-section support to engine update**
 
 In `ticket_engine_core.py`, add this helper near `_UPDATE_SECTION_HEADINGS`.
-Target-section update and create rendering must agree for structured target
-sections such as `Acceptance Criteria`; do not serialize structured values with
-Python `repr`:
+Target-section update, reopen, and create rendering must agree for structured
+target sections such as `Acceptance Criteria` and `Key Files`; do not serialize
+structured values with Python `repr`:
 
 ```python
+def _render_key_files_section_value(value: Any) -> str:
+    if not isinstance(value, list):
+        raise ValueError("Key Files target section requires a list of row objects")
+    rows = ["| File | Role | Look For |", "|------|------|----------|"]
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise ValueError("Key Files target section requires row objects")
+        rows.append(
+            "| "
+            + " | ".join(
+                str(item.get(key, ""))
+                for key in ("file", "role", "look_for")
+            )
+            + " |"
+        )
+    return "\n".join(rows)
+
+
 def _render_target_section_value(heading: str, value: Any) -> str | None:
     if value is None:
         return None
     if heading == "Acceptance Criteria":
         return _render_update_section_value("acceptance_criteria", value)
+    if heading == "Key Files":
+        return _render_key_files_section_value(value)
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (Mapping, list, tuple)):
+        raise ValueError(f"{heading} does not support structured target values")
     return str(value)
 ```
 
@@ -1989,6 +2100,13 @@ def _execute_update(
 After the existing `for key in section_fields:` block, add exact target-section updates:
 
 ```python
+    policy_fields = dict(fields)
+    if target_sections and "Blocked On" in target_sections:
+        policy_fields["blocked_on"] = target_sections["Blocked On"]
+    policy_error = _evaluate_update_policy(ticket_id, ticket, policy_fields, tickets_dir)
+    if policy_error is not None:
+        return policy_error
+
     for heading, value in (target_sections or {}).items():
         if heading == "Change History" or not validate_target_section_name(heading):
             return EngineResponse(
@@ -1997,7 +2115,15 @@ After the existing `for key in section_fields:` block, add exact target-section 
                 ticket_id=ticket_id,
                 error_code="intent_mismatch",
             )
-        rendered = _render_target_section_value(heading, value)
+        try:
+            rendered = _render_target_section_value(heading, value)
+        except ValueError as exc:
+            return EngineResponse(
+                state="need_fields",
+                message=f"Update failed: {exc}",
+                ticket_id=ticket_id,
+                error_code="need_fields",
+            )
         old_rendered = ticket.sections.get(heading, "")
         if rendered is None:
             if heading in ticket.sections:
@@ -2006,6 +2132,12 @@ After the existing `for key in section_fields:` block, add exact target-section 
             changes["sections_changed"].append(heading)
         sections[heading] = rendered
 ```
+
+Move the existing `_evaluate_update_policy(ticket_id, ticket, fields,
+tickets_dir)` call to this point, after section fields and exact target sections
+have been projected into `policy_fields`. Do not leave an earlier policy call
+that sees only `fields`; otherwise `blocked -> open` target candidates that name
+`Blocked On: None` still fail the current `blocked_on: null` precondition.
 
 Build targeted headings from both sources:
 
@@ -2177,11 +2309,11 @@ For reopen, pass target sections in Task 4 after reopen support lands.
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_applies_exact_target_section_update plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_removes_exact_optional_target_section plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_create_accepts_every_source_supported_target_section plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_summarizes_applied_mutation_before_next_turn plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py::test_agent_primary_apply_turn_applies_update_through_gateway -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_applies_exact_target_section_update plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_removes_exact_optional_target_section plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_updates_blocked_ticket_to_open_with_target_section_cleanup plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_create_accepts_every_source_supported_target_section plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_summarizes_applied_mutation_before_next_turn plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py::test_agent_primary_apply_turn_applies_update_through_gateway -q
 ```
 
-Expected: the gateway section update/removal/create tests and the two apply-turn
-source entrypoint tests pass.
+Expected: the gateway section update/removal/blocked-to-open/create tests and
+the two apply-turn source entrypoint tests pass.
 
 - [ ] **Step 9: Commit Task 3**
 
@@ -3601,7 +3733,15 @@ Replace the old `reopen_reason` body with:
                 ticket_id=ticket_id,
                 error_code="intent_mismatch",
             )
-        sections[heading] = _render_target_section_value(heading, value)
+        try:
+            sections[heading] = _render_target_section_value(heading, value)
+        except ValueError as exc:
+            return EngineResponse(
+                state="need_fields",
+                message=f"Reopen failed: {exc}",
+                ticket_id=ticket_id,
+                error_code="need_fields",
+            )
     targeted_headings = tuple((target_sections or {}).keys())
     if target_status == "open":
         targeted_headings = tuple(sorted(set(targeted_headings) | {"Blocked On"}))
@@ -3823,8 +3963,16 @@ def test_user_triggered_active_correction_to_open_clears_blocker_without_reopen(
     candidate = CandidateMutation(
         ticket_id="T-20260527-01",
         action="correct",
-        target=CandidateTarget(fields=("status", "blocked_by"), sections=("Blocked On",)),
-        proposed_change={"status": "open", "blocked_by": [], "Blocked On": None},
+        target=CandidateTarget(
+            fields=("status", "blocked_by"),
+            sections=("Blocked On", "Next Action"),
+        ),
+        proposed_change={
+            "status": "open",
+            "blocked_by": [],
+            "Blocked On": None,
+            "Next Action": "Continue the candidate-contract migration.",
+        },
         expected_ticket_fingerprint=target_fingerprint(ticket_path),
         evidence_summary="Prior mutation left a stale blocker on an open ticket.",
     )
@@ -3842,6 +3990,7 @@ def test_user_triggered_active_correction_to_open_clears_blocker_without_reopen(
     assert "status: open" in text
     assert "blocked_by: []" in text
     assert "## Blocked On" not in text
+    assert "## Next Action\nContinue the candidate-contract migration." in text
     assert "## Reopen History" not in text
     assert " | codex | Corrected ticket from candidate evidence." in text
 
@@ -4257,7 +4406,7 @@ Expected: commit succeeds with correction/recovery files and directly affected
 operation-log tests only. The recovery fingerprint helper should already be in
 the Task 3A commit.
 
-## Task 6: Update Source Docs, Skills, And Contract Availability
+## Task 6: Update Source Docs, Skills, Contract Availability, And Lifecycle Prose
 
 **Files:**
 - Modify: `plugins/turbo-mode/ticket/README.md`
@@ -4275,15 +4424,19 @@ while `ticket_autonomy.py` still constructs old gateway mutations, while create
 retry can still allocate a duplicate ticket instead of using a retained
 allocation binding, or while non-create recovery lacks pre-write
 `expected_post_write_fingerprint` and exact generated `Change History` metadata.
+The docs also must not preserve old lifecycle prose that says terminal tickets
+only reopen to `open` after Task 4 adds `reopen -> blocked` source behavior.
 
 - [ ] **Step 1: Write failing docs-contract tests**
 
-In `test_docs_contract.py`, add a source-availability contract test and update
-every existing assertion that currently requires `"temporarily unavailable"` for
+In `test_docs_contract.py`, add a source-availability contract test, update the
+lifecycle assertion for terminal reopen to `open` or `blocked`, and update every
+existing assertion that currently requires `"temporarily unavailable"` for
 capture/update write availability. This includes the capture skill frontmatter,
 active create guidance, update active guidance, and update skill description
 assertions. Do not leave old unavailable assertions for the source path while
-adding a new absence-only test.
+adding a new absence-only test. Do not leave the old exact assertion that
+terminal tickets reopen only to `open`.
 
 Add:
 
@@ -4307,6 +4460,25 @@ def test_ticket_write_docs_no_longer_claim_source_entrypoint_missing() -> None:
             assert phrase not in text, f"{path} still contains {phrase!r}"
 ```
 
+Update the existing lifecycle test in the same file:
+
+```python
+def test_contract_documents_lifecycle_transitions() -> None:
+    text = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
+    lifecycle = _section(text, "## Lifecycle Transitions", "\n## ")
+    normalized = _normalize_whitespace(lifecycle)
+
+    assert "`idea` may move only to `open`" in normalized
+    assert "`open` may move to `blocked`" in normalized
+    assert "`blocked` may move to `open`" in normalized
+    assert "`open` and `blocked` may close to `done` or `wontfix`" in normalized
+    assert "`done` and `wontfix` reopen to `open` or `blocked`" in normalized
+    assert "`reopen -> blocked` requires valid `Blocked On`" in normalized
+    assert "`blocked -> open` must clear `blocked_by: []` and `blocked_on: null`" in normalized
+    assert "without `dependency_override`, closing as `done` is blocked" in normalized
+    assert "closing as `wontfix` bypasses blocker resolution" in normalized
+```
+
 - [ ] **Step 2: Run full docs-contract test and verify RED**
 
 Run after the Task 6 precondition is satisfied:
@@ -4315,9 +4487,10 @@ Run after the Task 6 precondition is satisfied:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_docs_contract.py -q
 ```
 
-Expected: fail on README/HANDBOOK/contract/skills availability wording and on
-any existing docs-contract assertion that still requires the old unavailable
-source-write language.
+Expected: fail on README/HANDBOOK/contract/skills availability wording, on the
+contract lifecycle sentence that still says terminal tickets reopen only to
+`open`, and on any existing docs-contract assertion that still requires the old
+unavailable source-write language.
 
 - [ ] **Step 3: Update source docs availability language**
 
@@ -4341,6 +4514,25 @@ Before mutating, confirm the installed Ticket runtime exposes the target candida
 
 Do not add cache refresh commands to skill procedures.
 
+In `plugins/turbo-mode/ticket/references/ticket-contract.md`, replace the old
+lifecycle sentence:
+
+```text
+`done` and `wontfix` reopen to `open`.
+```
+
+with:
+
+```text
+`done` and `wontfix` reopen to `open` or `blocked`. `reopen -> blocked`
+requires valid blocked-ticket shape, including `Blocked On` and any visible
+`blocked_by` ticket-ID dependencies.
+```
+
+Check README and HANDBOOK for duplicated lifecycle prose. If either repeats the
+old open-only terminal reopen claim, update it in the same commit or add a
+docs-contract assertion that forbids the stale phrase in that file.
+
 - [ ] **Step 4: Run full docs-contract test and verify PASS**
 
 Run:
@@ -4349,10 +4541,10 @@ Run:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_docs_contract.py -q
 ```
 
-Expected: the full docs-contract file passes, including the updated capture and
-update skill availability assertions, and the Task 3, Task 3A, and Task 5
-focused source-entrypoint/create-idempotency/recovery tests are still passing in
-the current checkout.
+Expected: the full docs-contract file passes, including the updated lifecycle
+assertion, capture/update skill availability assertions, and the Task 3, Task 3A,
+and Task 5 focused source-entrypoint/create-idempotency/recovery tests are still
+passing in the current checkout.
 
 - [ ] **Step 5: Commit Task 6**
 
@@ -4363,7 +4555,8 @@ git add plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.m
 git commit -m "docs(ticket): update target candidate write availability"
 ```
 
-Expected: commit succeeds with docs/skill availability files only.
+Expected: commit succeeds with docs/skill availability and lifecycle contract
+files only.
 
 ## Task 7: Final Source Verification
 
@@ -4525,9 +4718,19 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
   blessed as applied.
 - Create target-section projection supports every source-rendered create section
   or narrows the source docs/skills in the same commit.
-- Exact target sections can be updated or removed without caller-owned `Change History` rewrites.
+- Exact target sections can be updated or removed without caller-owned
+  `Change History` rewrites; structured target sections such as
+  `Acceptance Criteria` and `Key Files` render canonically or are rejected before
+  write, never serialized through Python `repr`.
 - `reopen` uses target `status` plus `evidence_summary`; `reopen_reason` is rejected as normal target write input.
 - `reopen -> blocked` writes valid `Blocked On` and `blocked_by` shape.
+- Blocked-to-open update/correct candidates feed target-section
+  `Blocked On: None` into the update policy as `blocked_on: null` before transition
+  validation, and active unblocking candidates name `Next Action` unless the
+  authority docs are narrowed in the same commit.
+- Current-facing docs and `test_docs_contract.py` agree that terminal tickets
+  may reopen to `open` or `blocked`; no `ticket-contract.md` lifecycle assertion
+  remains pinned to reopen only to `open`.
 - Blocked `done`/`wontfix` candidates name `status`, `blocked_by`, and
   `Blocked On` cleanup, and the gateway does not silently drop the named
   cleanup section.
