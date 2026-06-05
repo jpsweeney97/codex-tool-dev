@@ -77,7 +77,8 @@ def test_close_policy_rejects_idea_as_terminal_source(tmp_tickets: Path) -> None
     assert response is not None
     assert response.state == "invalid_transition"
     assert response.data["current_status"] == "idea"
-    assert response.data["valid_recovery_statuses"] == ["open"]
+    assert response.data["valid_recovery_statuses"] == []
+    assert "promote idea to open first" in response.message
 
 
 def test_close_missing_acceptance_criteria_returns_precondition_detail(tmp_tickets: Path) -> None:

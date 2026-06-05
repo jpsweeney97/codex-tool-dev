@@ -383,6 +383,46 @@ def test_target_ticket_rejects_blocked_status_with_empty_blocked_on(tmp_path: Pa
     assert "Blocked On" in result.error
 
 
+def test_target_ticket_rejects_duplicate_blocked_on_section(tmp_path: Path) -> None:
+    ticket = tmp_path / "T-20260508-01.md"
+    _write_target_ticket(
+        ticket,
+        frontmatter=(
+            "---\n"
+            "id: T-20260508-01\n"
+            "title: Example\n"
+            "status: blocked\n"
+            "priority: normal\n"
+            "tags: []\n"
+            "related_paths: []\n"
+            "blocked_by: []\n"
+            "---\n"
+        ),
+        body=(
+            "\n"
+            "## Problem\n"
+            "Example problem.\n"
+            "\n"
+            "## Next Action\n"
+            "Ask for the missing deploy credentials, then continue implementation.\n"
+            "\n"
+            "## Blocked On\n"
+            "Waiting for deploy credentials from the user.\n"
+            "\n"
+            "## Blocked On\n"
+            "A duplicate blocker section must be rejected instead of ignored.\n"
+            "\n"
+            "## Change History\n"
+            "- 2026-06-02T00:00:00Z | migration | Normalized ticket into ADR 0006 schema.\n"
+        ),
+    )
+
+    result = validate_target_ticket_file(ticket)
+
+    assert result.ok is False
+    assert "duplicate section heading: Blocked On" in result.error
+
+
 def test_target_ticket_rejects_blocked_on_for_non_blocked_status(tmp_path: Path) -> None:
     ticket = tmp_path / "T-20260508-01.md"
     _write_target_ticket(

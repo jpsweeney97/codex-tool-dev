@@ -286,7 +286,8 @@ class TestCreate:
 
         assert response.state == "need_fields"
         assert response.error_code == "need_fields"
-        assert "blocked" in response.message
+        assert "blocked_on is only valid" in response.message
+        assert "blocked_by is only valid" in response.message
         assert list(tmp_tickets.glob("*.md")) == []
 
     def test_create_defaults_priority_to_normal(self, tmp_tickets: Path) -> None:
@@ -974,7 +975,8 @@ class TestCloseAndReopen:
         assert response.state == "invalid_transition"
         assert response.error_code == "invalid_transition"
         assert response.data["current_status"] == "idea"
-        assert response.data["valid_recovery_statuses"] == ["open"]
+        assert response.data["valid_recovery_statuses"] == []
+        assert "promote idea to open first" in response.message
 
     def test_close_blocked_ticket_clears_live_blocker_shape(self, tmp_tickets: Path) -> None:
         ticket_path = make_ticket(
@@ -994,6 +996,11 @@ class TestCloseAndReopen:
         )
 
         assert response.state == "ok"
+        assert response.data["changes"]["frontmatter"]["blocked_by"] == [
+            ["T-20260302-02"],
+            [],
+        ]
+        assert "Blocked On" in response.data["changes"]["sections_changed"]
         text = ticket_path.read_text(encoding="utf-8")
         assert "status: wontfix" in text
         assert "blocked_by: []" in text

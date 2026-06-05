@@ -48,6 +48,12 @@ class TestListTickets:
         with pytest.raises(InvalidTicketState):
             list_tickets(tmp_tickets)
 
+    def test_active_in_progress_ticket_fails_explicitly(self, tmp_tickets):
+        make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="in_progress")
+
+        with pytest.raises(InvalidTicketState):
+            list_tickets(tmp_tickets)
+
     def test_null_optional_frontmatter_list_fails_explicitly(self, tmp_tickets):
         ticket = tmp_tickets / "T-20260302-01.md"
         ticket.write_text(

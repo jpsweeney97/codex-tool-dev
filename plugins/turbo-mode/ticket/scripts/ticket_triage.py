@@ -509,14 +509,6 @@ def _next_actions(active_ticket_rows: list[dict[str, Any]]) -> list[dict[str, st
                     "reason": "Blocked ticket needs blocker resolution",
                 }
             )
-        elif row["blocked_by"]:
-            actions.append(
-                {
-                    "action": "resolve_blocker",
-                    "ticket_id": row["id"],
-                    "reason": "Ticket has unresolved blocked_by dependencies",
-                }
-            )
     return actions[:5]
 
 

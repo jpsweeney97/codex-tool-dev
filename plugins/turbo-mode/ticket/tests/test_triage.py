@@ -48,6 +48,15 @@ class TestDashboard:
         assert result["total"] == 0
         assert result["stale"] == []
 
+    def test_active_in_progress_ticket_fails_explicitly(self, tmp_tickets):
+        from scripts.ticket_read import InvalidTicketState
+        from scripts.ticket_triage import triage_dashboard
+
+        make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="in_progress")
+
+        with pytest.raises(InvalidTicketState):
+            triage_dashboard(tmp_tickets)
+
 
 def test_dashboard_includes_recommended_next_actions(tmp_tickets: Path) -> None:
     from scripts.ticket_triage import triage_dashboard

@@ -153,7 +153,9 @@ dependencies and is optional for blocked tickets. Reverse blocker views are
 derived by scanning tickets.
 
 Every target ticket requires `Problem`, `Next Action`, and `Change History`.
-Tickets with `status: blocked` additionally require `Blocked On`. Optional sections are preserved byte-for-byte unless a target candidate explicitly names the section.
+Tickets with `status: blocked` additionally require `Blocked On`.
+Optional sections are preserved byte-for-byte unless a target candidate
+explicitly names the section.
 
 ## Target Interfaces
 

@@ -224,6 +224,7 @@ def _validate_required_sections(body: str) -> str:
 
 
 def _section_bodies(body: str) -> dict[str, str]:
+    """Return stripped level-two section bodies keyed by heading."""
     sections = list(_SECTION_RE.finditer(body))
     bodies: dict[str, str] = {}
     for index, match in enumerate(sections):
@@ -234,9 +235,25 @@ def _section_bodies(body: str) -> dict[str, str]:
     return bodies
 
 
+def _duplicate_section_heading(body: str, heading: str) -> str:
+    """Return `heading` when it appears more than once, or an empty string."""
+    seen = False
+    for match in _SECTION_RE.finditer(body):
+        if match.group(1).strip() != heading:
+            continue
+        if seen:
+            return heading
+        seen = True
+    return ""
+
+
 def _validate_status_specific_shape(frontmatter: dict[str, Any], body: str) -> str:
+    """Validate status-only frontmatter and section constraints."""
     status = frontmatter["status"]
     blocked_by = frontmatter.get("blocked_by", [])
+    duplicate_heading = _duplicate_section_heading(body, "Blocked On")
+    if duplicate_heading:
+        return f"duplicate section heading: {duplicate_heading}"
     section_bodies = _section_bodies(body)
     blocked_on = section_bodies.get("Blocked On")
 

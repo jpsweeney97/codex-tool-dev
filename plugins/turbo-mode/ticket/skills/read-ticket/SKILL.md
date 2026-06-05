@@ -68,6 +68,6 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py check <TICKETS_DIR> <ticke
 
 ## Legacy Cutover Input
 
-Old filters such as blocked lifecycle status and critical or medium priorities
+Old filters such as `in_progress` status and `critical` or `medium` priorities
 may appear in legacy source data before cutover. Treat them as read-only
 compatibility facts, not target schema.

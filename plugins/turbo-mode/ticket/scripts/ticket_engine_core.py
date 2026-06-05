@@ -141,6 +141,7 @@ def _invalid_rendered_ticket_response(
     *,
     ticket_id: str | None = None,
 ) -> EngineResponse | None:
+    """Return an invalid-state response when rendered text fails target validation."""
     validation = validate_target_ticket_text(ticket_path, text)
     if validation.ok:
         return None
@@ -916,8 +917,8 @@ _UPDATE_SECTION_FIELDS = frozenset(
 )
 _UPDATE_IGNORED_FIELDS = frozenset({"ticket_id", "id"})
 
-# Valid status transitions for update action (from -> set of valid to statuses).
-# done/wontfix are terminal — only reopen (separate action) can transition out.
+# Valid status transitions for update action only.
+# Close and reopen handle terminal state changes as separate actions.
 _VALID_TRANSITIONS: dict[str, set[str]] = {
     "idea": {"open"},
     "open": {"blocked"},
@@ -1032,6 +1033,7 @@ def _check_transition_preconditions_with_detail(
     if precondition == "blocker_cleanup_required":
         blocked_by = _fields.get("blocked_by", ticket.blocked_by)
         blocked_on_present = "blocked_on" in _fields
+        # Unblocking must explicitly clear both machine IDs and visible blocker prose.
         if blocked_by != [] or not blocked_on_present or _fields.get("blocked_on") is not None:
             return (
                 "Transition to 'open' from blocked requires clearing blocked_by and Blocked On",
@@ -1119,7 +1121,11 @@ def _render_target_ticket_text(
     original_text: str | None = None,
     targeted_headings: tuple[str, ...] = (),
 ) -> str:
-    """Render a target ticket while preserving untargeted body sections."""
+    """Render a target ticket while preserving untargeted body sections.
+
+    For targeted headings, `None` removes the section and an empty string keeps
+    the section with an empty body.
+    """
     from scripts.ticket_target_schema import TARGET_SECTIONS_REQUIRED
 
     if original_text is not None:
@@ -1188,6 +1194,7 @@ def _replace_or_append_section(text: str, heading: str, content: str) -> str:
 
 
 def _remove_section(text: str, heading: str) -> str:
+    """Remove the first matching level-two section and leave surrounding text intact."""
     pattern = re.compile(
         rf"^## {re.escape(heading)}\n.*?(?=^## |\Z)",
         re.MULTILINE | re.DOTALL,
@@ -2081,7 +2088,7 @@ def _evaluate_close_policy(
         )
 
     if ticket.status == "idea":
-        valid_recovery_statuses = ["open"]
+        valid_recovery_statuses = []
     elif ticket.status in _TERMINAL_STATUSES:
         valid_recovery_statuses = []
     else:
@@ -2126,10 +2133,14 @@ def _evaluate_close_policy(
             )
 
     if not _is_valid_transition(ticket.status, resolution, "close"):
+        message = f"Cannot close with resolution {resolution!r} (must be 'done' or 'wontfix')"
+        if ticket.status == "idea":
+            message += "; promote idea to open first"
+        elif requires_reopen:
+            message += f" from terminal status {ticket.status!r}"
         return EngineResponse(
             state="invalid_transition",
-            message=f"Cannot close with resolution {resolution!r} (must be 'done' or 'wontfix')"
-            + (f" from terminal status {ticket.status!r}" if requires_reopen else ""),
+            message=message,
             ticket_id=ticket_id,
             error_code="invalid_transition",
             data=_transition_policy_data(
