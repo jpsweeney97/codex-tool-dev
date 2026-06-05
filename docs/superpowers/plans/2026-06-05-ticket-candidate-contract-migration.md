@@ -39,6 +39,8 @@ and after the create-recovery plan patch:
   `main...origin/main [ahead 15]`, clean normal status, `HEAD` at `8339751b`.
 - Branch/worktree after the blocked-close and correction-gate plan patch:
   `main...origin/main [ahead 16]`, clean normal status, `HEAD` at `7dc5cb7d`.
+- Branch/worktree after the authority-alignment plan patch:
+  `main...origin/main [ahead 17]`, clean normal status, `HEAD` at `18d40178`.
 - Active ticket inventory: seven files under `docs/tickets/`; all use ID-only filenames, frontmatter metadata, target statuses, required sections, no unknown frontmatter keys, and no blocked-shape defects.
 - Active ticket statuses: six `open`, one `done`, no `status: in_progress`.
 - Historical references: old-looking `T-20260527-001` examples only appear in `docs/superpowers/specs/2026-05-26-ticket-runtime-first-autonomy-design.md`; placeholders such as `T-YYYYMMDD-NN` appear in ADR/control docs and are not active ticket IDs.
@@ -98,6 +100,7 @@ Modify these files:
 - `plugins/turbo-mode/ticket/README.md`
 - `plugins/turbo-mode/ticket/HANDBOOK.md`
 - `plugins/turbo-mode/ticket/references/ticket-contract.md`
+- `plugins/turbo-mode/ticket/TERMS.md`
 - `plugins/turbo-mode/ticket/.codex-plugin/plugin.json`
 - `plugins/turbo-mode/ticket/skills/capture-ticket/SKILL.md`
 - `plugins/turbo-mode/ticket/skills/update-ticket/SKILL.md`
@@ -222,9 +225,12 @@ Test these files:
   claiming the broader target contract is implemented. `ticket_validate.py` is
   part of this adapter boundary because live create validation currently runs
   before `_execute_create()` renders source-supported sections.
-- Treat Tasks 1 and 2 as one atomic source commit group. Runtime identity calls
-  start using the target-shaped identity helper before `test_autonomy_runtime.py`
-  can be green; do not commit Task 1 by itself.
+- Treat Tasks 1, 2, and 3 as the first runnable source commit group. Runtime
+  identity calls start using the target-shaped identity helper before
+  `test_autonomy_runtime.py` can be green, and gateway/apply-turn construction
+  sites are not migrated until Task 3. Tasks 1 and 2 may be internal
+  focused-green checkpoints, but do not commit either task before Task 3's
+  gateway/source-entrypoint PASS gate succeeds.
 - Treat intermediate task commits as focused-green boundaries, not full-suite
   green boundaries. Do not claim the full Ticket suite is green until Task 7.
   If a task removes source behavior that a focused selector covers, rewrite or
@@ -307,15 +313,15 @@ git status --short --branch
 git rev-parse --short HEAD
 ```
 
-Expected at the last reviewed source baseline before this correction-context and
-Task 3A verification patch:
+Expected at the last reviewed source baseline before the Task 1/2 boundary,
+TERMS, and resume-path plan patch:
 
 ```text
-## main...origin/main [ahead 13]
-d145ac2d
+## main...origin/main [ahead 17]
+18d40178
 ```
 
-If `HEAD` has advanced, run `git diff --stat d145ac2d..HEAD` and re-check the
+If `HEAD` has advanced, run `git diff --stat 18d40178..HEAD` and re-check the
 plan against the new diff before using the expected output as a gate. If the
 only diff is this plan, record the live status and continue. If source files
 changed, re-check the implementation steps against the new source before
@@ -1156,8 +1162,9 @@ standalone green boundary.
 
 - [ ] **Step 7: Do not commit Task 1 by itself**
 
-Continue directly to Task 2. Commit the Task 1 and Task 2 files together after
-Task 2 Step 6 passes.
+Continue directly to Task 2. Do not commit Task 1 by itself, and do not commit
+the Task 1/2 runtime/discovery boundary before Task 3 migrates the gateway and
+live apply-turn construction sites.
 
 ## Task 2: Migrate Candidate Discovery And Commit Runtime Identity
 
@@ -1657,18 +1664,16 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 Expected: all three files pass.
 
-- [ ] **Step 7: Commit Tasks 1 and 2 together**
+- [ ] **Step 7: Treat Tasks 1 and 2 as an internal checkpoint**
 
-Run:
+Do not run `git add` or `git commit` here. Record the Task 1/2 test output in
+the active implementation notes and continue directly to Task 3.
 
-```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_candidate_discovery.py
-git commit -m "fix(ticket): migrate target candidate runtime and discovery"
-```
-
-Expected: commit succeeds with the atomic runtime, identity, and discovery
-files staged. Do not split the runtime changes from the identity helper
-signature change.
+Expected: runtime, identity, and discovery focused selectors pass, but this is
+not a runnable source-correct boundary because `ticket_autonomy.py` and
+`ticket_engine_gateway.py` still construct old-shaped gateway/runtime values
+until Task 3. Task 3's commit stages the Task 1, Task 2, and Task 3 files
+together.
 
 ## Task 3: Project Target Candidates Through Gateway, Entrypoint, And Engine
 
@@ -1737,6 +1742,58 @@ def test_apply_turn_reports_invalid_explicit_candidate_without_no_change(
             "Fix the explicit Ticket candidate payload before automatic ticket mutation."
         ),
     }
+```
+
+Add the resume-paused source-context variant in the same file:
+
+```python
+def test_apply_turn_resume_source_context_pause_reports_invalid_candidate_and_keeps_pause(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    pause_workspace_automation(tmp_path, reason="source_context_unhealthy")
+    context = _write_context(
+        tmp_path,
+        candidate_mutations=[
+            {
+                "ticket_id": "T-20260527-01",
+                "action": "update",
+                "target": {"fields": ["priority"], "sections": []},
+                "proposed_change": {"priority": "high"},
+                "expected_ticket_fingerprint": "state-T-20260527-01",
+                "evidence_summary": "Priority changed.",
+                "ticket_change_scope": "unrelated_backlog",
+            },
+        ],
+    )
+
+    result = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+        "--setup-choice",
+        "automatic",
+        "--resume-paused",
+    )
+
+    assert result.returncode == 2
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "invalid_candidate"
+    assert payload["changed"] is False
+    assert payload["invalid_candidates"] == [
+        {
+            "key": "candidate_mutations",
+            "index": 0,
+            "errors": ["unknown candidate keys: ['ticket_change_scope']"],
+        }
+    ]
+    assert (tmp_path / ".codex" / "ticket-workspace" / "pause.json").is_file()
 ```
 
 - [ ] **Step 1: Write failing gateway tests for target update and create**
@@ -2139,16 +2196,18 @@ Run:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_applies_exact_target_section_update plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_removes_exact_optional_target_section plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_updates_blocked_ticket_to_open_with_target_section_cleanup plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_rejects_status_only_close_for_blocked_ticket plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_create_accepts_every_source_supported_target_section plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_collector_unhealthy_pauses_without_mutation_or_health_events plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_reports_invalid_explicit_candidate_without_no_change plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_summarizes_applied_mutation_before_next_turn plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py::test_agent_primary_apply_turn_applies_update_through_gateway -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_resume_source_context_pause_reports_invalid_candidate_and_keeps_pause -q
 ```
 
 Expected: fail because `GatewayMutation` has no `target`, `proposed_change`, or
 `expected_ticket_fingerprint` fields, `ticket_autonomy.py` still constructs the
 old `fields`/`target_fingerprint` gateway shape, and blocked-to-open target
 sections are not yet projected into update policy. The
-`source_context_unhealthy` collector test and outer `invalid_candidate` host-state
-test must keep passing throughout this task; a failure there means the health
-gate or explicit invalid-candidate visibility was weakened while removing the
-fingerprint side channel.
+`source_context_unhealthy` collector test and outer `invalid_candidate`
+host-state tests, including the resume-paused invalid-candidate test, must keep
+passing throughout this task; a failure there means the health gate or explicit
+invalid-candidate visibility was weakened while removing the fingerprint side
+channel.
 
 - [ ] **Step 3: Update GatewayMutation and decision validation**
 
@@ -2342,10 +2401,25 @@ except InvalidTicketState:
     return 3
 ```
 
-- Make the same `InvalidCandidateMutations` catch in
-  `_source_context_resume_collection()` if it calls `discover_candidate_mutations()`;
-  return a collection state that keeps the pause closed instead of silently
-  resuming from malformed explicit input.
+- Add the same `InvalidCandidateMutations` catch in the `--resume-paused`
+  source-context branch before `resume_workspace_automation()` runs. Let
+  `_source_context_resume_collection()` keep calling
+  `discover_candidate_mutations()`, and catch the error at the resume branch so
+  the CLI can emit the same outer invalid-candidate host response while leaving
+  the existing pause file intact:
+
+```python
+if args.resume_paused and _read_pause_reason(project_root) == "source_context_unhealthy":
+    try:
+        collection = _source_context_resume_collection(project_root, context)
+    except InvalidCandidateMutations as exc:
+        _emit(_invalid_candidate_response(exc))
+        return 2
+    if collection.state == "unhealthy":
+        _emit(_paused_response(collection.reason or "source_context_unhealthy"))
+        return 3
+```
+
 - Do not broaden `_has_candidate_changes()` to treat malformed target candidates
   as legacy mode-projection work. The new explicit arrays are either valid
   target candidates, an explicit invalid-candidate response, or empty.
@@ -2676,24 +2750,26 @@ Run:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_applies_exact_target_section_update plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_removes_exact_optional_target_section plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_updates_blocked_ticket_to_open_with_target_section_cleanup plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_rejects_status_only_close_for_blocked_ticket plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_create_accepts_every_source_supported_target_section plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_collector_unhealthy_pauses_without_mutation_or_health_events plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_reports_invalid_explicit_candidate_without_no_change plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_summarizes_applied_mutation_before_next_turn plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py::test_agent_primary_apply_turn_applies_update_through_gateway -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_resume_source_context_pause_reports_invalid_candidate_and_keeps_pause -q
 ```
 
 Expected: the gateway section update/removal/blocked-to-open/create tests and
-the source-context health, invalid-candidate, and apply-turn source entrypoint
-tests pass.
+the source-context health, invalid-candidate normal/resume, and apply-turn source
+entrypoint tests pass.
 
 - [ ] **Step 9: Commit Task 3**
 
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_validate.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_engine_policy.py
-git commit -m "fix(ticket): project target candidates through gateway"
+git add plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py plugins/turbo-mode/ticket/scripts/ticket_candidate_discovery.py plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_validate.py plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_candidate_discovery.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_engine_policy.py
+git commit -m "fix(ticket): migrate target candidates through source entrypoints"
 ```
 
-Expected: commit succeeds with gateway, engine, source-entrypoint, and directly
-affected validation/tests staged. Do not update source-availability docs in this
-commit.
+Expected: commit succeeds with runtime shape, identity, discovery, gateway,
+engine, source-entrypoint, and directly affected validation/tests staged. This
+is the first runnable target-candidate source boundary. Do not update
+source-availability docs in this commit.
 
 ## Task 3A: Add Exact Create Idempotency Binding
 
@@ -5765,6 +5841,7 @@ fingerprint helper should already be in the Task 3A commit.
 - Modify: `plugins/turbo-mode/ticket/README.md`
 - Modify: `plugins/turbo-mode/ticket/HANDBOOK.md`
 - Modify: `plugins/turbo-mode/ticket/references/ticket-contract.md`
+- Modify: `plugins/turbo-mode/ticket/TERMS.md`
 - Modify: `plugins/turbo-mode/ticket/.codex-plugin/plugin.json`
 - Modify: `plugins/turbo-mode/ticket/skills/capture-ticket/SKILL.md`
 - Modify: `plugins/turbo-mode/ticket/skills/update-ticket/SKILL.md`
@@ -5779,9 +5856,9 @@ retry can still allocate a duplicate ticket instead of using a retained
 allocation binding, or while non-create recovery lacks pre-write
 `expected_post_write_fingerprint` and exact generated `Change History` metadata,
 or while apply-turn prior-turn ledger recovery cannot interpret retained create
-allocation facts. The docs and plugin manifest also must not preserve old
-lifecycle prose that says terminal tickets only reopen to `open` after Task 4
-adds `reopen -> blocked` source behavior.
+allocation facts. The docs, manifest-linked terms, and plugin manifest also must
+not preserve old lifecycle prose that says terminal tickets only reopen to
+`open` after Task 4 adds `reopen -> blocked` source behavior.
 
 - [ ] **Step 1: Write failing docs-contract tests**
 
@@ -5803,6 +5880,7 @@ def test_ticket_write_docs_no_longer_claim_source_entrypoint_missing() -> None:
         Path("plugins/turbo-mode/ticket/README.md"),
         Path("plugins/turbo-mode/ticket/HANDBOOK.md"),
         Path("plugins/turbo-mode/ticket/references/ticket-contract.md"),
+        Path("plugins/turbo-mode/ticket/TERMS.md"),
         Path("plugins/turbo-mode/ticket/skills/capture-ticket/SKILL.md"),
         Path("plugins/turbo-mode/ticket/skills/update-ticket/SKILL.md"),
     ]
@@ -5882,11 +5960,11 @@ Run after the Task 6 precondition is satisfied:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_docs_contract.py -q
 ```
 
-Expected: fail on README/HANDBOOK/contract/skills/manifest availability wording,
-on the control-doc/contract identity and correction-context authority wording,
-on the contract lifecycle sentence that still says terminal tickets reopen only
-to `open`, and on any existing docs-contract assertion that still requires the
-old unavailable source-write language.
+Expected: fail on README/HANDBOOK/contract/TERMS/skills/manifest availability
+wording, on the control-doc/contract identity and correction-context authority
+wording, on the contract lifecycle sentence that still says terminal tickets
+reopen only to `open`, and on any existing docs-contract assertion that still
+requires the old unavailable source-write language.
 
 - [ ] **Step 3: Update source docs availability language**
 
@@ -5896,7 +5974,7 @@ Replace "temporarily unavailable until source exposes a live target-candidate en
 Source now exposes the target candidate mutation path. Installed-runtime availability still requires a separate cache refresh and runtime inventory before claiming the active Codex plugin can perform writes.
 ```
 
-Use this boundary in README/HANDBOOK/contract:
+Use this boundary in README/HANDBOOK/contract/TERMS:
 
 ```text
 Capture and update skills may describe and route target candidates through the source entrypoint when the installed Ticket runtime matches this source. Do not claim installed write availability from source files alone.
@@ -5916,6 +5994,17 @@ rebaselined with source-truthful manifest text that keeps runtime proof separate
 
 ```json
 "longDescription": "Read, validate, triage, diagnose, and route repo-local Ticket state through the source target candidate contract. Installed write availability still requires separate runtime proof."
+```
+
+In `plugins/turbo-mode/ticket/TERMS.md`, replace the manifest-linked source
+rebaseline wording with source-truthful terms text that preserves the installed
+runtime boundary:
+
+```text
+The plugin is provided as source for repo-local ticket reading, backlog triage,
+capture/update candidate routing through the source target candidate contract,
+and explicit maintenance diagnostics. Installed write availability still
+requires separate runtime proof.
 ```
 
 In `plugins/turbo-mode/ticket/references/ticket-contract.md`, replace the old
@@ -5966,23 +6055,23 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 
 Expected: the full docs-contract file passes, including the updated lifecycle
 assertion, identity/correction authority assertions, capture/update skill
-availability assertions, and plugin manifest availability assertion. This
-command proves docs-contract coverage only; do not claim Task 3, Task 3A, or
-Task 5 source-test proof from this docs-only selector. Those source-test gates
-are Task 6 preconditions and are rechecked by the final all-source verification
-command.
+availability assertions, plugin manifest availability assertion, and
+manifest-linked `TERMS.md` availability assertion. This command proves
+docs-contract coverage only; do not claim Task 3, Task 3A, or Task 5 source-test
+proof from this docs-only selector. Those source-test gates are Task 6
+preconditions and are rechecked by the final all-source verification command.
 
 - [ ] **Step 5: Commit Task 6**
 
 Run:
 
 ```bash
-git add docs/superpowers/specs/2026-05-30-ticket-runtime-first-state-kernel-control.md plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/.codex-plugin/plugin.json plugins/turbo-mode/ticket/skills/capture-ticket/SKILL.md plugins/turbo-mode/ticket/skills/update-ticket/SKILL.md plugins/turbo-mode/ticket/tests/test_docs_contract.py
+git add docs/superpowers/specs/2026-05-30-ticket-runtime-first-state-kernel-control.md plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/TERMS.md plugins/turbo-mode/ticket/.codex-plugin/plugin.json plugins/turbo-mode/ticket/skills/capture-ticket/SKILL.md plugins/turbo-mode/ticket/skills/update-ticket/SKILL.md plugins/turbo-mode/ticket/tests/test_docs_contract.py
 git commit -m "docs(ticket): update target candidate write availability"
 ```
 
-Expected: commit succeeds with docs/skill/manifest availability and lifecycle
-contract files only.
+Expected: commit succeeds with docs/terms/skill/manifest availability and
+lifecycle contract files only.
 
 ## Task 7: Final Source Verification
 
@@ -6230,9 +6319,10 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
   existing operation-log event type.
 - The final construction-site check has no old-shaped `CandidateMutation(...)`
   or `GatewayMutation(...)` calls in scripts or tests.
-- Source docs, skills, and plugin manifest stop claiming source entrypoint absence
-  or ongoing source rebaseline after the source entrypoint lands, while
-  preserving the source-vs-installed-runtime proof boundary.
+- Source docs, manifest-linked terms, skills, and plugin manifest stop claiming
+  source entrypoint absence or ongoing source rebaseline after the source
+  entrypoint lands, while preserving the source-vs-installed-runtime proof
+  boundary.
 - Focused candidate-contract tests, full Ticket suite, ruff, and `git diff --check` pass.
 
 ## Out Of Scope
@@ -6254,10 +6344,11 @@ their required commits exist, and the acceptance criteria plus final verificatio
 commands are satisfied from the current checkout.
 
 Primary implementation mode: sequential inline execution using
-`superpowers:executing-plans`, with checkpoints after each task commit. Do not
-dispatch one primary worker per task: Tasks 1/2 are atomic together, Task 3A
-depends on Task 3, Task 5 depends on Task 3A recovery facts, and Task 6 depends
-on Tasks 3, 3A, and 5.
+`superpowers:executing-plans`, with checkpoints after each task commit and after
+the internal Task 1/2 test gate. Do not dispatch one primary worker per task:
+Tasks 1-3 form the first runnable source commit group, Task 3A depends on Task
+3, Task 5 depends on Task 3A recovery facts, and Task 6 depends on Tasks 3, 3A,
+and 5.
 
 Optional helpers: subagents may be used only for bounded read-only reviews,
 grep/probe summaries, or isolated snippet sanity checks after the active
