@@ -13,11 +13,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Literal, TypeAlias
 
 from scripts.ticket_autonomy_config import AutomationMode, LocalConfigState, read_local_config
@@ -1816,11 +1818,73 @@ def preview_target_write(
 ) -> EngineResponse | TargetWritePreview:
     """Render the exact target write without writing a ticket file."""
     if action != "create":
-        return EngineResponse(
-            state="blocked",
-            message=f"Preview failed: unsupported action {action!r}",
-            error_code="preview_unsupported",
-            ticket_id=ticket_id,
+        ticket, invalid_state = _find_ticket_by_id_for_engine(tickets_dir, ticket_id)
+        if invalid_state is not None:
+            return invalid_state
+        if ticket is None:
+            return EngineResponse(
+                state="not_found",
+                message=f"No ticket matching {ticket_id}",
+                ticket_id=ticket_id,
+                error_code="not_found",
+            )
+        with TemporaryDirectory(prefix="ticket-preview-") as preview_root:
+            preview_dir = Path(preview_root)
+            preview_dir.mkdir(parents=True, exist_ok=True)
+            for source in sorted(tickets_dir.glob("*.md")):
+                shutil.copy2(source, preview_dir / source.name)
+            if action == "update":
+                response = _execute_update(
+                    ticket_id,
+                    dict(fields),
+                    session_id,
+                    request_origin,
+                    preview_dir,
+                    change_history_entry=change_history_entry,
+                    target_sections=target_sections,
+                )
+            elif action == "close":
+                response = _execute_close(
+                    ticket_id,
+                    dict(fields),
+                    session_id,
+                    request_origin,
+                    preview_dir,
+                    change_history_entry=change_history_entry,
+                    target_sections=target_sections,
+                )
+            elif action == "reopen":
+                response = _execute_reopen(
+                    ticket_id,
+                    dict(fields),
+                    session_id,
+                    request_origin,
+                    preview_dir,
+                    change_history_entry=change_history_entry,
+                    target_sections=target_sections,
+                )
+            else:
+                return EngineResponse(
+                    state="blocked",
+                    message=f"Preview failed: unsupported action {action!r}",
+                    error_code="preview_unsupported",
+                    ticket_id=ticket_id,
+                )
+            if response.state != "ok":
+                return response
+            preview_path = response.data.get("ticket_path")
+            if not isinstance(preview_path, str):
+                return EngineResponse(
+                    state="blocked",
+                    message="Preview failed: ticket_path_missing",
+                    error_code="ticket_path_missing",
+                    ticket_id=ticket_id,
+                )
+            content = Path(preview_path).read_text(encoding="utf-8")
+        return TargetWritePreview(
+            ticket_path=Path(ticket.path),
+            rendered_text=content,
+            post_write_fingerprint=target_recovery_fingerprint_for_text(content),
         )
     render_fields = dict(fields)
     for heading, value in target_sections.items():

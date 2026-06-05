@@ -232,8 +232,19 @@ def _event_with_recovery_fingerprints(
     post: str,
 ) -> dict[str, object]:
     details = dict(event["details"])
+    details.pop("decision", None)
+    details.pop("current_mode", None)
+    details.pop("evidence_kind", None)
+    details["target"] = {"fields": ["priority"], "sections": []}
+    details["evidence_summary"] = "Current turn justifies this ticket change."
     details["expected_pre_write_fingerprint"] = pre
     details["expected_post_write_fingerprint"] = post
+    details["change_history_entry"] = {
+        "timestamp": event["timestamp"],
+        "actor": "codex",
+        "reason": "Updated ticket from candidate evidence.",
+        "corrects": None,
+    }
     return {**event, "details": details}
 
 
@@ -984,6 +995,67 @@ def test_create_attempt_records_allocated_ticket_binding_before_dispatch(
     assert not (project_root / str(allocation["allocated_ticket_path"])).exists()
 
 
+def test_update_attempt_records_expected_post_write_facts_before_dispatch(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
+    target = CandidateTarget(fields=("priority",), sections=("Next Action",))
+    proposed_change = {
+        "priority": "low",
+        "Next Action": "Finish the target candidate migration.",
+    }
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        target=target,
+        proposed_change=proposed_change,
+    )
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint or "",
+    )
+
+    def fail_dispatch(**_kwargs: object) -> EngineResponse:
+        return EngineResponse(
+            state="escalate",
+            message="simulated dispatch failure",
+            error_code="simulated_failure",
+        )
+
+    monkeypatch.setattr(gateway, "_execute_dispatch", fail_dispatch)
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    details = _events(project_root)[0]["details"]
+    history = details["change_history_entry"]
+    assert response.error_code == "simulated_failure"
+    assert details["expected_pre_write_fingerprint"] == mutation.expected_ticket_fingerprint
+    assert isinstance(details["expected_post_write_fingerprint"], str)
+    assert details["expected_post_write_fingerprint"]
+    assert history == {
+        "timestamp": _events(project_root)[0]["timestamp"],
+        "actor": "codex",
+        "reason": "Updated ticket from candidate evidence.",
+        "corrects": None,
+    }
+    assert "decision" not in details
+    assert "current_mode" not in details
+    assert "evidence_kind" not in details
+
+
 def test_create_retry_reuses_retained_allocation_when_file_not_written(
     tmp_tickets: Path,
 ) -> None:
@@ -1580,7 +1652,7 @@ def test_gateway_recovers_missing_write_events_without_rewriting_ticket(
         ticket_path.read_text(encoding="utf-8").replace("priority: high", "priority: low"),
         encoding="utf-8",
     )
-    post = target_fingerprint(ticket_path) or ""
+    post = target_recovery_fingerprint(ticket_path) or ""
     before = ticket_path.read_text(encoding="utf-8")
     store = PendingSummaryStore(project_root)
     assert (

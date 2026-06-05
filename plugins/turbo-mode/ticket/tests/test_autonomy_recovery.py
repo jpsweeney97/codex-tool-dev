@@ -6,6 +6,7 @@ from pathlib import Path
 
 from scripts.ticket_autonomy_ids import make_mutation_id
 from scripts.ticket_turn_batch import (
+    CurrentRecoveryFingerprints,
     PendingSummaryStore,
     project_mutation_recovery,
     validate_pending_summary_event,
@@ -25,8 +26,19 @@ def _event_with_bound_fingerprints(
     post: str = "post-fp",
 ) -> dict[str, object]:
     details = dict(event["details"])
+    details.pop("decision", None)
+    details.pop("current_mode", None)
+    details.pop("evidence_kind", None)
+    details["target"] = {"fields": ["priority"], "sections": []}
+    details["evidence_summary"] = "Current turn justifies this ticket change."
     details["expected_pre_write_fingerprint"] = pre
     details["expected_post_write_fingerprint"] = post
+    details["change_history_entry"] = {
+        "timestamp": "2026-05-27T12:00:00Z",
+        "actor": "codex",
+        "reason": "Updated ticket from candidate evidence.",
+        "corrects": None,
+    }
     return {**event, "details": details}
 
 
@@ -88,19 +100,19 @@ def test_attempt_recorded_retries_only_same_mutation_when_pre_write_matches(
         store=store,
         thread_id="thread-1",
         mutation_id="mut_recover",
-        current_ticket_fingerprint="pre-fp",
+        current_ticket_fingerprints=CurrentRecoveryFingerprints("pre-fp", "live-post-fp"),
     )
     other_thread = project_mutation_recovery(
         store=store,
         thread_id="thread-2",
         mutation_id="mut_recover",
-        current_ticket_fingerprint="pre-fp",
+        current_ticket_fingerprints=CurrentRecoveryFingerprints("pre-fp", "live-post-fp"),
     )
     stale = project_mutation_recovery(
         store=store,
         thread_id="thread-1",
         mutation_id="mut_recover",
-        current_ticket_fingerprint="other-fp",
+        current_ticket_fingerprints=CurrentRecoveryFingerprints("other-fp", "other-post-fp"),
     )
 
     assert projection.state == "retry_with_same_mutation"
@@ -130,13 +142,14 @@ def test_attempt_recorded_create_without_ticket_fingerprint_retries_same_mutatio
         store=store,
         thread_id="thread-1",
         mutation_id="mut_create",
-        current_ticket_fingerprint=None,
+        current_ticket_fingerprints=CurrentRecoveryFingerprints(None, None),
     )
 
-    assert projection.state == "retry_with_same_mutation"
+    assert projection.state == "pause_for_reconciliation"
     assert projection.events_to_append == ()
     assert projection.expected_pre_write_fingerprint is None
     assert projection.expected_post_write_fingerprint is None
+    assert projection.reason == "missing_post_write_fingerprint"
 
 
 def test_attempt_recorded_with_post_write_state_appends_missing_write_events(
@@ -159,7 +172,7 @@ def test_attempt_recorded_with_post_write_state_appends_missing_write_events(
         store=store,
         thread_id="thread-1",
         mutation_id="mut_recover",
-        current_ticket_fingerprint="post-fp",
+        current_ticket_fingerprints=CurrentRecoveryFingerprints("other-pre-fp", "post-fp"),
     )
 
     assert projection.state == "append_missing_ticket_written"
@@ -202,7 +215,7 @@ def test_ticket_written_without_terminal_status_appends_outcome(
         store=store,
         thread_id="thread-1",
         mutation_id="mut_recover",
-        current_ticket_fingerprint="post-fp",
+        current_ticket_fingerprints=CurrentRecoveryFingerprints("other-pre-fp", "post-fp"),
     )
 
     assert projection.state == "append_missing_terminal_status"
@@ -244,7 +257,7 @@ def test_status_recorded_without_summary_appends_recovery_summary_receipt(
         store=store,
         thread_id="thread-1",
         mutation_id="mut_recover",
-        current_ticket_fingerprint="post-fp",
+        current_ticket_fingerprints=CurrentRecoveryFingerprints("other-pre-fp", "post-fp"),
     )
 
     assert projection.state == "summary_ready"
@@ -287,7 +300,7 @@ def test_summary_recorded_does_not_retry_mutation(tmp_path: Path) -> None:
         store=store,
         thread_id="thread-1",
         mutation_id="mut_recover",
-        current_ticket_fingerprint="post-fp",
+        current_ticket_fingerprints=CurrentRecoveryFingerprints("other-pre-fp", "post-fp"),
     )
 
     assert projection.state == "healthy"
@@ -336,14 +349,15 @@ def test_recovery_derives_mutation_state_from_events(tmp_path: Path) -> None:
     )
 
     store.append_event(
-        valid_attempt_event(
-            event_id="evt_summary",
-            event_type="summary_receipt",
-            status="summarized",
-            thread_id=thread_id,
-            mutation_id=mutation_id,
-            details={},
-        )
+            valid_attempt_event(
+                event_id="evt_summary",
+                event_type="summary_receipt",
+                status="summarized",
+                action="summarize",
+                thread_id=thread_id,
+                mutation_id=mutation_id,
+                details={},
+            )
     )
     assert store.derive_mutation_state(thread_id=thread_id, mutation_id=mutation_id) == (
         "summary_recorded"

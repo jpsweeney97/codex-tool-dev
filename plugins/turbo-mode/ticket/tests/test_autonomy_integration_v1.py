@@ -5,13 +5,16 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from scripts.ticket_autonomy import build_repo_context
 from scripts.ticket_autonomy_config import AutomationMode, write_local_config
 from scripts.ticket_dedup import target_fingerprint
+from scripts.ticket_turn_batch import PendingSummaryStore
 
 from tests.support.builders import make_ticket
+from tests.test_turn_batch import valid_status_event
 
 SCRIPT = Path(__file__).parent.parent / "scripts" / "ticket_autonomy.py"
 
@@ -73,6 +76,42 @@ def _events(project_root: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
+def _append_retained_correction_context(
+    project_root: Path,
+    ticket_path: Path,
+    *,
+    target: dict[str, list[str]] | None = None,
+    proposed_change: dict[str, object] | None = None,
+    expected_ticket_fingerprint: str | None = None,
+    timestamp: str | None = None,
+    compacted: bool = False,
+) -> None:
+    details: dict[str, object] = {
+        "correction_ready": True,
+        "target": target or {"fields": ["priority"], "sections": []},
+        "proposed_change": proposed_change or {"priority": "high"},
+        "expected_ticket_fingerprint": (
+            expected_ticket_fingerprint or target_fingerprint(ticket_path) or ""
+        ),
+    }
+    if compacted:
+        details["correction_detail_compacted"] = True
+    else:
+        details["correction_detail_retained"] = True
+        details["correction_detail"] = "Prior automatic mutation wrote the wrong priority."
+    event = valid_status_event(
+        "failed",
+        event_id="evt_prior_correction",
+        timestamp=timestamp or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        thread_id="thread-1",
+        mutation_id="mut-prior-correction",
+        ticket_id="T-20260527-01",
+        error_code="policy_blocked",
+        **details,
+    )
+    assert PendingSummaryStore(project_root).append_event(event).state == "appended"
+
+
 def _priority_update_candidate(
     ticket_path: Path | None,
     *,
@@ -128,25 +167,25 @@ def test_agent_primary_apply_turn_applies_update_through_gateway(tmp_path: Path)
     assert all(event["repo_context"] == expected_repo_context for event in events)
 
 
-def test_agent_primary_apply_turn_applies_correction_through_gateway(tmp_path: Path) -> None:
+def test_agent_primary_apply_turn_applies_target_correction_from_retained_context(
+    tmp_path: Path,
+) -> None:
     tickets_dir = _init_ticket_project(tmp_path)
     ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="low")
     write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    expected = target_fingerprint(ticket) or ""
+    _append_retained_correction_context(tmp_path, ticket)
     context = _write_context(
         tmp_path,
         {
-            "correction_detail": {
-                "ticket_id": "T-20260527-01",
-                "summary": "Previous automatic update used the wrong priority.",
-            },
             "candidate_mutations": [
                 {
                     "ticket_id": "T-20260527-01",
                     "action": "correct",
                     "target": {"fields": ["priority"], "sections": []},
                     "proposed_change": {"priority": "high"},
-                    "expected_ticket_fingerprint": target_fingerprint(ticket),
-                    "evidence_summary": "Correct the previous automatic priority update.",
+                    "expected_ticket_fingerprint": expected,
+                    "evidence_summary": "Prior mutation set priority too low.",
                 }
             ]
         },
@@ -162,13 +201,151 @@ def test_agent_primary_apply_turn_applies_correction_through_gateway(tmp_path: P
     assert "priority: high" in text
     assert " | codex | Corrected ticket from candidate evidence." in text
     events = _events(tmp_path)
-    assert [event["status"] for event in events[:3]] == [
+    mutation_events = [event for event in events if event["event_type"] != "summary_receipt"]
+    assert [event["status"] for event in mutation_events[-3:]] == [
         "pending",
         "ticket_written",
         "applied",
     ]
-    assert events[0]["details"]["decision"] == "apply_correction"
-    assert "approval" not in events[0]["details"]
+    assert "decision" not in mutation_events[-3]["details"]
+    assert "evidence_kind" not in mutation_events[-3]["details"]
+
+
+def test_agent_primary_apply_turn_blocks_correction_with_compacted_context(
+    tmp_path: Path,
+) -> None:
+    tickets_dir = _init_ticket_project(tmp_path)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="low")
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    expected = target_fingerprint(ticket) or ""
+    _append_retained_correction_context(tmp_path, ticket, compacted=True)
+    context = _write_context(
+        tmp_path,
+        {
+            "candidate_mutations": [
+                {
+                    "ticket_id": "T-20260527-01",
+                    "action": "correct",
+                    "target": {"fields": ["priority"], "sections": []},
+                    "proposed_change": {"priority": "high"},
+                    "expected_ticket_fingerprint": expected,
+                    "evidence_summary": "Prior mutation set priority too low.",
+                }
+            ]
+        },
+    )
+
+    result = _apply_turn(tmp_path, context)
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "discussion_required"
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
+
+
+def test_agent_primary_apply_turn_blocks_correction_with_expired_context(
+    tmp_path: Path,
+) -> None:
+    tickets_dir = _init_ticket_project(tmp_path)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="low")
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    expected = target_fingerprint(ticket) or ""
+    old_timestamp = (datetime.now(UTC) - timedelta(days=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _append_retained_correction_context(tmp_path, ticket, timestamp=old_timestamp)
+    context = _write_context(
+        tmp_path,
+        {
+            "candidate_mutations": [
+                {
+                    "ticket_id": "T-20260527-01",
+                    "action": "correct",
+                    "target": {"fields": ["priority"], "sections": []},
+                    "proposed_change": {"priority": "high"},
+                    "expected_ticket_fingerprint": expected,
+                    "evidence_summary": "Prior mutation set priority too low.",
+                }
+            ]
+        },
+    )
+
+    result = _apply_turn(tmp_path, context)
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "discussion_required"
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
+
+
+def test_agent_primary_apply_turn_blocks_correction_with_unmatched_context(
+    tmp_path: Path,
+) -> None:
+    tickets_dir = _init_ticket_project(tmp_path)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="low")
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    expected = target_fingerprint(ticket) or ""
+    _append_retained_correction_context(
+        tmp_path,
+        ticket,
+        expected_ticket_fingerprint="different-fingerprint",
+    )
+    context = _write_context(
+        tmp_path,
+        {
+            "candidate_mutations": [
+                {
+                    "ticket_id": "T-20260527-01",
+                    "action": "correct",
+                    "target": {"fields": ["priority"], "sections": []},
+                    "proposed_change": {"priority": "high"},
+                    "expected_ticket_fingerprint": expected,
+                    "evidence_summary": "Prior mutation set priority too low.",
+                }
+            ]
+        },
+    )
+
+    result = _apply_turn(tmp_path, context)
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "discussion_required"
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
+
+
+def test_agent_primary_apply_turn_blocks_correction_with_proposed_change_mismatch(
+    tmp_path: Path,
+) -> None:
+    tickets_dir = _init_ticket_project(tmp_path)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="low")
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    expected = target_fingerprint(ticket) or ""
+    _append_retained_correction_context(
+        tmp_path,
+        ticket,
+        proposed_change={"priority": "normal"},
+    )
+    context = _write_context(
+        tmp_path,
+        {
+            "candidate_mutations": [
+                {
+                    "ticket_id": "T-20260527-01",
+                    "action": "correct",
+                    "target": {"fields": ["priority"], "sections": []},
+                    "proposed_change": {"priority": "high"},
+                    "expected_ticket_fingerprint": expected,
+                    "evidence_summary": "Prior mutation set priority too low.",
+                }
+            ]
+        },
+    )
+
+    result = _apply_turn(tmp_path, context)
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "discussion_required"
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
 
 
 def test_invalid_preview_config_and_discussion_mode_do_not_write_tickets(

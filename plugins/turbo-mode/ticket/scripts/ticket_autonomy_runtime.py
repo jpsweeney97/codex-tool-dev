@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 from scripts.ticket_mutation_identity import (
@@ -115,6 +115,7 @@ _UNSAFE_CORRECTION_KEYS = frozenset(
         "git_history_edit",
     }
 )
+_CORRECTION_CONTEXT_MAX_AGE = timedelta(days=14)
 
 
 def _string_tuple(value: object) -> tuple[str, ...] | None:
@@ -487,18 +488,68 @@ def _unsafe_correction(candidate: CandidateMutation) -> bool:
     return bool(_UNSAFE_CORRECTION_KEYS & set(candidate.proposed_change))
 
 
+def _parse_z(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=UTC)
+
+
+def _canonical_target_key(target: CandidateTarget) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    return (tuple(sorted(target.fields)), tuple(sorted(target.sections)))
+
+
+def _canonical_context_target(value: object) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    if not isinstance(value, Mapping):
+        return None
+    fields = value.get("fields")
+    sections = value.get("sections")
+    if not isinstance(fields, list) or not isinstance(sections, list):
+        return None
+    if not all(isinstance(field, str) for field in fields):
+        return None
+    if not all(isinstance(section, str) for section in sections):
+        return None
+    return (tuple(sorted(fields)), tuple(sorted(sections)))
+
+
 def _correction_detail_available(
     candidate: CandidateMutation,
     source_context: Mapping[str, object],
+    *,
+    now: datetime,
+    max_age: timedelta = _CORRECTION_CONTEXT_MAX_AGE,
 ) -> bool:
-    details = source_context.get("correction_detail")
-    if not isinstance(details, Mapping):
+    contexts = source_context.get("recent_correction_context")
+    if not isinstance(contexts, Mapping) or candidate.ticket_id is None:
         return False
-    if details.get("compacted") is True:
+    context = contexts.get(candidate.ticket_id)
+    if not isinstance(context, Mapping):
         return False
-    if details.get("ticket_id") != candidate.ticket_id:
+    if context.get("correction_ready") is not True:
         return False
-    return True
+    if context.get("correction_detail_retained") is not True:
+        return False
+    if not isinstance(context.get("source_mutation_id"), str):
+        return False
+    retained_at = _parse_z(context.get("retained_at"))
+    if retained_at is None:
+        return False
+    if retained_at < now - max_age:
+        return False
+    if context.get("expected_ticket_fingerprint") != candidate.expected_ticket_fingerprint:
+        return False
+    proposed_change = context.get("proposed_change")
+    if not isinstance(proposed_change, Mapping):
+        return False
+    if dict(proposed_change) != dict(candidate.proposed_change):
+        return False
+    return _canonical_context_target(context.get("target")) == _canonical_target_key(
+        candidate.target
+    )
 
 
 def _identity_for_candidate(
@@ -577,7 +628,7 @@ def evaluate_autonomy_intent(
     Returns:
         One decision per candidate, preserving candidate order.
     """
-    del now
+    runtime_now = now or datetime.now(UTC)
     applied_counts: dict[str, int] = defaultdict(int)
     decisions: list[AutonomyDecision] = []
 
@@ -613,6 +664,17 @@ def evaluate_autonomy_intent(
             )
             continue
         if candidate.action == "correct":
+            shape_errors = _candidate_shape_errors(candidate)
+            if shape_errors:
+                decisions.append(
+                    _decision(
+                        candidate,
+                        RuntimeDecisionKind.REQUIRE_USER_DISCUSSION,
+                        reason="target_closure_failed",
+                        pending_summary_status="discussion_required",
+                    )
+                )
+                continue
             if _unsafe_correction(candidate):
                 decisions.append(
                     _decision(
@@ -623,7 +685,11 @@ def evaluate_autonomy_intent(
                     )
                 )
                 continue
-            if not _correction_detail_available(candidate, intent.source_context):
+            if not _correction_detail_available(
+                candidate,
+                intent.source_context,
+                now=runtime_now,
+            ):
                 decisions.append(
                     _decision(
                         candidate,

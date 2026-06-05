@@ -41,6 +41,7 @@ from scripts.ticket_mutation_identity import make_candidate_mutation_identity
 from scripts.ticket_read import InvalidTicketState, find_ticket_by_id
 from scripts.ticket_turn_batch import (
     PENDING_SUMMARY_SCHEMA,
+    CurrentRecoveryFingerprints,
     PendingSummaryStore,
     VerifiedRepoContext,
     acquire_process_lock,
@@ -294,16 +295,20 @@ def _validate_expected_ticket_fingerprint(mutation: GatewayMutation) -> EngineRe
     return None
 
 
-def _current_ticket_fingerprint(mutation: GatewayMutation) -> str | None:
+def _current_recovery_fingerprints(mutation: GatewayMutation) -> CurrentRecoveryFingerprints:
     if mutation.action == "create" or not mutation.ticket_id:
-        return None
+        return CurrentRecoveryFingerprints(None, None)
     try:
         ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id)
     except InvalidTicketState:
-        return None
+        return CurrentRecoveryFingerprints(None, None)
     if ticket is None:
-        return None
-    return compute_target_fingerprint(Path(ticket.path))
+        return CurrentRecoveryFingerprints(None, None)
+    path = Path(ticket.path)
+    return CurrentRecoveryFingerprints(
+        pre_write_fingerprint=compute_target_fingerprint(path),
+        post_write_fingerprint=target_recovery_fingerprint(path),
+    )
 
 
 def _expected_pre_write_fingerprint(
@@ -432,31 +437,28 @@ def _fingerprint_details(
     *,
     mutation: GatewayMutation,
     project_root: Path,
-    expected_write_facts: ExpectedWriteFacts | None = None,
+    expected_write_facts: ExpectedWriteFacts,
     create_allocation: CreateAllocation | None = None,
 ) -> dict[str, object]:
+    details: dict[str, object] = {
+        "target": {
+            "fields": list(mutation.target.fields),
+            "sections": list(mutation.target.sections),
+        },
+        "evidence_summary": mutation.evidence_summary,
+        "expected_post_write_fingerprint": (
+            expected_write_facts.expected_post_write_fingerprint
+        ),
+        "change_history_entry": expected_write_facts.change_history_entry,
+    }
     if mutation.action == "create":
-        if expected_write_facts is None:
-            return {}
-        details: dict[str, object] = {
-            "target": {
-                "fields": list(mutation.target.fields),
-                "sections": list(mutation.target.sections),
-            },
-            "evidence_summary": mutation.evidence_summary,
-            "expected_post_write_fingerprint": (
-                expected_write_facts.expected_post_write_fingerprint
-            ),
-            "change_history_entry": expected_write_facts.change_history_entry,
-        }
         if create_allocation is not None:
             details["create_allocation"] = _create_allocation_details(
                 create_allocation,
                 project_root=project_root,
             )
         return details
-    details = {}
-    expected_pre = _expected_pre_write_fingerprint(mutation=mutation, decision=None)
+    expected_pre = mutation.expected_ticket_fingerprint
     if expected_pre is not None:
         details["expected_pre_write_fingerprint"] = expected_pre
     return details
@@ -699,7 +701,7 @@ def _existing_mutation_recovery_response(
         store=pending_summary,
         thread_id=thread_id,
         mutation_id=decision.mutation_id,
-        current_ticket_fingerprint=_current_ticket_fingerprint(mutation),
+        current_ticket_fingerprints=_current_recovery_fingerprints(mutation),
     )
     if projection.state == "retry_with_same_mutation":
         return None
@@ -1028,42 +1030,46 @@ def _apply_autonomous_mutation_locked(
             mutation.action,
             timestamp=attempt_timestamp,
         )
-    expected_write_facts: ExpectedWriteFacts | None = None
+    if dispatch.state != "ok" or dispatch.action is None:
+        return _policy_blocked(dispatch.reason or "gateway dispatch failed")
+
     if mutation.action == "create":
         if create_allocation is None:
             return _policy_blocked(
                 "Create recovery failed: retained expected write facts missing",
                 data={"recovery_state": "create_allocation_missing"},
             )
-        if dispatch.state != "ok" or dispatch.action is None:
-            return _policy_blocked(dispatch.reason or "gateway dispatch failed")
-        preview = preview_target_write(
-            action=dispatch.action.value,
-            ticket_id=mutation.ticket_id,
-            fields=dict(dispatch.fields),
-            target_sections=dispatch.sections or {},
-            session_id=thread_id,
-            request_origin="agent",
-            tickets_dir=mutation.tickets_dir,
-            change_history_entry=change_history_entry,
-            reserved_ticket_id=create_allocation.ticket_id,
+    preview = preview_target_write(
+        action=dispatch.action.value,
+        ticket_id=mutation.ticket_id,
+        fields=dict(dispatch.fields),
+        target_sections=dispatch.sections or {},
+        session_id=thread_id,
+        request_origin="agent",
+        tickets_dir=mutation.tickets_dir,
+        change_history_entry=change_history_entry,
+        reserved_ticket_id=(
+            create_allocation.ticket_id if create_allocation is not None else None
+        ),
+    )
+    if isinstance(preview, EngineResponse):
+        return preview
+
+    if retained_create_attempt is not None:
+        retained_fingerprint = (
+            retained_create_attempt.expected_write_facts.expected_post_write_fingerprint
         )
-        if isinstance(preview, EngineResponse):
-            return preview
+        if retained_fingerprint != preview.post_write_fingerprint:
+            return _policy_blocked(
+                "Create recovery failed: retained expected write facts changed",
+                data={"recovery_state": "create_expected_write_facts_mismatch"},
+            )
+        expected_write_facts = retained_create_attempt.expected_write_facts
+    else:
         expected_write_facts = ExpectedWriteFacts(
             expected_post_write_fingerprint=preview.post_write_fingerprint,
             change_history_entry=_change_history_entry_details(change_history_entry),
         )
-        if retained_create_attempt is not None:
-            retained_fingerprint = (
-                retained_create_attempt.expected_write_facts.expected_post_write_fingerprint
-            )
-            if retained_fingerprint != preview.post_write_fingerprint:
-                return _policy_blocked(
-                    "Create recovery failed: retained expected write facts changed",
-                    data={"recovery_state": "create_expected_write_facts_mismatch"},
-                )
-            expected_write_facts = retained_create_attempt.expected_write_facts
 
     attempt_details = _fingerprint_details(
         mutation=mutation,
@@ -1071,13 +1077,6 @@ def _apply_autonomous_mutation_locked(
         expected_write_facts=expected_write_facts,
         create_allocation=create_allocation,
     )
-    if mutation.action != "create":
-        attempt_details = {
-            "decision": decision.kind.value,
-            "current_mode": "agent_primary",
-            "evidence_kind": "runtime_context",
-            **attempt_details,
-        }
 
     attempt_error = _append_gateway_event(
         pending_summary=pending_summary,
@@ -1148,7 +1147,7 @@ def _apply_autonomous_mutation_locked(
             data={"error_code": "ticket_path_missing"},
         )
 
-    post_write_fingerprint = compute_target_fingerprint(Path(ticket_path_raw)) or "unknown"
+    post_write_fingerprint = target_recovery_fingerprint(Path(ticket_path_raw)) or "unknown"
 
     ticket_written_error = _append_gateway_event(
         pending_summary=pending_summary,
