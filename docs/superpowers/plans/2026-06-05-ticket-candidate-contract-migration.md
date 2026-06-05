@@ -1,7 +1,7 @@
 # Ticket Candidate Contract Migration Implementation Plan
 
 > **Superseded for execution:** This monolith is retained as historical source
-> material only. Execute the split plan series through
+> material only. Do not execute this file under any condition. Use
 > `docs/superpowers/plans/2026-06-05-ticket-candidate-contract-migration-index.md`
 > and its five child plans:
 >
@@ -11,7 +11,9 @@
 > 4. `docs/superpowers/plans/2026-06-05-ticket-correction-recovery-facts.md`
 > 5. `docs/superpowers/plans/2026-06-05-ticket-availability-flip-final-proof.md`
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans for sequential implementation with checkpoints. Subagents may be used only as bounded review/probe helpers for an already-scoped step, not as primary task executors, because this plan has shared-state and commit-order dependencies. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical note:** The body below preserves the original monolithic plan for
+> audit context only. Its task checkboxes, commands, expected outputs, and
+> execution handoff are not active instructions.
 
 **Goal:** Expose and enforce the literal Ticket target candidate mutation contract in source so autonomous create/update/close/reopen/correct writes use the same visible-board envelope documented by the May 30 control doc.
 
@@ -20,6 +22,8 @@
 **Tech Stack:** Python 3.11, dataclasses, pytest, existing Ticket scripts under `plugins/turbo-mode/ticket/scripts/`, existing target ticket schema/render/engine helpers.
 
 ---
+
+## Historical Body - Not Executable
 
 ## Evidence Baseline
 
@@ -6606,28 +6610,9 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
   recovery fingerprint, exact generated `Change History` metadata, evidence
   summary, target fields/sections, and write/summary completion facts.
 
-## Execution Handoff
+## Historical Execution Handoff - Not Executable
 
-Plan authoring is complete when this file is committed or intentionally left
-unstaged for review. Implementation is complete only after Tasks 0-7 finish,
-their required commits exist, and the acceptance criteria plus final verification
-commands are satisfied from the current checkout.
-
-Primary implementation mode: sequential inline execution using
-`superpowers:executing-plans`, with checkpoints after each task commit and after
-the internal Task 1/2 test gate. Do not dispatch one primary worker per task:
-Tasks 1-3 form the first runnable source commit group, Task 3A depends on Task
-3, Task 5 depends on Task 3A recovery facts, and Task 6 depends on Tasks 3, 3A,
-and 5.
-
-Optional helpers: subagents may be used only for bounded read-only reviews,
-grep/probe summaries, or isolated snippet sanity checks after the active
-sequential worker has defined the exact question and file scope.
-
-Do not start source edits from this plan without a fresh `git status --short --branch` and `git rev-parse --short HEAD` check.
-
-`Expected:` blocks describe the observable state after completing the named
-task. RED expectations must be reproduced before the corresponding GREEN patch.
-GREEN expectations must be backed by command output from the current checkout;
-do not carry aspirational expected output forward after live code contradicts
-it.
+Do not execute this file. The active execution sequence is
+`docs/superpowers/plans/2026-06-05-ticket-candidate-contract-migration-index.md`
+plus its five child plans. Treat every task, command, expected output, and
+handoff in this monolith as historical source material only.

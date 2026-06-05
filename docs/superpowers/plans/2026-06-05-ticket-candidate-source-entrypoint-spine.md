@@ -24,7 +24,10 @@ This plan owns Tasks 0-3 from the superseded monolith. Do not update source-avai
 
 ## Contract Decisions
 
-- Migrate `reopen` fully in this slice. The May 30 control doc already states that the human reason belongs in `evidence_summary`, not `reopen_reason`, and that `reopen -> blocked` is valid when the blocked ticket shape is valid.
+- Preserve the target shape and section plumbing needed by later reopen work.
+  Full reopen lifecycle semantics, including `reopen -> blocked`,
+  `reopen_reason` removal, and normal `Reopen History` removal, land in
+  `docs/superpowers/plans/2026-06-05-ticket-reopen-blocked-cleanup-semantics.md`.
 - Treat `correct` as the user-triggered correction lane for a recent Ticket
   write. A `correct` candidate follows the same content-change rules as the
   underlying target: active current tickets with active target status remain

@@ -35,8 +35,11 @@ This plan owns Tasks 6-7 from the superseded monolith plus final acceptance chec
 - Test: `plugins/turbo-mode/ticket/tests/test_docs_contract.py`
 
 Precondition: do not start Task 6 until the Task 3 source-entrypoint tests, Task
-3A create-idempotency tests, and Task 5 correction/recovery/integration tests
-pass, including `plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py`.
+3A create-idempotency tests, Task 4 reopen/change-history tests, and Task 5
+correction/recovery/integration tests pass, including
+`plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py`. Record the Plan 3
+commit hash and the Task 4 Step 7 reopen/change-history selector output before
+docs-contract RED/PASS or the docs availability commit.
 The docs must not claim that source exposes a target candidate mutation path
 while `ticket_autonomy.py` still constructs old gateway mutations, while create
 retry can still allocate a duplicate ticket instead of using a retained
@@ -368,11 +371,11 @@ Expected: normal status shows only intended committed or staged source changes b
 If verification required only wording or test-selector corrections, commit them:
 
 ```bash
-git add docs/superpowers/plans/2026-06-05-ticket-candidate-contract-migration.md
+git add docs/superpowers/plans/2026-06-05-ticket-availability-flip-final-proof.md docs/superpowers/plans/2026-06-05-ticket-candidate-contract-migration-index.md
 git commit -m "docs(ticket): close candidate contract migration plan"
 ```
 
-Expected: commit succeeds only if this plan changed during execution. If no plan changes occurred, do not create an empty commit.
+Expected: commit succeeds only if this plan or the parent index changed during execution. If neither changed, do not create an empty commit.
 
 ## Acceptance Criteria
 
