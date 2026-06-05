@@ -112,10 +112,12 @@ Test these files:
 
 - Migrate `reopen` fully in this slice. The May 30 control doc already states that the human reason belongs in `evidence_summary`, not `reopen_reason`, and that `reopen -> blocked` is valid when the blocked ticket shape is valid.
 - Treat `correct` as the user-triggered correction lane for a recent Ticket
-  write. A `correct` candidate may dispatch to update, close, or reopen
-  according to its target status, but the gateway must admit it only when the
+  write. A `correct` candidate follows the same content-change rules as the
+  underlying target: active current tickets with active target status remain
+  updates, terminal target status closes, and only terminal current tickets with
+  active target status reopen. The gateway must admit `correct` only when the
   paired runtime decision is `RuntimeDecisionKind.APPLY_CORRECTION`; that
-  decision kind is the approval boundary for `correct -> reopen`.
+  decision kind is the approval boundary for any `correct -> reopen`.
 - Keep full `reconcile_board` implementation out of this slice. This migration may make the future wrapper possible, but it must not implement discovery ordering, caps, overflow, or broad board search.
 - Keep operation-log work narrow. This slice may update candidate identity,
   expected pre-write recovery facts, expected post-write fingerprint, exact
@@ -515,6 +517,24 @@ def test_candidate_mapping_rejects_field_section_overlap() -> None:
     assert errors == ["target names cannot appear in both fields and sections: ['priority']"]
 
 
+def test_candidate_mapping_rejects_invalid_target_section_names() -> None:
+    for section_name in ("Bad\nName", "Bad | Name", "### Bad"):
+        errors = candidate_mapping_errors(
+            {
+                "action": "update",
+                "ticket_id": "T-20260527-01",
+                "target": {"fields": ["priority"], "sections": [section_name]},
+                "proposed_change": {"priority": "high", section_name: "unsafe"},
+                "expected_ticket_fingerprint": "state-T-20260527-01",
+                "evidence_summary": "Priority changed after this turn.",
+            }
+        )
+
+        assert errors == [
+            f"target.sections contains invalid section names: {[section_name]!r}"
+        ]
+
+
 def test_create_allows_null_ticket_id_and_null_expected_fingerprint() -> None:
     candidate = candidate_mutation_from_mapping(
         {
@@ -650,6 +670,9 @@ class CandidateMutation:
 Add these constants and helpers near the candidate model:
 
 ```python
+from scripts.ticket_target_schema import validate_target_section_name
+
+
 _TARGET_FRONTMATTER_FIELDS = frozenset(
     {"title", "status", "priority", "tags", "related_paths", "blocked_by"}
 )
@@ -725,6 +748,13 @@ def _candidate_shape_errors(candidate: CandidateMutation) -> list[str]:
     duplicate_sections = _duplicate_names(candidate.target.sections)
     if duplicate_sections:
         errors.append(f"target.sections contains duplicate names: {duplicate_sections!r}")
+    invalid_sections = sorted(
+        section
+        for section in candidate.target.sections
+        if not validate_target_section_name(section)
+    )
+    if invalid_sections:
+        errors.append(f"target.sections contains invalid section names: {invalid_sections!r}")
     overlapping_names = sorted(set(candidate.target.fields) & set(candidate.target.sections))
     if overlapping_names:
         errors.append(f"target names cannot appear in both fields and sections: {overlapping_names!r}")
@@ -842,6 +872,7 @@ def map_candidate_to_engine(
     candidate: CandidateMutation,
     *,
     gateway_approved: bool = True,
+    current_ticket_status: str | None = None,
 ) -> EngineDispatch:
     """Map one target-shaped candidate to deterministic engine dispatch."""
     if not _target_shape_valid(candidate):
@@ -876,7 +907,9 @@ def map_candidate_to_engine(
                 return EngineDispatch("policy_blocked", None, {}, reason="close_target_not_allowlisted")
             return EngineDispatch("ok", EngineAction.CLOSE, {"resolution": fields["status"]}, sections=sections)
         if fields.get("status") in {"open", "blocked"}:
-            return EngineDispatch("ok", EngineAction.REOPEN, fields, sections=sections)
+            if current_ticket_status in {"done", "wontfix"}:
+                return EngineDispatch("ok", EngineAction.REOPEN, fields, sections=sections)
+            return EngineDispatch("ok", EngineAction.UPDATE, fields, sections=sections)
         return EngineDispatch("ok", EngineAction.UPDATE, fields, sections=sections)
     if candidate.action == "update":
         return EngineDispatch("ok", EngineAction.UPDATE, fields, sections=sections)
@@ -913,6 +946,41 @@ def test_correct_close_rejects_mixed_status_and_metadata_target() -> None:
 
     assert dispatch.state == "policy_blocked"
     assert dispatch.reason == "close_target_not_allowlisted"
+
+
+def test_correct_active_status_defaults_to_update_without_current_terminal_status() -> None:
+    dispatch = map_candidate_to_engine(
+        _candidate(
+            "correct",
+            target=_target(fields=("status", "blocked_by"), sections=("Blocked On",)),
+            proposed_change={
+                "status": "blocked",
+                "blocked_by": ["T-20260527-02"],
+                "Blocked On": "Waiting for T-20260527-02.",
+            },
+        )
+    )
+
+    assert dispatch.action == EngineAction.UPDATE
+    assert dispatch.fields == {
+        "status": "blocked",
+        "blocked_by": ["T-20260527-02"],
+    }
+    assert dispatch.sections == {"Blocked On": "Waiting for T-20260527-02."}
+
+
+def test_correct_reopens_only_when_current_ticket_is_terminal() -> None:
+    dispatch = map_candidate_to_engine(
+        _candidate(
+            "correct",
+            target=_target(fields=("status",), sections=()),
+            proposed_change={"status": "open"},
+        ),
+        current_ticket_status="done",
+    )
+
+    assert dispatch.action == EngineAction.REOPEN
+    assert dispatch.fields == {"status": "open"}
 ```
 
 Update `EngineDispatch` to carry target sections:
@@ -1642,7 +1710,7 @@ def test_gateway_create_accepts_every_source_supported_target_section(
     ticket_path = Path(str(response.data["ticket_path"]))
     text = ticket_path.read_text(encoding="utf-8")
     assert "status: blocked" in text
-    assert "blocked_by:\n  - T-20260605-02" in text
+    assert "blocked_by: [T-20260605-02]" in text
     assert "## Blocked On\nWaiting for T-20260605-02 to expose broker retry policy." in text
     assert "## Captured Request\nTrack the publisher retry follow-up." in text
     assert "## Context\nBroker publishes sometimes fail transiently." in text
@@ -1676,12 +1744,15 @@ updating shared helpers.
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_applies_exact_target_section_update plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_removes_exact_optional_target_section plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_create_accepts_every_source_supported_target_section plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_summarizes_applied_mutation_before_next_turn plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py::test_agent_primary_apply_turn_applies_update_through_gateway -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_applies_exact_target_section_update plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_removes_exact_optional_target_section plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_create_accepts_every_source_supported_target_section plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_collector_unhealthy_pauses_without_mutation_or_health_events plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_summarizes_applied_mutation_before_next_turn plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py::test_agent_primary_apply_turn_applies_update_through_gateway -q
 ```
 
 Expected: fail because `GatewayMutation` has no `target`, `proposed_change`, or
 `expected_ticket_fingerprint` fields and `ticket_autonomy.py` still constructs
-the old `fields`/`target_fingerprint` gateway shape.
+the old `fields`/`target_fingerprint` gateway shape. The
+`source_context_unhealthy` collector test must keep passing throughout this
+task; a failure there means the health gate was weakened while removing the
+fingerprint side channel.
 
 - [ ] **Step 3: Update GatewayMutation and decision validation**
 
@@ -1844,12 +1915,45 @@ mutation = GatewayMutation(
 )
 ```
 
-Remove the normal apply-turn `_ticket_state_fingerprints()` collection and the
-`source_context={"ticket_state_fingerprints": fingerprints}` injection used only
-to populate candidate identity. Do not replace it with another hidden fingerprint
-side channel. Missing or stale expected fingerprints are visible candidate or
-gateway failures: runtime blocks missing non-create values, and the gateway
-recomputes the current target fingerprint immediately before writing.
+Keep a normal apply-turn source-context health pass before mutation evaluation.
+It may continue to call `_ticket_state_fingerprints()` or may be renamed to
+`_ticket_source_context_health()`, but its result must still pause automation on
+malformed active ticket source context:
+
+```python
+source_context_health = _ticket_state_fingerprints(candidates, tickets_dir)
+if source_context_health.state == "unhealthy":
+    pause_workspace_automation(
+        project_root,
+        reason=source_context_health.reason or "source_context_unhealthy",
+    )
+    _emit(_paused_response(source_context_health.reason or "source_context_unhealthy"))
+    return 3
+```
+
+Remove only the
+`source_context={"ticket_state_fingerprints": fingerprints}` injection used to
+populate candidate identity. Do not replace that injection with another hidden
+fingerprint side channel:
+
+```python
+decisions = evaluate_autonomy_intent(
+    AutonomyIntent(
+        action_kind="apply_ticket_mutations",
+        candidates=candidates,
+        source_context={},
+    ),
+    current_mode=mode.value,
+    thread_id=str(context["thread_id"]),
+    turn_id=str(context["turn_id"]),
+)
+```
+
+Missing or stale expected fingerprints are visible candidate or gateway
+failures: runtime blocks missing non-create values, and the gateway recomputes
+the current target fingerprint immediately before writing. The existing
+`source_context_unhealthy` CLI tests remain part of this task because source
+health and identity fingerprint sourcing are separate boundaries.
 
 - [ ] **Step 6: Add exact target-section support to engine update**
 
@@ -1928,7 +2032,15 @@ def build_engine_dispatch(mutation: GatewayMutation) -> EngineDispatch:
         expected_ticket_fingerprint=mutation.expected_ticket_fingerprint,
         evidence_summary=mutation.evidence_summary,
     )
-    return map_candidate_to_engine(candidate)
+    current_ticket_status: str | None = None
+    if mutation.action == "correct" and mutation.ticket_id is not None:
+        ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id)
+        if ticket is not None:
+            current_ticket_status = ticket.status
+    return map_candidate_to_engine(
+        candidate,
+        current_ticket_status=current_ticket_status,
+    )
 ```
 
 Update `_execute_dispatch()` calls to pass target sections:
@@ -3242,7 +3354,7 @@ def test_gateway_reopens_terminal_ticket_to_blocked_with_visible_blocker_shape(
     text = ticket_path.read_text(encoding="utf-8")
     assert response.state == "ok"
     assert "status: blocked" in text
-    assert "blocked_by:\n- T-20260527-02" in text
+    assert "blocked_by: [T-20260527-02]" in text
     assert "## Blocked On\nWaiting for T-20260527-02." in text
     assert "## Reopen History" not in text
     assert "| codex | Reopened ticket from candidate evidence." in text
@@ -3586,6 +3698,39 @@ candidate = CandidateMutation(
 )
 ```
 
+Update `_apply_correction()` so correction tests use the same target-shaped
+gateway request as normal apply-turn:
+
+```python
+def _apply_correction(
+    *,
+    project_root: Path,
+    tickets_dir: Path,
+    ticket_path: Path,
+    candidate: CandidateMutation,
+):
+    decision = _correction_decision(candidate, ticket_path=ticket_path)
+    mutation = GatewayMutation(
+        action=candidate.action,
+        ticket_id=candidate.ticket_id,
+        target=candidate.target,
+        proposed_change=dict(candidate.proposed_change),
+        tickets_dir=tickets_dir,
+        expected_ticket_fingerprint=candidate.expected_ticket_fingerprint,
+        evidence_summary=candidate.evidence_summary,
+    )
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+    return decision, response
+```
+
 Add this assertion to `test_user_triggered_update_correction_applies_without_new_approval()`:
 
 ```python
@@ -3617,6 +3762,118 @@ def test_correction_cannot_target_change_history(tmp_tickets: Path) -> None:
 
     assert decision.kind == RuntimeDecisionKind.REQUIRE_USER_DISCUSSION
     assert decision.reason == "target_closure_failed"
+```
+
+Add these active and terminal status-correction tests in the same file:
+
+```python
+def test_user_triggered_active_correction_to_blocked_uses_update_not_reopen(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    blocker = make_ticket(tmp_tickets, "blocker.md", id="T-20260527-02", status="open")
+    assert blocker.exists()
+    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01", status="open")
+    candidate = CandidateMutation(
+        ticket_id="T-20260527-01",
+        action="correct",
+        target=CandidateTarget(fields=("status", "blocked_by"), sections=("Blocked On",)),
+        proposed_change={
+            "status": "blocked",
+            "blocked_by": ["T-20260527-02"],
+            "Blocked On": "Waiting for T-20260527-02.",
+        },
+        expected_ticket_fingerprint=target_fingerprint(ticket_path),
+        evidence_summary="Prior mutation left the ticket open instead of blocked.",
+    )
+
+    decision, response = _apply_correction(
+        project_root=project_root,
+        tickets_dir=tmp_tickets,
+        ticket_path=ticket_path,
+        candidate=candidate,
+    )
+
+    assert decision.kind == RuntimeDecisionKind.APPLY_CORRECTION
+    assert response.state == "ok"
+    text = ticket_path.read_text(encoding="utf-8")
+    assert "status: blocked" in text
+    assert "blocked_by: [T-20260527-02]" in text
+    assert "## Blocked On\nWaiting for T-20260527-02." in text
+    assert "## Reopen History" not in text
+    assert " | codex | Corrected ticket from candidate evidence." in text
+
+
+def test_user_triggered_active_correction_to_open_clears_blocker_without_reopen(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    blocker = make_ticket(tmp_tickets, "blocker.md", id="T-20260527-02", status="open")
+    assert blocker.exists()
+    ticket_path = make_ticket(
+        tmp_tickets,
+        "one.md",
+        id="T-20260527-01",
+        status="blocked",
+        blocked_by=["T-20260527-02"],
+        blocked_on="Waiting for T-20260527-02.",
+    )
+    candidate = CandidateMutation(
+        ticket_id="T-20260527-01",
+        action="correct",
+        target=CandidateTarget(fields=("status", "blocked_by"), sections=("Blocked On",)),
+        proposed_change={"status": "open", "blocked_by": [], "Blocked On": None},
+        expected_ticket_fingerprint=target_fingerprint(ticket_path),
+        evidence_summary="Prior mutation left a stale blocker on an open ticket.",
+    )
+
+    decision, response = _apply_correction(
+        project_root=project_root,
+        tickets_dir=tmp_tickets,
+        ticket_path=ticket_path,
+        candidate=candidate,
+    )
+
+    assert decision.kind == RuntimeDecisionKind.APPLY_CORRECTION
+    assert response.state == "ok"
+    text = ticket_path.read_text(encoding="utf-8")
+    assert "status: open" in text
+    assert "blocked_by: []" in text
+    assert "## Blocked On" not in text
+    assert "## Reopen History" not in text
+    assert " | codex | Corrected ticket from candidate evidence." in text
+
+
+def test_user_triggered_terminal_correction_to_open_uses_reopen_policy(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "done.md", id="T-20260527-01", status="done")
+    candidate = CandidateMutation(
+        ticket_id="T-20260527-01",
+        action="correct",
+        target=CandidateTarget(fields=("status",), sections=()),
+        proposed_change={"status": "open"},
+        expected_ticket_fingerprint=target_fingerprint(ticket_path),
+        evidence_summary="Prior mutation closed the ticket by mistake.",
+    )
+
+    decision, response = _apply_correction(
+        project_root=project_root,
+        tickets_dir=tmp_tickets,
+        ticket_path=ticket_path,
+        candidate=candidate,
+    )
+
+    assert decision.kind == RuntimeDecisionKind.APPLY_CORRECTION
+    assert response.state == "ok"
+    text = ticket_path.read_text(encoding="utf-8")
+    assert "status: open" in text
+    assert "## Reopen History" not in text
+    assert " | codex | Corrected ticket from candidate evidence." in text
 ```
 
 In `test_engine_gateway.py`, add this non-create recovery-facts test:
@@ -3764,6 +4021,10 @@ In `ticket_engine_gateway.py`:
 
 - Replace the `_decision_error()` correction guard so it accepts target action
   `"correct"` while still requiring `RuntimeDecisionKind.APPLY_CORRECTION`.
+- Confirm `build_engine_dispatch()` passes the current parsed ticket status to
+  `map_candidate_to_engine()` for `correct` mutations. Active current tickets
+  corrected to `open` or `blocked` must dispatch as update; terminal current
+  tickets corrected to `open` or `blocked` must dispatch as reopen.
 - Update `_change_history_reason()` so `action == "correct"` returns the
   generated correction reason. No target candidate path should keep the old
   `"correction"` action literal.
@@ -4233,7 +4494,8 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
   details.
 - `target` has exactly `fields` and `sections`; `proposed_change` keys exactly equal their union.
 - `target.fields` and `target.sections` reject duplicate names and reject overlap
-  between field and section names.
+  between field and section names; `target.sections` also rejects names that
+  fail `validate_target_section_name()` before runtime decisions or mutation IDs.
 - Mutation identity canonicalizes target name ordering so equivalent target
   envelopes do not produce different mutation IDs solely from caller order.
 - Non-create writes require `expected_ticket_fingerprint`; create requires it to
@@ -4245,6 +4507,10 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
 - `ticket_autonomy.py` constructs target-shaped `GatewayMutation` values from
   `decision.candidate` and does not repopulate expected fingerprints through
   `source_context`.
+- `ticket_autonomy.py` still runs a source-context health pass before apply-turn
+  mutation evaluation and still pauses with `source_context_unhealthy` for
+  malformed active ticket files; only the hidden fingerprint injection into
+  runtime identity is removed.
 - Gateway mutation validation compares target, proposed change, expected fingerprint, evidence summary, and mutation identity.
 - Gateway validation preserves `mutation_id_required`, `ticket_mismatch`, and
   `mutation_id_mismatch` guards.
@@ -4265,7 +4531,10 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
 - Blocked `done`/`wontfix` candidates name `status`, `blocked_by`, and
   `Blocked On` cleanup, and the gateway does not silently drop the named
   cleanup section.
-- `correct` is an ordinary target-shaped mutation and appends generated correction history.
+- `correct` is an ordinary target-shaped mutation and appends generated
+  correction history. Active current tickets corrected to `open` or `blocked`
+  dispatch through update semantics; only terminal current tickets corrected to
+  `open` or `blocked` dispatch through reopen semantics.
 - Operation-log details retain only bounded recovery facts and do not add
   semantic ranking, current-mode labels, evidence taxonomies, runtime decision
   kinds, approval state, or private workflow stages. Non-create attempts retain
