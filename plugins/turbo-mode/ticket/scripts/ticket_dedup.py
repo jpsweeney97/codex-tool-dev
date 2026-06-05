@@ -65,3 +65,18 @@ def target_fingerprint(ticket_path: Path) -> str | None:
         return None
     payload = content + mtime.encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def target_recovery_fingerprint_for_text(text: str) -> str:
+    """Return a content-only fingerprint for post-write recovery comparison."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def target_recovery_fingerprint(path: Path) -> str | None:
+    """Return a content-only fingerprint for a written target ticket."""
+    if not path.is_file():
+        return None
+    try:
+        return target_recovery_fingerprint_for_text(path.read_text(encoding="utf-8"))
+    except OSError:
+        return None

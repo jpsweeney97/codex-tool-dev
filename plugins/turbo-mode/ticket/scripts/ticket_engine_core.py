@@ -26,6 +26,7 @@ from scripts.ticket_change_history import (
     append_change_history_entry,
     render_change_history_entry,
 )
+from scripts.ticket_dedup import target_recovery_fingerprint_for_text
 from scripts.ticket_id import allocate_id, build_filename
 from scripts.ticket_parse import ParsedTicket
 from scripts.ticket_paths import discover_project_root
@@ -124,6 +125,15 @@ class EngineResponse:
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2)
+
+
+@dataclass(frozen=True, slots=True)
+class TargetWritePreview:
+    """Rendered target ticket write used for pre-write recovery facts."""
+
+    ticket_path: Path
+    rendered_text: str
+    post_write_fingerprint: str
 
 
 def _invalid_ticket_state_response(
@@ -945,6 +955,20 @@ _VALID_TRANSITIONS: dict[str, set[str]] = {
 # Bounds archive collision search to avoid infinite loops in pathological trees.
 _MAX_ARCHIVE_COLLISION_SUFFIX = 1000
 _CREATE_WRITE_RETRY_LIMIT = 3
+_CREATE_TARGET_SECTION_MAP = {
+    "Problem": "problem",
+    "Next Action": "next_action",
+    "Blocked On": "blocked_on",
+    "Captured Request": "captured_request",
+    "Context": "context",
+    "Prior Investigation": "prior_investigation",
+    "Approach": "approach",
+    "Decisions Made": "decisions_made",
+    "Acceptance Criteria": "acceptance_criteria",
+    "Verification": "verification",
+    "Key Files": "key_files",
+    "Related": "related",
+}
 
 # Transitions that require preconditions.
 # Pair-keyed: specific (current, target) combinations.
@@ -1778,19 +1802,41 @@ def _write_text_exclusive(ticket_path: Path, content: str) -> None:
                 pass
 
 
-def _execute_create(
-    fields: dict[str, Any],
+def preview_target_write(
+    *,
+    action: str,
+    ticket_id: str | None,
+    fields: Mapping[str, Any],
+    target_sections: Mapping[str, object],
     session_id: str,
     request_origin: str,
     tickets_dir: Path,
-    *,
-    change_history_entry: ChangeHistoryEntry | None = None,
-) -> EngineResponse:
-    """Create a new ticket file with all required contract fields."""
+    change_history_entry: ChangeHistoryEntry,
+    reserved_ticket_id: str | None = None,
+) -> EngineResponse | TargetWritePreview:
+    """Render the exact target write without writing a ticket file."""
+    if action != "create":
+        return EngineResponse(
+            state="blocked",
+            message=f"Preview failed: unsupported action {action!r}",
+            error_code="preview_unsupported",
+            ticket_id=ticket_id,
+        )
+    render_fields = dict(fields)
+    for heading, value in target_sections.items():
+        engine_key = _CREATE_TARGET_SECTION_MAP.get(heading)
+        if engine_key is None:
+            return EngineResponse(
+                state="blocked",
+                message=f"Preview failed: unsupported create target section {heading!r}",
+                error_code="preview_unsupported",
+                ticket_id=ticket_id,
+            )
+        render_fields[engine_key] = value
     missing = []
-    if not fields.get("title"):
+    if not render_fields.get("title"):
         missing.append("title")
-    if not fields.get("problem"):
+    if not render_fields.get("problem"):
         missing.append("problem")
     if missing:
         return EngineResponse(
@@ -1799,7 +1845,7 @@ def _execute_create(
             error_code="need_fields",
         )
 
-    create_shape_errors = _validate_create_status_shape(fields)
+    create_shape_errors = _validate_create_status_shape(render_fields)
     if create_shape_errors:
         return EngineResponse(
             state="need_fields",
@@ -1808,7 +1854,7 @@ def _execute_create(
             data={"validation_errors": create_shape_errors},
         )
 
-    validation_errors = validate_create_fields(fields)
+    validation_errors = validate_create_fields(render_fields)
     if validation_errors:
         return EngineResponse(
             state="need_fields",
@@ -1817,84 +1863,121 @@ def _execute_create(
             data={"validation_errors": validation_errors},
         )
 
-    tickets_dir.mkdir(parents=True, exist_ok=True)
-
     now = datetime.now(UTC)
     today = now.date()
-    title = fields.get("title", "Untitled")
-    status = fields.get("status", "open")
+    title = render_fields.get("title", "Untitled")
+    status = render_fields.get("status", "open")
+    rendered_history = render_change_history_entry(change_history_entry)
 
+    allocated_ticket_id = reserved_ticket_id or allocate_id(tickets_dir, today)
+    try:
+        filename = build_filename(allocated_ticket_id, str(title))
+    except ValueError as exc:
+        return EngineResponse(
+            state="invalid_state",
+            message=str(exc),
+            error_code="invalid_state",
+        )
+    ticket_path = tickets_dir / filename
+    content = render_ticket(
+        id=allocated_ticket_id,
+        title=title,
+        status=status,
+        priority=render_fields.get("priority", "normal"),
+        related_paths=render_fields.get("related_paths"),
+        tags=render_fields.get("tags", []),
+        blocked_by=render_fields.get("blocked_by", []),
+        problem=render_fields.get("problem", ""),
+        captured_request=render_fields.get("captured_request", ""),
+        approach=render_fields.get("approach", ""),
+        acceptance_criteria=render_fields.get("acceptance_criteria"),
+        next_action=render_fields.get("next_action", ""),
+        blocked_on=render_fields.get("blocked_on", ""),
+        verification=render_fields.get("verification", ""),
+        key_files=render_fields.get("key_files"),
+        context=render_fields.get("context", ""),
+        prior_investigation=render_fields.get("prior_investigation", ""),
+        decisions_made=render_fields.get("decisions_made", ""),
+        related=render_fields.get("related", ""),
+        change_history_entry=rendered_history,
+    )
+    invalid_render = _invalid_rendered_ticket_response(
+        "create",
+        ticket_path,
+        content,
+        ticket_id=allocated_ticket_id,
+    )
+    if invalid_render is not None:
+        return invalid_render
+    return TargetWritePreview(
+        ticket_path=ticket_path,
+        rendered_text=content,
+        post_write_fingerprint=target_recovery_fingerprint_for_text(content),
+    )
+
+
+def _execute_create(
+    fields: dict[str, Any],
+    session_id: str,
+    request_origin: str,
+    tickets_dir: Path,
+    *,
+    change_history_entry: ChangeHistoryEntry | None = None,
+    reserved_ticket_id: str | None = None,
+) -> EngineResponse:
+    """Create a new ticket file with all required contract fields."""
     if change_history_entry is None:
         change_history_entry = ChangeHistoryEntry(
-            timestamp=now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            timestamp=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             actor="codex",
             reason="Created ticket.",
         )
-    rendered_history = render_change_history_entry(change_history_entry)
-
-    for _attempt in range(_CREATE_WRITE_RETRY_LIMIT):
-        ticket_id = allocate_id(tickets_dir, today)
-        try:
-            filename = build_filename(ticket_id, title)
-        except ValueError as exc:
-            return EngineResponse(
-                state="invalid_state",
-                message=str(exc),
-                error_code="invalid_state",
-            )
-        ticket_path = tickets_dir / filename
-        content = render_ticket(
-            id=ticket_id,
-            title=title,
-            status=status,
-            priority=fields.get("priority", "normal"),
-            related_paths=fields.get("related_paths"),
-            tags=fields.get("tags", []),
-            blocked_by=fields.get("blocked_by", []),
-            problem=fields.get("problem", ""),
-            captured_request=fields.get("captured_request", ""),
-            approach=fields.get("approach", ""),
-            acceptance_criteria=fields.get("acceptance_criteria"),
-            next_action=fields.get("next_action", ""),
-            blocked_on=fields.get("blocked_on", ""),
-            verification=fields.get("verification", ""),
-            key_files=fields.get("key_files"),
-            context=fields.get("context", ""),
-            prior_investigation=fields.get("prior_investigation", ""),
-            decisions_made=fields.get("decisions_made", ""),
-            related=fields.get("related", ""),
-            change_history_entry=rendered_history,
+    tickets_dir.mkdir(parents=True, exist_ok=True)
+    attempts = 1 if reserved_ticket_id is not None else _CREATE_WRITE_RETRY_LIMIT
+    for _attempt in range(attempts):
+        preview = preview_target_write(
+            action="create",
+            ticket_id=None,
+            fields=fields,
+            target_sections={},
+            session_id=session_id,
+            request_origin=request_origin,
+            tickets_dir=tickets_dir,
+            change_history_entry=change_history_entry,
+            reserved_ticket_id=reserved_ticket_id,
         )
-        invalid_render = _invalid_rendered_ticket_response(
-            "create",
-            ticket_path,
-            content,
-            ticket_id=ticket_id,
-        )
-        if invalid_render is not None:
-            return invalid_render
+        if isinstance(preview, EngineResponse):
+            return preview
+        ticket_id = reserved_ticket_id or preview.ticket_path.stem
         try:
-            _write_text_exclusive(ticket_path, content)
+            _write_text_exclusive(preview.ticket_path, preview.rendered_text)
         except FileExistsError:
+            if reserved_ticket_id is not None:
+                return EngineResponse(
+                    state="invalid_state",
+                    message="Reserved create allocation path already exists.",
+                    ticket_id=ticket_id,
+                    error_code="create_allocation_conflict",
+                )
             continue
         except OSError as exc:
             return EngineResponse(
                 state="escalate",
-                message=f"create failed: {exc}. Got: {str(ticket_path)!r:.100}",
+                message=f"create failed: {exc}. Got: {str(preview.ticket_path)!r:.100}",
                 error_code="io_error",
             )
         return EngineResponse(
             state="ok",
-            message=f"Created {ticket_id} at {ticket_path}",
+            message=f"Created {ticket_id} at {preview.ticket_path}",
             ticket_id=ticket_id,
-            data={"ticket_path": str(ticket_path), "changes": None},
+            data={"ticket_path": str(preview.ticket_path), "changes": None},
         )
 
     return EngineResponse(
         state="escalate",
         message=(
             "create failed: exclusive write retry budget exhausted after "
-            f"{_CREATE_WRITE_RETRY_LIMIT} attempts. Got: {title!r:.100}"
+            f"{_CREATE_WRITE_RETRY_LIMIT} attempts. Got: {fields.get('title')!r:.100}"
         ),
         error_code="io_error",
     )

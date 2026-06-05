@@ -56,6 +56,36 @@ def valid_attempt_event(**overrides: object) -> dict[str, object]:
     return data
 
 
+def valid_create_attempt_event(**overrides: object) -> dict[str, object]:
+    timestamp = overrides.pop("timestamp", "2026-06-05T12:00:00Z")
+    details: dict[str, object] = {
+        "target": {"fields": ["title"], "sections": ["Problem", "Next Action"]},
+        "evidence_summary": "The user asked to track the publisher retry follow-up.",
+        "expected_post_write_fingerprint": "post-fp-before-write",
+        "change_history_entry": {
+            "timestamp": timestamp,
+            "actor": "codex",
+            "reason": "Created ticket from candidate evidence.",
+            "corrects": None,
+        },
+        "create_allocation": {
+            "allocated_ticket_id": "T-20260605-01",
+            "allocated_ticket_path": "docs/tickets/T-20260605-01.md",
+            "expected_pre_write_fact": "allocated_target_path_unused",
+        },
+    }
+    details.update(overrides.pop("details", {}))
+    data = valid_attempt_event(
+        action="create",
+        ticket_id=None,
+        timestamp=timestamp,
+        details={},
+        **overrides,
+    )
+    data["details"] = details
+    return data
+
+
 def valid_status_event(status: str, **detail_overrides: object) -> dict[str, object]:
     details_by_status: dict[str, dict[str, object]] = {
         "ticket_written": {"post_write_fingerprint": "post-fp"},
@@ -107,6 +137,44 @@ def without_detail(event: dict[str, object], key: str) -> dict[str, object]:
     details = dict(event["details"])
     details.pop(key, None)
     return {**event, "details": details}
+
+
+def test_create_attempt_accepts_bounded_recovery_details_without_runtime_decision() -> None:
+    event = valid_create_attempt_event()
+
+    assert validate_pending_summary_event(event).ok is True
+    assert "decision" not in event["details"]
+    assert "current_mode" not in event["details"]
+    assert "evidence_kind" not in event["details"]
+    assert event["timestamp"] == event["details"]["change_history_entry"]["timestamp"]
+
+
+@pytest.mark.parametrize("detail_key", ["decision", "current_mode", "evidence_kind"])
+def test_create_attempt_rejects_runtime_details_when_recovery_facts_present(
+    detail_key: str,
+) -> None:
+    event = valid_create_attempt_event(details={detail_key: "apply_autonomously"})
+
+    assert_invalid(event, detail_key)
+
+
+@pytest.mark.parametrize(
+    "detail_key",
+    ["target", "expected_post_write_fingerprint", "change_history_entry", "create_allocation"],
+)
+def test_create_attempt_requires_bounded_recovery_details(detail_key: str) -> None:
+    event = valid_create_attempt_event()
+    details = dict(event["details"])
+    details.pop(detail_key)
+    event["details"] = details
+
+    assert_invalid(event, detail_key)
+
+
+def test_legacy_create_attempt_remains_readable_for_blocking_recovery() -> None:
+    event = valid_attempt_event(action="create", ticket_id=None)
+
+    assert validate_pending_summary_event(event).ok is True
 
 
 def test_pending_summary_envelope_requires_strict_fields() -> None:

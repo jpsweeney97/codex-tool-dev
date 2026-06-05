@@ -276,6 +276,56 @@ def _require_detail(details: Mapping[str, object], key: str) -> ValidationResult
     return _ok()
 
 
+def _validate_create_attempt_details(details: Mapping[str, object]) -> ValidationResult:
+    if "create_allocation" not in details:
+        return (
+            _ok()
+            if details.get("decision") in _DECISIONS
+            else _invalid("details.create_allocation is required")
+        )
+    for key in ("decision", "current_mode", "evidence_kind"):
+        if key in details:
+            return _invalid(f"details.{key} is not supported for create attempts")
+    target = details.get("target")
+    if not isinstance(target, Mapping):
+        return _invalid("details.target is required")
+    fields = target.get("fields")
+    sections = target.get("sections")
+    if not isinstance(fields, list) or not all(_nonempty_string(item) for item in fields):
+        return _invalid("details.target.fields is required")
+    if not isinstance(sections, list) or not all(_nonempty_string(item) for item in sections):
+        return _invalid("details.target.sections is required")
+    if not _nonempty_string(details.get("evidence_summary")):
+        return _invalid("details.evidence_summary is required")
+    if not _nonempty_string(details.get("expected_post_write_fingerprint")):
+        return _invalid("details.expected_post_write_fingerprint is required")
+    history = details.get("change_history_entry")
+    if not isinstance(history, Mapping):
+        return _invalid("details.change_history_entry is required")
+    for key in ("timestamp", "actor", "reason"):
+        if not _nonempty_string(history.get(key)):
+            return _invalid(f"details.change_history_entry.{key} is required")
+    if history.get("corrects") is not None and not _nonempty_string(history.get("corrects")):
+        return _invalid("details.change_history_entry.corrects must be a string or null")
+    allocation = details.get("create_allocation")
+    if not isinstance(allocation, Mapping):
+        return _invalid("details.create_allocation is required")
+    allocated_ticket_id = allocation.get("allocated_ticket_id")
+    allocated_ticket_path = allocation.get("allocated_ticket_path")
+    if not _nonempty_string(allocated_ticket_id):
+        return _invalid("details.create_allocation.allocated_ticket_id is required")
+    if (
+        not _nonempty_string(allocated_ticket_path)
+        or "\\" in str(allocated_ticket_path)
+        or not str(allocated_ticket_path).startswith("docs/tickets/")
+        or not str(allocated_ticket_path).endswith(".md")
+    ):
+        return _invalid("details.create_allocation.allocated_ticket_path is invalid")
+    if allocation.get("expected_pre_write_fact") != "allocated_target_path_unused":
+        return _invalid("details.create_allocation.expected_pre_write_fact is invalid")
+    return _ok()
+
+
 def _validate_details(
     *,
     event_type: str,
@@ -289,6 +339,8 @@ def _validate_details(
 
     decision = details.get("decision")
     if event_type == "mutation_attempt":
+        if action == "create":
+            return _validate_create_attempt_details(details)
         if decision not in _DECISIONS:
             return _invalid("details.decision is required")
 
