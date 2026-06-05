@@ -122,7 +122,7 @@ def test_close_readiness_rejects_placeholder_ac_until_concrete(
         tmp_tickets,
         "T-20260518-05.md",
         id="T-20260518-05",
-        status="in_progress",
+        status="open",
     )
     text = path.read_text(encoding="utf-8")
     path.write_text(

@@ -93,6 +93,35 @@ class TestRenderTicket:
         assert "blocked_by: [T-20260302-02]" in result
         assert "blocks:" not in result
 
+    def test_blocked_on_section_renders_between_next_action_and_change_history(self):
+        result = render_ticket(
+            id="T-20260302-01",
+            title="Blocked ticket",
+            status="blocked",
+            priority="high",
+            problem="Waiting on dependency.",
+            next_action="Resume once the dependency is resolved.",
+            blocked_on="Waiting for deployment credentials from the user.",
+            change_history_entry=_HISTORY,
+        )
+
+        assert "## Blocked On\nWaiting for deployment credentials from the user." in result
+        assert result.index("## Next Action") < result.index("## Blocked On")
+        assert result.index("## Blocked On") < result.index("## Change History")
+
+    def test_empty_blocked_on_does_not_render_section(self):
+        result = render_ticket(
+            id="T-20260302-01",
+            title="Open ticket",
+            status="open",
+            priority="normal",
+            problem="No blocker.",
+            blocked_on="",
+            change_history_entry=_HISTORY,
+        )
+
+        assert "## Blocked On" not in result
+
     def test_defer_field_not_persisted(self):
         result = render_ticket(
             id="T-20260302-01",
@@ -104,6 +133,12 @@ class TestRenderTicket:
             change_history_entry=_HISTORY,
         )
         assert "defer:" not in result
+
+
+def test_render_ticket_docstring_documents_blocked_on_order():
+    doc = " ".join((render_ticket.__doc__ or "").split())
+
+    assert "Problem -> Next Action -> Blocked On -> Change History" in doc
 
 
 def test_render_ticket_yaml_injection_tags(tmp_path):

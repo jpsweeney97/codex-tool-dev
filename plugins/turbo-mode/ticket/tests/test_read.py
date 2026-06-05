@@ -48,6 +48,12 @@ class TestListTickets:
         with pytest.raises(InvalidTicketState):
             list_tickets(tmp_tickets)
 
+    def test_active_in_progress_ticket_fails_explicitly(self, tmp_tickets):
+        make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="in_progress")
+
+        with pytest.raises(InvalidTicketState):
+            list_tickets(tmp_tickets)
+
     def test_null_optional_frontmatter_list_fails_explicitly(self, tmp_tickets):
         ticket = tmp_tickets / "T-20260302-01.md"
         ticket.write_text(
@@ -185,6 +191,34 @@ def test_list_includes_display_sort_key_and_identity(tmp_tickets: Path) -> None:
     assert payload[0]["id"] == "T-20260503-10"
     assert payload[0]["display"]["identity"]["filename"] == "T-20260503-10.md"
     assert payload[0]["display"]["status_label"] == "Open"
+
+
+def test_display_sort_key_uses_target_status_rank(tmp_tickets: Path) -> None:
+    make_ticket(tmp_tickets, "ignored.md", id="T-20260503-10", status="idea")
+    make_ticket(tmp_tickets, "ignored.md", id="T-20260503-11", status="open")
+    make_ticket(
+        tmp_tickets,
+        "ignored.md",
+        id="T-20260503-12",
+        status="blocked",
+        blocked_on="Waiting for upstream work.",
+    )
+    make_ticket(tmp_tickets, "ignored.md", id="T-20260503-13", status="done")
+    make_ticket(tmp_tickets, "ignored.md", id="T-20260503-14", status="wontfix")
+
+    payload_by_status = {
+        item["status"]: item
+        for item in (
+            _ticket_to_dict(ticket)
+            for ticket in list_tickets(tmp_tickets)
+        )
+    }
+
+    assert payload_by_status["idea"]["display"]["sort_key"].startswith("0-idea")
+    assert payload_by_status["open"]["display"]["sort_key"].startswith("1-open")
+    assert payload_by_status["blocked"]["display"]["sort_key"].startswith("2-blocked")
+    assert payload_by_status["done"]["display"]["sort_key"].startswith("8-done")
+    assert payload_by_status["wontfix"]["display"]["sort_key"].startswith("9-wontfix")
 
 
 def test_query_marks_ambiguous_prefix_matches(tmp_tickets: Path) -> None:

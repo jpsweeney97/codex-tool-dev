@@ -15,7 +15,22 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.ticket_parse import ParsedTicket, parse_ticket  # noqa: E402
 from scripts.ticket_paths import discover_project_root, resolve_tickets_dir  # noqa: E402
-from scripts.ticket_target_schema import validate_target_ticket_file  # noqa: E402
+from scripts.ticket_target_schema import (  # noqa: E402
+    TARGET_ACTIVE_STATUSES,
+    TARGET_STATUSES,
+    TARGET_TERMINAL_STATUSES,
+    validate_target_ticket_file,
+)
+
+STATUS_SORT_RANK = {
+    **{status: str(index) for index, status in enumerate(TARGET_ACTIVE_STATUSES)},
+    **{
+        status: str(8 + index)
+        for index, status in enumerate(
+            status for status in TARGET_STATUSES if status in TARGET_TERMINAL_STATUSES
+        )
+    },
+}
 
 
 class InvalidTicketState(ValueError):
@@ -110,12 +125,7 @@ def _ticket_to_dict(ticket: ParsedTicket) -> dict:
     from scripts.ticket_ux import humanize_state, ticket_identity
 
     priority_rank = {"high": "0", "normal": "1", "low": "2"}.get(ticket.priority, "9")
-    status_rank = {
-        "open": "0",
-        "in_progress": "1",
-        "done": "8",
-        "wontfix": "9",
-    }.get(ticket.status, "7")
+    status_rank = STATUS_SORT_RANK.get(ticket.status, "7")
     return {
         "id": ticket.id,
         "title": ticket.title,

@@ -14,7 +14,11 @@ TARGET_FRONTMATTER_REQUIRED = ("id", "title", "status", "priority")
 TARGET_FRONTMATTER_OPTIONAL = ("tags", "related_paths", "blocked_by")
 TARGET_FRONTMATTER_FIELDS = TARGET_FRONTMATTER_REQUIRED + TARGET_FRONTMATTER_OPTIONAL
 TARGET_SECTIONS_REQUIRED = ("Problem", "Next Action", "Change History")
-TARGET_STATUSES = ("open", "in_progress", "done", "wontfix")
+TARGET_STATUSES = ("idea", "open", "blocked", "done", "wontfix")
+TARGET_TERMINAL_STATUSES = frozenset({"done", "wontfix"})
+TARGET_ACTIVE_STATUSES = tuple(
+    status for status in TARGET_STATUSES if status not in TARGET_TERMINAL_STATUSES
+)
 TARGET_PRIORITIES = ("high", "normal", "low")
 # Canonical legacy (Handoff v1.0 / pre-cutover) -> target priority mapping.
 LEGACY_PRIORITY_MAP = {"critical": "high", "medium": "normal"}
@@ -50,6 +54,13 @@ class TargetTicketValidation:
     ok: bool
     ticket_id: str = ""
     error: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.ok and not self.error:
+            raise ValueError(
+                "TargetTicketValidation validation failed: error is required when ok is False. "
+                f"Got: {self!r:.100}"
+            )
 
 
 def validate_target_section_name(name: str) -> bool:
@@ -128,6 +139,10 @@ def validate_target_ticket_text(path: Path, text: str) -> TargetTicketValidation
     history_error = _validate_change_history(body)
     if history_error:
         return TargetTicketValidation(False, ticket_id=ticket_id, error=history_error)
+
+    status_shape_error = _validate_status_specific_shape(normalized_frontmatter, body)
+    if status_shape_error:
+        return TargetTicketValidation(False, ticket_id=ticket_id, error=status_shape_error)
 
     return TargetTicketValidation(True, ticket_id=ticket_id)
 
@@ -216,6 +231,60 @@ def _validate_required_sections(body: str) -> str:
     ordered_positions = [positions[section] for section in TARGET_SECTIONS_REQUIRED]
     if ordered_positions != sorted(ordered_positions):
         return "required sections are not in target section order"
+    return ""
+
+
+def _section_bodies(body: str) -> dict[str, str]:
+    """Return stripped level-two section bodies keyed by heading."""
+    sections = list(_SECTION_RE.finditer(body))
+    bodies: dict[str, str] = {}
+    for index, match in enumerate(sections):
+        heading = match.group(1).strip()
+        section_start = match.end()
+        section_end = sections[index + 1].start() if index + 1 < len(sections) else len(body)
+        bodies.setdefault(heading, body[section_start:section_end].strip())
+    return bodies
+
+
+def _duplicate_section_heading(body: str, heading: str) -> str:
+    """Return `heading` when it appears more than once, or an empty string."""
+    seen = False
+    for match in _SECTION_RE.finditer(body):
+        if match.group(1).strip() != heading:
+            continue
+        if seen:
+            return heading
+        seen = True
+    return ""
+
+
+def _validate_status_specific_shape(frontmatter: dict[str, Any], body: str) -> str:
+    """Validate status-only frontmatter and section constraints."""
+    status = frontmatter["status"]
+    blocked_by = frontmatter.get("blocked_by", [])
+    duplicate_heading = _duplicate_section_heading(body, "Blocked On")
+    if duplicate_heading:
+        return f"duplicate section heading: {duplicate_heading}"
+    section_bodies = _section_bodies(body)
+    blocked_on = section_bodies.get("Blocked On")
+
+    invalid_blocked_by = [
+        ticket_id
+        for ticket_id in blocked_by
+        if not isinstance(ticket_id, str) or TARGET_ID_RE.fullmatch(ticket_id) is None
+    ]
+    if invalid_blocked_by:
+        return f"blocked_by entries must be target ticket IDs. Got: {invalid_blocked_by!r:.100}"
+
+    if status == "blocked":
+        if not blocked_on:
+            return "blocked tickets require non-empty Blocked On section"
+        return ""
+
+    if blocked_on is not None:
+        return f"Blocked On section is only valid for blocked tickets. Got: {status!r:.100}"
+    if blocked_by:
+        return f"blocked_by is only valid for blocked tickets. Got: {blocked_by!r:.100}"
     return ""
 
 

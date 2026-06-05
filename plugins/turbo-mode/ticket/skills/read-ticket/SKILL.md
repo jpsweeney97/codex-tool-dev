@@ -34,16 +34,17 @@ and stop.
 
 ## Target Post-Cutover Ticket Shape
 
-Target statuses are `open`, `in_progress`, `done`, and `wontfix`. Target
-priorities are `high`, `normal`, and `low`. Blockedness derives from
-`blocked_by`; it is not a persisted lifecycle status.
+Target statuses are `idea`, `open`, `blocked`, `done`, and `wontfix`. Target
+priorities are `high`, `normal`, and `low`. Tickets with `status: blocked`
+require a non-empty `Blocked On` section. `blocked_by` is optional ticket-ID
+dependency data for blocked tickets, not the source of blockedness.
 
 ## Commands
 
 List tickets:
 
 ```bash
-uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <TICKETS_DIR> [--status open|in_progress|done|wontfix] [--priority high|normal|low] [--tag <tag>]
+uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <TICKETS_DIR> [--status idea|open|blocked|done|wontfix] [--priority high|normal|low] [--tag <tag>]
 ```
 
 Search or open by ticket ID prefix:
@@ -67,6 +68,6 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py check <TICKETS_DIR> <ticke
 
 ## Legacy Cutover Input
 
-Old filters such as blocked lifecycle status and critical or medium priorities
+Old filters such as `in_progress` status and `critical` or `medium` priorities
 may appear in legacy source data before cutover. Treat them as read-only
 compatibility facts, not target schema.

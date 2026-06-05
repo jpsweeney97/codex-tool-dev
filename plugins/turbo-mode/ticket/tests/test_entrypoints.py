@@ -523,7 +523,7 @@ def test_activation_smoke_entrypoint_direct_execute_resolves_plugin_local_script
             {
                 "action": "update",
                 "ticket_id": "T-20990101-99",
-                "fields": {"status": "in_progress"},
+                "fields": {"priority": "low"},
                 "session_id": "activation-smoke-session",
                 "hook_injected": True,
                 "hook_request_origin": "user",
@@ -565,7 +565,7 @@ def test_activation_smoke_entrypoint_rejects_agent_hook_origin(
             {
                 "action": "update",
                 "ticket_id": "T-20990101-99",
-                "fields": {"status": "in_progress"},
+                "fields": {"priority": "low"},
                 "session_id": "activation-smoke-session",
                 "hook_injected": True,
                 "hook_request_origin": "agent",

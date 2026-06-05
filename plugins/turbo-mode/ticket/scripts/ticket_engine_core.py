@@ -29,6 +29,11 @@ from scripts.ticket_id import allocate_id, build_filename
 from scripts.ticket_parse import ParsedTicket
 from scripts.ticket_paths import discover_project_root
 from scripts.ticket_render import render_ticket
+from scripts.ticket_target_schema import (
+    TARGET_ACTIVE_STATUSES,
+    TARGET_TERMINAL_STATUSES,
+    validate_target_ticket_text,
+)
 from scripts.ticket_trust import collect_trust_triple_errors
 from scripts.ticket_validate import validate_fields
 
@@ -130,6 +135,38 @@ def _invalid_ticket_state_response(
         ticket_id=ticket_id,
         error_code="invalid_state",
         data={"reason": str(reason)},
+    )
+
+
+def _invalid_rendered_ticket_response(
+    operation: str,
+    ticket_path: Path,
+    text: str,
+    *,
+    ticket_id: str | None = None,
+    state: str = "invalid_state",
+    error_code: str = "invalid_state",
+) -> EngineResponse | None:
+    """Return a mutation rejection response when rendered text fails validation."""
+    validation = validate_target_ticket_text(ticket_path, text)
+    if validation.ok:
+        return None
+    if state == "need_fields":
+        message = (
+            f"{operation} failed: proposed fields render an invalid target ticket: "
+            f"{validation.error}. Got: {text!r:.100}"
+        )
+    else:
+        message = (
+            f"{operation} failed: rendered ticket is not target-normalized: "
+            f"{validation.error}. Got: {text!r:.100}"
+        )
+    return EngineResponse(
+        state=state,
+        message=message,
+        ticket_id=ticket_id or validation.ticket_id or None,
+        error_code=error_code,
+        data={"reason": validation.error},
     )
 
 
@@ -326,9 +363,29 @@ def engine_classify(
 
 # Required fields for create.
 _CREATE_REQUIRED = ("title", "problem")
+_CREATE_STATUSES = frozenset(TARGET_ACTIVE_STATUSES)
 
 # Dedup window.
 _DEDUP_WINDOW_HOURS = 24
+
+
+def _validate_create_status_shape(fields: dict[str, Any]) -> list[str]:
+    status = fields.get("status", "open")
+    blocked_on = fields.get("blocked_on")
+    blocked_by = fields.get("blocked_by", [])
+    errors: list[str] = []
+
+    if not isinstance(status, str) or status not in _CREATE_STATUSES:
+        errors.append(f"create status must be one of {sorted(_CREATE_STATUSES)}")
+    if status == "blocked":
+        if not isinstance(blocked_on, str) or not blocked_on.strip():
+            errors.append("blocked create requires blocked_on")
+    else:
+        if blocked_on:
+            errors.append("blocked_on is only valid for blocked create")
+        if blocked_by:
+            errors.append("blocked_by is only valid for blocked create")
+    return errors
 
 
 def engine_plan(
@@ -395,6 +452,15 @@ def _plan_create(
             message=f"Missing required fields: {', '.join(missing)}",
             error_code="need_fields",
             data={"missing_fields": missing},
+        )
+
+    create_shape_errors = _validate_create_status_shape(fields)
+    if create_shape_errors:
+        return EngineResponse(
+            state="need_fields",
+            message=f"Field validation failed: {'; '.join(create_shape_errors)}",
+            error_code="need_fields",
+            data={"missing_fields": [], "validation_errors": create_shape_errors},
         )
 
     validation_errors = validate_fields(fields)
@@ -492,7 +558,7 @@ _T_BASE = 0.5
 _ORIGIN_MODIFIER: dict[str, float] = {"user": 0.0, "agent": 0.15}
 
 # Terminal statuses for dependency resolution.
-_TERMINAL_STATUSES = frozenset({"done", "wontfix"})
+_TERMINAL_STATUSES = TARGET_TERMINAL_STATUSES
 
 
 def _read_autonomy_config_state(
@@ -844,11 +910,14 @@ _UPDATE_FRONTMATTER_KEYS = frozenset(
 )
 _UPDATE_FOCUSED_MODE = "focused_refinement"
 _UPDATE_INTERNAL_FIELDS = frozenset({"_update_mode", "_clear_refinement_status"})
-_UPDATE_FOCUSED_SECTION_FIELDS = frozenset({"problem", "next_action", "acceptance_criteria"})
+_UPDATE_FOCUSED_SECTION_FIELDS = frozenset(
+    {"problem", "next_action", "acceptance_criteria", "blocked_on"}
+)
 _UPDATE_SECTION_FIELDS = frozenset(
     {
         "problem",
         "next_action",
+        "blocked_on",
         "context",
         "prior_investigation",
         "approach",
@@ -861,13 +930,14 @@ _UPDATE_SECTION_FIELDS = frozenset(
 )
 _UPDATE_IGNORED_FIELDS = frozenset({"ticket_id", "id"})
 
-# Valid status transitions for update action (from -> set of valid to statuses).
-# done/wontfix are terminal — only reopen (separate action) can transition out.
+# Valid status transitions for update action only.
+# Close and reopen handle terminal state changes as separate actions.
 _VALID_TRANSITIONS: dict[str, set[str]] = {
-    "open": {"in_progress", "wontfix"},
-    "in_progress": {"open", "done", "wontfix"},
-    "done": set(),  # Terminal — reopen action required.
-    "wontfix": set(),  # Terminal — reopen action required.
+    "idea": {"open"},
+    "open": {"blocked"},
+    "blocked": {"open"},
+    "done": set(),
+    "wontfix": set(),
 }
 
 # Bounds archive collision search to avoid infinite loops in pathological trees.
@@ -876,7 +946,10 @@ _CREATE_WRITE_RETRY_LIMIT = 3
 
 # Transitions that require preconditions.
 # Pair-keyed: specific (current, target) combinations.
-_TRANSITION_PRECONDITIONS: dict[tuple[str, str], str] = {}
+_TRANSITION_PRECONDITIONS: dict[tuple[str, str], str] = {
+    ("open", "blocked"): "blocked_on_required",
+    ("blocked", "open"): "blocker_cleanup_required",
+}
 # Target-keyed: preconditions that apply regardless of current status.
 _TARGET_PRECONDITIONS: dict[str, str] = {
     "done": "acceptance_criteria_required",
@@ -960,44 +1033,26 @@ def _check_transition_preconditions_with_detail(
     if precondition is None:
         return (None, "none", None)
 
-    if precondition == "blocked_by_required":
-        blocked_by = _fields.get("blocked_by", ticket.blocked_by)
-        if not blocked_by:
+    if precondition == "blocked_on_required":
+        blocked_on = _fields.get("blocked_on")
+        if not isinstance(blocked_on, str) or not blocked_on.strip():
             return (
-                "Transition to 'blocked' requires non-empty blocked_by",
-                "blocked_by_required",
-                {"missing": ["blocked_by"]},
+                "Transition to 'blocked' requires blocked_on",
+                "blocked_on_required",
+                {"missing": ["blocked_on"]},
             )
         return (None, "none", None)
 
-    if precondition == "blockers_resolved_required":
-        if ticket.blocked_by:
-            all_tickets, invalid_state = _list_tickets_for_engine(
-                tickets_dir,
-                ticket_id=ticket.id,
+    if precondition == "blocker_cleanup_required":
+        blocked_by = _fields.get("blocked_by", ticket.blocked_by)
+        blocked_on_present = "blocked_on" in _fields
+        # Unblocking must explicitly clear both machine IDs and visible blocker prose.
+        if blocked_by != [] or not blocked_on_present or _fields.get("blocked_on") is not None:
+            return (
+                "Transition to 'open' from blocked requires clearing blocked_by and Blocked On",
+                "blocker_cleanup_required",
+                {"required": ["blocked_by: []", "blocked_on: null"]},
             )
-            if invalid_state is not None:
-                return (
-                    invalid_state.message,
-                    invalid_state.error_code or "invalid_state",
-                    invalid_state.data,
-                )
-            ticket_map = {t.id: t for t in all_tickets}
-            missing, unresolved = _classify_blockers(ticket.blocked_by, ticket_map)
-            if missing or unresolved:
-                return (
-                    _format_blocker_message(
-                        unresolved=unresolved,
-                        missing=missing,
-                        include_override=False,
-                    ),
-                    "dependency_blocked",
-                    {
-                        "blocking_ids": unresolved + missing,
-                        "unresolved_blockers": unresolved,
-                        "missing_blockers": missing,
-                    },
-                )
         return (None, "none", None)
 
     return (None, "none", None)
@@ -1038,6 +1093,7 @@ def _classify_update_fields(
 _UPDATE_SECTION_HEADINGS = {
     "problem": "Problem",
     "next_action": "Next Action",
+    "blocked_on": "Blocked On",
     "acceptance_criteria": "Acceptance Criteria",
 }
 _TARGET_FRONTMATTER_BLOCK_RE = re.compile(r"\A---\n.*?\n---\n?", re.DOTALL)
@@ -1073,22 +1129,31 @@ def _replace_target_frontmatter_text(text: str, frontmatter: dict[str, Any]) -> 
 
 def _render_target_ticket_text(
     frontmatter: dict[str, Any],
-    sections: dict[str, str],
+    sections: dict[str, str | None],
     *,
     original_text: str | None = None,
     targeted_headings: tuple[str, ...] = (),
 ) -> str:
-    """Render a target ticket while preserving untargeted body sections."""
+    """Render a target ticket while preserving untargeted body sections.
+
+    For targeted headings on an existing ticket, `None` removes the section and
+    an empty string keeps the section with an empty body. For new text, `None`
+    omits optional sections and required sections coerce `None` to an empty
+    body.
+    """
     from scripts.ticket_target_schema import TARGET_SECTIONS_REQUIRED
 
     if original_text is not None:
         rendered_text = _replace_target_frontmatter_text(original_text, frontmatter)
         for heading in targeted_headings:
-            rendered_text = _replace_or_append_section(
-                rendered_text,
-                heading,
-                sections.get(heading, ""),
-            )
+            if heading in sections and sections[heading] is None:
+                rendered_text = _remove_section(rendered_text, heading)
+            else:
+                rendered_text = _replace_or_append_section(
+                    rendered_text,
+                    heading,
+                    str(sections.get(heading, "")),
+                )
         return rendered_text
 
     from scripts.ticket_render import render_frontmatter
@@ -1096,24 +1161,33 @@ def _render_target_ticket_text(
     rendered = ["---", render_frontmatter(_target_frontmatter(frontmatter)).rstrip("\n"), "---", ""]
     emitted: set[str] = set()
     for heading in TARGET_SECTIONS_REQUIRED:
-        rendered.extend([f"## {heading}", sections.get(heading, "").strip(), ""])
+        body = sections.get(heading, "")
+        if body is None:
+            body = ""
+        rendered.extend([f"## {heading}", body.strip(), ""])
         emitted.add(heading)
     for heading, body in sections.items():
-        if heading in emitted:
+        if heading in emitted or body is None:
             continue
         rendered.extend([f"## {heading}", body.strip(), ""])
     return "\n".join(rendered).rstrip() + "\n"
 
 
 def _focused_section_fields_allowed(fields: dict[str, Any], section_fields: list[str]) -> bool:
-    """Return True only for the ticket_update.py focused refinement section path."""
-    return fields.get("_update_mode") == _UPDATE_FOCUSED_MODE and all(
+    """Return True for focused refinement or status-specific blocker section writes."""
+    if fields.get("_update_mode") == _UPDATE_FOCUSED_MODE and all(
         field in _UPDATE_FOCUSED_SECTION_FIELDS for field in section_fields
-    )
+    ):
+        return True
+    if fields.get("status") in {"blocked", "open"}:
+        return all(field in {"blocked_on", "next_action"} for field in section_fields)
+    return False
 
 
-def _render_update_section_value(key: str, value: Any) -> str:
+def _render_update_section_value(key: str, value: Any) -> str | None:
     """Render focused section update values into markdown section content."""
+    if value is None:
+        return None
     if key == "acceptance_criteria":
         if not isinstance(value, list):
             return ""
@@ -1122,7 +1196,7 @@ def _render_update_section_value(key: str, value: Any) -> str:
 
 
 def _replace_or_append_section(text: str, heading: str, content: str) -> str:
-    """Replace a level-two section body, appending the section if it does not exist."""
+    """Replace a level-two section body, inserting/appending when missing."""
     replacement = f"## {heading}\n{content.rstrip()}\n\n"
     pattern = re.compile(
         rf"^## {re.escape(heading)}\n.*?(?=^## |\Z)",
@@ -1131,15 +1205,38 @@ def _replace_or_append_section(text: str, heading: str, content: str) -> str:
     updated, count = pattern.subn(replacement, text, count=1)
     if count:
         return updated
+    if heading == "Blocked On":
+        return _insert_section_before(text, replacement, before_heading="Change History")
     return text.rstrip() + "\n\n" + replacement
+
+
+def _insert_section_before(text: str, replacement: str, *, before_heading: str) -> str:
+    """Insert a missing section before another level-two heading when present."""
+    before_match = re.search(rf"^## {re.escape(before_heading)}\n", text, re.MULTILINE)
+    if before_match is None:
+        return text.rstrip() + "\n\n" + replacement
+    return (
+        text[: before_match.start()].rstrip()
+        + "\n\n"
+        + replacement
+        + text[before_match.start() :]
+    )
+
+
+def _remove_section(text: str, heading: str) -> str:
+    """Remove the first matching level-two section and leave surrounding text intact."""
+    pattern = re.compile(
+        rf"^## {re.escape(heading)}\n.*?(?=^## |\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    updated, _count = pattern.subn("", text, count=1)
+    return updated.rstrip() + "\n"
 
 
 def _is_valid_transition(current: str, target: str, action: str) -> bool:
     """Check if a status transition is valid per the contract."""
     if action == "close":
-        if current in _TERMINAL_STATUSES:
-            return False
-        return target in ("done", "wontfix")
+        return current in {"open", "blocked"} and target in ("done", "wontfix")
     if action == "reopen":
         return current in ("done", "wontfix") and target == "open"
     # Update: follow transition table.
@@ -1668,6 +1765,15 @@ def _execute_create(
             error_code="need_fields",
         )
 
+    create_shape_errors = _validate_create_status_shape(fields)
+    if create_shape_errors:
+        return EngineResponse(
+            state="need_fields",
+            message=f"Field validation failed: {'; '.join(create_shape_errors)}",
+            error_code="need_fields",
+            data={"validation_errors": create_shape_errors},
+        )
+
     validation_errors = validate_fields(fields)
     if validation_errors:
         return EngineResponse(
@@ -1682,6 +1788,7 @@ def _execute_create(
     now = datetime.now(UTC)
     today = now.date()
     title = fields.get("title", "Untitled")
+    status = fields.get("status", "open")
 
     if change_history_entry is None:
         change_history_entry = ChangeHistoryEntry(
@@ -1705,7 +1812,7 @@ def _execute_create(
         content = render_ticket(
             id=ticket_id,
             title=title,
-            status="open",
+            status=status,
             priority=fields.get("priority", "normal"),
             related_paths=fields.get("related_paths"),
             tags=fields.get("tags", []),
@@ -1715,6 +1822,7 @@ def _execute_create(
             approach=fields.get("approach", ""),
             acceptance_criteria=fields.get("acceptance_criteria"),
             next_action=fields.get("next_action", ""),
+            blocked_on=fields.get("blocked_on", ""),
             verification=fields.get("verification", ""),
             key_files=fields.get("key_files"),
             context=fields.get("context", ""),
@@ -1723,6 +1831,14 @@ def _execute_create(
             related=fields.get("related", ""),
             change_history_entry=rendered_history,
         )
+        invalid_render = _invalid_rendered_ticket_response(
+            "create",
+            ticket_path,
+            content,
+            ticket_id=ticket_id,
+        )
+        if invalid_render is not None:
+            return invalid_render
         try:
             _write_text_exclusive(ticket_path, content)
         except FileExistsError:
@@ -1780,9 +1896,15 @@ def _evaluate_update_policy(
         )
         requires_reopen = ticket.status in _TERMINAL_STATUSES
         if not _is_valid_transition(ticket.status, new_status, "update"):
+            close_hint = (
+                " (use close action)"
+                if ticket.status in {"open", "blocked"} and new_status in _TERMINAL_STATUSES
+                else ""
+            )
             return EngineResponse(
                 state="invalid_transition",
                 message=f"Cannot transition from {ticket.status} to {new_status} via update"
+                + close_hint
                 + (" (use reopen action)" if requires_reopen else ""),
                 ticket_id=ticket_id,
                 error_code="invalid_transition",
@@ -1938,7 +2060,10 @@ def _execute_update(
         heading = _UPDATE_SECTION_HEADINGS[key]
         rendered = _render_update_section_value(key, fields[key])
         old_rendered = ticket.sections.get(heading, "")
-        if old_rendered.strip() != rendered.strip():
+        if rendered is None:
+            if heading in ticket.sections:
+                changes["sections_changed"].append(heading)
+        elif old_rendered.strip() != rendered.strip():
             changes["sections_changed"].append(heading)
         sections[heading] = rendered
     targeted_headings = tuple(_UPDATE_SECTION_HEADINGS[key] for key in section_fields)
@@ -1950,6 +2075,16 @@ def _execute_update(
     )
     if change_history_entry is not None:
         new_text = append_change_history_entry(new_text, change_history_entry)
+    invalid_render = _invalid_rendered_ticket_response(
+        "update",
+        ticket_path,
+        new_text,
+        ticket_id=ticket_id,
+        state="need_fields",
+        error_code="need_fields",
+    )
+    if invalid_render is not None:
+        return invalid_render
     ticket_path.write_text(new_text, encoding="utf-8")
 
     return EngineResponse(
@@ -1987,7 +2122,14 @@ def _evaluate_close_policy(
             data={"validation_errors": validation_errors},
         )
 
-    valid_recovery_statuses = [] if ticket.status in _TERMINAL_STATUSES else ["done", "wontfix"]
+    if ticket.status == "idea":
+        valid_recovery_statuses = []
+    elif ticket.status in _TERMINAL_STATUSES:
+        valid_recovery_statuses = []
+    elif ticket.status not in {"open", "blocked"}:
+        valid_recovery_statuses = ["open", "blocked"]
+    else:
+        valid_recovery_statuses = ["done", "wontfix"]
     requires_reopen = ticket.status in _TERMINAL_STATUSES
 
     if ticket.blocked_by and resolution != "wontfix":
@@ -2028,10 +2170,18 @@ def _evaluate_close_policy(
             )
 
     if not _is_valid_transition(ticket.status, resolution, "close"):
+        message = f"Cannot close with resolution {resolution!r} (must be 'done' or 'wontfix')"
+        if ticket.status == "idea":
+            message += "; promote idea to open first"
+        elif requires_reopen:
+            message += f" from terminal status {ticket.status!r}"
+        elif ticket.status not in {"open", "blocked"}:
+            message += (
+                f"; status {ticket.status!r} is not closeable; migrate to open or blocked first"
+            )
         return EngineResponse(
             state="invalid_transition",
-            message=f"Cannot close with resolution {resolution!r} (must be 'done' or 'wontfix')"
-            + (f" from terminal status {ticket.status!r}" if requires_reopen else ""),
+            message=message,
             ticket_id=ticket_id,
             error_code="invalid_transition",
             data=_transition_policy_data(
@@ -2121,6 +2271,8 @@ def _close_readiness_from_policy_error(
         allowed_actions = ["resolve blockers", "close as wontfix", "keep current status"]
     elif policy_error.error_code == "need_fields":
         allowed_actions = ["choose done or wontfix", "keep current status"]
+    elif ticket.status == "idea":
+        allowed_actions = ["promote idea to open before closing", "keep current status"]
     elif ticket.status in _TERMINAL_STATUSES:
         allowed_actions = ["reopen before closing", "keep current status"]
     elif missing:
@@ -2309,12 +2461,38 @@ def _execute_close(
     sections = dict(ticket.sections)
     old_status = data.get("status", "")
     data["status"] = resolution
-    new_text = _render_target_ticket_text(data, sections, original_text=original_text)
+    changes_blocked_by = None
+    if old_status == "blocked":
+        previous_blocked_by = data.get("blocked_by", [])
+        if previous_blocked_by:
+            changes_blocked_by = [previous_blocked_by, []]
+        data["blocked_by"] = []
+        sections["Blocked On"] = None
+
+    targeted_headings = ("Blocked On",) if old_status == "blocked" else ()
+    new_text = _render_target_ticket_text(
+        data,
+        sections,
+        original_text=original_text,
+        targeted_headings=targeted_headings,
+    )
     if change_history_entry is not None:
         new_text = append_change_history_entry(new_text, change_history_entry)
+    invalid_render = _invalid_rendered_ticket_response(
+        "close",
+        ticket_path,
+        new_text,
+        ticket_id=ticket_id,
+    )
+    if invalid_render is not None:
+        return invalid_render
     ticket_path.write_text(new_text, encoding="utf-8")
 
-    changes = {"frontmatter": {"status": [old_status, resolution]}}
+    changes = {"frontmatter": {"status": [old_status, resolution]}, "sections_changed": []}
+    if old_status == "blocked":
+        changes["sections_changed"].append("Blocked On")
+        if changes_blocked_by is not None:
+            changes["frontmatter"]["blocked_by"] = changes_blocked_by
 
     return EngineResponse(
         state="ok",
@@ -2389,6 +2567,14 @@ def _execute_reopen(
         new_text += reopen_entry
     if change_history_entry is not None:
         new_text = append_change_history_entry(new_text, change_history_entry)
+    invalid_render = _invalid_rendered_ticket_response(
+        "reopen",
+        ticket_path,
+        new_text,
+        ticket_id=ticket_id,
+    )
+    if invalid_render is not None:
+        return invalid_render
 
     try:
         ticket_path.write_text(new_text, encoding="utf-8")

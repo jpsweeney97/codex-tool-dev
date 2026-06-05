@@ -107,6 +107,27 @@ def test_close_readiness_rejects_terminal_tickets(tmp_tickets: Path, status: str
     assert result["allowed_actions"] == ["reopen before closing", "keep current status"]
 
 
+def test_close_readiness_tells_idea_to_promote_before_closing(tmp_tickets: Path) -> None:
+    path = make_ticket(
+        tmp_tickets,
+        "2026-05-03-idea.md",
+        id="T-20260503-32",
+        status="idea",
+    )
+    ticket = parse_ticket(path)
+    assert ticket is not None
+
+    result = close_readiness(ticket, tmp_tickets, resolution="wontfix")
+
+    assert result["ready"] is False
+    assert result["error_code"] == "invalid_transition"
+    assert result["status"] == "idea"
+    assert result["allowed_actions"] == [
+        "promote idea to open before closing",
+        "keep current status",
+    ]
+
+
 def test_close_readiness_rejects_legacy_tickets(tmp_tickets: Path) -> None:
     path = make_gen1_ticket(tmp_tickets, "legacy.md")
     ticket = parse_ticket(path)
@@ -119,8 +140,9 @@ def test_close_readiness_reports_open_blocker(tmp_tickets: Path) -> None:
         tmp_tickets,
         "blocked.md",
         id="T-20260503-13",
-        status="in_progress",
+        status="blocked",
         blocked_by=["T-20260503-12"],
+        blocked_on="Waiting for the blocker to finish.",
     )
     ticket = parse_ticket(path)
     assert ticket is not None
@@ -144,8 +166,9 @@ def test_close_readiness_reports_missing_blocker_reference(tmp_tickets: Path) ->
         tmp_tickets,
         "missing-blocker.md",
         id="T-20260503-14",
-        status="in_progress",
+        status="blocked",
         blocked_by=["T-20260503-99"],
+        blocked_on="Waiting for a missing blocker.",
     )
     ticket = parse_ticket(path)
     assert ticket is not None
@@ -190,7 +213,7 @@ def test_close_readiness_error_code_matches_close_policy_for_missing_acceptance_
         tmp_tickets,
         "missing-ac-parity.md",
         id="T-20260503-16",
-        status="in_progress",
+        status="open",
     )
     text = path.read_text(encoding="utf-8")
     path.write_text(
@@ -223,8 +246,9 @@ def test_close_readiness_error_code_matches_close_policy_for_blocked_ticket(
         tmp_tickets,
         "blocked-parity.md",
         id="T-20260503-18",
-        status="in_progress",
+        status="blocked",
         blocked_by=["T-20260503-17"],
+        blocked_on="Waiting for the blocker to finish.",
     )
     ticket = parse_ticket(path)
     assert ticket is not None
@@ -259,7 +283,7 @@ def test_close_readiness_error_code_matches_close_policy_for_invalid_resolution(
         tmp_tickets,
         "invalid-resolution-parity.md",
         id="T-20260503-19",
-        status="in_progress",
+        status="open",
     )
     ticket = parse_ticket(path)
     assert ticket is not None
@@ -280,7 +304,7 @@ def test_close_readiness_error_code_matches_close_policy_for_invalid_resolution(
 def test_close_readiness_ready_matches_close_policy_for_successful_close(tmp_tickets: Path) -> None:
     from scripts.ticket_engine_core import _execute_close
 
-    path = make_ticket(tmp_tickets, "success-parity.md", id="T-20260503-20", status="in_progress")
+    path = make_ticket(tmp_tickets, "success-parity.md", id="T-20260503-20", status="open")
     ticket = parse_ticket(path)
     assert ticket is not None
 

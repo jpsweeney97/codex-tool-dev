@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import inspect
 import textwrap
 
 import pytest
+import scripts.ticket_parse as ticket_parse_module
 from scripts.ticket_parse import (
+    CANONICAL_STATUSES,
     date_from_ticket_id,
     extract_fenced_yaml,
     extract_sections,
@@ -15,6 +18,7 @@ from scripts.ticket_parse import (
     parse_ticket,
     parse_yaml_block,
 )
+from scripts.ticket_target_schema import TARGET_STATUSES
 
 from tests.support.builders import make_gen1_ticket, make_gen2_ticket, make_gen4_ticket, make_ticket
 
@@ -67,9 +71,20 @@ class TestExtractTitle:
 
 
 class TestNormalizeStatus:
+    def test_canonical_statuses_are_derived_from_target_contract(self):
+        source = inspect.getsource(ticket_parse_module)
+        assert "CANONICAL_STATUSES = frozenset(TARGET_STATUSES)" in source
+        assert CANONICAL_STATUSES == frozenset(TARGET_STATUSES)
+
     def test_target_statuses_unchanged(self):
-        for status in ("open", "in_progress", "done", "wontfix"):
+        for status in ("idea", "open", "blocked", "done", "wontfix"):
             assert normalize_status(status) == (status, None)
+
+    def test_legacy_in_progress_passes_through_for_diagnostics(self):
+        assert normalize_status("in_progress") == ("in_progress", None)
+
+    def test_legacy_implementing_does_not_normalize_to_in_progress(self):
+        assert normalize_status("implementing") == ("open", None)
 
     def test_legacy_deferred_maps_to_open_for_cutover(self):
         status, defer_info = normalize_status("deferred")

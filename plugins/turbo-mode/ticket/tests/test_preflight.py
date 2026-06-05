@@ -171,7 +171,9 @@ class TestEnginePreflight:
             tmp_tickets,
             "target.md",
             id="T-20260302-02",
+            status="blocked",
             blocked_by=["T-20260302-01"],
+            blocked_on="Waiting for T-20260302-01.",
         )
         resp = engine_preflight(
             ticket_id="T-20260302-02",
@@ -192,7 +194,9 @@ class TestEnginePreflight:
             tmp_tickets,
             "target.md",
             id="T-20260302-02",
+            status="blocked",
             blocked_by=["T-20260302-01"],
+            blocked_on="Waiting for T-20260302-01.",
         )
         resp = engine_preflight(
             ticket_id="T-20260302-02",
@@ -216,7 +220,9 @@ class TestEnginePreflight:
             tmp_tickets,
             "target.md",
             id="T-20260302-02",
+            status="blocked",
             blocked_by=["T-20260302-01"],
+            blocked_on="Waiting for T-20260302-01.",
         )
         resp = engine_preflight(
             ticket_id="T-20260302-02",
@@ -238,7 +244,9 @@ class TestEnginePreflight:
             tmp_tickets,
             "target.md",
             id="T-20260302-02",
-            blocked_by=["T-MISSING-01"],
+            status="blocked",
+            blocked_by=["T-20260302-99"],
+            blocked_on="Waiting for missing dependency.",
         )
         resp = engine_preflight(
             ticket_id="T-20260302-02",
@@ -252,7 +260,7 @@ class TestEnginePreflight:
             tickets_dir=tmp_tickets,
         )
         assert resp.state == "dependency_blocked"
-        assert resp.data["missing_blockers"] == ["T-MISSING-01"]
+        assert resp.data["missing_blockers"] == ["T-20260302-99"]
         assert resp.data["unresolved_blockers"] == []
 
     def test_dedup_blocks_without_override(self, tmp_tickets):

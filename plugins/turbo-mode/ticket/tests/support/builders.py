@@ -26,6 +26,7 @@ def make_ticket(
     contract_version: str = "1.0",
     title: str = "Test ticket",
     problem: str = "Test problem description.",
+    blocked_on: str = "",
     extra_yaml: str = "",
     extra_sections: str = "",
 ) -> Path:
@@ -73,6 +74,13 @@ def make_ticket(
         | test.py | Test | Test code |
         {extra_sections}
     """)
+    if blocked_on:
+        marker = "\n## Change History\n"
+        content = content.replace(
+            marker,
+            f"\n## Blocked On\n{blocked_on.strip()}\n{marker}",
+            1,
+        )
     path = tickets_dir / f"{id}.md"
     path.write_text(content, encoding="utf-8")
     return path

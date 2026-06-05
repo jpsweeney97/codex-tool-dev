@@ -17,11 +17,19 @@ class TestValidateFields:
             assert any("priority" in error for error in validate_fields({"priority": priority}))
 
     def test_valid_statuses(self):
-        for status in ("open", "in_progress", "done", "wontfix"):
+        for status in ("idea", "open", "blocked", "done", "wontfix"):
             assert validate_fields({"status": status}) == []
 
-    def test_deprecated_blocked_status_rejected(self):
-        assert any("status" in error for error in validate_fields({"status": "blocked"}))
+    def test_deprecated_in_progress_status_rejected(self):
+        assert any("status" in error for error in validate_fields({"status": "in_progress"}))
+
+    def test_blocked_on_none_is_valid_section_removal_input(self):
+        assert validate_fields({"blocked_on": None}) == []
+
+    def test_non_string_blocked_on_rejected(self):
+        errors = validate_fields({"blocked_on": 123})
+
+        assert "blocked_on must be a string, got int" in errors
 
     def test_valid_resolutions(self):
         for resolution in ("done", "wontfix"):
@@ -39,6 +47,11 @@ class TestValidateFields:
         assert any("tags" in error for error in validate_fields({"tags": "bug"}))
         assert any("blocked_by" in error for error in validate_fields({"blocked_by": "T-1"}))
         assert any("related_paths" in error for error in validate_fields({"related_paths": "x"}))
+
+    def test_blocked_by_entries_must_be_target_ticket_ids(self):
+        errors = validate_fields({"blocked_by": ["not-a-ticket-id"]})
+
+        assert any("blocked_by entries must be target ticket IDs" in error for error in errors)
 
     def test_deprecated_storage_fields_rejected(self):
         for key, value in {

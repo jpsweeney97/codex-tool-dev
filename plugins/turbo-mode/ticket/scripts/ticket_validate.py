@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from scripts.ticket_target_schema import TARGET_PRIORITIES, TARGET_STATUSES
+from scripts.ticket_target_schema import TARGET_ID_RE, TARGET_PRIORITIES, TARGET_STATUSES
 
 VALID_PRIORITIES = frozenset(TARGET_PRIORITIES)
 VALID_STATUSES = frozenset(TARGET_STATUSES)
@@ -96,6 +96,12 @@ def validate_fields(fields: dict[str, Any]) -> list[str]:
     ):
         _validate_string_field(fields, key, errors)
 
+    if "blocked_on" in fields:
+        if fields["blocked_on"] is None:
+            pass
+        else:
+            _validate_string_field(fields, "blocked_on", errors)
+
     # --- Enum fields ---
     if "priority" in fields:
         v = fields["priority"]
@@ -120,6 +126,17 @@ def validate_fields(fields: dict[str, Any]) -> list[str]:
                 errors.append(f"{key} must be a list, got {type(v).__name__}")
             elif not all(isinstance(item, str) for item in v):
                 errors.append(f"{key} must contain only strings")
+
+    if "blocked_by" in fields and isinstance(fields["blocked_by"], list):
+        invalid_blocked_by = [
+            ticket_id
+            for ticket_id in fields["blocked_by"]
+            if isinstance(ticket_id, str) and TARGET_ID_RE.fullmatch(ticket_id) is None
+        ]
+        if invalid_blocked_by:
+            errors.append(
+                f"blocked_by entries must be target ticket IDs, got {invalid_blocked_by!r}"
+            )
 
     if (
         "acceptance_criteria" in fields

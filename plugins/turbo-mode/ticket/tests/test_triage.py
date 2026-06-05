@@ -20,13 +20,14 @@ class TestDashboard:
     def populated_tickets(self, tmp_tickets):
         """Create a mix of tickets for dashboard testing."""
         make_ticket(tmp_tickets, "t1.md", id="T-20260302-01", status="open")
-        make_ticket(tmp_tickets, "t2.md", id="T-20260302-02", status="in_progress")
+        make_ticket(tmp_tickets, "t2.md", id="T-20260302-02", status="idea")
         make_ticket(
             tmp_tickets,
             "t3.md",
             id="T-20260302-03",
-            status="open",
+            status="blocked",
             blocked_by=["T-20260302-01"],
+            blocked_on="Waiting for root blocker.",
         )
         make_ticket(tmp_tickets, "t4.md", id="T-20260302-04", status="done")
         return tmp_tickets
@@ -35,9 +36,9 @@ class TestDashboard:
         from scripts.ticket_triage import triage_dashboard
 
         result = triage_dashboard(populated_tickets)
-        assert result["counts"]["open"] == 2
-        assert result["counts"]["in_progress"] == 1
-        assert "blocked" not in result["counts"]
+        assert result["counts"]["idea"] == 1
+        assert result["counts"]["open"] == 1
+        assert result["counts"]["blocked"] == 1
         assert result["total"] == 3
 
     def test_empty_directory(self, tmp_tickets):
@@ -46,6 +47,15 @@ class TestDashboard:
         result = triage_dashboard(tmp_tickets)
         assert result["total"] == 0
         assert result["stale"] == []
+
+    def test_active_in_progress_ticket_fails_explicitly(self, tmp_tickets):
+        from scripts.ticket_read import InvalidTicketState
+        from scripts.ticket_triage import triage_dashboard
+
+        make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="in_progress")
+
+        with pytest.raises(InvalidTicketState):
+            triage_dashboard(tmp_tickets)
 
 
 def test_dashboard_includes_recommended_next_actions(tmp_tickets: Path) -> None:
@@ -65,9 +75,9 @@ def test_dashboard_includes_recommended_next_actions(tmp_tickets: Path) -> None:
         "2026-04-21-high-progress.md",
         id="T-20260421-01",
         date="2026-04-21",
-        status="in_progress",
+        status="idea",
         priority="high",
-        title="High priority in progress",
+        title="High priority idea",
     )
 
     dashboard = triage_dashboard(tmp_tickets)
@@ -287,6 +297,41 @@ class TestStaleDetection:
         assert result["stale"][0]["id"] == "T-20260220-01"
         assert result["stale"][0]["title"] == "Test ticket"
 
+    def test_old_blocked_ticket_is_stale(self, tmp_tickets):
+        """Blocked tickets older than 7 days are stale."""
+        old_date = (datetime.now(UTC) - timedelta(days=10)).strftime("%Y-%m-%d")
+        make_ticket(
+            tmp_tickets,
+            "old-blocked.md",
+            id="T-20260220-01",
+            date=old_date,
+            status="blocked",
+            blocked_on="Waiting for upstream work.",
+        )
+        from scripts.ticket_triage import triage_dashboard
+
+        result = triage_dashboard(tmp_tickets)
+        assert len(result["stale"]) == 1
+        assert result["stale"][0]["id"] == "T-20260220-01"
+
+    def test_old_idea_ticket_is_visible_but_not_stale_or_actionable(self, tmp_tickets):
+        """Idea tickets stay visible without default stale or next-action prompts."""
+        old_date = (datetime.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d")
+        make_ticket(
+            tmp_tickets,
+            "old-idea.md",
+            id="T-20260220-01",
+            date=old_date,
+            status="idea",
+            priority="high",
+        )
+        from scripts.ticket_triage import triage_dashboard
+
+        result = triage_dashboard(tmp_tickets)
+        assert result["active_tickets"][0]["status"] == "idea"
+        assert result["stale"] == []
+        assert result["next_actions"] == []
+
     def test_recent_ticket_not_stale(self, tmp_tickets):
         """Ticket from today -> not stale."""
         today = datetime.now(UTC).strftime("%Y-%m-%d")
@@ -323,15 +368,17 @@ class TestBlockedChain:
             tmp_tickets,
             "mid.md",
             id="T-20260302-02",
-            status="open",
+            status="blocked",
             blocked_by=["T-20260302-01"],
+            blocked_on="Waiting for the root blocker.",
         )
         make_ticket(
             tmp_tickets,
             "leaf.md",
             id="T-20260302-03",
-            status="in_progress",
+            status="blocked",
             blocked_by=["T-20260302-02"],
+            blocked_on="Waiting for the mid blocker.",
         )
         from scripts.ticket_triage import triage_dashboard
 
@@ -347,13 +394,14 @@ class TestBlockedChain:
             tmp_tickets,
             "blocked.md",
             id="T-20260302-01",
-            status="open",
-            blocked_by=["T-MISSING-01"],
+            status="blocked",
+            blocked_by=["T-20260302-99"],
+            blocked_on="Waiting for a missing blocker.",
         )
         from scripts.ticket_triage import triage_dashboard
 
         result = triage_dashboard(tmp_tickets)
-        assert result["blocked_chains"][0]["root_blockers"] == ["T-MISSING-01"]
+        assert result["blocked_chains"][0]["root_blockers"] == ["T-20260302-99"]
 
     def test_circular_dependency_no_infinite_loop(self, tmp_tickets):
         """Circular blocked_by chain -> visited set prevents infinite loop."""
@@ -361,15 +409,17 @@ class TestBlockedChain:
             tmp_tickets,
             "a.md",
             id="T-20260302-01",
-            status="open",
+            status="blocked",
             blocked_by=["T-20260302-02"],
+            blocked_on="Waiting for ticket B.",
         )
         make_ticket(
             tmp_tickets,
             "b.md",
             id="T-20260302-02",
-            status="in_progress",
+            status="blocked",
             blocked_by=["T-20260302-01"],
+            blocked_on="Waiting for ticket A.",
         )
         from scripts.ticket_triage import triage_dashboard
 

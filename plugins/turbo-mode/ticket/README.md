@@ -30,11 +30,13 @@ Post-cutover active tickets use ID-only filenames under
 by Markdown sections. Closed YAML frontmatter keys are `id`, `title`, `status`,
 `priority`, `tags`, `related_paths`, and `blocked_by`.
 
-Target statuses are `open`, `in_progress`, `done`, and `wontfix`. Target
+Target statuses are `idea`, `open`, `blocked`, `done`, and `wontfix`. Target
 priorities are `high`, `normal`, and `low`. Required sections are `Problem`,
-`Next Action`, and `Change History`. Unknown frontmatter keys are invalid.
-`blocked` is not a status; blockedness derives from `blocked_by`. Store
-`blocked_by` only and derive reverse `blocks` views by scanning tickets.
+`Next Action`, and `Change History`. `status: blocked` also requires a
+non-empty `Blocked On` section. Unknown frontmatter keys are invalid.
+`blocked_by` is optional ticket-ID dependency data for blocked tickets. There
+is no persisted reverse `blocks` edge; reverse blocker views are derived by
+scanning tickets.
 
 ## Target Candidate Mutation Contract
 
@@ -323,13 +325,14 @@ Target tickets use YAML frontmatter, not fenced YAML blocks.
 |-------|--------|--------|
 | `id` | `T-YYYYMMDD-NN` | Auto-allocated |
 | `title` | string | Canonical title |
-| `status` | string | `open`, `in_progress`, `done`, `wontfix` |
+| `status` | string | `idea`, `open`, `blocked`, `done`, `wontfix` |
 | `priority` | string | `high`, `normal`, `low` |
 | `tags` | list of strings | `[]` |
 | `related_paths` | list of strings | `[]` |
 | `blocked_by` | list of ticket IDs | `[]` |
 
 Required Markdown sections are `Problem`, `Next Action`, and `Change History`.
+Tickets with `status: blocked` also require a non-empty `Blocked On` section.
 
 ## Usage Patterns
 
