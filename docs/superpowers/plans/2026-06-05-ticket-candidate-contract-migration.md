@@ -12,8 +12,8 @@
 
 ## Evidence Baseline
 
-Live state checked before writing this plan, after the initial plan commit, and
-after the review hardening patch:
+Live state checked before writing this plan, after the initial plan commit, after
+the review hardening patch, and after the correction-gate clarification:
 
 - Branch/worktree at plan creation: `main...origin/main`, clean normal status,
   `HEAD` at `92cd4bed`.
@@ -21,6 +21,8 @@ after the review hardening patch:
   clean normal status, `HEAD` at `38537aa9`.
 - Branch/worktree after the review hardening patch: `main...origin/main [ahead 2]`,
   clean normal status, `HEAD` at `69f44342`.
+- Branch/worktree after the correction-gate clarification: `main...origin/main [ahead 3]`,
+  clean normal status, `HEAD` at `6d7e1579`.
 - Active ticket inventory: seven files under `docs/tickets/`; all use ID-only filenames, frontmatter metadata, target statuses, required sections, no unknown frontmatter keys, and no blocked-shape defects.
 - Active ticket statuses: six `open`, one `done`, no `status: in_progress`.
 - Historical references: old-looking `T-20260527-001` examples only appear in `docs/superpowers/specs/2026-05-26-ticket-runtime-first-autonomy-design.md`; placeholders such as `T-YYYYMMDD-NN` appear in ADR/control docs and are not active ticket IDs.
@@ -38,6 +40,11 @@ Modify these files:
   - Converts explicit turn-context candidate mappings into target-shaped `CandidateMutation` objects and stops converting vague/path-only signals into write candidates.
 - `plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py`
   - Hashes canonical target candidate content, including `target`, `proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`.
+- `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py`
+  - Projects evaluated target candidates through the live `apply-turn` source
+    entrypoint and constructs target-shaped `GatewayMutation` requests without
+    repopulating expected fingerprints from the old `source_context` side
+    channel.
 - `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`
   - Carries target-shaped `GatewayMutation`, recomputes mutation identity, validates expected fingerprints, projects exact target sections into engine dispatch, and records bounded recovery facts.
 - `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
@@ -74,6 +81,7 @@ Test these files:
 - `plugins/turbo-mode/ticket/tests/test_change_history.py`
 - `plugins/turbo-mode/ticket/tests/test_turn_batch.py`
 - `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`
+- `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`
 - `plugins/turbo-mode/ticket/tests/test_docs_contract.py`
 
 ## Contract Decisions
@@ -90,13 +98,21 @@ Test these files:
 - Treat Tasks 1 and 2 as one atomic source commit group. Runtime identity calls
   start using the target-shaped identity helper before `test_autonomy_runtime.py`
   can be green; do not commit Task 1 by itself.
+- Treat `expected_ticket_fingerprint` as candidate content supplied by explicit
+  target candidate mappings. `ticket_autonomy.py` must pass
+  `decision.candidate.expected_ticket_fingerprint` into `GatewayMutation`; it
+  must not synthesize or override that value from `_ticket_state_fingerprints()`
+  or `source_context`. The gateway still recomputes the current ticket
+  fingerprint immediately before writing and rejects stale candidates.
 
 ## Migration Coverage Map
 
-Before implementation, build the rename/blast-radius map from live source. Run:
+Before implementation, build the rename/blast-radius map from live source. Run
+both commands:
 
 ```bash
-rg -n "target_fingerprint|mutation\.fields|\.evidence|EvidenceLink|\"correction\"|reopen_reason|Reopen History|evidence_kind|current_mode" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
+rg -n "target_fingerprint|mutation\.fields|\.evidence|EvidenceLink|\"correction\"|reopen_reason|Reopen History|evidence_kind|current_mode|reprioritize|stale_cleanup|blocker_edit|refine" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
+rg -n "GatewayMutation\(|CandidateMutation\(" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 ```
 
 Assign every hit to one of these dispositions before claiming a task is green:
@@ -105,8 +121,11 @@ Assign every hit to one of these dispositions before claiming a task is green:
 |---|---|---|
 | `target_fingerprint` in candidate/gateway identity | Rename to `expected_ticket_fingerprint` for target candidate/gateway paths. Legacy direct engine plan/execute surfaces may keep `target_fingerprint` only when the task explicitly labels them outside the target candidate path. Calls to `scripts.ticket_dedup.target_fingerprint` may remain only as the helper that computes a current ticket fingerprint; import it as `compute_target_fingerprint` in changed tests when practical. | Tasks 1-3 and final residue check |
 | `mutation.fields` on `GatewayMutation` | Rename to `mutation.proposed_change`, including create dedup and test fakes. | Task 3 |
+| `GatewayMutation(...)` construction sites | Rewrite every source/test construction to the target-shaped constructor. `ticket_autonomy.py` is the live apply-turn spine and must be migrated in Task 3, not left to final verification. | Task 3 |
+| `CandidateMutation(...)` construction sites | Rewrite every source/test construction to the target-shaped constructor or remove the old test. Construction sites are not covered by vocabulary greps alone. | Tasks 1-5 and final construction-site check |
 | `.evidence`, `EvidenceLink`, evidence-kind floors | Replace with one-line `evidence_summary`; remove evidence-kind classification from runtime/discovery/gateway mutation-attempt facts. | Tasks 1, 2, and 5 |
 | `"correction"` candidate action | Rename target candidate action to `"correct"` in runtime, gateway, turn-batch validation, tests, and generated history reason. Keep `RuntimeDecisionKind.APPLY_CORRECTION` only as an internal decision kind. | Task 5 |
+| `reprioritize`, `stale_cleanup`, `blocker_edit`, `refine` action literals | These are not target candidate actions. Fold write behavior into ordinary `update` candidates, delete old runtime/gateway/test action branches, and keep `stale_cleanup` only as read-only review-hygiene output that candidate discovery no longer accepts as a write candidate. | Tasks 1, 2, 5, and final residue check |
 | `reopen_reason` and `Reopen History` normal write behavior | Move human reason to `evidence_summary`, append ordinary generated `Change History`, and rewrite/remove tests or helpers that preserve `Reopen History` as target behavior. | Task 4 |
 | `evidence_kind` and `current_mode` mutation-attempt details | Remove from target candidate operation-log event details unless a separate operation-log redesign explicitly keeps a bounded mechanical fact allowed by the control doc. Runtime mode inputs may keep `current_mode` only when they are not persisted mutation-attempt details. | Task 5 |
 | `EngineDispatch.sections` for close/reopen | Do not compute sections and drop them. Either pass them to engine execution or explicitly validate that the engine-owned side effect exactly matches the named target cleanup. | Tasks 3 and 4 |
@@ -131,14 +150,14 @@ git status --short --branch
 git rev-parse --short HEAD
 ```
 
-Expected at the last reviewed source baseline before this clarification patch:
+Expected at the last reviewed source baseline before this blast-radius patch:
 
 ```text
-## main...origin/main [ahead 2]
-69f44342
+## main...origin/main [ahead 3]
+6d7e1579
 ```
 
-If `HEAD` has advanced, run `git diff --stat 69f44342..HEAD` and re-check the
+If `HEAD` has advanced, run `git diff --stat 6d7e1579..HEAD` and re-check the
 plan against the new diff before using the expected output as a gate. If the
 only diff is this plan, record the live status and continue. If source files
 changed, re-check the implementation steps against the new source before
@@ -225,13 +244,14 @@ docs/tickets/T-20260526-01.md status='open' invalid=[]
 
 If any active ticket line has a non-empty `invalid=[...]`, stop this plan and create a separate diagnostic inventory or ticket-data migration plan. Do not silently repair `docs/tickets/` inside this candidate-contract slice.
 
-- [ ] **Step 4: Run the migration coverage grep**
+- [ ] **Step 4: Run the migration coverage and construction-site greps**
 
-Run the `rg` command from `Migration Coverage Map` and paste the hit summary
+Run both `rg` commands from `Migration Coverage Map` and paste the hit summaries
 into the active implementation notes. The output does not need to be clean at
 Task 0; each hit needs an assigned task or an explicit "legacy direct
 engine/diagnostic surface intentionally kept" disposition before source edits
-start.
+start. Do not start Task 1 until `ticket_autonomy.py` and every
+`GatewayMutation(...)` construction site have an assigned task.
 
 - [ ] **Step 5: Commit Task 0 only if it changed this plan**
 
@@ -250,7 +270,8 @@ Task 0 normally makes no source changes and should not be committed by itself. I
 In `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py`, replace the
 helper imports and helper constructors with target-shaped versions. Rewrite or
 remove every old-contract test that depends on `EvidenceLink`, `evidence=`,
-`blocker_edit`, `refine`, `target_fingerprint`, `"correction"`, or
+`blocker_edit`, `refine`, `reprioritize`, `stale_cleanup`,
+`target_fingerprint`, `"correction"`, or
 `reopen_reason`. Keep only tests for target-contract invariants, mechanical
 mode/fanout/conflict gates, destructive-action discussion gates, and target
 engine dispatch.
@@ -879,6 +900,12 @@ def test_vague_and_path_only_signals_do_not_create_write_candidates(tmp_path: Pa
     assert discover_candidate_mutations(context, tickets_dir) == ()
 ```
 
+Add one discovery test that `reprioritize`, `stale_cleanup`, `blocker_edit`, and
+`refine` mappings are not accepted as target candidate actions. `stale_cleanup`
+may remain read-only output from `ticket_review.py`, but
+`discover_candidate_mutations()` must not convert `review_hygiene_findings` into
+write candidates in this slice.
+
 - [ ] **Step 3: Run identity and discovery tests and verify RED**
 
 Run:
@@ -1037,11 +1064,14 @@ Expected: commit succeeds with the atomic runtime, identity, and discovery
 files staged. Do not split the runtime changes from the identity helper
 signature change.
 
-## Task 3: Project Target Candidates Through Gateway And Engine
+## Task 3: Project Target Candidates Through Gateway, Entrypoint, And Engine
 
 **Files:**
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
+- Test: `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`
+- Test: `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`
 - Test: `plugins/turbo-mode/ticket/tests/test_engine_gateway.py`
 - Test: `plugins/turbo-mode/ticket/tests/test_engine_policy.py`
 
@@ -1165,15 +1195,33 @@ def test_gateway_applies_exact_target_section_update(tmp_tickets: Path) -> None:
     assert "| codex | Updated ticket from candidate evidence." in text
 ```
 
+In `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py` and
+`plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`, update
+apply-turn candidate fixtures to the target envelope. For existing-ticket writes,
+fixtures must include `target`, `proposed_change`, `expected_ticket_fingerprint`
+computed with `target_fingerprint(ticket_path)`, and `evidence_summary`. For
+create, fixtures must use `ticket_id=None`, `expected_ticket_fingerprint=None`,
+and target sections such as `Problem` and `Next Action`. Rewrite old
+`evidence`/`reason` fixtures in the same task.
+
+Also rewrite standalone positional `GatewayMutation(...)` constructions in
+`test_engine_gateway.py`, including create tests and
+`test_gateway_dispatch_maps_ticket_actions_and_rejects_archive_smuggling()`.
+That dispatch test currently uses `blocker_edit` and `reopen_reason`; rewrite it
+to target-shaped `update`, `reopen`, and close-smuggling cases rather than only
+updating shared helpers.
+
 - [ ] **Step 2: Run gateway tests and verify RED**
 
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_applies_exact_target_section_update -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_applies_exact_target_section_update plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_summarizes_applied_mutation_before_next_turn plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py::test_agent_primary_apply_turn_applies_update_through_gateway -q
 ```
 
-Expected: fail because `GatewayMutation` has no `target`, `proposed_change`, or `expected_ticket_fingerprint` fields.
+Expected: fail because `GatewayMutation` has no `target`, `proposed_change`, or
+`expected_ticket_fingerprint` fields and `ticket_autonomy.py` still constructs
+the old `fields`/`target_fingerprint` gateway shape.
 
 - [ ] **Step 3: Update GatewayMutation and decision validation**
 
@@ -1222,6 +1270,10 @@ In `_decision_error()`, replace field comparison and identity recomputation with
             return "decision_mismatch"
     elif decision.kind != RuntimeDecisionKind.APPLY_AUTONOMOUSLY:
         return "autonomous_decision_required"
+    if decision.mutation_id is None:
+        return "mutation_id_required"
+    if decision.candidate.ticket_id != mutation.ticket_id:
+        return "ticket_mismatch"
     if decision.candidate.action != mutation.action:
         return "action_mismatch"
     if decision.candidate.target != mutation.target:
@@ -1244,6 +1296,9 @@ In `_decision_error()`, replace field comparison and identity recomputation with
         expected_ticket_fingerprint=mutation.expected_ticket_fingerprint,
         evidence_summary=decision.candidate.evidence_summary,
     )
+    if decision.mutation_id != identity.mutation_id:
+        return "mutation_id_mismatch"
+    return None
 ```
 
 The `correct` gate above is intentional: `correct -> reopen` is allowed only
@@ -1311,7 +1366,32 @@ Do not defer this helper to Task 5. `_fingerprint_details()` is reached before
 dispatch during gateway application, so leaving the old attribute read breaks
 the first target gateway write.
 
-- [ ] **Step 5: Add exact target-section support to engine update**
+- [ ] **Step 5: Update apply-turn gateway construction and fingerprint sourcing**
+
+In `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py`, update
+`_run_apply_turn_with_mode()` so the live source entrypoint passes target
+candidate content through unchanged:
+
+```python
+mutation = GatewayMutation(
+    action=decision.candidate.action,
+    ticket_id=decision.candidate.ticket_id,
+    target=decision.candidate.target,
+    proposed_change=dict(decision.candidate.proposed_change),
+    tickets_dir=tickets_dir,
+    expected_ticket_fingerprint=decision.candidate.expected_ticket_fingerprint,
+    evidence_summary=decision.candidate.evidence_summary,
+)
+```
+
+Remove the normal apply-turn `_ticket_state_fingerprints()` collection and the
+`source_context={"ticket_state_fingerprints": fingerprints}` injection used only
+to populate candidate identity. Do not replace it with another hidden fingerprint
+side channel. Missing or stale expected fingerprints are visible candidate or
+gateway failures: runtime blocks missing non-create values, and the gateway
+recomputes the current target fingerprint immediately before writing.
+
+- [ ] **Step 6: Add exact target-section support to engine update**
 
 In `ticket_engine_core.py`, add this helper near `_UPDATE_SECTION_HEADINGS`:
 
@@ -1368,7 +1448,7 @@ Build targeted headings from both sources:
 
 Ensure `validate_target_section_name` and `Mapping` are imported in `ticket_engine_core.py`.
 
-- [ ] **Step 6: Project gateway dispatch into engine fields and sections**
+- [ ] **Step 7: Project gateway dispatch into engine fields and sections**
 
 In `ticket_engine_gateway.py`, replace `build_engine_dispatch()` with:
 
@@ -1473,26 +1553,28 @@ not wait until production create flow.
 
 For reopen, pass target sections in Task 4 after reopen support lands.
 
-- [ ] **Step 7: Run gateway section update test and verify PASS**
+- [ ] **Step 8: Run gateway and source-entrypoint tests and verify PASS**
 
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_applies_exact_target_section_update -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_applies_exact_target_section_update plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_summarizes_applied_mutation_before_next_turn plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py::test_agent_primary_apply_turn_applies_update_through_gateway -q
 ```
 
-Expected: the new section update test passes.
+Expected: the gateway section update test and the two apply-turn source
+entrypoint tests pass.
 
-- [ ] **Step 8: Commit Task 3**
+- [ ] **Step 9: Commit Task 3**
 
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_engine_policy.py
+git add plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_engine_policy.py
 git commit -m "fix(ticket): project target candidates through gateway"
 ```
 
-Expected: commit succeeds with only gateway/engine files staged.
+Expected: commit succeeds with gateway, engine, source-entrypoint, and directly
+affected tests staged. Do not update source-availability docs in this commit.
 
 ## Task 4: Migrate Reopen And Blocked Cleanup Semantics
 
@@ -1946,6 +2028,10 @@ In `ticket_autonomy_runtime.py`:
 
 - Replace action string `"correction"` with target action `"correct"` across runtime checks.
 - Keep `RuntimeDecisionKind.APPLY_CORRECTION` as the decision kind.
+- Remove old target-candidate action literals from runtime action groups:
+  `reprioritize`, `stale_cleanup`, `blocker_edit`, and `refine` are not target
+  candidate actions. Any retained update behavior must flow through `action:
+  "update"` plus explicit target fields or sections.
 - Replace the correction branch shape check so it rejects kernel-owned sections through `_candidate_shape_errors()` rather than old proposed-change control keys:
 
 ```python
@@ -1978,10 +2064,14 @@ In `ticket_engine_gateway.py`:
   `"correction"` action literal.
 
 In `ticket_turn_batch.py`, update retained operation-log validation so the
-target candidate action set includes `"correct"` and no longer treats
-`"correction"` as a valid target candidate action. Keep historical compaction
+target candidate action set includes only the six target actions:
+`"create"`, `"update"`, `"done"`, `"wontfix"`, `"reopen"`, and `"correct"`.
+Do not keep `reprioritize`, `stale_cleanup`, `blocker_edit`, `refine`, or
+`"correction"` as valid new target candidate actions. Keep historical compaction
 status names only when they describe existing stored correction detail rather
-than new candidate action input.
+than new candidate action input. `ticket_review.py` may still emit
+`stale_cleanup` as read-only review-hygiene output, but candidate discovery must
+not accept it as a write candidate.
 
 - [ ] **Step 4: Record bounded target recovery facts**
 
@@ -2052,6 +2142,11 @@ operation-log tests only.
 - Modify: `plugins/turbo-mode/ticket/skills/update-ticket/SKILL.md`
 - Test: `plugins/turbo-mode/ticket/tests/test_docs_contract.py`
 
+Precondition: do not start Task 6 until the Task 3 source-entrypoint tests and
+Task 5 correction/integration tests pass. The docs must not claim that source
+exposes a target candidate mutation path while `ticket_autonomy.py` still
+constructs old gateway mutations.
+
 - [ ] **Step 1: Write failing docs-contract tests**
 
 In `test_docs_contract.py`, add a source-availability contract test:
@@ -2078,7 +2173,7 @@ def test_ticket_write_docs_no_longer_claim_source_entrypoint_missing() -> None:
 
 - [ ] **Step 2: Run docs-contract test and verify RED**
 
-Run:
+Run after the Task 6 precondition is satisfied:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_docs_contract.py::test_ticket_write_docs_no_longer_claim_source_entrypoint_missing -q
@@ -2116,7 +2211,8 @@ Run:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_docs_contract.py::test_ticket_write_docs_no_longer_claim_source_entrypoint_missing -q
 ```
 
-Expected: docs-contract test passes.
+Expected: docs-contract test passes, and the Task 3/Task 5 source-entrypoint
+tests are still passing in the current checkout.
 
 - [ ] **Step 5: Commit Task 6**
 
@@ -2139,17 +2235,18 @@ Expected: commit succeeds with docs/skill availability files only.
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_candidate_discovery.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_integration.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_review_findings.py plugins/turbo-mode/ticket/tests/test_change_history.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_docs_contract.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_candidate_discovery.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_integration.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_review_findings.py plugins/turbo-mode/ticket/tests/test_change_history.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_docs_contract.py -q
 ```
 
 Expected: all selected tests pass.
 
-- [ ] **Step 2: Run target-contract residue check**
+- [ ] **Step 2: Run target-contract residue and construction-site checks**
 
 Run:
 
 ```bash
-rg -n "EvidenceLink|\.evidence|\"correction\"|reopen_reason|Reopen History|evidence_kind|current_mode|mutation\.fields|target_fingerprint" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
+rg -n "EvidenceLink|\.evidence|\"correction\"|reopen_reason|Reopen History|evidence_kind|current_mode|mutation\.fields|target_fingerprint|reprioritize|stale_cleanup|blocker_edit|refine" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
+rg -n "GatewayMutation\(|CandidateMutation\(" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 ```
 
 Expected: every remaining hit is explicitly one of:
@@ -2162,10 +2259,15 @@ Expected: every remaining hit is explicitly one of:
 - historical migration/diagnostic test data labeled as such;
 - non-candidate correction-detail storage vocabulary retained for recent
   correction recovery;
+- read-only review-hygiene output such as `ticket_review.py` `stale_cleanup`
+  that candidate discovery does not accept as a write candidate;
+- target-shaped `CandidateMutation(...)` or `GatewayMutation(...)` constructions
+  that include the new target envelope fields;
 - user-facing text explaining removed/deprecated input.
 
-Any remaining target candidate runtime, gateway, discovery, identity, or normal
-reopen/correct test hit must be fixed before continuing.
+Any remaining old-shaped target candidate runtime, gateway, discovery, identity,
+source-entrypoint, or normal reopen/correct test hit must be fixed before
+continuing.
 
 - [ ] **Step 3: Run full Ticket suite**
 
@@ -2220,7 +2322,12 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
 - Non-create writes require `expected_ticket_fingerprint`; create requires it to be `None`.
 - Mutation identity includes `target`, `proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`.
 - Discovery emits only explicit target-shaped candidates and does not turn vague/path-only signals into write candidates.
+- `ticket_autonomy.py` constructs target-shaped `GatewayMutation` values from
+  `decision.candidate` and does not repopulate expected fingerprints through
+  `source_context`.
 - Gateway mutation validation compares target, proposed change, expected fingerprint, evidence summary, and mutation identity.
+- Gateway validation preserves `mutation_id_required`, `ticket_mismatch`, and
+  `mutation_id_mismatch` guards.
 - Exact target sections can be updated or removed without caller-owned `Change History` rewrites.
 - `reopen` uses target `status` plus `evidence_summary`; `reopen_reason` is rejected as normal target write input.
 - `reopen -> blocked` writes valid `Blocked On` and `blocked_by` shape.
@@ -2232,7 +2339,9 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
   semantic ranking, current-mode labels, evidence taxonomies, approval state, or
   private workflow stages.
 - The final residue check has no unexplained target-candidate hits for old
-  identity, evidence, correction, reopen, or gateway field names.
+  identity, evidence, action, correction, reopen, or gateway field names.
+- The final construction-site check has no old-shaped `CandidateMutation(...)`
+  or `GatewayMutation(...)` calls in scripts or tests.
 - Source docs and skills stop claiming source entrypoint absence after the source entrypoint lands, while preserving the source-vs-installed-runtime proof boundary.
 - Focused candidate-contract tests, full Ticket suite, ruff, and `git diff --check` pass.
 
