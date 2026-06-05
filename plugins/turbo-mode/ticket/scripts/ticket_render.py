@@ -174,10 +174,11 @@ def render_ticket(
     """Render a complete target ticket markdown file.
 
     Returns the full file content as a string.
-    Section ordering follows the target contract: Problem -> Next Action
-    -> Change History
-    -> Context -> Prior Investigation -> Approach -> Decisions Made ->
-    Acceptance Criteria -> Verification -> Key Files -> Related.
+    Section ordering follows the target contract. When present, Blocked On
+    renders in the required-section run: Problem -> Next Action -> Blocked On
+    -> Change History. Optional sections then render as Captured Request ->
+    Context -> Prior Investigation -> Approach -> Decisions Made -> Acceptance
+    Criteria -> Verification -> Key Files -> Related.
     """
     related_paths = related_paths or []
     tags = tags or []

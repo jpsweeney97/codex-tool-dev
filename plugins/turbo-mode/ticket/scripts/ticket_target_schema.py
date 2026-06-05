@@ -258,7 +258,9 @@ def _validate_status_specific_shape(frontmatter: dict[str, Any], body: str) -> s
     blocked_on = section_bodies.get("Blocked On")
 
     invalid_blocked_by = [
-        ticket_id for ticket_id in blocked_by if not TARGET_ID_RE.fullmatch(ticket_id)
+        ticket_id
+        for ticket_id in blocked_by
+        if not isinstance(ticket_id, str) or TARGET_ID_RE.fullmatch(ticket_id) is None
     ]
     if invalid_blocked_by:
         return f"blocked_by entries must be target ticket IDs. Got: {invalid_blocked_by!r:.100}"

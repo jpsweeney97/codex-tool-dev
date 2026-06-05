@@ -26,6 +26,11 @@ class TestValidateFields:
     def test_blocked_on_none_is_valid_section_removal_input(self):
         assert validate_fields({"blocked_on": None}) == []
 
+    def test_non_string_blocked_on_rejected(self):
+        errors = validate_fields({"blocked_on": 123})
+
+        assert "blocked_on must be a string, got int" in errors
+
     def test_valid_resolutions(self):
         for resolution in ("done", "wontfix"):
             assert validate_fields({"resolution": resolution}) == []

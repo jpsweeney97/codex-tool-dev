@@ -12,6 +12,7 @@ from scripts.ticket_target_schema import (
     TARGET_PRIORITIES,
     TARGET_SECTIONS_REQUIRED,
     TARGET_STATUSES,
+    _validate_status_specific_shape,
     validate_target_section_name,
     validate_target_ticket_file,
 )
@@ -509,6 +510,28 @@ def test_target_ticket_rejects_invalid_blocked_by_ids(tmp_path: Path) -> None:
 
     assert result.ok is False
     assert "blocked_by" in result.error
+
+
+def test_status_shape_rejects_non_string_blocked_by_entries_without_type_error() -> None:
+    error = _validate_status_specific_shape(
+        {"status": "blocked", "blocked_by": [123]},
+        (
+            "## Problem\n"
+            "Example problem.\n"
+            "\n"
+            "## Next Action\n"
+            "Ask for the missing deploy credentials, then continue implementation.\n"
+            "\n"
+            "## Blocked On\n"
+            "Waiting for deploy credentials from the user.\n"
+            "\n"
+            "## Change History\n"
+            "- 2026-06-02T00:00:00Z | migration | Normalized ticket into ADR 0006 schema.\n"
+        ),
+    )
+
+    assert "blocked_by entries must be target ticket IDs" in error
+    assert "123" in error
 
 
 def test_target_ticket_rejects_blocks_reverse_edge(tmp_path: Path) -> None:

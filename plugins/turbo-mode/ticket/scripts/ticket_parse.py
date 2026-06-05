@@ -20,7 +20,7 @@ from typing import Any
 
 import yaml
 
-from scripts.ticket_target_schema import TARGET_ID_RE
+from scripts.ticket_target_schema import TARGET_ID_RE, TARGET_STATUSES
 
 # Match the first ```yaml or ```yml block in markdown.
 _FENCED_YAML_RE = re.compile(
@@ -47,7 +47,7 @@ SECTION_RENAMES: dict[str, str] = {
 }
 
 # Canonical statuses (v1.0 target tickets).
-CANONICAL_STATUSES = frozenset({"idea", "open", "blocked", "done", "wontfix"})
+CANONICAL_STATUSES = frozenset(TARGET_STATUSES)
 
 # Legacy status normalization map.
 _STATUS_MAP: dict[str, str] = {

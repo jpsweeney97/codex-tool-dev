@@ -2094,6 +2094,8 @@ def _evaluate_close_policy(
         valid_recovery_statuses = []
     elif ticket.status in _TERMINAL_STATUSES:
         valid_recovery_statuses = []
+    elif ticket.status not in {"open", "blocked"}:
+        valid_recovery_statuses = ["open", "blocked"]
     else:
         valid_recovery_statuses = ["done", "wontfix"]
     requires_reopen = ticket.status in _TERMINAL_STATUSES
@@ -2141,6 +2143,10 @@ def _evaluate_close_policy(
             message += "; promote idea to open first"
         elif requires_reopen:
             message += f" from terminal status {ticket.status!r}"
+        elif ticket.status not in {"open", "blocked"}:
+            message += (
+                f"; status {ticket.status!r} is not closeable; migrate to open or blocked first"
+            )
         return EngineResponse(
             state="invalid_transition",
             message=message,

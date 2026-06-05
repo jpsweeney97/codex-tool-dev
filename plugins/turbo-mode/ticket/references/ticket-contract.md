@@ -38,6 +38,10 @@ reverse `blocks` views by scanning tickets.
 may move to `open`. `open` and `blocked` may close to `done` or `wontfix`.
 `done` and `wontfix` reopen to `open`.
 
+For close actions, without `dependency_override`, closing as `done` is blocked
+while `blocked_by` references are unresolved or missing; closing as `wontfix`
+bypasses blocker resolution.
+
 Moving `open -> blocked` requires non-empty `Blocked On` prose. Moving
 `blocked -> open` must clear `blocked_by: []` and `blocked_on: null` in the
 same update, so the machine dependency IDs and visible blocker prose cannot

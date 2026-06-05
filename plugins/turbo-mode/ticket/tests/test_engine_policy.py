@@ -10,10 +10,40 @@ from scripts.ticket_engine_core import (
     _execute_reopen,
     _execute_update,
 )
-from scripts.ticket_parse import parse_legacy_ticket_for_cutover, parse_ticket
+from scripts.ticket_parse import ParsedTicket, parse_legacy_ticket_for_cutover, parse_ticket
 from scripts.ticket_target_schema import validate_target_ticket_file
 
 from tests.support.builders import make_gen1_ticket, make_ticket
+
+
+def _parsed_ticket_with_status(status: str) -> ParsedTicket:
+    ticket_id = "T-20260503-37"
+    frontmatter = {
+        "id": ticket_id,
+        "title": "Status edge",
+        "status": status,
+        "priority": "normal",
+        "tags": [],
+        "related_paths": [],
+        "blocked_by": [],
+    }
+    return ParsedTicket(
+        path="",
+        id=ticket_id,
+        title="Status edge",
+        date="2026-05-03",
+        status=status,
+        priority="normal",
+        source={"type": "test", "ref": "", "session": ""},
+        generation=10,
+        frontmatter=frontmatter,
+        sections={
+            "Problem": "Status is outside the target status set.",
+            "Next Action": "Migrate the status before closing.",
+            "Acceptance Criteria": "- [ ] Status is migrated.",
+            "Change History": "- 2026-06-02T00:00:00Z | codex | Created target ticket.",
+        },
+    )
 
 
 def test_update_invalid_transition_returns_structured_policy_data(tmp_tickets: Path) -> None:
@@ -79,6 +109,24 @@ def test_close_policy_rejects_idea_as_terminal_source(tmp_tickets: Path) -> None
     assert response.data["current_status"] == "idea"
     assert response.data["valid_recovery_statuses"] == []
     assert "promote idea to open first" in response.message
+
+
+def test_close_policy_names_non_canonical_status_recovery(tmp_tickets: Path) -> None:
+    ticket = _parsed_ticket_with_status("in_progress")
+
+    response = _evaluate_close_policy(
+        ticket.id,
+        ticket,
+        {"resolution": "done"},
+        tmp_tickets,
+    )
+
+    assert response is not None
+    assert response.state == "invalid_transition"
+    assert response.data["current_status"] == "in_progress"
+    assert response.data["valid_recovery_statuses"] == ["open", "blocked"]
+    assert "status 'in_progress' is not closeable" in response.message
+    assert "migrate to open or blocked first" in response.message
 
 
 def test_close_missing_acceptance_criteria_returns_precondition_detail(tmp_tickets: Path) -> None:

@@ -236,6 +236,8 @@ def test_contract_documents_lifecycle_transitions() -> None:
     assert "`open` and `blocked` may close to `done` or `wontfix`" in normalized
     assert "`done` and `wontfix` reopen to `open`" in normalized
     assert "`blocked -> open` must clear `blocked_by: []` and `blocked_on: null`" in normalized
+    assert "without `dependency_override`, closing as `done` is blocked" in normalized
+    assert "closing as `wontfix` bypasses blocker resolution" in normalized
 
 
 def test_readme_ticket_schema_matches_yaml_contract_boundary() -> None:
