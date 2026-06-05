@@ -1,6 +1,6 @@
 # Ticket Candidate Contract Migration Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans for sequential implementation with checkpoints. Subagents may be used only as bounded review/probe helpers for an already-scoped step, not as primary task executors, because this plan has shared-state and commit-order dependencies. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Expose and enforce the literal Ticket target candidate mutation contract in source so autonomous create/update/close/reopen/correct writes use the same visible-board envelope documented by the May 30 control doc.
 
@@ -33,6 +33,8 @@ and after the create-recovery plan patch:
   `main...origin/main [ahead 6]`, clean normal status, `HEAD` at `bed44541`.
 - Branch/worktree after the correction-context and Task 3A verification review:
   `main...origin/main [ahead 13]`, clean normal status, `HEAD` at `d145ac2d`.
+- Branch/worktree after the correction context producer patch:
+  `main...origin/main [ahead 14]`, clean normal status, `HEAD` at `cf0d3d13`.
 - Active ticket inventory: seven files under `docs/tickets/`; all use ID-only filenames, frontmatter metadata, target statuses, required sections, no unknown frontmatter keys, and no blocked-shape defects.
 - Active ticket statuses: six `open`, one `done`, no `status: in_progress`.
 - Historical references: old-looking `T-20260527-001` examples only appear in `docs/superpowers/specs/2026-05-26-ticket-runtime-first-autonomy-design.md`; placeholders such as `T-YYYYMMDD-NN` appear in ADR/control docs and are not active ticket IDs.
@@ -138,6 +140,10 @@ Test these files:
   wrong-typed target-candidate keys, apply-turn must emit an invalid/blocked
   result or a discussion-required result before mutation evaluation. It must not
   silently drop the item and fall through to `no_change`.
+- Treat `invalid_candidate` as an outer `apply-turn` CLI/host response state for
+  malformed explicit turn-context payloads before target mutation evaluation. It
+  is not part of the target mutation result envelope, which remains limited to
+  `ok`, `blocked`, `needs_discussion`, `invalid_state`, and `no_change`.
 - Keep full `reconcile_board` implementation out of this slice. This migration may make the future wrapper possible, but it must not implement discovery ordering, caps, overflow, or broad board search.
 - Keep operation-log work narrow. This slice may update candidate identity,
   expected pre-write recovery facts, expected post-write fingerprint, exact
@@ -171,6 +177,11 @@ Test these files:
   at the identity boundary. Reject duplicate names inside either list, reject a
   name that appears in both `fields` and `sections`, and sort target names before
   hashing candidate identity or discovery dedupe keys.
+- Require every target candidate to name at least one user-visible target field
+  or section. An empty `target.fields` plus empty `target.sections` envelope is
+  invalid for `create`, `update`, `done`, `wontfix`, `reopen`, and `correct`;
+  generated `Change History` alone is a side effect and never satisfies target
+  closure.
 - Validate raw mapping values before normalization. Non-string, non-null
   `ticket_id` and `expected_ticket_fingerprint` values are invalid; do not
   silently coerce them to `None`. Non-string `action` and `evidence_summary`
@@ -304,61 +315,21 @@ way not already named by this plan, stop and patch the plan before source work.
 Run this read-only inventory:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 python - <<'PY'
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run python - <<'PY'
+import sys
 from pathlib import Path
-import re
 
 root = Path.cwd()
+sys.path.insert(0, str((root / "plugins" / "turbo-mode" / "ticket").resolve()))
+
+from scripts.ticket_read import list_tickets  # noqa: E402
+
 tickets_dir = root / "docs" / "tickets"
-allowed_fields = {"id", "title", "status", "priority", "tags", "related_paths", "blocked_by"}
-allowed_statuses = {"idea", "open", "blocked", "done", "wontfix"}
-required_sections = ["Problem", "Next Action", "Change History"]
-
-def parse_scalar(value: str) -> object:
-    value = value.strip()
-    if value.startswith("[") and value.endswith("]"):
-        inner = value[1:-1].strip()
-        if not inner:
-            return []
-        return [part.strip().strip("\"'") for part in inner.split(",")]
-    return value.strip("\"'")
-
-for path in sorted(tickets_dir.glob("*.md")):
-    text = path.read_text(encoding="utf-8")
-    if not text.startswith("---\n"):
-        print(path, "metadata=not_frontmatter")
-        continue
-    end = text.find("\n---", 4)
-    frontmatter = {}
-    for line in text[4:end].splitlines():
-        if ":" in line:
-            key, value = line.split(":", 1)
-            frontmatter[key.strip()] = parse_scalar(value)
-    headings = re.findall(r"^##\s+(.+?)\s*$", text[end + 4 :], flags=re.M)
-    unknown = sorted(set(frontmatter) - allowed_fields)
-    missing = [section for section in required_sections if section not in headings]
-    status = frontmatter.get("status")
-    blocked_by = frontmatter.get("blocked_by", [])
-    invalid = []
-    if path.stem != frontmatter.get("id"):
-        invalid.append("filename_id_mismatch")
-    if status not in allowed_statuses:
-        invalid.append(f"bad_status={status!r}")
-    if unknown:
-        invalid.append(f"unknown_keys={unknown!r}")
-    if missing:
-        invalid.append(f"missing_sections={missing!r}")
-    if status == "blocked" and "Blocked On" not in headings:
-        invalid.append("blocked_missing_blocked_on")
-    if status != "blocked" and "Blocked On" in headings:
-        invalid.append("nonblocked_has_blocked_on")
-    if status != "blocked" and blocked_by:
-        invalid.append("nonblocked_has_blocked_by")
-    if isinstance(blocked_by, list):
-        bad_blockers = [item for item in blocked_by if re.fullmatch(r"T-\d{8}-\d{2}", str(item)) is None]
-        if bad_blockers:
-            invalid.append(f"bad_blocked_by={bad_blockers!r}")
-    print(f"{path.relative_to(root)} status={status!r} invalid={invalid!r}")
+tickets = sorted(list_tickets(tickets_dir), key=lambda ticket: ticket.id)
+for ticket in tickets:
+    path = Path(ticket.path)
+    display = path.relative_to(root) if path.is_absolute() else path
+    print(f"{display} status={ticket.status!r} invalid=[]")
 PY
 ```
 
@@ -376,7 +347,10 @@ docs/tickets/T-20260526-01.md status='open' invalid=[]
 
 - [ ] **Step 4: Stop if active ticket inventory is not clean**
 
-If any active ticket line has a non-empty `invalid=[...]`, stop this plan and create a separate diagnostic inventory or ticket-data migration plan. Do not silently repair `docs/tickets/` inside this candidate-contract slice.
+If the command exits non-zero, if `list_tickets()` raises `InvalidTicketState`,
+or if the active ticket list differs from the expected inventory, stop this plan
+and create a separate diagnostic inventory or ticket-data migration plan. Do not
+silently repair `docs/tickets/` inside this candidate-contract slice.
 
 - [ ] **Step 5: Run the migration coverage and construction-site greps**
 
@@ -528,6 +502,25 @@ def test_candidate_mapping_requires_exact_target_closure() -> None:
     assert errors == [
         "proposed_change keys must exactly match target fields and sections; missing ['Next Action']; extra []"
     ]
+
+
+@pytest.mark.parametrize("action", ("create", "update", "done", "wontfix", "reopen", "correct"))
+def test_candidate_mapping_rejects_empty_target(action: str) -> None:
+    ticket_id = None if action == "create" else "T-20260527-01"
+    expected_ticket_fingerprint = None if action == "create" else "state-T-20260527-01"
+
+    errors = candidate_mapping_errors(
+        {
+            "action": action,
+            "ticket_id": ticket_id,
+            "target": {"fields": [], "sections": []},
+            "proposed_change": {},
+            "expected_ticket_fingerprint": expected_ticket_fingerprint,
+            "evidence_summary": "Current turn justifies this ticket change.",
+        }
+    )
+
+    assert "target must name at least one field or section" in errors
 
 
 def test_candidate_mapping_rejects_duplicate_target_names() -> None:
@@ -805,6 +798,8 @@ def _candidate_shape_errors(candidate: CandidateMutation) -> list[str]:
     if forbidden_sections:
         errors.append(f"target.sections cannot name kernel-owned sections: {forbidden_sections!r}")
     expected_keys = _target_keys(candidate.target)
+    if not expected_keys:
+        errors.append("target must name at least one field or section")
     actual_keys = set(candidate.proposed_change)
     if expected_keys != actual_keys:
         missing = sorted(expected_keys - actual_keys)
@@ -1660,6 +1655,7 @@ def test_apply_turn_reports_invalid_explicit_candidate_without_no_change(
 
     assert result.returncode == 2
     payload = json.loads(result.stdout)
+    # Outer apply-turn host state; target mutation result vocabulary is not extended.
     assert payload == {
         "state": "invalid_candidate",
         "changed": False,
@@ -2071,6 +2067,14 @@ def _mutation_fingerprint(mutation: GatewayMutation) -> str:
     )
 ```
 
+Near `_decision_error()`, add canonical target comparison so unordered target
+sets are validated consistently with mutation identity:
+
+```python
+def _canonical_target(target: CandidateTarget) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    return (tuple(sorted(target.fields)), tuple(sorted(target.sections)))
+```
+
 In `_decision_error()`, replace field comparison and identity recomputation with:
 
 ```python
@@ -2085,7 +2089,7 @@ In `_decision_error()`, replace field comparison and identity recomputation with
         return "ticket_mismatch"
     if decision.candidate.action != mutation.action:
         return "action_mismatch"
-    if decision.candidate.target != mutation.target:
+    if _canonical_target(decision.candidate.target) != _canonical_target(mutation.target):
         return "target_mismatch"
     if dict(decision.candidate.proposed_change) != dict(mutation.proposed_change):
         return "mutation_fingerprint_mismatch"
@@ -2113,7 +2117,9 @@ In `_decision_error()`, replace field comparison and identity recomputation with
 The `correct` gate above is intentional: `correct -> reopen` is allowed only
 after the runtime selected the user-triggered correction decision kind. Also
 remove `_candidate_evidence_payload()`. After this step, `_decision_error` must
-not read `candidate.evidence`, `mutation.fields`, or `mutation.target_fingerprint`.
+not read `candidate.evidence`, `mutation.fields`, or `mutation.target_fingerprint`,
+and must not reject semantically equivalent target envelopes solely because the
+caller preserved a different field or section order.
 
 - [ ] **Step 4: Update expected fingerprint validation**
 
@@ -2187,6 +2193,7 @@ candidate content through unchanged:
 ```python
 def _invalid_candidate_response(error: InvalidCandidateMutations) -> dict[str, object]:
     return {
+        # Outer apply-turn host state, not a target mutation result envelope state.
         "state": "invalid_candidate",
         "changed": False,
         "ticket_updates": None,
@@ -5748,24 +5755,29 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
   `ticket_id`, `target`, `proposed_change`, `expected_ticket_fingerprint`, and
   `evidence_summary`.
 - Unknown or missing top-level candidate keys are rejected before mutation
-  evaluation and surface as visible invalid-candidate or discussion-required
-  results. Malformed explicit entries under `candidate_mutations`,
-  `update_candidates`, or `capture_candidates` must not be silently dropped into
-  `no_change`.
+  evaluation and surface through the outer apply-turn/CLI `invalid_candidate`
+  host state or through discussion-required handling. Malformed explicit entries
+  under `candidate_mutations`, `update_candidates`, or `capture_candidates` must
+  not be silently dropped into `no_change`.
 - Wrong-type `ticket_id`, `expected_ticket_fingerprint`, `action`, and
   `evidence_summary` mapping values are rejected before mutation evaluation; no
   invalid non-string value is coerced to `None` or `""`, and wrong-type explicit
-  candidate entries also surface as visible invalid-candidate or
-  discussion-required results.
+  candidate entries also surface through the outer apply-turn/CLI
+  `invalid_candidate` host state or through discussion-required handling.
+- The target mutation result envelope itself does not gain `invalid_candidate`;
+  target result vocabulary remains `ok`, `blocked`, `needs_discussion`,
+  `invalid_state`, and `no_change`.
 - `conflict_reason` is not accepted as target candidate input and does not enter
   target candidate identity, gateway validation, result data, or operation-log
   details.
-- `target` has exactly `fields` and `sections`; `proposed_change` keys exactly equal their union.
+- `target` has exactly `fields` and `sections`, at least one named field or
+  section, and `proposed_change` keys exactly equal their union.
 - `target.fields` and `target.sections` reject duplicate names and reject overlap
   between field and section names; `target.sections` also rejects names that
   fail `validate_target_section_name()` before runtime decisions or mutation IDs.
-- Mutation identity canonicalizes target name ordering so equivalent target
-  envelopes do not produce different mutation IDs solely from caller order.
+- Mutation identity and gateway decision validation canonicalize target name
+  ordering so equivalent target envelopes do not produce different mutation IDs
+  or target mismatches solely from caller order.
 - Non-create writes require `expected_ticket_fingerprint`; create requires it to
   be `None`.
 - Mutation identity includes `target`, `proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`.
@@ -5874,10 +5886,18 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
 
 ## Execution Handoff
 
-Plan complete when this file is committed or intentionally left unstaged for review. Implementation should use either:
+Plan complete when this file is committed or intentionally left unstaged for
+review.
 
-1. Subagent-Driven (recommended) - use one focused worker per task with review between task commits.
-2. Inline Execution - execute tasks in this session using `superpowers:executing-plans`, with checkpoints after each task commit.
+Primary implementation mode: sequential inline execution using
+`superpowers:executing-plans`, with checkpoints after each task commit. Do not
+dispatch one primary worker per task: Tasks 1/2 are atomic together, Task 3A
+depends on Task 3, Task 5 depends on Task 3A recovery facts, and Task 6 depends
+on Tasks 3, 3A, and 5.
+
+Optional helpers: subagents may be used only for bounded read-only reviews,
+grep/probe summaries, or isolated snippet sanity checks after the active
+sequential worker has defined the exact question and file scope.
 
 Do not start source edits from this plan without a fresh `git status --short --branch` and `git rev-parse --short HEAD` check.
 
