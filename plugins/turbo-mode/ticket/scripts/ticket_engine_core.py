@@ -375,7 +375,7 @@ def _validate_create_status_shape(fields: dict[str, Any]) -> list[str]:
     blocked_by = fields.get("blocked_by", [])
     errors: list[str] = []
 
-    if status not in _CREATE_STATUSES:
+    if not isinstance(status, str) or status not in _CREATE_STATUSES:
         errors.append(f"create status must be one of {sorted(_CREATE_STATUSES)}")
     if status == "blocked":
         if not isinstance(blocked_on, str) or not blocked_on.strip():

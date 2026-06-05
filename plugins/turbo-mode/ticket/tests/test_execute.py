@@ -258,6 +258,23 @@ class TestCreate:
         assert "create status" in response.message
         assert list(tmp_tickets.glob("*.md")) == []
 
+    def test_direct_create_rejects_non_string_status(self, tmp_tickets: Path) -> None:
+        response = ticket_engine_core._execute_create(
+            {
+                "title": "Malformed status",
+                "problem": "Create requests must reject malformed status values.",
+                "status": ["open"],
+            },
+            "test-session",
+            "user",
+            tmp_tickets,
+        )
+
+        assert response.state == "need_fields"
+        assert response.error_code == "need_fields"
+        assert "create status" in response.message
+        assert list(tmp_tickets.glob("*.md")) == []
+
     def test_create_rejects_blocked_without_visible_blocker(self, tmp_tickets: Path) -> None:
         response = _create_response(
             tmp_tickets,
