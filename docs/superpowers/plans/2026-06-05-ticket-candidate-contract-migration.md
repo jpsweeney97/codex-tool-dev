@@ -1,5 +1,16 @@
 # Ticket Candidate Contract Migration Implementation Plan
 
+> **Superseded for execution:** This monolith is retained as historical source
+> material only. Execute the split plan series through
+> `docs/superpowers/plans/2026-06-05-ticket-candidate-contract-migration-index.md`
+> and its five child plans:
+>
+> 1. `docs/superpowers/plans/2026-06-05-ticket-candidate-source-entrypoint-spine.md`
+> 2. `docs/superpowers/plans/2026-06-05-ticket-create-idempotency-binding.md`
+> 3. `docs/superpowers/plans/2026-06-05-ticket-reopen-blocked-cleanup-semantics.md`
+> 4. `docs/superpowers/plans/2026-06-05-ticket-correction-recovery-facts.md`
+> 5. `docs/superpowers/plans/2026-06-05-ticket-availability-flip-final-proof.md`
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans for sequential implementation with checkpoints. Subagents may be used only as bounded review/probe helpers for an already-scoped step, not as primary task executors, because this plan has shared-state and commit-order dependencies. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Expose and enforce the literal Ticket target candidate mutation contract in source so autonomous create/update/close/reopen/correct writes use the same visible-board envelope documented by the May 30 control doc.
