@@ -128,6 +128,16 @@ Rules:
 - Optional section removal is represented by naming the section in
   `target.sections` and setting that section value to `null` in
   `proposed_change`.
+- For non-create writes, `expected_ticket_fingerprint` is the
+  candidate-supplied copy of the live target fingerprint at
+  discovery/evaluation time and participates in candidate identity. Ticket
+  recomputes the current live target fingerprint before writing and rejects
+  stale candidates whose current fingerprint no longer matches
+  `expected_ticket_fingerprint`; callers do not supply authoritative identity
+  values.
+- In prose, expected_ticket_fingerprint is the candidate-supplied copy of the
+  live target fingerprint. Ticket recomputes the current live target
+  fingerprint before writing.
 - `expected_ticket_fingerprint` is required for every non-create write.
 - `evidence_summary` is required and must be human-readable. Ticket validates
   that it is present and line-shaped; Ticket does not score, rank, or classify
@@ -178,11 +188,17 @@ Action-specific rules:
   in a separate `reopen_reason` field.
 - `correct`: an ordinary candidate mutation that repairs a recent Ticket write.
   Its `target` and `proposed_change` follow the same rules as the underlying
-  content change. If recent operation-log context identifies the corrected
-  mutation, Ticket may use it to append `Corrects:` in `Change History`; callers
-  do not add a separate correction-control field. `correct` does not target or
-  rewrite existing `Change History`; it records correction details by appending
-  a new generated history entry.
+  content change. Automatic `correct` requires recent uncompacted correction
+  context outside the candidate envelope. If that context is absent, expired,
+  compacted, or not bound to the candidate target and
+  `expected_ticket_fingerprint`, runtime returns `correction_detail_missing`
+  instead of emitting `APPLY_CORRECTION`. If recent operation-log context
+  identifies the corrected mutation, Ticket may use it to append `Corrects:` in
+  `Change History`; callers do not add a separate correction-control field.
+  `correct` does not target or rewrite existing `Change History`; it records
+  correction details by appending a new generated history entry.
+  Put plainly, recent uncompacted correction context is required before
+  automatic correct.
 
 ### Create Idempotency
 
