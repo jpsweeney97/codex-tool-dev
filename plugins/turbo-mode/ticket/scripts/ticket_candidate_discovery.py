@@ -2,191 +2,119 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from scripts.ticket_autonomy_runtime import CandidateMutation, EvidenceLink
-from scripts.ticket_read import list_tickets
+from scripts.ticket_autonomy_ids import sha256_fingerprint
+from scripts.ticket_autonomy_runtime import (
+    CandidateMutation,
+    candidate_mapping_errors,
+    candidate_mutation_from_mapping,
+)
+from scripts.ticket_mutation_identity import candidate_mutation_payload
 
 
 def _value_error(operation: str, reason: str, value: object) -> ValueError:
     return ValueError(f"{operation} failed: {reason}. Got: {value!r:.100}")
 
 
-def _string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, str) and item.strip()]
+@dataclass(frozen=True)
+class InvalidCandidateMappingError:
+    key: str
+    index: int
+    errors: tuple[str, ...]
 
 
-def _normalize_path(path: str) -> str:
-    return path.replace("\\", "/").strip()
+class InvalidCandidateMutations(ValueError):
+    def __init__(self, errors: Sequence[InvalidCandidateMappingError]) -> None:
+        self.errors = tuple(errors)
+        super().__init__(
+            "candidate discovery failed: explicit candidate payload is invalid. "
+            f"Got: {self.as_payload()!r:.100}"
+        )
+
+    def as_payload(self) -> list[dict[str, object]]:
+        return [
+            {"key": error.key, "index": error.index, "errors": list(error.errors)}
+            for error in self.errors
+        ]
 
 
-def _ticket_metadata_paths(ticket: Any) -> set[str]:
-    paths: set[str] = set()
-    key_file_paths = ticket.frontmatter.get("key_file_paths")
-    for path in _string_list(key_file_paths):
-        paths.add(_normalize_path(path))
-    for path in ticket.related_paths:
-        if isinstance(path, str):
-            paths.add(_normalize_path(path))
-    return paths
+def _candidate_from_mapping(item: Mapping[str, object]) -> CandidateMutation | None:
+    return candidate_mutation_from_mapping(item)
 
 
 def _append_candidate(
     candidates: list[CandidateMutation],
-    seen: set[tuple[str | None, str, str, str]],
+    seen: set[str],
     candidate: CandidateMutation,
 ) -> None:
-    evidence = candidate.evidence[0] if candidate.evidence else EvidenceLink("none", "none")
-    key = (candidate.ticket_id, candidate.action, evidence.kind, evidence.ref)
+    key = sha256_fingerprint(
+        candidate_mutation_payload(
+            ticket_id=candidate.ticket_id,
+            action=candidate.action,
+            target=candidate.target,
+            proposed_change=candidate.proposed_change,
+            expected_ticket_fingerprint=candidate.expected_ticket_fingerprint,
+            evidence_summary=candidate.evidence_summary,
+        )
+    )
     if key in seen:
         return
     seen.add(key)
     candidates.append(candidate)
 
 
-def _candidate_from_mapping(item: Mapping[str, object]) -> CandidateMutation | None:
-    ticket_id = item.get("ticket_id")
-    action = item.get("action", "update")
-    proposed_change = item.get("proposed_change", {})
-    reason = item.get("reason")
-    conflict_reason = item.get("conflict_reason")
-    if ticket_id is not None and not isinstance(ticket_id, str):
-        return None
-    if not isinstance(action, str) or not action:
-        return None
-    if not isinstance(proposed_change, Mapping):
-        return None
-    normalized_change = _normalize_candidate_change(action, proposed_change)
-    evidence_ref = reason if isinstance(reason, str) and reason else "candidate_mutations"
-    evidence = _evidence_from_mapping(item, default_ref=evidence_ref)
-    return CandidateMutation(
-        ticket_id=ticket_id,
-        action=action,
-        proposed_change=normalized_change,
-        evidence=evidence,
-        conflict_reason=conflict_reason if isinstance(conflict_reason, str) else None,
-    )
-
-
-def _normalize_candidate_change(
-    action: str,
-    proposed_change: Mapping[str, object],
-) -> dict[str, object]:
-    data = dict(proposed_change)
-    status = data.get("status")
-    if action == "done" and status == "done":
-        data.pop("status")
-        data.setdefault("resolution", "done")
-    if action == "wontfix" and status == "wontfix":
-        data.pop("status")
-        data.setdefault("resolution", "wontfix")
-    return data
-
-
-def _evidence_from_mapping(
-    item: Mapping[str, object],
-    *,
-    default_ref: str,
-) -> tuple[EvidenceLink, ...]:
-    evidence_items = item.get("evidence")
-    evidence: list[EvidenceLink] = []
-    if isinstance(evidence_items, list):
-        for evidence_item in evidence_items:
-            if not isinstance(evidence_item, Mapping):
-                continue
-            kind = evidence_item.get("kind")
-            ref = evidence_item.get("ref")
-            freshness = evidence_item.get("freshness", "fresh")
-            if not isinstance(kind, str) or not isinstance(ref, str):
-                continue
-            if freshness not in {"fresh", "stale"}:
-                freshness = "fresh"
-            evidence.append(EvidenceLink(kind=kind, ref=ref, freshness=freshness))
-    if evidence:
-        return tuple(evidence)
-    return (EvidenceLink(kind="codex_candidate", ref=default_ref),)
-
-
-def _possible_candidate_from_mapping(item: Mapping[str, object]) -> CandidateMutation | None:
-    ticket_id = item.get("ticket_id")
-    action = item.get("action", "update")
-    reason = item.get("reason")
-    if ticket_id is not None and not isinstance(ticket_id, str):
-        return None
-    if not isinstance(action, str) or not action:
-        return None
-    if not isinstance(reason, str) or not reason:
-        reason = "Codex supplied a possible candidate that needs discussion."
-    return CandidateMutation(
-        ticket_id=ticket_id,
-        action=action,
-        proposed_change={"requires_discussion": True, "reason": reason},
-        evidence=(EvidenceLink(kind="codex_possible_candidate", ref=reason),),
-    )
-
-
 def _append_structured_candidates(
     candidates: list[CandidateMutation],
-    seen: set[tuple[str | None, str, str, str]],
+    seen: set[str],
     turn_context: Mapping[str, object],
 ) -> None:
+    invalid: list[InvalidCandidateMappingError] = []
+    valid: list[CandidateMutation] = []
     for key in ("candidate_mutations", "update_candidates", "capture_candidates"):
-        for item in turn_context.get(key, []):
-            if isinstance(item, Mapping):
-                candidate = _candidate_from_mapping(item)
-                if candidate is not None:
-                    _append_candidate(candidates, seen, candidate)
-    for item in turn_context.get("possible_candidates", []):
-        if isinstance(item, Mapping):
-            candidate = _possible_candidate_from_mapping(item)
-            if candidate is not None:
-                _append_candidate(candidates, seen, candidate)
-    for item in turn_context.get("review_hygiene_findings", []):
-        if isinstance(item, Mapping):
-            candidate = _possible_candidate_from_mapping(item)
-            if candidate is not None:
-                _append_candidate(candidates, seen, candidate)
-
-
-def _path_refs(turn_context: Mapping[str, object]) -> list[tuple[str, str]]:
-    refs: list[tuple[str, str]] = []
-    for key, evidence_kind in (
-        ("touched_files", "related_path"),
-        ("diff_files", "diff_path"),
-        ("test_files", "test_path"),
-    ):
-        for path in _string_list(turn_context.get(key)):
-            refs.append((_normalize_path(path), evidence_kind))
-    return refs
-
-
-def _append_path_candidates(
-    candidates: list[CandidateMutation],
-    seen: set[tuple[str | None, str, str, str]],
-    turn_context: Mapping[str, object],
-    tickets_dir: Path,
-) -> None:
-    tickets = sorted(list_tickets(tickets_dir), key=lambda ticket: ticket.id)
-    ticket_paths = {ticket.id: _ticket_metadata_paths(ticket) for ticket in tickets}
-    tickets_by_id = {ticket.id: ticket for ticket in tickets}
-    for path, evidence_kind in _path_refs(turn_context):
-        for ticket_id in sorted(tickets_by_id):
-            if path not in ticket_paths[ticket_id]:
-                continue
-            _append_candidate(
-                candidates,
-                seen,
-                CandidateMutation(
-                    ticket_id=ticket_id,
-                    action="update",
-                    proposed_change={},
-                    evidence=(EvidenceLink(kind=evidence_kind, ref=path),),
-                ),
+        raw_items = turn_context.get(key, [])
+        if raw_items is None:
+            continue
+        if not isinstance(raw_items, list):
+            invalid.append(
+                InvalidCandidateMappingError(
+                    key=key,
+                    index=-1,
+                    errors=("candidate list must be an array",),
+                )
             )
+            continue
+        for index, item in enumerate(raw_items):
+            if not isinstance(item, Mapping):
+                invalid.append(
+                    InvalidCandidateMappingError(
+                        key=key,
+                        index=index,
+                        errors=("candidate item must be an object",),
+                    )
+                )
+                continue
+            errors = tuple(candidate_mapping_errors(item))
+            if errors:
+                invalid.append(InvalidCandidateMappingError(key=key, index=index, errors=errors))
+                continue
+            candidate = _candidate_from_mapping(item)
+            if candidate is None:
+                invalid.append(
+                    InvalidCandidateMappingError(
+                        key=key,
+                        index=index,
+                        errors=("candidate item failed target shape construction",),
+                    )
+                )
+                continue
+            valid.append(candidate)
+    if invalid:
+        raise InvalidCandidateMutations(invalid)
+    for candidate in valid:
+        _append_candidate(candidates, seen, candidate)
 
 
 def discover_candidate_mutations(
@@ -197,14 +125,17 @@ def discover_candidate_mutations(
 
     Args:
         turn_context: Strict turn context supplied by Codex/host runtime.
-        tickets_dir: Active Ticket directory used for metadata path matching.
+        tickets_dir: Active Ticket directory. Path-only signals are read-only
+            hints in this migration slice and do not emit write candidates.
 
     Returns:
         Candidate mutations in deterministic discovery order.
 
     Raises:
         ValueError: If `turn_context` is not object-shaped.
+        InvalidCandidateMutations: If explicit candidate arrays are malformed.
     """
+    del tickets_dir
     if not isinstance(turn_context, Mapping):
         raise _value_error(
             "discover candidate mutations",
@@ -213,7 +144,6 @@ def discover_candidate_mutations(
         )
 
     candidates: list[CandidateMutation] = []
-    seen: set[tuple[str | None, str, str, str]] = set()
+    seen: set[str] = set()
     _append_structured_candidates(candidates, seen, turn_context)
-    _append_path_candidates(candidates, seen, turn_context, tickets_dir)
     return tuple(candidates)

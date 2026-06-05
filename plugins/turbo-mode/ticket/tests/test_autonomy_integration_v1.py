@@ -9,6 +9,7 @@ from pathlib import Path
 
 from scripts.ticket_autonomy import build_repo_context
 from scripts.ticket_autonomy_config import AutomationMode, write_local_config
+from scripts.ticket_dedup import target_fingerprint
 
 from tests.support.builders import make_ticket
 
@@ -72,6 +73,25 @@ def _events(project_root: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
+def _priority_update_candidate(
+    ticket_path: Path | None,
+    *,
+    ticket_id: str = "T-20260527-01",
+    priority: str = "low",
+    evidence_summary: str = "Verification passed.",
+) -> dict[str, object]:
+    return {
+        "ticket_id": ticket_id,
+        "action": "update",
+        "target": {"fields": ["priority"], "sections": []},
+        "proposed_change": {"priority": priority},
+        "expected_ticket_fingerprint": (
+            target_fingerprint(ticket_path) if ticket_path is not None else None
+        ),
+        "evidence_summary": evidence_summary,
+    }
+
+
 def test_agent_primary_apply_turn_applies_update_through_gateway(tmp_path: Path) -> None:
     tickets_dir = _init_ticket_project(tmp_path)
     ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01")
@@ -80,13 +100,7 @@ def test_agent_primary_apply_turn_applies_update_through_gateway(tmp_path: Path)
         tmp_path,
         {
             "candidate_mutations": [
-                {
-                    "ticket_id": "T-20260527-01",
-                    "action": "update",
-                    "proposed_change": {"priority": "low"},
-                    "reason": "Verification passed.",
-                    "evidence": [{"kind": "current_thread_reason", "ref": "tests passed"}],
-                }
+                _priority_update_candidate(ticket),
             ]
         },
     )
@@ -121,18 +135,18 @@ def test_agent_primary_apply_turn_applies_correction_through_gateway(tmp_path: P
     context = _write_context(
         tmp_path,
         {
+            "correction_detail": {
+                "ticket_id": "T-20260527-01",
+                "summary": "Previous automatic update used the wrong priority.",
+            },
             "candidate_mutations": [
                 {
                     "ticket_id": "T-20260527-01",
-                    "action": "correction",
+                    "action": "correct",
+                    "target": {"fields": ["priority"], "sections": []},
                     "proposed_change": {"priority": "high"},
-                    "reason": "Correct the previous automatic priority update.",
-                    "evidence": [
-                        {
-                            "kind": "correction_detail",
-                            "ref": "previous automatic update used the wrong priority",
-                        }
-                    ],
+                    "expected_ticket_fingerprint": target_fingerprint(ticket),
+                    "evidence_summary": "Correct the previous automatic priority update.",
                 }
             ]
         },
@@ -166,12 +180,7 @@ def test_invalid_preview_config_and_discussion_mode_do_not_write_tickets(
         tmp_path,
         {
             "candidate_mutations": [
-                {
-                    "ticket_id": "T-20260527-01",
-                    "action": "update",
-                    "proposed_change": {"priority": "low"},
-                    "evidence": [{"kind": "current_thread_reason", "ref": "tests passed"}],
-                }
+                _priority_update_candidate(ticket),
             ]
         },
     )
@@ -196,12 +205,7 @@ def test_invalid_preview_config_and_discussion_mode_do_not_write_tickets(
         {
             "thread_id": "thread-2",
             "candidate_mutations": [
-                {
-                    "ticket_id": "T-20260527-01",
-                    "action": "update",
-                    "proposed_change": {"priority": "low"},
-                    "evidence": [{"kind": "current_thread_reason", "ref": "tests passed"}],
-                }
+                _priority_update_candidate(ticket),
             ],
         },
     )
@@ -214,76 +218,86 @@ def test_invalid_preview_config_and_discussion_mode_do_not_write_tickets(
     assert ticket.read_text(encoding="utf-8") == before
 
 
-def test_apply_turn_ignores_adapter_authorization_residue(
+def test_apply_turn_reports_adapter_authorization_residue_as_invalid_candidate(
     tmp_path: Path,
 ) -> None:
     tickets_dir = _init_ticket_project(tmp_path)
     ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01")
     write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    candidate = _priority_update_candidate(
+        ticket,
+        evidence_summary="Adapter proposed a scoped update.",
+    )
+    candidate.update(
+        {
+            "authorization": {"token": "forged"},
+            "mutation_id": "forged",
+        }
+    )
     context = _write_context(
         tmp_path,
         {
-            "update_candidates": [
-                {
-                    "ticket_id": "T-20260527-01",
-                    "action": "update",
-                    "proposed_change": {"priority": "low"},
-                    "reason": "Adapter proposed a scoped update.",
-                    "authorization": {"token": "forged"},
-                    "mutation_id": "forged",
-                    "evidence": [{"kind": "current_thread_reason", "ref": "adapter"}],
-                }
-            ]
+            "update_candidates": [candidate]
         },
     )
 
     result = _apply_turn(tmp_path, context)
 
-    assert result.returncode == 0
-    assert "priority: low" in ticket.read_text(encoding="utf-8")
-    events = _events(tmp_path)
-    assert events[0]["mutation_id"] != "forged"
+    assert result.returncode == 2
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "invalid_candidate"
+    assert payload["invalid_candidates"] == [
+        {
+            "key": "update_candidates",
+            "index": 0,
+            "errors": ["unknown candidate keys: ['authorization', 'mutation_id']"],
+        }
+    ]
+    assert "priority: high" in ticket.read_text(encoding="utf-8")
+    assert _events(tmp_path) == []
 
 
-def test_conflicting_candidate_is_skipped_without_blocking_plausible_candidate(
+def test_explicit_conflict_reason_candidate_is_invalid_candidate(
     tmp_path: Path,
 ) -> None:
     tickets_dir = _init_ticket_project(tmp_path)
     first = make_ticket(tickets_dir, "one.md", id="T-20260527-01")
     second = make_ticket(tickets_dir, "two.md", id="T-20260527-02")
     write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    conflicting = _priority_update_candidate(
+        first,
+        ticket_id="T-20260527-01",
+        evidence_summary="Current thread contradicts this ticket.",
+    )
+    conflicting["conflict_reason"] = "Current thread contradicts this ticket."
     context = _write_context(
         tmp_path,
         {
             "candidate_mutations": [
-                {
-                    "ticket_id": "T-20260527-01",
-                    "action": "update",
-                    "proposed_change": {"priority": "low"},
-                    "conflict_reason": "Current thread contradicts this ticket.",
-                    "evidence": [{"kind": "conflicting", "ref": "summary"}],
-                },
-                {
-                    "ticket_id": "T-20260527-02",
-                    "action": "update",
-                    "proposed_change": {"priority": "low"},
-                    "evidence": [{"kind": "current_thread_reason", "ref": "tests passed"}],
-                },
+                conflicting,
+                _priority_update_candidate(second, ticket_id="T-20260527-02"),
             ]
         },
     )
 
     result = _apply_turn(tmp_path, context)
 
-    assert result.returncode == 0
+    assert result.returncode == 2
     payload = json.loads(result.stdout)
-    assert payload["state"] == "partially_applied"
-    assert "Skipped" in payload["ticket_updates"]
+    assert payload["state"] == "invalid_candidate"
+    assert payload["invalid_candidates"] == [
+        {
+            "key": "candidate_mutations",
+            "index": 0,
+            "errors": ["unknown candidate keys: ['conflict_reason']"],
+        }
+    ]
     assert "priority: high" in first.read_text(encoding="utf-8")
-    assert "priority: low" in second.read_text(encoding="utf-8")
+    assert "priority: high" in second.read_text(encoding="utf-8")
+    assert _events(tmp_path) == []
 
 
-def test_missing_target_fingerprint_blocks_one_candidate_without_private_event(
+def test_null_expected_fingerprint_invalidates_batch_without_private_event(
     tmp_path: Path,
 ) -> None:
     tickets_dir = _init_ticket_project(tmp_path)
@@ -293,46 +307,36 @@ def test_missing_target_fingerprint_blocks_one_candidate_without_private_event(
         tmp_path,
         {
             "candidate_mutations": [
-                {
-                    "ticket_id": "T-20260527-01",
-                    "action": "update",
-                    "proposed_change": {"priority": "low"},
-                    "evidence": [{"kind": "current_thread_reason", "ref": "tests passed"}],
-                },
-                {
-                    "ticket_id": "T-20260527-02",
-                    "action": "update",
-                    "proposed_change": {"priority": "low"},
-                    "evidence": [{"kind": "current_thread_reason", "ref": "missing ticket"}],
-                },
+                _priority_update_candidate(ticket),
+                _priority_update_candidate(None, ticket_id="T-20260527-02"),
             ]
         },
     )
 
     result = _apply_turn(tmp_path, context)
 
-    assert result.returncode == 0
+    assert result.returncode == 2
     payload = json.loads(result.stdout)
-    assert payload["state"] == "partially_applied"
-    assert payload["ticket_updates"]["Applied"] == ["T-20260527-01"]
-    assert payload["ticket_updates"]["Blocked"] == ["T-20260527-02"]
-    assert payload["blocked_reasons"] == {
-        "T-20260527-02": "target_fingerprint_required"
-    }
-    assert "discussion_question" not in payload or payload["discussion_question"] is None
+    assert payload["state"] == "invalid_candidate"
+    assert payload["changed"] is False
+    assert payload["invalid_candidates"] == [
+        {
+            "key": "candidate_mutations",
+            "index": 1,
+            "errors": ["expected_ticket_fingerprint is required for non-create writes"],
+        }
+    ]
+    assert payload["discussion_question"] == (
+        "Fix the explicit Ticket candidate payload before automatic ticket mutation."
+    )
     assert "mutation_id" not in payload
     assert "event_id" not in payload
     assert "fingerprints" not in payload
-    assert "priority: low" in ticket.read_text(encoding="utf-8")
-
-    events = _events(tmp_path)
-    blocked_events = [
-        event for event in events if event.get("ticket_id") == "T-20260527-02"
-    ]
-    assert blocked_events == []
+    assert "priority: high" in ticket.read_text(encoding="utf-8")
+    assert _events(tmp_path) == []
 
 
-def test_missing_target_fingerprint_only_reports_blocked_without_private_event(
+def test_null_expected_fingerprint_only_reports_invalid_candidate_without_private_event(
     tmp_path: Path,
 ) -> None:
     _init_ticket_project(tmp_path)
@@ -341,27 +345,27 @@ def test_missing_target_fingerprint_only_reports_blocked_without_private_event(
         tmp_path,
         {
             "candidate_mutations": [
-                {
-                    "ticket_id": "T-20260527-02",
-                    "action": "update",
-                    "proposed_change": {"priority": "low"},
-                    "evidence": [{"kind": "current_thread_reason", "ref": "missing ticket"}],
-                }
+                _priority_update_candidate(None, ticket_id="T-20260527-02"),
             ]
         },
     )
 
     result = _apply_turn(tmp_path, context)
 
-    assert result.returncode == 0
+    assert result.returncode == 2
     payload = json.loads(result.stdout)
-    assert payload["state"] == "ticket_update_blocked"
+    assert payload["state"] == "invalid_candidate"
     assert payload["changed"] is False
-    assert payload["ticket_updates"]["Blocked"] == ["T-20260527-02"]
-    assert payload["blocked_reasons"] == {
-        "T-20260527-02": "target_fingerprint_required"
-    }
-    assert payload["discussion_question"] is None
+    assert payload["invalid_candidates"] == [
+        {
+            "key": "candidate_mutations",
+            "index": 0,
+            "errors": ["expected_ticket_fingerprint is required for non-create writes"],
+        }
+    ]
+    assert payload["discussion_question"] == (
+        "Fix the explicit Ticket candidate payload before automatic ticket mutation."
+    )
     assert _events(tmp_path) == []
 
 
@@ -376,12 +380,7 @@ def test_repo_context_mismatch_fails_closed_before_ledger_or_write(tmp_path: Pat
         {
             "git": bad_git,
             "candidate_mutations": [
-                {
-                    "ticket_id": "T-20260527-01",
-                    "action": "update",
-                    "proposed_change": {"priority": "low"},
-                    "evidence": [{"kind": "current_thread_reason", "ref": "tests passed"}],
-                }
+                _priority_update_candidate(ticket),
             ],
         },
     )

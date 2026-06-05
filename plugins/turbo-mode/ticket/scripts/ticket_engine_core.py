@@ -14,6 +14,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -32,10 +33,11 @@ from scripts.ticket_render import render_ticket
 from scripts.ticket_target_schema import (
     TARGET_ACTIVE_STATUSES,
     TARGET_TERMINAL_STATUSES,
+    validate_target_section_name,
     validate_target_ticket_text,
 )
 from scripts.ticket_trust import collect_trust_triple_errors
-from scripts.ticket_validate import validate_fields
+from scripts.ticket_validate import validate_create_fields, validate_fields
 
 # --- Helpers ---
 
@@ -463,7 +465,7 @@ def _plan_create(
             data={"missing_fields": [], "validation_errors": create_shape_errors},
         )
 
-    validation_errors = validate_fields(fields)
+    validation_errors = validate_create_fields(fields)
     if validation_errors:
         return EngineResponse(
             state="need_fields",
@@ -1097,6 +1099,38 @@ _UPDATE_SECTION_HEADINGS = {
     "acceptance_criteria": "Acceptance Criteria",
 }
 _TARGET_FRONTMATTER_BLOCK_RE = re.compile(r"\A---\n.*?\n---\n?", re.DOTALL)
+
+
+def _render_key_files_section_value(value: Any) -> str:
+    if not isinstance(value, list):
+        raise ValueError("Key Files target section requires a list of row objects")
+    rows = ["| File | Role | Look For |", "|------|------|----------|"]
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise ValueError("Key Files target section requires row objects")
+        rows.append(
+            "| "
+            + " | ".join(
+                str(item.get(key, ""))
+                for key in ("file", "role", "look_for")
+            )
+            + " |"
+        )
+    return "\n".join(rows)
+
+
+def _render_target_section_value(heading: str, value: Any) -> str | None:
+    if value is None:
+        return None
+    if heading == "Acceptance Criteria":
+        return _render_update_section_value("acceptance_criteria", value)
+    if heading == "Key Files":
+        return _render_key_files_section_value(value)
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (Mapping, list, tuple)):
+        raise ValueError(f"{heading} does not support structured target values")
+    return str(value)
 
 
 def _target_frontmatter(frontmatter: dict[str, Any]) -> dict[str, Any]:
@@ -1774,7 +1808,7 @@ def _execute_create(
             data={"validation_errors": create_shape_errors},
         )
 
-    validation_errors = validate_fields(fields)
+    validation_errors = validate_create_fields(fields)
     if validation_errors:
         return EngineResponse(
             state="need_fields",
@@ -1991,6 +2025,7 @@ def _execute_update(
     tickets_dir: Path,
     *,
     change_history_entry: ChangeHistoryEntry | None = None,
+    target_sections: Mapping[str, object] | None = None,
 ) -> EngineResponse:
     """Update an existing ticket's frontmatter fields."""
     if not ticket_id:
@@ -2008,10 +2043,6 @@ def _execute_update(
             ticket_id=ticket_id,
             error_code="not_found",
         )
-
-    policy_error = _evaluate_update_policy(ticket_id, ticket, fields, tickets_dir)
-    if policy_error is not None:
-        return policy_error
 
     ticket_path = Path(ticket.path)
     original_text = ticket_path.read_text(encoding="utf-8")
@@ -2066,7 +2097,42 @@ def _execute_update(
         elif old_rendered.strip() != rendered.strip():
             changes["sections_changed"].append(heading)
         sections[heading] = rendered
-    targeted_headings = tuple(_UPDATE_SECTION_HEADINGS[key] for key in section_fields)
+
+    policy_fields = dict(fields)
+    if target_sections and "Blocked On" in target_sections:
+        policy_fields["blocked_on"] = target_sections["Blocked On"]
+    policy_error = _evaluate_update_policy(ticket_id, ticket, policy_fields, tickets_dir)
+    if policy_error is not None:
+        return policy_error
+
+    for heading, value in (target_sections or {}).items():
+        if heading == "Change History" or not validate_target_section_name(heading):
+            return EngineResponse(
+                state="escalate",
+                message=f"Update failed: invalid target section {heading!r}",
+                ticket_id=ticket_id,
+                error_code="intent_mismatch",
+            )
+        try:
+            rendered = _render_target_section_value(heading, value)
+        except ValueError as exc:
+            return EngineResponse(
+                state="need_fields",
+                message=f"Update failed: {exc}",
+                ticket_id=ticket_id,
+                error_code="need_fields",
+            )
+        old_rendered = ticket.sections.get(heading, "")
+        if rendered is None:
+            if heading in ticket.sections:
+                changes["sections_changed"].append(heading)
+        elif old_rendered.strip() != rendered.strip():
+            changes["sections_changed"].append(heading)
+        sections[heading] = rendered
+
+    targeted_headings = tuple(_UPDATE_SECTION_HEADINGS[key] for key in section_fields) + tuple(
+        (target_sections or {}).keys()
+    )
     new_text = _render_target_ticket_text(
         data,
         sections,
@@ -2421,6 +2487,7 @@ def _execute_close(
     *,
     dependency_override: bool = False,
     change_history_entry: ChangeHistoryEntry | None = None,
+    target_sections: Mapping[str, object] | None = None,
 ) -> EngineResponse:
     """Close a ticket (set status to done or wontfix, optionally archive).
 
@@ -2444,6 +2511,15 @@ def _execute_close(
             ticket_id=ticket_id,
             error_code="not_found",
         )
+
+    if target_sections:
+        if set(target_sections) != {"Blocked On"} or target_sections["Blocked On"] is not None:
+            return EngineResponse(
+                state="escalate",
+                message="Close failed: invalid target section cleanup",
+                ticket_id=ticket_id,
+                error_code="intent_mismatch",
+            )
 
     policy_error = _evaluate_close_policy(
         ticket_id,

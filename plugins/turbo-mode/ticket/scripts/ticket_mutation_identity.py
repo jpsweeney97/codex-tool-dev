@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Protocol
 
 from scripts.ticket_autonomy_ids import make_mutation_id, sha256_fingerprint
 
@@ -17,19 +18,31 @@ class CandidateMutationIdentity:
     evidence_fingerprint: str
 
 
+class CandidateTargetLike(Protocol):
+    fields: tuple[str, ...]
+    sections: tuple[str, ...]
+
+
 def candidate_mutation_payload(
     *,
     ticket_id: str | None,
     action: str,
+    target: CandidateTargetLike,
     proposed_change: Mapping[str, object],
-    target_fingerprint: str | None,
+    expected_ticket_fingerprint: str | None,
+    evidence_summary: str,
 ) -> dict[str, object]:
-    """Return the canonical payload used for mutation identity."""
+    """Return the canonical target candidate payload used for mutation identity."""
     return {
         "ticket_id": ticket_id,
         "action": action,
+        "target": {
+            "fields": sorted(target.fields),
+            "sections": sorted(target.sections),
+        },
         "proposed_change": dict(proposed_change),
-        "target_fingerprint": target_fingerprint,
+        "expected_ticket_fingerprint": expected_ticket_fingerprint,
+        "evidence_summary": evidence_summary,
     }
 
 
@@ -39,27 +52,25 @@ def make_candidate_mutation_identity(
     turn_id: str,
     ticket_id: str | None,
     action: str,
+    target: CandidateTargetLike,
     proposed_change: Mapping[str, object],
-    target_fingerprint: str | None,
-    evidence: object,
+    expected_ticket_fingerprint: str | None,
+    evidence_summary: str,
 ) -> CandidateMutationIdentity:
-    """Calculate deterministic identity for one candidate mutation.
-
-    This helper is calculation-only. It hashes the supplied target fingerprint
-    but does not decide whether a missing target fingerprint is acceptable.
-    Runtime and gateway callers own that policy.
-    """
+    """Calculate deterministic identity for one target candidate mutation."""
     mutation_fingerprint = sha256_fingerprint(
         candidate_mutation_payload(
             ticket_id=ticket_id,
             action=action,
+            target=target,
             proposed_change=proposed_change,
-            target_fingerprint=target_fingerprint,
+            expected_ticket_fingerprint=expected_ticket_fingerprint,
+            evidence_summary=evidence_summary,
         )
     )
-    evidence_fingerprint = sha256_fingerprint(evidence)
+    evidence_fingerprint = sha256_fingerprint({"evidence_summary": evidence_summary})
     mutation_id = make_mutation_id(
-        schema="codex.ticket.mutation.v1",
+        schema="codex.ticket.mutation.v2",
         thread_id=thread_id,
         turn_id=turn_id,
         action=action,

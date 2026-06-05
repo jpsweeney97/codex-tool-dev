@@ -76,6 +76,7 @@ _ACTIONS = frozenset(
         "delete",
         "history_repair",
         "correction",
+        "correct",
         "summarize",
         "compact",
         "pause_automation",

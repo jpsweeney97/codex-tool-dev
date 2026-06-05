@@ -33,7 +33,10 @@ from scripts.ticket_autonomy_runtime import (  # noqa: E402
     RuntimeDecisionKind,
     evaluate_autonomy_intent,
 )
-from scripts.ticket_candidate_discovery import discover_candidate_mutations  # noqa: E402
+from scripts.ticket_candidate_discovery import (  # noqa: E402
+    InvalidCandidateMutations,
+    discover_candidate_mutations,
+)
 from scripts.ticket_change_history import plan_change_history_migration  # noqa: E402
 from scripts.ticket_dedup import target_fingerprint as compute_target_fingerprint  # noqa: E402
 from scripts.ticket_engine_gateway import GatewayMutation, apply_autonomous_mutation  # noqa: E402
@@ -227,6 +230,18 @@ def _paused_response(reason: str) -> dict[str, Any]:
         "message": _pause_message(reason),
         "ticket_updates": None,
         "discussion_question": None,
+    }
+
+
+def _invalid_candidate_response(error: InvalidCandidateMutations) -> dict[str, object]:
+    return {
+        "state": "invalid_candidate",
+        "changed": False,
+        "ticket_updates": None,
+        "invalid_candidates": error.as_payload(),
+        "discussion_question": (
+            "Fix the explicit Ticket candidate payload before automatic ticket mutation."
+        ),
     }
 
 
@@ -919,7 +934,11 @@ def _run_apply_turn(args: argparse.Namespace) -> int:
             _emit(_paused_response("repair"))
             return 3
         if args.resume_paused and _read_pause_reason(project_root) == "source_context_unhealthy":
-            collection = _source_context_resume_collection(project_root, context)
+            try:
+                collection = _source_context_resume_collection(project_root, context)
+            except InvalidCandidateMutations as exc:
+                _emit(_invalid_candidate_response(exc))
+                return 2
             if collection.state == "unhealthy":
                 _emit(_paused_response(collection.reason or "source_context_unhealthy"))
                 return 3
@@ -943,6 +962,15 @@ def _run_apply_turn(args: argparse.Namespace) -> int:
     if unsafe is not None:
         return unsafe
     return _run_apply_turn_with_mode(project_root, context, repo_context, resolved.mode)
+
+
+def _runtime_source_context(context: Mapping[str, Any]) -> dict[str, object]:
+    runtime_keys = (
+        "correction_detail",
+        "explicit_linked_batch",
+        "shared_decision_evidence",
+    )
+    return {key: context[key] for key in runtime_keys if key in context}
 
 
 def _run_apply_turn_with_mode(
@@ -975,6 +1003,9 @@ def _run_apply_turn_with_mode(
     tickets_dir = project_root / "docs" / "tickets"
     try:
         candidates = discover_candidate_mutations(context, tickets_dir)
+    except InvalidCandidateMutations as exc:
+        _emit(_invalid_candidate_response(exc))
+        return 2
     except InvalidTicketState:
         pause_workspace_automation(project_root, reason="source_context_unhealthy")
         _emit(_paused_response("source_context_unhealthy"))
@@ -993,12 +1024,11 @@ def _run_apply_turn_with_mode(
         )
         _emit(_paused_response(fingerprint_collection.reason or "source_context_unhealthy"))
         return 3
-    fingerprints = fingerprint_collection.fingerprints
     decisions = evaluate_autonomy_intent(
         AutonomyIntent(
             action_kind="apply_ticket_mutations",
             candidates=candidates,
-            source_context={"ticket_state_fingerprints": fingerprints},
+            source_context=_runtime_source_context(context),
         ),
         current_mode=mode.value,
         thread_id=str(context["thread_id"]),
@@ -1021,13 +1051,11 @@ def _run_apply_turn_with_mode(
             mutation = GatewayMutation(
                 action=decision.candidate.action,
                 ticket_id=decision.candidate.ticket_id,
-                fields=dict(decision.candidate.proposed_change),
+                target=decision.candidate.target,
+                proposed_change=dict(decision.candidate.proposed_change),
                 tickets_dir=tickets_dir,
-                target_fingerprint=(
-                    fingerprints.get(decision.candidate.ticket_id)
-                    if isinstance(decision.candidate.ticket_id, str)
-                    else None
-                ),
+                expected_ticket_fingerprint=decision.candidate.expected_ticket_fingerprint,
+                evidence_summary=decision.candidate.evidence_summary,
             )
             response = apply_autonomous_mutation(
                 project_root=project_root,

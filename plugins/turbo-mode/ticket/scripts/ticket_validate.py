@@ -8,6 +8,7 @@ validator).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from scripts.ticket_target_schema import TARGET_ID_RE, TARGET_PRIORITIES, TARGET_STATUSES
@@ -152,4 +153,22 @@ def validate_fields(fields: dict[str, Any]) -> list[str]:
     ):
         errors.append("tag needs-refinement is not a target tag")
 
+    return errors
+
+
+def validate_create_fields(fields: dict[str, Any]) -> list[str]:
+    """Validate source create fields after gateway target-section projection."""
+    errors = validate_fields({key: value for key, value in fields.items() if key != "key_files"})
+    if "key_files" in fields:
+        value = fields["key_files"]
+        if not isinstance(value, list):
+            errors.append(f"key_files must be a list, got {type(value).__name__}")
+        elif not all(isinstance(item, Mapping) for item in value):
+            errors.append("key_files must contain only objects")
+        else:
+            for index, item in enumerate(value):
+                for key in ("file", "role", "look_for"):
+                    item_value = item.get(key)
+                    if not isinstance(item_value, str) or not item_value.strip():
+                        errors.append(f"key_files[{index}].{key} must be a non-empty string")
     return errors

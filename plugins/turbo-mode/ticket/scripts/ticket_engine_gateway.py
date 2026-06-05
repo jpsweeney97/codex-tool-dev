@@ -13,6 +13,7 @@ from scripts.ticket_autonomy_ids import make_event_id, sha256_fingerprint
 from scripts.ticket_autonomy_runtime import (
     AutonomyDecision,
     CandidateMutation,
+    CandidateTarget,
     EngineAction,
     EngineDispatch,
     RuntimeDecisionKind,
@@ -44,13 +45,15 @@ from scripts.ticket_turn_batch import (
 
 @dataclass(frozen=True, slots=True)
 class GatewayMutation:
-    """Gateway-owned mutation request."""
+    """Gateway-owned target candidate mutation request."""
 
     action: str
     ticket_id: str | None
-    fields: Mapping[str, object]
+    target: CandidateTarget
+    proposed_change: Mapping[str, object]
     tickets_dir: Path
-    target_fingerprint: str | None
+    expected_ticket_fingerprint: str | None
+    evidence_summary: str
 
 
 def _policy_blocked(message: str, *, data: dict[str, object] | None = None) -> EngineResponse:
@@ -111,7 +114,13 @@ def _mutation_fingerprint(mutation: GatewayMutation) -> str:
         {
             "ticket_id": mutation.ticket_id,
             "action": mutation.action,
-            "proposed_change": dict(mutation.fields),
+            "target": {
+                "fields": list(mutation.target.fields),
+                "sections": list(mutation.target.sections),
+            },
+            "proposed_change": dict(mutation.proposed_change),
+            "expected_ticket_fingerprint": mutation.expected_ticket_fingerprint,
+            "evidence_summary": mutation.evidence_summary,
         }
     )
 
@@ -144,21 +153,28 @@ def _release_gateway_write_lock(lock_path: Path | None) -> None:
 
 
 def build_engine_dispatch(mutation: GatewayMutation) -> EngineDispatch:
-    """Build deterministic engine dispatch for a gateway mutation."""
+    """Build deterministic engine dispatch for a gateway target mutation."""
     candidate = CandidateMutation(
         ticket_id=mutation.ticket_id,
         action=mutation.action,
-        proposed_change=dict(mutation.fields),
-        evidence=(),
+        target=mutation.target,
+        proposed_change=dict(mutation.proposed_change),
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint,
+        evidence_summary=mutation.evidence_summary,
     )
-    return map_candidate_to_engine(candidate)
+    current_ticket_status: str | None = None
+    if mutation.action != "create" and mutation.ticket_id is not None:
+        ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id)
+        if ticket is not None:
+            current_ticket_status = ticket.status
+    return map_candidate_to_engine(
+        candidate,
+        current_ticket_status=current_ticket_status,
+    )
 
 
-def _candidate_evidence_payload(candidate: CandidateMutation) -> list[dict[str, str]]:
-    return [
-        {"kind": evidence.kind, "ref": evidence.ref, "freshness": evidence.freshness}
-        for evidence in candidate.evidence
-    ]
+def _canonical_target(target: CandidateTarget) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    return (tuple(sorted(target.fields)), tuple(sorted(target.sections)))
 
 
 def _decision_error(
@@ -168,8 +184,8 @@ def _decision_error(
     mutation: GatewayMutation,
     decision: AutonomyDecision,
 ) -> str | None:
-    if decision.kind == RuntimeDecisionKind.APPLY_CORRECTION:
-        if mutation.action != "correction" or decision.candidate.action != "correction":
+    if mutation.action == "correct":
+        if decision.kind != RuntimeDecisionKind.APPLY_CORRECTION:
             return "decision_mismatch"
     elif decision.kind != RuntimeDecisionKind.APPLY_AUTONOMOUSLY:
         return "autonomous_decision_required"
@@ -179,25 +195,32 @@ def _decision_error(
         return "ticket_mismatch"
     if decision.candidate.action != mutation.action:
         return "action_mismatch"
-    if dict(decision.candidate.proposed_change) != dict(mutation.fields):
+    if _canonical_target(decision.candidate.target) != _canonical_target(mutation.target):
+        return "target_mismatch"
+    if dict(decision.candidate.proposed_change) != dict(mutation.proposed_change):
         return "mutation_fingerprint_mismatch"
-    if mutation.action != "create" and mutation.target_fingerprint is None:
-        return "target_fingerprint_required"
+    if decision.candidate.expected_ticket_fingerprint != mutation.expected_ticket_fingerprint:
+        return "expected_ticket_fingerprint_mismatch"
+    if decision.candidate.evidence_summary != mutation.evidence_summary:
+        return "evidence_summary_mismatch"
+    if mutation.action != "create" and mutation.expected_ticket_fingerprint is None:
+        return "expected_ticket_fingerprint_required"
     identity = make_candidate_mutation_identity(
         thread_id=thread_id,
         turn_id=turn_id,
         ticket_id=decision.candidate.ticket_id,
         action=decision.candidate.action,
+        target=decision.candidate.target,
         proposed_change=decision.candidate.proposed_change,
-        target_fingerprint=mutation.target_fingerprint,
-        evidence=_candidate_evidence_payload(decision.candidate),
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint,
+        evidence_summary=decision.candidate.evidence_summary,
     )
     if decision.mutation_id != identity.mutation_id:
         return "mutation_id_mismatch"
     return None
 
 
-def _validate_target_fingerprint(mutation: GatewayMutation) -> EngineResponse | None:
+def _validate_expected_ticket_fingerprint(mutation: GatewayMutation) -> EngineResponse | None:
     if mutation.action == "create":
         return None
     if not mutation.ticket_id:
@@ -206,8 +229,8 @@ def _validate_target_fingerprint(mutation: GatewayMutation) -> EngineResponse | 
             message=f"ticket_id required for {mutation.action}",
             error_code="need_fields",
         )
-    if mutation.target_fingerprint is None:
-        return _policy_blocked(f"{mutation.action} requires target_fingerprint")
+    if mutation.expected_ticket_fingerprint is None:
+        return _policy_blocked(f"{mutation.action} requires expected_ticket_fingerprint")
     try:
         ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id)
     except InvalidTicketState as exc:
@@ -223,7 +246,7 @@ def _validate_target_fingerprint(mutation: GatewayMutation) -> EngineResponse | 
             error_code="not_found",
         )
     current = compute_target_fingerprint(Path(ticket.path))
-    if current != mutation.target_fingerprint:
+    if current != mutation.expected_ticket_fingerprint:
         return _invalid_state(
             message="Stale fingerprint - ticket was modified since validation.",
             ticket_id=mutation.ticket_id,
@@ -250,7 +273,7 @@ def _expected_pre_write_fingerprint(
     decision: AutonomyDecision,
 ) -> str | None:
     del decision
-    return mutation.target_fingerprint
+    return mutation.expected_ticket_fingerprint
 
 
 def _fingerprint_details(
@@ -384,6 +407,36 @@ def _existing_mutation_recovery_response(
     )
 
 
+_CREATE_SECTION_MAP = {
+    "Problem": "problem",
+    "Next Action": "next_action",
+    "Blocked On": "blocked_on",
+    "Captured Request": "captured_request",
+    "Context": "context",
+    "Prior Investigation": "prior_investigation",
+    "Approach": "approach",
+    "Decisions Made": "decisions_made",
+    "Acceptance Criteria": "acceptance_criteria",
+    "Verification": "verification",
+    "Key Files": "key_files",
+    "Related": "related",
+}
+
+
+def _create_fields_for_engine(mutation: GatewayMutation) -> tuple[dict[str, object], str | None]:
+    fields = {
+        key: value
+        for key, value in mutation.proposed_change.items()
+        if key in mutation.target.fields
+    }
+    for heading in mutation.target.sections:
+        engine_key = _CREATE_SECTION_MAP.get(heading)
+        if engine_key is None:
+            return {}, f"Unsupported create target section: {heading}"
+        fields[engine_key] = mutation.proposed_change[heading]
+    return fields, None
+
+
 def _execute_dispatch(
     *,
     dispatch: EngineDispatch,
@@ -393,9 +446,13 @@ def _execute_dispatch(
 ) -> EngineResponse:
     if dispatch.state != "ok" or dispatch.action is None:
         return _policy_blocked(dispatch.reason or "gateway dispatch failed")
+    target_sections = dispatch.sections or {}
     if dispatch.action == EngineAction.CREATE:
+        fields, create_error = _create_fields_for_engine(mutation)
+        if create_error is not None:
+            return _policy_blocked(create_error)
         return _execute_create(
-            dict(dispatch.fields),
+            fields,
             thread_id,
             "agent",
             mutation.tickets_dir,
@@ -409,6 +466,7 @@ def _execute_dispatch(
             "agent",
             mutation.tickets_dir,
             change_history_entry=change_history_entry,
+            target_sections=target_sections,
         )
     if dispatch.action == EngineAction.CLOSE:
         return _execute_close(
@@ -418,6 +476,7 @@ def _execute_dispatch(
             "agent",
             mutation.tickets_dir,
             change_history_entry=change_history_entry,
+            target_sections=target_sections,
         )
     if dispatch.action == EngineAction.REOPEN:
         return _execute_reopen(
@@ -434,13 +493,11 @@ def _execute_dispatch(
 def _change_history_reason(action: str) -> str:
     if action == "create":
         return "Created ticket from candidate evidence."
-    if action == "blocker_edit":
-        return "Updated blocker details from candidate evidence."
     if action in {"done", "wontfix"}:
         return f"Closed ticket as {action} from candidate evidence."
     if action == "reopen":
         return "Reopened ticket from candidate evidence."
-    if action == "correction":
+    if action == "correct":
         return "Corrected ticket from candidate evidence."
     return "Updated ticket from candidate evidence."
 
@@ -477,7 +534,9 @@ def _validate_autonomous_create_dedup(
 ) -> EngineResponse | None:
     if mutation.action != "create":
         return None
-    fields = dict(mutation.fields)
+    fields, create_error = _create_fields_for_engine(mutation)
+    if create_error is not None:
+        return _policy_blocked(create_error)
     fields.setdefault("priority", "normal")
     plan_response = _plan_create(fields, thread_id, "agent", mutation.tickets_dir)
     if plan_response.state == "ok":
@@ -606,7 +665,7 @@ def _apply_autonomous_mutation_locked(
         else None
     )
 
-    target_error = _validate_target_fingerprint(mutation)
+    target_error = _validate_expected_ticket_fingerprint(mutation)
     if target_error is not None:
         return target_error
 
