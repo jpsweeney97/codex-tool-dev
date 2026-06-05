@@ -1296,7 +1296,7 @@ def _is_valid_transition(current: str, target: str, action: str) -> bool:
     if action == "close":
         return current in {"open", "blocked"} and target in ("done", "wontfix")
     if action == "reopen":
-        return current in ("done", "wontfix") and target == "open"
+        return current in ("done", "wontfix") and target in {"open", "blocked"}
     # Update: follow transition table.
     valid = _VALID_TRANSITIONS.get(current, set())
     return target in valid
@@ -2127,6 +2127,13 @@ def _execute_update(
             error_code="not_found",
         )
 
+    policy_fields = dict(fields)
+    if target_sections and "Blocked On" in target_sections:
+        policy_fields["blocked_on"] = target_sections["Blocked On"]
+    policy_error = _evaluate_update_policy(ticket_id, ticket, policy_fields, tickets_dir)
+    if policy_error is not None:
+        return policy_error
+
     ticket_path = Path(ticket.path)
     original_text = ticket_path.read_text(encoding="utf-8")
     (
@@ -2180,13 +2187,6 @@ def _execute_update(
         elif old_rendered.strip() != rendered.strip():
             changes["sections_changed"].append(heading)
         sections[heading] = rendered
-
-    policy_fields = dict(fields)
-    if target_sections and "Blocked On" in target_sections:
-        policy_fields["blocked_on"] = target_sections["Blocked On"]
-    policy_error = _evaluate_update_policy(ticket_id, ticket, policy_fields, tickets_dir)
-    if policy_error is not None:
-        return policy_error
 
     for heading, value in (target_sections or {}).items():
         if heading == "Change History" or not validate_target_section_name(heading):
@@ -2520,14 +2520,14 @@ def _evaluate_reopen_policy(
     tickets_dir: Path,
 ) -> EngineResponse | None:
     """Return the reopen-policy rejection response, or None when reopen may write."""
-    reopen_reason = fields.get("reopen_reason", "")
-    if not reopen_reason:
+    target_status = fields.get("status")
+    if target_status not in {"open", "blocked"}:
         return EngineResponse(
             state="need_fields",
-            message="reopen_reason required for reopen",
+            message="status must be open or blocked for reopen",
             error_code="need_fields",
             ticket_id=ticket_id,
-            data={"missing_fields": ["reopen_reason"]},
+            data={"missing_fields": ["status"]},
         )
 
     legacy_block = _check_legacy_gate(ticket)
@@ -2544,7 +2544,7 @@ def _evaluate_reopen_policy(
             data={"validation_errors": validation_errors},
         )
 
-    if not _is_valid_transition(ticket.status, "open", "reopen"):
+    if ticket.status not in _TERMINAL_STATUSES:
         return EngineResponse(
             state="invalid_transition",
             message=f"Cannot reopen ticket with status {ticket.status} (must be done or wontfix)",
@@ -2552,9 +2552,43 @@ def _evaluate_reopen_policy(
             error_code="invalid_transition",
             data=_transition_policy_data(
                 ticket.status,
-                "open",
+                target_status,
                 valid_recovery_statuses=[],
                 requires_reopen=False,
+            ),
+        )
+
+    if target_status == "blocked":
+        blocked_on = fields.get("blocked_on")
+        if not isinstance(blocked_on, str) or not blocked_on.strip():
+            return EngineResponse(
+                state="need_fields",
+                message="Transition to 'blocked' requires blocked_on",
+                error_code="blocked_on_required",
+                ticket_id=ticket_id,
+                data={"missing": ["blocked_on"]},
+            )
+
+    message, precondition_code, precondition_detail = _check_transition_preconditions_with_detail(
+        ticket.status,
+        target_status,
+        ticket,
+        tickets_dir,
+        fields=fields,
+    )
+    if message is not None:
+        return EngineResponse(
+            state="invalid_transition",
+            message=message,
+            ticket_id=ticket_id,
+            error_code=precondition_code,
+            data=_transition_policy_data(
+                ticket.status,
+                target_status,
+                valid_recovery_statuses=[target_status],
+                requires_reopen=True,
+                precondition_code=precondition_code,
+                precondition_detail=precondition_detail,
             ),
         )
 
@@ -2669,6 +2703,7 @@ def _execute_reopen(
     tickets_dir: Path,
     *,
     change_history_entry: ChangeHistoryEntry | None = None,
+    target_sections: Mapping[str, object] | None = None,
 ) -> EngineResponse:
     """Reopen a done/wontfix ticket."""
     if not ticket_id:
@@ -2676,11 +2711,11 @@ def _execute_reopen(
             state="need_fields", message="ticket_id required for reopen", error_code="need_fields"
         )
 
-    reopen_reason = fields.get("reopen_reason", "")
-    if not reopen_reason:
+    target_status = fields.get("status")
+    if target_status not in {"open", "blocked"}:
         return EngineResponse(
             state="need_fields",
-            message="reopen_reason required for reopen",
+            message="status must be open or blocked for reopen",
             error_code="need_fields",
         )
 
@@ -2695,35 +2730,54 @@ def _execute_reopen(
             error_code="not_found",
         )
 
-    policy_error = _evaluate_reopen_policy(ticket_id, ticket, fields, tickets_dir)
+    policy_fields = dict(fields)
+    if target_sections and "Blocked On" in target_sections:
+        policy_fields["blocked_on"] = target_sections["Blocked On"]
+    policy_error = _evaluate_reopen_policy(ticket_id, ticket, policy_fields, tickets_dir)
     if policy_error is not None:
         return policy_error
 
-    # Write status change.
     ticket_path = Path(ticket.path)
     original_text = ticket_path.read_text(encoding="utf-8")
     data = dict(ticket.frontmatter)
     sections = dict(ticket.sections)
     old_status = data.get("status", "")
-    data["status"] = "open"
-    new_text = _render_target_ticket_text(data, sections, original_text=original_text)
-
-    # Append to Reopen History section (newest-last).
-    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
-    reopen_entry = f"\n\n## Reopen History\n- **{now}**: {reopen_reason} (by {request_origin})"
-
-    if "## Reopen History" in new_text:
-        rh_match = re.search(r"## Reopen History\n", new_text)
-        if rh_match:
-            next_heading = re.search(r"\n## ", new_text[rh_match.end() :])
-            if next_heading:
-                insert_pos = rh_match.end() + next_heading.start()
-            else:
-                insert_pos = len(new_text)
-            entry = f"- **{now}**: {reopen_reason} (by {request_origin})\n"
-            new_text = new_text[:insert_pos].rstrip() + "\n" + entry + new_text[insert_pos:]
-    else:
-        new_text += reopen_entry
+    data["status"] = target_status
+    if "blocked_by" in fields:
+        data["blocked_by"] = fields["blocked_by"]
+    if target_status == "open":
+        data["blocked_by"] = []
+        sections["Blocked On"] = None
+    elif "blocked_on" in fields:
+        sections["Blocked On"] = _render_target_section_value("Blocked On", fields["blocked_on"])
+    for heading, value in (target_sections or {}).items():
+        if heading == "Change History" or not validate_target_section_name(heading):
+            return EngineResponse(
+                state="escalate",
+                message=f"Reopen failed: invalid target section {heading!r}",
+                ticket_id=ticket_id,
+                error_code="intent_mismatch",
+            )
+        try:
+            sections[heading] = _render_target_section_value(heading, value)
+        except ValueError as exc:
+            return EngineResponse(
+                state="need_fields",
+                message=f"Reopen failed: {exc}",
+                ticket_id=ticket_id,
+                error_code="need_fields",
+            )
+    targeted_headings = tuple((target_sections or {}).keys())
+    if "blocked_on" in fields:
+        targeted_headings = tuple(sorted(set(targeted_headings) | {"Blocked On"}))
+    if target_status == "open":
+        targeted_headings = tuple(sorted(set(targeted_headings) | {"Blocked On"}))
+    new_text = _render_target_ticket_text(
+        data,
+        sections,
+        original_text=original_text,
+        targeted_headings=targeted_headings,
+    )
     if change_history_entry is not None:
         new_text = append_change_history_entry(new_text, change_history_entry)
     invalid_render = _invalid_rendered_ticket_response(
@@ -2748,7 +2802,10 @@ def _execute_reopen(
 
     return EngineResponse(
         state="ok",
-        message=f"Reopened {ticket_id}. Reason: {reopen_reason}",
+        message=f"Reopened {ticket_id} as {target_status}",
         ticket_id=ticket_id,
-        data={"ticket_path": str(ticket_path), "changes": {"status": [old_status, "open"]}},
+        data={
+            "ticket_path": str(ticket_path),
+            "changes": {"status": [old_status, target_status]},
+        },
     )

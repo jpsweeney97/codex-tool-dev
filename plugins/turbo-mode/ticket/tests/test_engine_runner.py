@@ -117,7 +117,7 @@ def _old_mode_agent_execute_payload(
     fields_by_action: dict[str, dict[str, object]] = {
         "update": {"priority": "low"},
         "close": {"resolution": "done"},
-        "reopen": {"reopen_reason": "Need another pass."},
+        "reopen": {"status": "open"},
     }
     return {
         "action": action,

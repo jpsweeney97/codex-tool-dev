@@ -705,6 +705,122 @@ def test_gateway_rejects_status_only_close_for_blocked_ticket(
     assert text == before_text
 
 
+def test_gateway_reopens_terminal_ticket_to_blocked_with_visible_blocker_shape(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    blocker = make_ticket(tmp_tickets, "blocker.md", id="T-20260527-02", status="open")
+    assert blocker.exists()
+    ticket_path = make_ticket(tmp_tickets, "done.md", id="T-20260527-01", status="done")
+    target = CandidateTarget(fields=("status", "blocked_by"), sections=("Blocked On",))
+    proposed_change = {
+        "status": "blocked",
+        "blocked_by": ["T-20260527-02"],
+        "Blocked On": "Waiting for T-20260527-02.",
+    }
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        action="reopen",
+        target=target,
+        proposed_change=proposed_change,
+    )
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        action="reopen",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint or "",
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    text = ticket_path.read_text(encoding="utf-8")
+    assert response.state == "ok"
+    assert "status: blocked" in text
+    assert "blocked_by: [T-20260527-02]" in text
+    assert "## Blocked On\nWaiting for T-20260527-02." in text
+    assert "## Reopen History" not in text
+    assert "| codex | Reopened ticket from candidate evidence." in text
+
+
+def test_gateway_reopens_terminal_ticket_to_open_without_reopen_reason(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "done.md", id="T-20260527-01", status="done")
+    target = CandidateTarget(fields=("status",), sections=())
+    proposed_change = {"status": "open"}
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        action="reopen",
+        target=target,
+        proposed_change=proposed_change,
+    )
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        action="reopen",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint or "",
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    text = ticket_path.read_text(encoding="utf-8")
+    assert response.state == "ok"
+    assert "status: open" in text
+    assert "## Reopen History" not in text
+    assert "reopen_reason" not in text
+
+
+def test_gateway_rejects_reopen_to_open_with_blocker_target_content(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "done.md", id="T-20260527-01", status="done")
+    target = CandidateTarget(fields=("status", "blocked_by"), sections=("Blocked On",))
+    proposed_change = {
+        "status": "open",
+        "blocked_by": [],
+        "Blocked On": None,
+    }
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        action="reopen",
+        target=target,
+        proposed_change=proposed_change,
+    )
+    dispatch = build_engine_dispatch(mutation)
+
+    text = ticket_path.read_text(encoding="utf-8")
+    assert dispatch.state == "policy_blocked"
+    assert dispatch.reason == "reopen_target_not_allowlisted"
+    assert "status: done" in text
+    assert "## Blocked On" not in text
+
+
 def test_gateway_create_accepts_every_source_supported_target_section(
     tmp_tickets: Path,
 ) -> None:

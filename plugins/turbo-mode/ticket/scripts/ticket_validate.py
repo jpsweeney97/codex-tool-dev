@@ -33,6 +33,7 @@ DEPRECATED_WRITE_FIELDS = frozenset(
         "defer",
         "key_file_paths",
         "key_files",
+        "reopen_reason",
         "archive",
     }
 )
@@ -85,7 +86,6 @@ def validate_fields(fields: dict[str, Any]) -> list[str]:
     for key in (
         "title",
         "problem",
-        "reopen_reason",
         "captured_request",
         "next_action",
         "change_history_entry",

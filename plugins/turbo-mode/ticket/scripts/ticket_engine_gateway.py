@@ -802,6 +802,7 @@ def _execute_dispatch(
             "agent",
             mutation.tickets_dir,
             change_history_entry=change_history_entry,
+            target_sections=target_sections,
         )
     return _policy_blocked(f"Unsupported dispatch action: {dispatch.action!r}")
 
