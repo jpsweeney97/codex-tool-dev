@@ -123,6 +123,19 @@ Test these files:
   active target status reopen. The gateway must admit `correct` only when the
   paired runtime decision is `RuntimeDecisionKind.APPLY_CORRECTION`; that
   decision kind is the approval boundary for any `correct -> reopen`.
+- Do not let `correct` authorize itself from candidate content. `evidence_summary`
+  explains the requested correction, but the runtime correction gate must require
+  bounded recent-correction context from private pending-summary/source-context
+  state outside the candidate envelope. If that mechanical context is absent,
+  expired, compacted, or not tied to the current correction candidate, runtime
+  must return `RuntimeDecisionKind.REQUIRE_USER_DISCUSSION` with
+  `reason="correction_detail_missing"` and must not call the gateway.
+- Treat malformed explicit candidate arrays as visible invalid work, not as
+  absence of work. If any object under `candidate_mutations`,
+  `update_candidates`, or `capture_candidates` has missing, unknown, or
+  wrong-typed target-candidate keys, apply-turn must emit an invalid/blocked
+  result or a discussion-required result before mutation evaluation. It must not
+  silently drop the item and fall through to `no_change`.
 - Keep full `reconcile_board` implementation out of this slice. This migration may make the future wrapper possible, but it must not implement discovery ordering, caps, overflow, or broad board search.
 - Keep operation-log work narrow. This slice may update candidate identity,
   expected pre-write recovery facts, expected post-write fingerprint, exact
@@ -1199,7 +1212,9 @@ def test_candidate_identity_canonicalizes_target_order() -> None:
 
 - [ ] **Step 2: Write failing discovery tests**
 
-In `plugins/turbo-mode/ticket/tests/test_candidate_discovery.py`, update explicit candidate tests:
+In `plugins/turbo-mode/ticket/tests/test_candidate_discovery.py`, import
+`InvalidCandidateMutations` from `scripts.ticket_candidate_discovery` and update
+explicit candidate tests:
 
 ```python
 def test_discovers_explicit_target_candidate_mutations(tmp_path: Path) -> None:
@@ -1247,7 +1262,51 @@ def test_structured_candidates_reject_deprecated_ticket_change_scope(
         ]
     )
 
-    assert discover_candidate_mutations(context, tickets_dir) == ()
+    with pytest.raises(InvalidCandidateMutations) as exc_info:
+        discover_candidate_mutations(context, tickets_dir)
+
+    assert exc_info.value.as_payload() == [
+        {
+            "key": "candidate_mutations",
+            "index": 0,
+            "errors": ["unknown candidate keys: ['ticket_change_scope']"],
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "context_key",
+    ("candidate_mutations", "update_candidates", "capture_candidates"),
+)
+def test_malformed_explicit_candidate_arrays_raise_invalid_candidate(
+    tmp_path: Path,
+    context_key: str,
+) -> None:
+    tickets_dir = tmp_path / "docs" / "tickets"
+    context = _context(
+        **{
+            context_key: [
+                {
+                    "ticket_id": "T-20260527-01",
+                    "action": "update",
+                    "target": {"fields": ["priority"], "sections": []},
+                    "proposed_change": {"priority": "high"},
+                    "expected_ticket_fingerprint": "state-T-20260527-01",
+                },
+            ]
+        }
+    )
+
+    with pytest.raises(InvalidCandidateMutations) as exc_info:
+        discover_candidate_mutations(context, tickets_dir)
+
+    assert exc_info.value.as_payload() == [
+        {
+            "key": context_key,
+            "index": 0,
+            "errors": ["missing candidate keys: ['evidence_summary']"],
+        }
+    ]
 
 
 def test_vague_and_path_only_signals_do_not_create_write_candidates(tmp_path: Path) -> None:
@@ -1403,7 +1462,7 @@ def make_candidate_mutation_identity(
 In `ticket_candidate_discovery.py`:
 
 - Remove `EvidenceLink` import.
-- Import `candidate_mutation_from_mapping`.
+- Import `candidate_mapping_errors` and `candidate_mutation_from_mapping`.
 - Import `sha256_fingerprint` from `ticket_autonomy_ids` and
   `candidate_mutation_payload` from `ticket_mutation_identity`.
 - Replace `_candidate_from_mapping()` with:
@@ -1411,6 +1470,38 @@ In `ticket_candidate_discovery.py`:
 ```python
 def _candidate_from_mapping(item: Mapping[str, object]) -> CandidateMutation | None:
     return candidate_mutation_from_mapping(item)
+```
+
+Add explicit invalid-candidate records before `_append_structured_candidates()`:
+
+```python
+@dataclass(frozen=True)
+class InvalidCandidateMappingError:
+    key: str
+    index: int
+    errors: tuple[str, ...]
+
+
+class InvalidCandidateMutations(ValueError):
+    def __init__(self, errors: Sequence[InvalidCandidateMappingError]) -> None:
+        self.errors = tuple(errors)
+        super().__init__(
+            "candidate discovery failed: explicit candidate payload is invalid. "
+            f"Got: {self.as_payload()!r:.100}"
+        )
+
+    def as_payload(self) -> list[dict[str, object]]:
+        return [
+            {"key": error.key, "index": error.index, "errors": list(error.errors)}
+            for error in self.errors
+        ]
+```
+
+Add the needed imports:
+
+```python
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 ```
 
 Replace `_append_structured_candidates()` with:
@@ -1421,12 +1512,50 @@ def _append_structured_candidates(
     seen: set[str],
     turn_context: Mapping[str, object],
 ) -> None:
+    invalid: list[InvalidCandidateMappingError] = []
+    valid: list[CandidateMutation] = []
     for key in ("candidate_mutations", "update_candidates", "capture_candidates"):
-        for item in turn_context.get(key, []):
-            if isinstance(item, Mapping):
-                candidate = _candidate_from_mapping(item)
-                if candidate is not None:
-                    _append_candidate(candidates, seen, candidate)
+        raw_items = turn_context.get(key, [])
+        if raw_items is None:
+            continue
+        if not isinstance(raw_items, list):
+            invalid.append(
+                InvalidCandidateMappingError(
+                    key=key,
+                    index=-1,
+                    errors=("candidate list must be an array",),
+                )
+            )
+            continue
+        for index, item in enumerate(raw_items):
+            if not isinstance(item, Mapping):
+                invalid.append(
+                    InvalidCandidateMappingError(
+                        key=key,
+                        index=index,
+                        errors=("candidate item must be an object",),
+                    )
+                )
+                continue
+            errors = tuple(candidate_mapping_errors(item))
+            if errors:
+                invalid.append(InvalidCandidateMappingError(key=key, index=index, errors=errors))
+                continue
+            candidate = _candidate_from_mapping(item)
+            if candidate is None:
+                invalid.append(
+                    InvalidCandidateMappingError(
+                        key=key,
+                        index=index,
+                        errors=("candidate item failed target shape construction",),
+                    )
+                )
+                continue
+            valid.append(candidate)
+    if invalid:
+        raise InvalidCandidateMutations(invalid)
+    for candidate in valid:
+        _append_candidate(candidates, seen, candidate)
 ```
 
 Replace `_append_candidate()` with:
@@ -1489,6 +1618,62 @@ signature change.
 - Test: `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`
 - Test: `plugins/turbo-mode/ticket/tests/test_engine_gateway.py`
 - Test: `plugins/turbo-mode/ticket/tests/test_engine_policy.py`
+
+- [ ] **Step 0: Write failing apply-turn invalid-candidate test**
+
+In `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`, add this host-facing
+regression test before the existing apply-turn mutation tests:
+
+```python
+def test_apply_turn_reports_invalid_explicit_candidate_without_no_change(
+    tmp_path: Path,
+) -> None:
+    _init_ticket_project(tmp_path)
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    context = _write_context(
+        tmp_path,
+        candidate_mutations=[
+            {
+                "ticket_id": "T-20260527-01",
+                "action": "update",
+                "target": {"fields": ["priority"], "sections": []},
+                "proposed_change": {"priority": "high"},
+                "expected_ticket_fingerprint": "state-T-20260527-01",
+                "evidence_summary": "Priority changed.",
+                "ticket_change_scope": "unrelated_backlog",
+            },
+        ],
+    )
+
+    result = _run_autonomy(
+        tmp_path,
+        "apply-turn",
+        "--project-root",
+        str(tmp_path),
+        "--turn-id",
+        "turn-1",
+        "--context-file",
+        str(context),
+    )
+
+    assert result.returncode == 2
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "state": "invalid_candidate",
+        "changed": False,
+        "ticket_updates": None,
+        "invalid_candidates": [
+            {
+                "key": "candidate_mutations",
+                "index": 0,
+                "errors": ["unknown candidate keys: ['ticket_change_scope']"],
+            }
+        ],
+        "discussion_question": (
+            "Fix the explicit Ticket candidate payload before automatic ticket mutation."
+        ),
+    }
+```
 
 - [ ] **Step 1: Write failing gateway tests for target update and create**
 
@@ -1993,6 +2178,48 @@ the first target gateway write.
 In `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py`, update
 `_run_apply_turn_with_mode()` so the live source entrypoint passes target
 candidate content through unchanged:
+
+- Import `InvalidCandidateMutations` from `ticket_candidate_discovery`.
+- Add this response helper near `_paused_response()`:
+
+```python
+def _invalid_candidate_response(error: InvalidCandidateMutations) -> dict[str, object]:
+    return {
+        "state": "invalid_candidate",
+        "changed": False,
+        "ticket_updates": None,
+        "invalid_candidates": error.as_payload(),
+        "discussion_question": (
+            "Fix the explicit Ticket candidate payload before automatic ticket mutation."
+        ),
+    }
+```
+
+- In `_run_apply_turn_with_mode()`, catch malformed explicit candidate payloads
+  immediately after the existing `InvalidTicketState` branch and before the
+  no-candidate fallback:
+
+```python
+try:
+    candidates = discover_candidate_mutations(context, tickets_dir)
+except InvalidCandidateMutations as exc:
+    _emit(_invalid_candidate_response(exc))
+    return 2
+except InvalidTicketState:
+    pause_workspace_automation(project_root, reason="source_context_unhealthy")
+    _emit(_paused_response("source_context_unhealthy"))
+    return 3
+```
+
+- Make the same `InvalidCandidateMutations` catch in
+  `_source_context_resume_collection()` if it calls `discover_candidate_mutations()`;
+  return a collection state that keeps the pause closed instead of silently
+  resuming from malformed explicit input.
+- Do not broaden `_has_candidate_changes()` to treat malformed target candidates
+  as legacy mode-projection work. The new explicit arrays are either valid
+  target candidates, an explicit invalid-candidate response, or empty.
+
+Then construct target-shaped gateway mutations from accepted decisions:
 
 ```python
 mutation = GatewayMutation(
@@ -3867,6 +4094,49 @@ candidate = CandidateMutation(
 )
 ```
 
+Update `_correction_decision()` so tests provide recent correction context from
+`source_context`, not from candidate content:
+
+```python
+def _recent_correction_context(candidate: CandidateMutation) -> dict[str, object]:
+    assert candidate.ticket_id is not None
+    return {
+        candidate.ticket_id: {
+            "correction_ready": True,
+            "target": {
+                "fields": list(candidate.target.fields),
+                "sections": list(candidate.target.sections),
+            },
+        }
+    }
+
+
+def _correction_decision(
+    candidate: CandidateMutation,
+    *,
+    ticket_path: Path | None = None,
+    recent_correction_context: bool = True,
+):
+    source_context: dict[str, object] = {}
+    if ticket_path is not None and candidate.ticket_id is not None:
+        source_context["ticket_state_fingerprints"] = {
+            candidate.ticket_id: target_fingerprint(ticket_path)
+        }
+    if recent_correction_context and candidate.ticket_id is not None:
+        source_context["recent_correction_context"] = _recent_correction_context(candidate)
+    return evaluate_autonomy_intent(
+        AutonomyIntent(
+            action_kind="correct_ticket_mutation",
+            candidates=(candidate,),
+            source_context=source_context,
+        ),
+        current_mode="agent_primary",
+        thread_id="thread-1",
+        turn_id="turn-1",
+        now=datetime.now(UTC),
+    )[0]
+```
+
 Update `_apply_correction()` so correction tests use the same target-shaped
 gateway request as normal apply-turn:
 
@@ -3909,6 +4179,35 @@ assert "current_mode" not in events[0]["details"]
 assert "evidence_kind" not in events[0]["details"]
 assert events[0]["details"]["target"] == {"fields": ["priority"], "sections": []}
 assert events[0]["details"]["evidence_summary"] == "Prior mutation set priority too low."
+```
+
+Add this negative authorization test. It must fail before implementation because
+`evidence_summary` is line-shaped, but no recent correction context is present:
+
+```python
+def test_correction_without_recent_context_requires_discussion(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01", priority="low")
+    candidate = CandidateMutation(
+        ticket_id="T-20260527-01",
+        action="correct",
+        target=CandidateTarget(fields=("priority",), sections=()),
+        proposed_change={"priority": "high"},
+        expected_ticket_fingerprint=target_fingerprint(ticket_path),
+        evidence_summary="Prior mutation set priority too low.",
+    )
+
+    decision = _correction_decision(
+        candidate,
+        ticket_path=ticket_path,
+        recent_correction_context=False,
+    )
+
+    assert decision.kind == RuntimeDecisionKind.REQUIRE_USER_DISCUSSION
+    assert decision.reason == "correction_detail_missing"
 ```
 
 Add this test:
@@ -4352,12 +4651,80 @@ if shape_errors:
     continue
 ```
 
-Replace `_correction_detail_available()` with:
+Replace `_correction_detail_available()` with a source-context gate. The helper
+must not read `candidate.evidence_summary`; that text explains the correction
+but does not authorize the privileged correction lane:
 
 ```python
-def _correction_detail_available(candidate: CandidateMutation) -> bool:
-    return _line_shaped(candidate.evidence_summary)
+def _correction_detail_available(
+    candidate: CandidateMutation,
+    source_context: Mapping[str, object],
+) -> bool:
+    contexts = source_context.get("recent_correction_context")
+    if not isinstance(contexts, Mapping) or candidate.ticket_id is None:
+        return False
+    context = contexts.get(candidate.ticket_id)
+    if not isinstance(context, Mapping):
+        return False
+    if context.get("correction_ready") is not True:
+        return False
+    expected_target = {
+        "fields": list(candidate.target.fields),
+        "sections": list(candidate.target.sections),
+    }
+    return context.get("target") == expected_target
 ```
+
+Call it from the correction branch with `intent.source_context`:
+
+```python
+if not _correction_detail_available(candidate, intent.source_context):
+    decisions.append(
+        _decision(
+            candidate,
+            RuntimeDecisionKind.REQUIRE_USER_DISCUSSION,
+            reason="correction_detail_missing",
+            pending_summary_status="discussion_required",
+        )
+    )
+    continue
+```
+
+In `ticket_autonomy.py`, derive `recent_correction_context` only from bounded
+private pending-summary events that still retain uncompacted correction detail:
+
+```python
+def _recent_correction_context_from_events(
+    events: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    context: dict[str, object] = {}
+    for event in events:
+        ticket_id = event.get("ticket_id")
+        details = event.get("details")
+        if not isinstance(ticket_id, str) or not isinstance(details, Mapping):
+            continue
+        if details.get("correction_ready") is not True:
+            continue
+        if "correction_detail" not in details:
+            continue
+        target = details.get("target")
+        if not isinstance(target, Mapping):
+            continue
+        fields = target.get("fields")
+        sections = target.get("sections")
+        if not isinstance(fields, list) or not isinstance(sections, list):
+            continue
+        context[ticket_id] = {
+            "correction_ready": True,
+            "target": {"fields": fields, "sections": sections},
+        }
+    return context
+```
+
+When `evaluate_autonomy_intent()` is called for apply-turn candidates, pass
+`{"recent_correction_context": context}` only when this helper returns a
+non-empty mapping. Do not synthesize correction context from the candidate
+envelope or from `evidence_summary`.
 
 In `ticket_engine_gateway.py`:
 
@@ -4609,34 +4976,49 @@ helpers. Do not introduce a second recovery-facts type or a second history
 metadata shape.
 
 Before appending `mutation_attempt`, build the dispatch, create allocation, and
-`ChangeHistoryEntry`, then call `preview_target_write()`. Use one timestamp for
-the attempt event and generated history entry:
+`ChangeHistoryEntry`, then call `preview_target_write()` for non-create writes
+and fresh create attempts. For retained create retries, preserve Task 3A's
+retained branch exactly: reuse the recorded allocation and retained
+`ExpectedWriteFacts`, including the generated `ChangeHistoryEntry` details.
+Do not reconstruct retained create history metadata from the current clock or a
+fresh `_change_history_entry()` call.
+
+Use one timestamp for the attempt event and generated history entry on fresh
+attempts:
 
 ```python
 attempt_timestamp = change_history_timestamp or _now_z()
-change_history_entry = _change_history_entry(
-    mutation.action,
-    timestamp=attempt_timestamp,
-)
-preview = preview_target_write(
-    action=dispatch.action.value,
-    ticket_id=mutation.ticket_id,
-    fields=dict(dispatch.fields),
-    target_sections=dispatch.sections or {},
-    session_id=thread_id,
-    request_origin="agent",
-    tickets_dir=mutation.tickets_dir,
-    change_history_entry=change_history_entry,
-    reserved_ticket_id=(
-        create_allocation.ticket_id if create_allocation is not None else None
-    ),
-)
-if isinstance(preview, EngineResponse):
-    return preview
-expected_write_facts = ExpectedWriteFacts(
-    expected_post_write_fingerprint=preview.post_write_fingerprint,
-    change_history_entry=_change_history_entry_details(change_history_entry),
-)
+if retained_create_attempt is not None:
+    create_allocation = retained_create_attempt.allocation
+    expected_write_facts = retained_create_attempt.expected_write_facts
+    change_history_entry = _change_history_entry_from_expected_facts(
+        retained_create_attempt.expected_write_facts
+    )
+    attempt_timestamp = change_history_entry.timestamp
+else:
+    change_history_entry = _change_history_entry(
+        mutation.action,
+        timestamp=attempt_timestamp,
+    )
+    preview = preview_target_write(
+        action=dispatch.action.value,
+        ticket_id=mutation.ticket_id,
+        fields=dict(dispatch.fields),
+        target_sections=dispatch.sections or {},
+        session_id=thread_id,
+        request_origin="agent",
+        tickets_dir=mutation.tickets_dir,
+        change_history_entry=change_history_entry,
+        reserved_ticket_id=(
+            create_allocation.ticket_id if create_allocation is not None else None
+        ),
+    )
+    if isinstance(preview, EngineResponse):
+        return preview
+    expected_write_facts = ExpectedWriteFacts(
+        expected_post_write_fingerprint=preview.post_write_fingerprint,
+        change_history_entry=_change_history_entry_details(change_history_entry),
+    )
 ```
 
 Update `_base_event()` and `_append_gateway_event()` to accept an optional
@@ -4898,10 +5280,11 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 ```
 
 Expected: the full docs-contract file passes, including the updated lifecycle
-assertion, capture/update skill availability assertions, plugin manifest
-availability assertion, and the Task 3, Task 3A, and Task 5 focused
-source-entrypoint/create-idempotency/recovery tests are still passing in the
-current checkout.
+assertion, capture/update skill availability assertions, and plugin manifest
+availability assertion. This command proves docs-contract coverage only; do not
+claim Task 3, Task 3A, or Task 5 source-test proof from this docs-only selector.
+Those source-test gates are Task 6 preconditions and are rechecked by the final
+all-source verification command.
 
 - [ ] **Step 5: Commit Task 6**
 
@@ -5035,10 +5418,15 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
   `ticket_id`, `target`, `proposed_change`, `expected_ticket_fingerprint`, and
   `evidence_summary`.
 - Unknown or missing top-level candidate keys are rejected before mutation
-  evaluation.
+  evaluation and surface as visible invalid-candidate or discussion-required
+  results. Malformed explicit entries under `candidate_mutations`,
+  `update_candidates`, or `capture_candidates` must not be silently dropped into
+  `no_change`.
 - Wrong-type `ticket_id`, `expected_ticket_fingerprint`, `action`, and
   `evidence_summary` mapping values are rejected before mutation evaluation; no
-  invalid non-string value is coerced to `None` or `""`.
+  invalid non-string value is coerced to `None` or `""`, and wrong-type explicit
+  candidate entries also surface as visible invalid-candidate or
+  discussion-required results.
 - `conflict_reason` is not accepted as target candidate input and does not enter
   target candidate identity, gateway validation, result data, or operation-log
   details.
@@ -5095,6 +5483,11 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
   correction history. Active current tickets corrected to `open` or `blocked`
   dispatch through update semantics; only terminal current tickets corrected to
   `open` or `blocked` dispatch through reopen semantics.
+- `correct` requires recent correction context from private pending-summary or
+  source-context state outside the candidate envelope. `evidence_summary` is not
+  an authorization fact; without uncompacted recent correction context matching
+  the current correction target, runtime returns `correction_detail_missing` and
+  does not emit `RuntimeDecisionKind.APPLY_CORRECTION`.
 - Operation-log details retain only bounded recovery facts and do not add
   semantic ranking, current-mode labels, evidence taxonomies, runtime decision
   kinds, approval state, or private workflow stages. Non-create attempts retain
@@ -5117,6 +5510,10 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
   content-only post-write fingerprint is repairable, mismatched occupied content
   pauses for reconciliation, and an unused allocation path does not allocate a
   fresh ticket without the same current candidate retry.
+- Task 5 non-create recovery changes preserve Task 3A retained-create recovery:
+  retained create retries reuse recorded allocation, expected post-write
+  fingerprint, and generated `Change History` metadata instead of rebuilding
+  those facts from the current clock or current candidate facts.
 - `ticket_turn_batch.py` validates the six target actions for retained
   candidate action facts on `mutation_attempt` and
   `mutation_status`/`ticket_written` boundaries and keeps maintenance event
