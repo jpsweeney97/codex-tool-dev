@@ -12,12 +12,15 @@
 
 ## Evidence Baseline
 
-Live state checked before writing this plan and after the review patch:
+Live state checked before writing this plan, after the initial plan commit, and
+after the review hardening patch:
 
 - Branch/worktree at plan creation: `main...origin/main`, clean normal status,
   `HEAD` at `92cd4bed`.
-- Branch/worktree after committing this plan: `main...origin/main [ahead 1]`,
+- Branch/worktree after committing the initial plan: `main...origin/main [ahead 1]`,
   clean normal status, `HEAD` at `38537aa9`.
+- Branch/worktree after the review hardening patch: `main...origin/main [ahead 2]`,
+  clean normal status, `HEAD` at `69f44342`.
 - Active ticket inventory: seven files under `docs/tickets/`; all use ID-only filenames, frontmatter metadata, target statuses, required sections, no unknown frontmatter keys, and no blocked-shape defects.
 - Active ticket statuses: six `open`, one `done`, no `status: in_progress`.
 - Historical references: old-looking `T-20260527-001` examples only appear in `docs/superpowers/specs/2026-05-26-ticket-runtime-first-autonomy-design.md`; placeholders such as `T-YYYYMMDD-NN` appear in ADR/control docs and are not active ticket IDs.
@@ -76,6 +79,11 @@ Test these files:
 ## Contract Decisions
 
 - Migrate `reopen` fully in this slice. The May 30 control doc already states that the human reason belongs in `evidence_summary`, not `reopen_reason`, and that `reopen -> blocked` is valid when the blocked ticket shape is valid.
+- Treat `correct` as the user-triggered correction lane for a recent Ticket
+  write. A `correct` candidate may dispatch to update, close, or reopen
+  according to its target status, but the gateway must admit it only when the
+  paired runtime decision is `RuntimeDecisionKind.APPLY_CORRECTION`; that
+  decision kind is the approval boundary for `correct -> reopen`.
 - Keep full `reconcile_board` implementation out of this slice. This migration may make the future wrapper possible, but it must not implement discovery ordering, caps, overflow, or broad board search.
 - Keep operation-log work narrow. This slice may update candidate identity, expected pre-write fingerprint, post-write fingerprint, evidence summary, target fields/sections, and write/summary flags. It must not add semantic ranking, evidence-kind taxonomies, approval-state taxonomies, or private workflow stages.
 - Remove vague `possible_candidates` and path-only candidates from write-candidate discovery. They are not target candidate mutations because they do not name a user-visible change. Future `reconcile_board` can reintroduce broad search as a wrapper that emits ordinary target candidates.
@@ -123,17 +131,20 @@ git status --short --branch
 git rev-parse --short HEAD
 ```
 
-Expected:
+Expected at the last reviewed source baseline before this clarification patch:
 
 ```text
-## main...origin/main [ahead 1]
-38537aa9
+## main...origin/main [ahead 2]
+69f44342
 ```
 
-If `HEAD` has advanced, re-check the plan against the new diff before using the
-expected output as a gate. If normal status is dirty before implementation,
-inspect the dirty files and stop unless they are this plan or intentional
-implementation work for the active task.
+If `HEAD` has advanced, run `git diff --stat 69f44342..HEAD` and re-check the
+plan against the new diff before using the expected output as a gate. If the
+only diff is this plan, record the live status and continue. If source files
+changed, re-check the implementation steps against the new source before
+continuing. If normal status is dirty before implementation, inspect the dirty
+files and stop unless they are this plan or intentional implementation work for
+the active task.
 
 - [ ] **Step 2: Re-run the active ticket inventory**
 
@@ -1206,6 +1217,13 @@ def _mutation_fingerprint(mutation: GatewayMutation) -> str:
 In `_decision_error()`, replace field comparison and identity recomputation with:
 
 ```python
+    if mutation.action == "correct":
+        if decision.kind != RuntimeDecisionKind.APPLY_CORRECTION:
+            return "decision_mismatch"
+    elif decision.kind != RuntimeDecisionKind.APPLY_AUTONOMOUSLY:
+        return "autonomous_decision_required"
+    if decision.candidate.action != mutation.action:
+        return "action_mismatch"
     if decision.candidate.target != mutation.target:
         return "target_mismatch"
     if dict(decision.candidate.proposed_change) != dict(mutation.proposed_change):
@@ -1228,9 +1246,10 @@ In `_decision_error()`, replace field comparison and identity recomputation with
     )
 ```
 
-Also remove `_candidate_evidence_payload()`. After this step, `_decision_error`
-must not read `candidate.evidence`, `mutation.fields`, or
-`mutation.target_fingerprint`.
+The `correct` gate above is intentional: `correct -> reopen` is allowed only
+after the runtime selected the user-triggered correction decision kind. Also
+remove `_candidate_evidence_payload()`. After this step, `_decision_error` must
+not read `candidate.evidence`, `mutation.fields`, or `mutation.target_fingerprint`.
 
 - [ ] **Step 4: Update expected fingerprint validation**
 
