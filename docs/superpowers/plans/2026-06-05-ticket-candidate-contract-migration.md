@@ -13,7 +13,8 @@
 ## Evidence Baseline
 
 Live state checked before writing this plan, after the initial plan commit, after
-the review hardening patch, and after the correction-gate clarification:
+the review hardening patch, after the correction-gate clarification, and after
+the source-entrypoint coverage patch:
 
 - Branch/worktree at plan creation: `main...origin/main`, clean normal status,
   `HEAD` at `92cd4bed`.
@@ -23,6 +24,8 @@ the review hardening patch, and after the correction-gate clarification:
   clean normal status, `HEAD` at `69f44342`.
 - Branch/worktree after the correction-gate clarification: `main...origin/main [ahead 3]`,
   clean normal status, `HEAD` at `6d7e1579`.
+- Branch/worktree after the source-entrypoint coverage patch:
+  `main...origin/main [ahead 4]`, clean normal status, `HEAD` at `d52a81ab`.
 - Active ticket inventory: seven files under `docs/tickets/`; all use ID-only filenames, frontmatter metadata, target statuses, required sections, no unknown frontmatter keys, and no blocked-shape defects.
 - Active ticket statuses: six `open`, one `done`, no `status: in_progress`.
 - Historical references: old-looking `T-20260527-001` examples only appear in `docs/superpowers/specs/2026-05-26-ticket-runtime-first-autonomy-design.md`; placeholders such as `T-YYYYMMDD-NN` appear in ADR/control docs and are not active ticket IDs.
@@ -54,9 +57,9 @@ Modify these files:
     flow and keeps generated `Change History` grammar aligned with the May 30
     control doc.
 - `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py`
-  - Keeps retained operation-log validation compatible with the six target
-    actions and removes durable evidence-kind/current-mode detail requirements
-    from mutation attempt events.
+  - Separates retained target-candidate action facts from maintenance event
+    validation and removes durable decision-kind/evidence-kind/current-mode
+    detail requirements from mutation attempt events.
 - `plugins/turbo-mode/ticket/scripts/ticket_validate.py`
   - Removes `reopen_reason` from normal target write-field acceptance once `reopen` uses `evidence_summary`.
 - `plugins/turbo-mode/ticket/README.md`
@@ -94,10 +97,22 @@ Test these files:
   decision kind is the approval boundary for `correct -> reopen`.
 - Keep full `reconcile_board` implementation out of this slice. This migration may make the future wrapper possible, but it must not implement discovery ordering, caps, overflow, or broad board search.
 - Keep operation-log work narrow. This slice may update candidate identity, expected pre-write fingerprint, post-write fingerprint, evidence summary, target fields/sections, and write/summary flags. It must not add semantic ranking, evidence-kind taxonomies, approval-state taxonomies, or private workflow stages.
+- Treat the target candidate envelope as exact. Do not accept `conflict_reason`
+  as a top-level candidate key, do not store it on target-shaped
+  `CandidateMutation`, and do not include it in identity, gateway, result, or
+  operation-log payloads. If live discovery sees conflicting evidence, it should
+  block before constructing a write candidate or carry a short mechanical pause
+  reason outside candidate content.
 - Remove vague `possible_candidates` and path-only candidates from write-candidate discovery. They are not target candidate mutations because they do not name a user-visible change. Future `reconcile_board` can reintroduce broad search as a wrapper that emits ordinary target candidates.
 - Treat Tasks 1 and 2 as one atomic source commit group. Runtime identity calls
   start using the target-shaped identity helper before `test_autonomy_runtime.py`
   can be green; do not commit Task 1 by itself.
+- Treat intermediate task commits as focused-green boundaries, not full-suite
+  green boundaries. Do not claim the full Ticket suite is green until Task 7.
+  If a task removes source behavior that a focused selector covers, rewrite or
+  remove the corresponding tests in that same task. Tests outside the task's
+  focused selector remain assigned to their named later task and must not be
+  dismissed as unrelated failures.
 - Treat `expected_ticket_fingerprint` as candidate content supplied by explicit
   target candidate mappings. `ticket_autonomy.py` must pass
   `decision.candidate.expected_ticket_fingerprint` into `GatewayMutation`; it
@@ -111,7 +126,7 @@ Before implementation, build the rename/blast-radius map from live source. Run
 both commands:
 
 ```bash
-rg -n "target_fingerprint|mutation\.fields|\.evidence|EvidenceLink|\"correction\"|reopen_reason|Reopen History|evidence_kind|current_mode|reprioritize|stale_cleanup|blocker_edit|refine" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
+rg -n "target_fingerprint|mutation\.fields|\.evidence|EvidenceLink|\"correction\"|conflict_reason|reopen_reason|Reopen History|evidence_kind|current_mode|\"decision\"|decision\.kind|RuntimeDecisionKind|reprioritize|stale_cleanup|blocker_edit|refine|archive|delete|history_repair|summarize|compact|pause_automation|codex\.ticket\.mutation\.v1" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 rg -n "GatewayMutation\(|CandidateMutation\(" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 ```
 
@@ -124,10 +139,13 @@ Assign every hit to one of these dispositions before claiming a task is green:
 | `GatewayMutation(...)` construction sites | Rewrite every source/test construction to the target-shaped constructor. `ticket_autonomy.py` is the live apply-turn spine and must be migrated in Task 3, not left to final verification. | Task 3 |
 | `CandidateMutation(...)` construction sites | Rewrite every source/test construction to the target-shaped constructor or remove the old test. Construction sites are not covered by vocabulary greps alone. | Tasks 1-5 and final construction-site check |
 | `.evidence`, `EvidenceLink`, evidence-kind floors | Replace with one-line `evidence_summary`; remove evidence-kind classification from runtime/discovery/gateway mutation-attempt facts. | Tasks 1, 2, and 5 |
-| `"correction"` candidate action | Rename target candidate action to `"correct"` in runtime, gateway, turn-batch validation, tests, and generated history reason. Keep `RuntimeDecisionKind.APPLY_CORRECTION` only as an internal decision kind. | Task 5 |
+| `"correction"` candidate action | Rename target candidate action to `"correct"` in runtime, gateway, turn-batch validation, tests, and generated history reason. Task 1 owns runtime action groups and `evaluate_autonomy_intent()`; Task 3 owns gateway/source-entrypoint projection; Task 5 owns correction fixtures and operation-log recovery assertions. Keep `RuntimeDecisionKind.APPLY_CORRECTION` only as an internal decision kind. | Tasks 1, 3, 5, and final residue check |
+| `conflict_reason` candidate content | Remove from accepted target candidate mappings and from `CandidateMutation`. Conflict evidence may stop candidate construction or produce a short mechanical pause reason outside the target candidate envelope, but it must not enter candidate identity, gateway validation, result data, or mutation-attempt details. | Tasks 1, 2, and final residue check |
 | `reprioritize`, `stale_cleanup`, `blocker_edit`, `refine` action literals | These are not target candidate actions. Fold write behavior into ordinary `update` candidates, delete old runtime/gateway/test action branches, and keep `stale_cleanup` only as read-only review-hygiene output that candidate discovery no longer accepts as a write candidate. | Tasks 1, 2, 5, and final residue check |
 | `reopen_reason` and `Reopen History` normal write behavior | Move human reason to `evidence_summary`, append ordinary generated `Change History`, and rewrite/remove tests or helpers that preserve `Reopen History` as target behavior. | Task 4 |
-| `evidence_kind` and `current_mode` mutation-attempt details | Remove from target candidate operation-log event details unless a separate operation-log redesign explicitly keeps a bounded mechanical fact allowed by the control doc. Runtime mode inputs may keep `current_mode` only when they are not persisted mutation-attempt details. | Task 5 |
+| `evidence_kind`, `current_mode`, `"decision"`, and `decision.kind` mutation-attempt details | Remove from target candidate operation-log event details unless a separate operation-log redesign explicitly keeps a bounded mechanical fact allowed by the control doc. Runtime mode inputs may keep `current_mode` only when they are not persisted mutation-attempt details. `RuntimeDecisionKind` values may remain internal branch logic, but must not be persisted in mutation-attempt details or result data. | Task 5 |
+| `archive`, `delete`, `history_repair`, `summarize`, `compact`, `pause_automation` action vocabulary | These are not target candidate actions. Keep maintenance vocabulary only in event-type-specific validation or hard discussion guards where the code is not recording a retained candidate action fact. Do not let these values validate a new `mutation_attempt` or `ticket_write` candidate action. | Task 5 and final residue check |
+| `codex.ticket.mutation.v1` candidate identity fixtures | Replace candidate-contract identity helpers and fixtures with `codex.ticket.mutation.v2`. Low-level `make_mutation_id()` tests may keep arbitrary v1 schema examples only when they are not candidate-contract fixtures. | Task 2 and final residue check |
 | `EngineDispatch.sections` for close/reopen | Do not compute sections and drop them. Either pass them to engine execution or explicitly validate that the engine-owned side effect exactly matches the named target cleanup. | Tasks 3 and 4 |
 
 Tests that encode deprecated architecture must be rewritten or removed in the
@@ -150,14 +168,15 @@ git status --short --branch
 git rev-parse --short HEAD
 ```
 
-Expected at the last reviewed source baseline before this blast-radius patch:
+Expected at the last reviewed source baseline before this operation-log and
+exact-envelope patch:
 
 ```text
-## main...origin/main [ahead 3]
-6d7e1579
+## main...origin/main [ahead 4]
+d52a81ab
 ```
 
-If `HEAD` has advanced, run `git diff --stat 6d7e1579..HEAD` and re-check the
+If `HEAD` has advanced, run `git diff --stat d52a81ab..HEAD` and re-check the
 plan against the new diff before using the expected output as a gate. If the
 only diff is this plan, record the live status and continue. If source files
 changed, re-check the implementation steps against the new source before
@@ -271,10 +290,11 @@ In `plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py`, replace the
 helper imports and helper constructors with target-shaped versions. Rewrite or
 remove every old-contract test that depends on `EvidenceLink`, `evidence=`,
 `blocker_edit`, `refine`, `reprioritize`, `stale_cleanup`,
-`target_fingerprint`, `"correction"`, or
+`target_fingerprint`, `"correction"`, `conflict_reason`, or
 `reopen_reason`. Keep only tests for target-contract invariants, mechanical
-mode/fanout/conflict gates, destructive-action discussion gates, and target
-engine dispatch.
+mode/fanout gates, destructive-action discussion gates, and target engine
+dispatch. If conflicting evidence is still represented in source, it must block
+before `CandidateMutation` construction or live outside candidate content.
 
 Add these tests near the top of the file after `_decisions()`:
 
@@ -308,7 +328,6 @@ def _candidate(
     proposed_change: dict[str, object] | None = None,
     expected_ticket_fingerprint: str | None = "state-T-20260527-01",
     evidence_summary: str = "Current turn justifies this ticket change.",
-    conflict_reason: str | None = None,
 ) -> CandidateMutation:
     return CandidateMutation(
         ticket_id=ticket_id,
@@ -317,7 +336,6 @@ def _candidate(
         proposed_change={"priority": "low"} if proposed_change is None else proposed_change,
         expected_ticket_fingerprint=expected_ticket_fingerprint,
         evidence_summary=evidence_summary,
-        conflict_reason=conflict_reason,
     )
 
 
@@ -348,6 +366,22 @@ def test_candidate_mapping_rejects_unknown_top_level_keys() -> None:
     )
 
     assert errors == ["unknown candidate keys: ['legacy_reason']"]
+
+
+def test_candidate_mapping_rejects_conflict_reason_as_candidate_content() -> None:
+    errors = candidate_mapping_errors(
+        {
+            "action": "update",
+            "ticket_id": "T-20260527-01",
+            "target": {"fields": ["priority"], "sections": []},
+            "proposed_change": {"priority": "high"},
+            "expected_ticket_fingerprint": "state-T-20260527-01",
+            "evidence_summary": "Priority changed after this turn.",
+            "conflict_reason": "conflicting evidence",
+        }
+    )
+
+    assert errors == ["unknown candidate keys: ['conflict_reason']"]
 
 
 def test_candidate_mapping_requires_exact_target_closure() -> None:
@@ -457,7 +491,6 @@ class CandidateMutation:
     proposed_change: Mapping[str, object]
     expected_ticket_fingerprint: str | None
     evidence_summary: str
-    conflict_reason: str | None = None
 ```
 
 Add these constants and helpers near the candidate model:
@@ -475,7 +508,6 @@ _ALLOWED_CANDIDATE_KEYS = frozenset(
         "proposed_change",
         "expected_ticket_fingerprint",
         "evidence_summary",
-        "conflict_reason",
     }
 )
 _FORBIDDEN_TARGET_SECTIONS = frozenset({"Change History"})
@@ -556,7 +588,6 @@ def candidate_mapping_errors(item: Mapping[str, object]) -> list[str]:
     proposed_change = item.get("proposed_change")
     if not isinstance(proposed_change, Mapping):
         return ["proposed_change must be an object"]
-    conflict_reason = item.get("conflict_reason")
     candidate = CandidateMutation(
         ticket_id=item.get("ticket_id") if isinstance(item.get("ticket_id"), str) else None,
         action=item.get("action") if isinstance(item.get("action"), str) else "",
@@ -570,7 +601,6 @@ def candidate_mapping_errors(item: Mapping[str, object]) -> list[str]:
         evidence_summary=(
             item.get("evidence_summary") if isinstance(item.get("evidence_summary"), str) else ""
         ),
-        conflict_reason=conflict_reason if isinstance(conflict_reason, str) else None,
     )
     return _candidate_shape_errors(candidate)
 
@@ -584,7 +614,6 @@ def candidate_mutation_from_mapping(item: Mapping[str, object]) -> CandidateMuta
     proposed_change = item["proposed_change"]
     if not isinstance(proposed_change, Mapping):
         return None
-    conflict_reason = item.get("conflict_reason")
     return CandidateMutation(
         ticket_id=item.get("ticket_id") if isinstance(item.get("ticket_id"), str) else None,
         action=item["action"] if isinstance(item["action"], str) else "",
@@ -596,7 +625,6 @@ def candidate_mutation_from_mapping(item: Mapping[str, object]) -> CandidateMuta
             else None
         ),
         evidence_summary=item["evidence_summary"] if isinstance(item["evidence_summary"], str) else "",
-        conflict_reason=conflict_reason if isinstance(conflict_reason, str) else None,
     )
 ```
 
@@ -657,6 +685,8 @@ def map_candidate_to_engine(
         return EngineDispatch("ok", EngineAction.REOPEN, fields, sections=sections)
     if candidate.action == "correct":
         if fields.get("status") in {"done", "wontfix"}:
+            if not _close_target_is_valid(candidate, fields["status"]):
+                return EngineDispatch("policy_blocked", None, {}, reason="close_target_not_allowlisted")
             return EngineDispatch("ok", EngineAction.CLOSE, {"resolution": fields["status"]}, sections=sections)
         if fields.get("status") in {"open", "blocked"}:
             return EngineDispatch("ok", EngineAction.REOPEN, fields, sections=sections)
@@ -683,6 +713,19 @@ def test_blocked_close_target_names_blocker_cleanup() -> None:
     assert dispatch.action == EngineAction.CLOSE
     assert dispatch.fields == {"resolution": "done"}
     assert dispatch.sections == {"Blocked On": None}
+
+
+def test_correct_close_rejects_mixed_status_and_metadata_target() -> None:
+    dispatch = map_candidate_to_engine(
+        _candidate(
+            "correct",
+            target=_target(fields=("status", "priority"), sections=()),
+            proposed_change={"status": "done", "priority": "high"},
+        )
+    )
+
+    assert dispatch.state == "policy_blocked"
+    assert dispatch.reason == "close_target_not_allowlisted"
 ```
 
 Update `EngineDispatch` to carry target sections:
@@ -729,7 +772,16 @@ def _identity_for_candidate(
     )
 ```
 
-Update evaluator branches so non-create writes block with reason `expected_ticket_fingerprint_required` when `candidate.expected_ticket_fingerprint is None`. Remove calls to `_target_fingerprint_for_candidate()` and remove evidence-link floors that classify evidence kinds. Keep conflict, mode, fanout, hard destructive-action, and correction-detail mechanical gates.
+Update evaluator branches so non-create writes block with reason
+`expected_ticket_fingerprint_required` when
+`candidate.expected_ticket_fingerprint is None`. Remove calls to
+`_target_fingerprint_for_candidate()`, remove evidence-link floors that classify
+evidence kinds, and replace any runtime `if candidate.action == "correction"`
+branch with `if candidate.action == "correct"` in this task. Keep mode, fanout,
+hard destructive-action, and correction-detail mechanical gates. Conflict facts
+must not live on `CandidateMutation`; if current source still needs a conflict
+boundary, handle it before target candidate construction or as a short
+mechanical pause reason outside candidate content.
 
 - [ ] **Step 6: Run focused runtime and identity tests**
 
@@ -1393,12 +1445,17 @@ recomputes the current target fingerprint immediately before writing.
 
 - [ ] **Step 6: Add exact target-section support to engine update**
 
-In `ticket_engine_core.py`, add this helper near `_UPDATE_SECTION_HEADINGS`:
+In `ticket_engine_core.py`, add this helper near `_UPDATE_SECTION_HEADINGS`.
+Target-section update and create rendering must agree for structured target
+sections such as `Acceptance Criteria`; do not serialize structured values with
+Python `repr`:
 
 ```python
-def _render_target_section_value(value: Any) -> str | None:
+def _render_target_section_value(heading: str, value: Any) -> str | None:
     if value is None:
         return None
+    if heading == "Acceptance Criteria":
+        return _render_update_section_value("acceptance_criteria", value)
     return str(value)
 ```
 
@@ -1428,7 +1485,7 @@ After the existing `for key in section_fields:` block, add exact target-section 
                 ticket_id=ticket_id,
                 error_code="intent_mismatch",
             )
-        rendered = _render_target_section_value(value)
+        rendered = _render_target_section_value(heading, value)
         old_rendered = ticket.sections.get(heading, "")
         if rendered is None:
             if heading in ticket.sections:
@@ -1887,7 +1944,7 @@ Replace the old `reopen_reason` body with:
                 ticket_id=ticket_id,
                 error_code="intent_mismatch",
             )
-        sections[heading] = _render_target_section_value(value)
+        sections[heading] = _render_target_section_value(heading, value)
     targeted_headings = tuple((target_sections or {}).keys())
     if target_status == "open":
         targeted_headings = tuple(sorted(set(targeted_headings) | {"Blocked On"}))
@@ -1986,6 +2043,9 @@ Add this assertion to `test_user_triggered_update_correction_applies_without_new
 
 ```python
 assert "rewrite_change_history" not in events[0]["details"]
+assert "decision" not in events[0]["details"]
+assert "current_mode" not in events[0]["details"]
+assert "evidence_kind" not in events[0]["details"]
 assert events[0]["details"]["target"] == {"fields": ["priority"], "sections": []}
 assert events[0]["details"]["evidence_summary"] == "Prior mutation set priority too low."
 ```
@@ -2020,13 +2080,18 @@ Run:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py -q
 ```
 
-Expected: fail because correction helpers still use the old `correction` action and flat fields.
+Expected: fail because correction helpers, integration fixtures, gateway recovery
+details, or turn-batch validation still use the old `correction` action, flat
+fields, or persisted decision/current-mode/evidence-kind details.
 
 - [ ] **Step 3: Normalize correction action and unsafe correction checks**
 
 In `ticket_autonomy_runtime.py`:
 
-- Replace action string `"correction"` with target action `"correct"` across runtime checks.
+- Confirm Task 1 already replaced runtime action string `"correction"` with
+  target action `"correct"` across runtime checks. Any remaining runtime hit is
+  in scope here only if Task 1 missed it; do not leave the old action literal in
+  runtime after this task.
 - Keep `RuntimeDecisionKind.APPLY_CORRECTION` as the decision kind.
 - Remove old target-candidate action literals from runtime action groups:
   `reprioritize`, `stale_cleanup`, `blocker_edit`, and `refine` are not target
@@ -2063,15 +2128,32 @@ In `ticket_engine_gateway.py`:
   generated correction reason. No target candidate path should keep the old
   `"correction"` action literal.
 
-In `ticket_turn_batch.py`, update retained operation-log validation so the
-target candidate action set includes only the six target actions:
-`"create"`, `"update"`, `"done"`, `"wontfix"`, `"reopen"`, and `"correct"`.
-Do not keep `reprioritize`, `stale_cleanup`, `blocker_edit`, `refine`, or
-`"correction"` as valid new target candidate actions. Keep historical compaction
-status names only when they describe existing stored correction detail rather
-than new candidate action input. `ticket_review.py` may still emit
-`stale_cleanup` as read-only review-hygiene output, but candidate discovery must
-not accept it as a write candidate.
+In `ticket_turn_batch.py`, separate retained candidate-action validation from
+maintenance event validation:
+
+- Add `_TARGET_MUTATION_ACTIONS = frozenset({"create", "update", "done", "wontfix", "reopen", "correct"})`.
+- Use `_TARGET_MUTATION_ACTIONS` for new `mutation_attempt` and `ticket_write`
+  candidate action facts.
+- Keep `summarize`, `compact`, and `pause_automation` valid only for their
+  event-specific maintenance records if current operation-log validation still
+  needs them. Prefer an `_EVENT_ACTIONS_BY_TYPE` map over one flat `_ACTIONS`
+  set if that makes the boundary executable.
+- Do not keep `reprioritize`, `stale_cleanup`, `blocker_edit`, `refine`,
+  `archive`, `delete`, `history_repair`, or `"correction"` as valid new
+  target candidate actions.
+- Keep historical compaction status names only when they describe existing
+  stored correction detail rather than new candidate action input.
+  `ticket_review.py` may still emit `stale_cleanup` as read-only review-hygiene
+  output, but candidate discovery must not accept it as a write candidate.
+
+Add turn-batch tests proving both sides of the split:
+
+- a new `mutation_attempt` or `ticket_write` event rejects
+  `reprioritize`, `stale_cleanup`, `blocker_edit`, `refine`, `archive`,
+  `delete`, `history_repair`, `summarize`, `compact`, `pause_automation`, and
+  `"correction"` as candidate action values;
+- existing maintenance event types still accept their own mechanical actions
+  where those events are intentionally retained.
 
 - [ ] **Step 4: Record bounded target recovery facts**
 
@@ -2085,7 +2167,6 @@ outside `_fingerprint_details()`.
 def _fingerprint_details(
     *,
     mutation: GatewayMutation,
-    decision: AutonomyDecision,
 ) -> dict[str, object]:
     return {
         "target": {
@@ -2094,19 +2175,18 @@ def _fingerprint_details(
         },
         "expected_pre_write_fingerprint": mutation.expected_ticket_fingerprint,
         "evidence_summary": mutation.evidence_summary,
-        "decision": decision.kind.value,
     }
 ```
 
 Use the helper as the full details value:
 
 ```python
-details=_fingerprint_details(mutation=mutation, decision=decision)
+details=_fingerprint_details(mutation=mutation)
 ```
 
 Do not add confidence scores, evidence-kind lists, current-mode labels,
-approval states, Handoff metadata, private workflow stages, or copied ticket
-content.
+runtime decision kinds, approval states, Handoff metadata, private workflow
+stages, or copied ticket content.
 
 - [ ] **Step 5: Run correction and gateway recovery tests and verify PASS**
 
@@ -2117,8 +2197,9 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 ```
 
 Expected: all four files pass. Any failure still using `"correction"` as a
-target candidate action or expecting `evidence_kind`/`current_mode` mutation
-attempt details belongs to this task.
+target candidate action, narrowing maintenance event validation into candidate
+action validation, or expecting `decision`, `evidence_kind`, or `current_mode`
+mutation attempt details belongs to this task.
 
 - [ ] **Step 6: Commit Task 5**
 
@@ -2245,7 +2326,7 @@ Expected: all selected tests pass.
 Run:
 
 ```bash
-rg -n "EvidenceLink|\.evidence|\"correction\"|reopen_reason|Reopen History|evidence_kind|current_mode|mutation\.fields|target_fingerprint|reprioritize|stale_cleanup|blocker_edit|refine" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
+rg -n "EvidenceLink|\.evidence|\"correction\"|conflict_reason|reopen_reason|Reopen History|evidence_kind|current_mode|\"decision\"|decision\.kind|RuntimeDecisionKind|mutation\.fields|target_fingerprint|reprioritize|stale_cleanup|blocker_edit|refine|archive|delete|history_repair|summarize|compact|pause_automation|codex\.ticket\.mutation\.v1" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 rg -n "GatewayMutation\(|CandidateMutation\(" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 ```
 
@@ -2256,18 +2337,29 @@ Expected: every remaining hit is explicitly one of:
 - calls to `scripts.ticket_dedup.target_fingerprint` used only to compute a
   current ticket fingerprint for `expected_ticket_fingerprint`;
 - runtime mode inputs or tests that are not persisted mutation-attempt details;
+- internal `RuntimeDecisionKind` branch logic, including
+  `RuntimeDecisionKind.APPLY_CORRECTION`, that is not persisted in
+  mutation-attempt details or result data;
 - historical migration/diagnostic test data labeled as such;
 - non-candidate correction-detail storage vocabulary retained for recent
   correction recovery;
 - read-only review-hygiene output such as `ticket_review.py` `stale_cleanup`
   that candidate discovery does not accept as a write candidate;
+- maintenance event validation for `summarize`, `compact`, or
+  `pause_automation`, only where the code validates those event types rather
+  than a target candidate action fact;
+- low-level `make_mutation_id()` tests that use `codex.ticket.mutation.v1` as
+  arbitrary schema input and are not candidate-contract fixtures;
 - target-shaped `CandidateMutation(...)` or `GatewayMutation(...)` constructions
   that include the new target envelope fields;
 - user-facing text explaining removed/deprecated input.
 
 Any remaining old-shaped target candidate runtime, gateway, discovery, identity,
-source-entrypoint, or normal reopen/correct test hit must be fixed before
-continuing.
+source-entrypoint, operation-log, or normal reopen/correct test hit must be
+fixed before continuing. In particular, no accepted target candidate mapping may
+mention `conflict_reason`, no `mutation_attempt` details may persist
+`"decision"` or a runtime decision kind, and no new mutation event may validate
+maintenance action names as candidate actions.
 
 - [ ] **Step 3: Run full Ticket suite**
 
@@ -2316,8 +2408,13 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
 
 ## Acceptance Criteria
 
-- `CandidateMutation` uses only the target envelope fields: `action`, `ticket_id`, `target`, `proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`, plus mechanical `conflict_reason` for runtime skip handling.
+- `CandidateMutation` uses only the target envelope fields: `action`,
+  `ticket_id`, `target`, `proposed_change`, `expected_ticket_fingerprint`, and
+  `evidence_summary`.
 - Unknown top-level candidate keys are rejected before mutation evaluation.
+- `conflict_reason` is not accepted as target candidate input and does not enter
+  target candidate identity, gateway validation, result data, or operation-log
+  details.
 - `target` has exactly `fields` and `sections`; `proposed_change` keys exactly equal their union.
 - Non-create writes require `expected_ticket_fingerprint`; create requires it to be `None`.
 - Mutation identity includes `target`, `proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`.
@@ -2336,8 +2433,11 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
   cleanup section.
 - `correct` is an ordinary target-shaped mutation and appends generated correction history.
 - Operation-log details retain only bounded recovery facts and do not add
-  semantic ranking, current-mode labels, evidence taxonomies, approval state, or
-  private workflow stages.
+  semantic ranking, current-mode labels, evidence taxonomies, runtime decision
+  kinds, approval state, or private workflow stages.
+- `ticket_turn_batch.py` validates the six target actions for retained
+  candidate action facts and keeps maintenance event actions only in
+  event-specific validation.
 - The final residue check has no unexplained target-candidate hits for old
   identity, evidence, action, correction, reopen, or gateway field names.
 - The final construction-site check has no old-shaped `CandidateMutation(...)`
