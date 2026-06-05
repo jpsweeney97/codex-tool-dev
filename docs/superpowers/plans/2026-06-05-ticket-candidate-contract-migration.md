@@ -209,6 +209,16 @@ Test these files:
   `blocked_by`, and `Blocked On`, with `blocked_by=[]` and `Blocked On=None`;
   the gateway must not let `_execute_close()` clear visible blocker state that
   was not present in the candidate target envelope.
+- Treat active unblocking as an exact target shape, not only a transition-policy
+  side effect. If the current ticket is `blocked` and a target candidate moves it
+  to `open`, the candidate must name `status`, `blocked_by`, `Blocked On`, and
+  `Next Action` together; `blocked_by` must be `[]`, `Blocked On` must be
+  `None`, and `Next Action` must carry the continuation step unless the
+  authority docs are narrowed in the same commit.
+- Treat `reopen -> open` and `reopen -> blocked` as separate target shapes.
+  `reopen -> open` names only normal open-ticket shape and must not carry
+  `blocked_by`, `Blocked On`, or other blocked-only target content. `reopen ->
+  blocked` must name valid blocked-ticket shape.
 - Validate raw mapping values before normalization. Non-string, non-null
   `ticket_id` and `expected_ticket_fingerprint` values are invalid; do not
   silently coerce them to `None`. Non-string `action` and `evidence_summary`
@@ -951,6 +961,42 @@ def _close_target_is_valid(
     return open_close or blocked_close_cleanup
 
 
+def _nonempty_target_text(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _blocked_to_open_target_is_valid(
+    candidate: CandidateMutation,
+    *,
+    current_ticket_status: str | None = None,
+) -> bool:
+    if current_ticket_status != "blocked" or candidate.proposed_change.get("status") != "open":
+        return True
+    return (
+        set(candidate.target.fields) == {"status", "blocked_by"}
+        and set(candidate.target.sections) == {"Blocked On", "Next Action"}
+        and candidate.proposed_change.get("blocked_by") == []
+        and candidate.proposed_change.get("Blocked On") is None
+        and _nonempty_target_text(candidate.proposed_change.get("Next Action"))
+    )
+
+
+def _reopen_target_is_valid(candidate: CandidateMutation) -> bool:
+    target_status = candidate.proposed_change.get("status")
+    target_fields = set(candidate.target.fields)
+    target_sections = set(candidate.target.sections)
+    if target_status == "open":
+        return target_fields == {"status"} and not target_sections
+    if target_status == "blocked":
+        return (
+            target_fields == {"status", "blocked_by"}
+            and target_sections == {"Blocked On"}
+            and isinstance(candidate.proposed_change.get("blocked_by"), list)
+            and _nonempty_target_text(candidate.proposed_change.get("Blocked On"))
+        )
+    return False
+
+
 def map_candidate_to_engine(
     candidate: CandidateMutation,
     *,
@@ -991,6 +1037,8 @@ def map_candidate_to_engine(
             return EngineDispatch("policy_blocked", None, {}, reason="gateway_required")
         if fields.get("status") not in {"open", "blocked"}:
             return EngineDispatch("policy_blocked", None, {}, reason="reopen_status_required")
+        if not _reopen_target_is_valid(candidate):
+            return EngineDispatch("policy_blocked", None, {}, reason="reopen_target_not_allowlisted")
         return EngineDispatch("ok", EngineAction.REOPEN, fields, sections=sections)
     if candidate.action == "correct":
         if fields.get("status") in {"done", "wontfix"}:
@@ -1003,10 +1051,22 @@ def map_candidate_to_engine(
             return EngineDispatch("ok", EngineAction.CLOSE, {"resolution": fields["status"]}, sections=sections)
         if fields.get("status") in {"open", "blocked"}:
             if current_ticket_status in {"done", "wontfix"}:
+                if not _reopen_target_is_valid(candidate):
+                    return EngineDispatch("policy_blocked", None, {}, reason="reopen_target_not_allowlisted")
                 return EngineDispatch("ok", EngineAction.REOPEN, fields, sections=sections)
+            if not _blocked_to_open_target_is_valid(
+                candidate,
+                current_ticket_status=current_ticket_status,
+            ):
+                return EngineDispatch("policy_blocked", None, {}, reason="blocked_to_open_target_not_allowlisted")
             return EngineDispatch("ok", EngineAction.UPDATE, fields, sections=sections)
         return EngineDispatch("ok", EngineAction.UPDATE, fields, sections=sections)
     if candidate.action == "update":
+        if not _blocked_to_open_target_is_valid(
+            candidate,
+            current_ticket_status=current_ticket_status,
+        ):
+            return EngineDispatch("policy_blocked", None, {}, reason="blocked_to_open_target_not_allowlisted")
         return EngineDispatch("ok", EngineAction.UPDATE, fields, sections=sections)
     if candidate.action == "create":
         return EngineDispatch("ok", EngineAction.CREATE, fields, sections=sections)
@@ -2020,6 +2080,63 @@ def test_gateway_updates_blocked_ticket_to_open_with_target_section_cleanup(
     assert "| codex | Updated ticket from candidate evidence." in text
 ```
 
+Add this blocked-to-open negative gateway test. It proves blocker cleanup alone
+does not satisfy the visible unblocking contract when `Next Action` is missing:
+
+```python
+def test_gateway_rejects_blocked_to_open_without_next_action(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    blocker = make_ticket(tmp_tickets, "blocker.md", id="T-20260527-02", status="open")
+    assert blocker.exists()
+    ticket_path = make_ticket(
+        tmp_tickets,
+        "one.md",
+        id="T-20260527-01",
+        status="blocked",
+        blocked_by=["T-20260527-02"],
+        blocked_on="Waiting for T-20260527-02.",
+    )
+    target = CandidateTarget(fields=("status", "blocked_by"), sections=("Blocked On",))
+    proposed_change = {
+        "status": "open",
+        "blocked_by": [],
+        "Blocked On": None,
+    }
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        target=target,
+        proposed_change=proposed_change,
+    )
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint or "",
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    text = ticket_path.read_text(encoding="utf-8")
+    assert response.state == "policy_blocked"
+    assert response.error_code == "policy_blocked"
+    assert "blocked_to_open_target_not_allowlisted" in response.message
+    assert "status: blocked" in text
+    assert "blocked_by: [T-20260527-02]" in text
+    assert "## Blocked On\nWaiting for T-20260527-02." in text
+```
+
 Add this blocked close negative gateway test. It proves the gateway passes the
 current ticket status into runtime dispatch before `_execute_close()` can clear
 blocker state:
@@ -2195,14 +2312,15 @@ updating shared helpers.
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_applies_exact_target_section_update plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_removes_exact_optional_target_section plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_updates_blocked_ticket_to_open_with_target_section_cleanup plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_rejects_status_only_close_for_blocked_ticket plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_create_accepts_every_source_supported_target_section plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_collector_unhealthy_pauses_without_mutation_or_health_events plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_reports_invalid_explicit_candidate_without_no_change plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_summarizes_applied_mutation_before_next_turn plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py::test_agent_primary_apply_turn_applies_update_through_gateway -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_applies_exact_target_section_update plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_removes_exact_optional_target_section plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_updates_blocked_ticket_to_open_with_target_section_cleanup plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_rejects_blocked_to_open_without_next_action plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_rejects_status_only_close_for_blocked_ticket plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_create_accepts_every_source_supported_target_section plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_collector_unhealthy_pauses_without_mutation_or_health_events plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_reports_invalid_explicit_candidate_without_no_change plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_summarizes_applied_mutation_before_next_turn plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py::test_agent_primary_apply_turn_applies_update_through_gateway -q
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_cli.py::test_apply_turn_resume_source_context_pause_reports_invalid_candidate_and_keeps_pause -q
 ```
 
 Expected: fail because `GatewayMutation` has no `target`, `proposed_change`, or
 `expected_ticket_fingerprint` fields, `ticket_autonomy.py` still constructs the
 old `fields`/`target_fingerprint` gateway shape, and blocked-to-open target
-sections are not yet projected into update policy. The
+sections are not yet projected into update policy or guarded for `Next Action`.
+The
 `source_context_unhealthy` collector test and outer `invalid_candidate`
 host-state tests, including the resume-paused invalid-candidate test, must keep
 passing throughout this task; a failure there means the health gate or explicit
@@ -2612,8 +2730,8 @@ def build_engine_dispatch(mutation: GatewayMutation) -> EngineDispatch:
 ```
 
 Do not scope the current-status lookup to `correct`. The Task 3 blocked-close
-gateway test depends on `done` and `wontfix` dispatch receiving the parsed
-current status before `_execute_close()` can clear blocker state.
+and blocked-to-open gateway tests depend on dispatch receiving the parsed current
+status before `_execute_close()` or `_execute_update()` can clear blocker state.
 
 Update `_execute_dispatch()` calls to pass target sections:
 
@@ -4006,6 +4124,56 @@ def test_gateway_reopens_terminal_ticket_to_open_without_reopen_reason(
     assert "reopen_reason" not in text
 ```
 
+Add this open-reopen negative variant. It proves `reopen -> open` rejects
+blocked-only target content before render-time cleanup can hide the mismatch:
+
+```python
+def test_gateway_rejects_reopen_to_open_with_blocker_target_content(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "done.md", id="T-20260527-01", status="done")
+    target = CandidateTarget(fields=("status", "blocked_by"), sections=("Blocked On",))
+    proposed_change = {
+        "status": "open",
+        "blocked_by": [],
+        "Blocked On": None,
+    }
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        action="reopen",
+        target=target,
+        proposed_change=proposed_change,
+    )
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        action="reopen",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint or "",
+        evidence_summary="The user asked to reopen the work.",
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    text = ticket_path.read_text(encoding="utf-8")
+    assert response.state == "policy_blocked"
+    assert response.error_code == "policy_blocked"
+    assert "reopen_target_not_allowlisted" in response.message
+    assert "status: done" in text
+    assert "## Blocked On" not in text
+```
+
 Rewrite or remove existing tests in `test_execute.py`, `test_integration.py`,
 `test_engine_runner.py`, `test_review_findings.py`, and
 `test_change_history.py` that preserve `reopen_reason` or `Reopen History` as
@@ -4018,10 +4186,12 @@ not ordinary `reopen` contract tests.
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_reopens_terminal_ticket_to_blocked_with_visible_blocker_shape plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_reopens_terminal_ticket_to_open_without_reopen_reason -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_reopens_terminal_ticket_to_blocked_with_visible_blocker_shape plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_reopens_terminal_ticket_to_open_without_reopen_reason plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_rejects_reopen_to_open_with_blocker_target_content -q
 ```
 
-Expected: fail because `_execute_reopen()` still requires `reopen_reason` and only writes `status: open`.
+Expected: fail because `_execute_reopen()` still requires `reopen_reason`, only
+writes `status: open`, and does not yet reject blocked-only target content on
+`reopen -> open`.
 
 - [ ] **Step 3: Remove reopen_reason from target field validation**
 
@@ -4261,7 +4431,7 @@ In `ticket_engine_gateway.py`, update the reopen branch in `_execute_dispatch()`
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_reopens_terminal_ticket_to_blocked_with_visible_blocker_shape plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_reopens_terminal_ticket_to_open_without_reopen_reason plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py::test_reopen_uses_evidence_summary_not_reopen_reason plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_integration.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_review_findings.py plugins/turbo-mode/ticket/tests/test_change_history.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_reopens_terminal_ticket_to_blocked_with_visible_blocker_shape plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_reopens_terminal_ticket_to_open_without_reopen_reason plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_rejects_reopen_to_open_with_blocker_target_content plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py::test_reopen_uses_evidence_summary_not_reopen_reason plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_integration.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_review_findings.py plugins/turbo-mode/ticket/tests/test_change_history.py -q
 ```
 
 Expected: all listed reopen and change-history tests pass. Any failure still
@@ -4314,7 +4484,7 @@ candidate = CandidateMutation(
 Update `_correction_decision()` so tests provide recent correction context from
 `source_context`, not from candidate content. Include the same binding facts the
 apply-turn producer will retain from pending-summary: source mutation ID,
-freshness timestamp, target, and expected ticket fingerprint.
+freshness timestamp, target, proposed change, and expected ticket fingerprint.
 
 ```python
 def _recent_correction_context(
@@ -4332,6 +4502,7 @@ def _recent_correction_context(
             "source_mutation_id": source_mutation_id,
             "retained_at": retained_at,
             "expected_ticket_fingerprint": candidate.expected_ticket_fingerprint,
+            "proposed_change": dict(candidate.proposed_change),
             "target": {
                 "fields": list(candidate.target.fields),
                 "sections": list(candidate.target.sections),
@@ -4467,6 +4638,7 @@ def test_correction_context_must_match_target_and_expected_fingerprint(
                 "source_mutation_id": "mut-prior-correction",
                 "retained_at": "2026-06-05T12:00:00Z",
                 "expected_ticket_fingerprint": "different-fingerprint",
+                "proposed_change": {"priority": "high"},
                 "target": {"fields": ["priority"], "sections": []},
             }
         }
@@ -4483,6 +4655,38 @@ def test_correction_context_must_match_target_and_expected_fingerprint(
         turn_id="turn-1",
         now=datetime(2026, 6, 5, 12, 5, tzinfo=UTC),
     )[0]
+
+    assert decision.kind == RuntimeDecisionKind.REQUIRE_USER_DISCUSSION
+    assert decision.reason == "correction_detail_missing"
+```
+
+Add this same-target/different-value authorization test. It proves retained
+correction context binds the current correction candidate value, not just the
+target name set and pre-write fingerprint:
+
+```python
+def test_correction_context_must_match_proposed_change(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01", priority="low")
+    candidate = CandidateMutation(
+        ticket_id="T-20260527-01",
+        action="correct",
+        target=CandidateTarget(fields=("priority",), sections=()),
+        proposed_change={"priority": "high"},
+        expected_ticket_fingerprint=target_fingerprint(ticket_path),
+        evidence_summary="Prior mutation set priority too low.",
+    )
+    mismatched_context = _recent_correction_context(candidate)
+    mismatched_context["T-20260527-01"]["proposed_change"] = {"priority": "normal"}
+
+    decision = _correction_decision(
+        candidate,
+        ticket_path=ticket_path,
+        recent_correction_context=mismatched_context,
+    )
 
     assert decision.kind == RuntimeDecisionKind.REQUIRE_USER_DISCUSSION
     assert decision.reason == "correction_detail_missing"
@@ -4767,6 +4971,7 @@ def _append_retained_correction_context(
     ticket_path: Path,
     *,
     target: dict[str, list[str]] | None = None,
+    proposed_change: dict[str, object] | None = None,
     expected_ticket_fingerprint: str | None = None,
     timestamp: str | None = None,
     compacted: bool = False,
@@ -4774,6 +4979,7 @@ def _append_retained_correction_context(
     details: dict[str, object] = {
         "correction_ready": True,
         "target": target or {"fields": ["priority"], "sections": []},
+        "proposed_change": proposed_change or {"priority": "high"},
         "expected_ticket_fingerprint": (
             expected_ticket_fingerprint or target_fingerprint(ticket_path) or ""
         ),
@@ -4922,6 +5128,42 @@ def test_agent_primary_apply_turn_blocks_correction_with_unmatched_context(
         tmp_path,
         ticket,
         expected_ticket_fingerprint="different-fingerprint",
+    )
+    context = _write_context(
+        tmp_path,
+        {
+            "candidate_mutations": [
+                {
+                    "ticket_id": "T-20260527-01",
+                    "action": "correct",
+                    "target": {"fields": ["priority"], "sections": []},
+                    "proposed_change": {"priority": "high"},
+                    "expected_ticket_fingerprint": expected,
+                    "evidence_summary": "Prior mutation set priority too low.",
+                }
+            ]
+        },
+    )
+
+    result = _apply_turn(tmp_path, context)
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "discussion_required"
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
+
+
+def test_agent_primary_apply_turn_blocks_correction_with_proposed_change_mismatch(
+    tmp_path: Path,
+) -> None:
+    tickets_dir = _init_ticket_project(tmp_path)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="low")
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    expected = target_fingerprint(ticket) or ""
+    _append_retained_correction_context(
+        tmp_path,
+        ticket,
+        proposed_change={"priority": "normal"},
     )
     context = _write_context(
         tmp_path,
@@ -5310,6 +5552,11 @@ def _correction_detail_available(
         return False
     if context.get("expected_ticket_fingerprint") != candidate.expected_ticket_fingerprint:
         return False
+    proposed_change = context.get("proposed_change")
+    if not isinstance(proposed_change, Mapping):
+        return False
+    if dict(proposed_change) != dict(candidate.proposed_change):
+        return False
     return _canonical_context_target(context.get("target")) == _canonical_target_key(
         candidate.target
     )
@@ -5347,6 +5594,7 @@ require these bounded mechanical details when `correction_ready` is true:
     "correction_detail": "Prior automatic mutation wrote the wrong priority.",
     "correction_detail_retained": True,
     "target": {"fields": ["priority"], "sections": []},
+    "proposed_change": {"priority": "high"},
     "expected_ticket_fingerprint": "target-fingerprint-before-correction",
 }
 ```
@@ -5354,7 +5602,7 @@ require these bounded mechanical details when `correction_ready` is true:
 The event's top-level `mutation_id`, `ticket_id`, and `timestamp` are part of
 the binding. Add turn-batch validation tests proving a newly appended
 correction-ready failed status event is invalid when any of `correction_detail`,
-`correction_detail_retained`, `target`, `expected_ticket_fingerprint`,
+`correction_detail_retained`, `target`, `proposed_change`, `expected_ticket_fingerprint`,
 `ticket_id`, `mutation_id`, or parseable `timestamp` is missing or wrong-typed.
 Compacted retained events may keep
 `correction_ready` with `correction_detail_compacted is True`, but they must not
@@ -5414,8 +5662,11 @@ def _recent_correction_context_from_events(
             continue
         fields = target.get("fields")
         sections = target.get("sections")
+        proposed_change = details.get("proposed_change")
         expected_ticket_fingerprint = details.get("expected_ticket_fingerprint")
         if not isinstance(fields, list) or not isinstance(sections, list):
+            continue
+        if not isinstance(proposed_change, Mapping):
             continue
         if not isinstance(expected_ticket_fingerprint, str) or not expected_ticket_fingerprint:
             continue
@@ -5425,6 +5676,7 @@ def _recent_correction_context_from_events(
             "source_mutation_id": mutation_id,
             "retained_at": timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "expected_ticket_fingerprint": expected_ticket_fingerprint,
+            "proposed_change": dict(proposed_change),
             "target": {"fields": fields, "sections": sections},
         }
     return context
@@ -5489,7 +5741,9 @@ validation as the corresponding execute helper, including the same
 Return an `EngineResponse` for the same validation failures execute would
 return. If preview and execute would diverge for any action, stop and refactor
 the shared rendering helpers before continuing; do not approximate the expected
-post fingerprint from candidate fields.
+post fingerprint from candidate fields. This preview/execute parity check is
+the fingerprint trust boundary; a broader shared-rendering refactor is optional
+unless this check finds divergence.
 
 In `ticket_turn_batch.py`, update recovery state to compare both pre-write and
 post-write facts. Pre-write comparison keeps the existing mtime-sensitive
@@ -5812,8 +6066,9 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 ```
 
 Expected: all six files pass, including the target-shaped apply-turn correction
-positive path and the compacted, expired, and unmatched correction-context block
-paths. Any failure still using `"correction"` as a target candidate action,
+positive path and the compacted, expired, unmatched fingerprint, and mismatched
+proposed-change correction-context block paths. Any failure still using
+`"correction"` as a target candidate action,
 narrowing maintenance event validation into candidate action validation,
 expecting `decision`, `evidence_kind`, or `current_mode` mutation attempt
 details, missing `expected_post_write_fingerprint`, authorizing correction from
@@ -6254,10 +6509,13 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
   write, never serialized through Python `repr`.
 - `reopen` uses target `status` plus `evidence_summary`; `reopen_reason` is rejected as normal target write input.
 - `reopen -> blocked` writes valid `Blocked On` and `blocked_by` shape.
+- `reopen -> open` rejects `blocked_by`, `Blocked On`, and other blocked-only
+  target content before render-time cleanup can hide the mismatch.
 - Blocked-to-open update/correct candidates feed target-section
   `Blocked On: None` into the update policy as `blocked_on: null` before transition
-  validation, and active unblocking candidates name `Next Action` unless the
-  authority docs are narrowed in the same commit.
+  validation, active unblocking candidates name `Next Action` unless the
+  authority docs are narrowed in the same commit, and missing `Next Action` is
+  rejected before write.
 - Current-facing docs and `test_docs_contract.py` agree that terminal tickets
   may reopen to `open` or `blocked`; no `ticket-contract.md` lifecycle assertion
   remains pinned to reopen only to `open`.
@@ -6273,8 +6531,9 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
 - `correct` requires recent correction context from private pending-summary or
   source-context state outside the candidate envelope. `evidence_summary` is not
   an authorization fact; without uncompacted recent correction context matching
-  the current correction target and `expected_ticket_fingerprint`, with a
-  retained source mutation ID and parseable fresh timestamp, runtime returns
+  the current correction target, proposed change, and
+  `expected_ticket_fingerprint`, with a retained source mutation ID and parseable
+  fresh timestamp, runtime returns
   `correction_detail_missing` and does not emit
   `RuntimeDecisionKind.APPLY_CORRECTION`. Runtime correction authorization
   rejects expired, unparseable, and compacted contexts inside
