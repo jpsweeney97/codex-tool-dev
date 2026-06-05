@@ -37,6 +37,8 @@ and after the create-recovery plan patch:
   `main...origin/main [ahead 14]`, clean normal status, `HEAD` at `cf0d3d13`.
 - Branch/worktree after the validation-gate hardening patch:
   `main...origin/main [ahead 15]`, clean normal status, `HEAD` at `8339751b`.
+- Branch/worktree after the blocked-close and correction-gate plan patch:
+  `main...origin/main [ahead 16]`, clean normal status, `HEAD` at `7dc5cb7d`.
 - Active ticket inventory: seven files under `docs/tickets/`; all use ID-only filenames, frontmatter metadata, target statuses, required sections, no unknown frontmatter keys, and no blocked-shape defects.
 - Active ticket statuses: six `open`, one `done`, no `status: in_progress`.
 - Historical references: old-looking `T-20260527-001` examples only appear in `docs/superpowers/specs/2026-05-26-ticket-runtime-first-autonomy-design.md`; placeholders such as `T-YYYYMMDD-NN` appear in ADR/control docs and are not active ticket IDs.
@@ -90,6 +92,9 @@ Modify these files:
     create fields, keeps non-create target writes from accepting `key_files`, and
     removes `reopen_reason` from normal target write-field acceptance once
     `reopen` uses `evidence_summary`.
+- `docs/superpowers/specs/2026-05-30-ticket-runtime-first-state-kernel-control.md`
+  - Align source-authority wording for non-create identity and deliberate
+    correction authorization tightening after the source migration lands.
 - `plugins/turbo-mode/ticket/README.md`
 - `plugins/turbo-mode/ticket/HANDBOOK.md`
 - `plugins/turbo-mode/ticket/references/ticket-contract.md`
@@ -141,6 +146,13 @@ Test these files:
   but runtime authorization must independently parse `retained_at`, reject
   unparseable or expired context, require an uncompacted/detail-retained marker,
   and compare canonical sorted target fields/sections.
+- Deliberately tighten `correct` authorization in this slice: recent,
+  uncompacted correction context is an authorization prerequisite for automatic
+  `correct`, not only optional `Corrects:` metadata. The May 30 control doc
+  phrases recent correction context more loosely today; Task 6 must update that
+  authority wording before docs-contract PASS. Until that docs update lands,
+  source implementation still treats absent, expired, compacted, or unmatched
+  context as `correction_detail_missing`.
 - Treat malformed explicit candidate arrays as visible invalid work, not as
   absence of work. If any object under `candidate_mutations`,
   `update_candidates`, or `capture_candidates` has missing, unknown, or
@@ -225,6 +237,15 @@ Test these files:
   must not synthesize or override that value from `_ticket_state_fingerprints()`
   or `source_context`. The gateway still recomputes the current ticket
   fingerprint immediately before writing and rejects stale candidates.
+- Resolve identity authority explicitly: for non-create target candidates,
+  `expected_ticket_fingerprint` is the candidate-supplied copy of the live target
+  fingerprint at discovery/evaluation time, and it participates in candidate
+  identity. It is not an authoritative caller-supplied identity value; Ticket
+  recomputes the current live target fingerprint at gateway write time and
+  rejects any mismatch. For `create`, identity excludes
+  `expected_ticket_fingerprint` because it is `None`. Task 6 must align the May
+  30 control doc and `ticket-contract.md` wording so "live target fingerprint"
+  and `expected_ticket_fingerprint` describe this same boundary.
 
 ## Migration Coverage Map
 
@@ -2506,7 +2527,7 @@ def build_engine_dispatch(mutation: GatewayMutation) -> EngineDispatch:
         evidence_summary=mutation.evidence_summary,
     )
     current_ticket_status: str | None = None
-    if mutation.action == "correct" and mutation.ticket_id is not None:
+    if mutation.action != "create" and mutation.ticket_id is not None:
         ticket = find_ticket_by_id(mutation.tickets_dir, mutation.ticket_id)
         if ticket is not None:
             current_ticket_status = ticket.status
@@ -2515,6 +2536,10 @@ def build_engine_dispatch(mutation: GatewayMutation) -> EngineDispatch:
         current_ticket_status=current_ticket_status,
     )
 ```
+
+Do not scope the current-status lookup to `correct`. The Task 3 blocked-close
+gateway test depends on `done` and `wontfix` dispatch receiving the parsed
+current status before `_execute_close()` can clear blocker state.
 
 Update `_execute_dispatch()` calls to pass target sections:
 
@@ -5736,6 +5761,7 @@ fingerprint helper should already be in the Task 3A commit.
 ## Task 6: Update Source Docs, Skills, Contract Availability, And Lifecycle Prose
 
 **Files:**
+- Modify: `docs/superpowers/specs/2026-05-30-ticket-runtime-first-state-kernel-control.md`
 - Modify: `plugins/turbo-mode/ticket/README.md`
 - Modify: `plugins/turbo-mode/ticket/HANDBOOK.md`
 - Modify: `plugins/turbo-mode/ticket/references/ticket-contract.md`
@@ -5759,7 +5785,8 @@ adds `reopen -> blocked` source behavior.
 
 - [ ] **Step 1: Write failing docs-contract tests**
 
-In `test_docs_contract.py`, add a source-availability contract test, update the
+In `test_docs_contract.py`, add a source-availability contract test, add an
+authority-alignment contract test for identity/correction wording, update the
 lifecycle assertion for terminal reopen to `open` or `blocked`, and update every
 existing assertion that currently requires `"temporarily unavailable"` for
 capture/update write availability. This includes the capture skill frontmatter,
@@ -5803,6 +5830,31 @@ def test_ticket_write_docs_no_longer_claim_source_entrypoint_missing() -> None:
             assert phrase not in text, f"{path} still contains {phrase!r}"
 ```
 
+Add:
+
+```python
+def test_authority_docs_align_identity_and_correction_context() -> None:
+    control = _read_text(
+        Path("docs/superpowers/specs/2026-05-30-ticket-runtime-first-state-kernel-control.md")
+    )
+    contract = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
+    combined = _normalize_whitespace(control + "\n" + contract)
+
+    assert (
+        "expected_ticket_fingerprint is the candidate-supplied copy of the live target fingerprint"
+        in combined
+    )
+    assert (
+        "Ticket recomputes the current live target fingerprint before writing"
+        in combined
+    )
+    assert (
+        "recent uncompacted correction context is required before automatic correct"
+        in combined
+    )
+    assert "correction_detail_missing" in combined
+```
+
 Update the existing lifecycle test in the same file:
 
 ```python
@@ -5831,6 +5883,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 ```
 
 Expected: fail on README/HANDBOOK/contract/skills/manifest availability wording,
+on the control-doc/contract identity and correction-context authority wording,
 on the contract lifecycle sentence that still says terminal tickets reopen only
 to `open`, and on any existing docs-contract assertion that still requires the
 old unavailable source-write language.
@@ -5884,6 +5937,25 @@ Check README and HANDBOOK for duplicated lifecycle prose. If either repeats the
 old open-only terminal reopen claim, update it in the same commit or add a
 docs-contract assertion that forbids the stale phrase in that file.
 
+In the May 30 control doc and `ticket-contract.md`, make the identity and
+correction authorization wording explicit:
+
+```text
+For non-create writes, `expected_ticket_fingerprint` is the candidate-supplied
+copy of the live target fingerprint at discovery/evaluation time and participates
+in candidate identity. Ticket recomputes the current live target fingerprint
+before writing and rejects stale candidates whose current fingerprint no longer
+matches `expected_ticket_fingerprint`; callers do not supply authoritative
+identity values.
+```
+
+```text
+Automatic `correct` requires recent uncompacted correction context outside the
+candidate envelope. If that context is absent, expired, compacted, or not bound
+to the candidate target and `expected_ticket_fingerprint`, runtime returns
+`correction_detail_missing` instead of emitting `APPLY_CORRECTION`.
+```
+
 - [ ] **Step 4: Run full docs-contract test and verify PASS**
 
 Run:
@@ -5893,18 +5965,19 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 ```
 
 Expected: the full docs-contract file passes, including the updated lifecycle
-assertion, capture/update skill availability assertions, and plugin manifest
-availability assertion. This command proves docs-contract coverage only; do not
-claim Task 3, Task 3A, or Task 5 source-test proof from this docs-only selector.
-Those source-test gates are Task 6 preconditions and are rechecked by the final
-all-source verification command.
+assertion, identity/correction authority assertions, capture/update skill
+availability assertions, and plugin manifest availability assertion. This
+command proves docs-contract coverage only; do not claim Task 3, Task 3A, or
+Task 5 source-test proof from this docs-only selector. Those source-test gates
+are Task 6 preconditions and are rechecked by the final all-source verification
+command.
 
 - [ ] **Step 5: Commit Task 6**
 
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/.codex-plugin/plugin.json plugins/turbo-mode/ticket/skills/capture-ticket/SKILL.md plugins/turbo-mode/ticket/skills/update-ticket/SKILL.md plugins/turbo-mode/ticket/tests/test_docs_contract.py
+git add docs/superpowers/specs/2026-05-30-ticket-runtime-first-state-kernel-control.md plugins/turbo-mode/ticket/README.md plugins/turbo-mode/ticket/HANDBOOK.md plugins/turbo-mode/ticket/references/ticket-contract.md plugins/turbo-mode/ticket/.codex-plugin/plugin.json plugins/turbo-mode/ticket/skills/capture-ticket/SKILL.md plugins/turbo-mode/ticket/skills/update-ticket/SKILL.md plugins/turbo-mode/ticket/tests/test_docs_contract.py
 git commit -m "docs(ticket): update target candidate write availability"
 ```
 
@@ -6057,6 +6130,11 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
 - Non-create writes require `expected_ticket_fingerprint`; create requires it to
   be `None`.
 - Mutation identity includes `target`, `proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`.
+- For non-create writes, `expected_ticket_fingerprint` is the candidate-supplied
+  copy of the live target fingerprint at discovery/evaluation time. It
+  participates in candidate identity and is also the pre-write TOCTOU guard; the
+  gateway recomputes the current live target fingerprint before writing and
+  rejects stale candidates whose current fingerprint no longer matches.
 - Discovery emits only explicit target-shaped candidates, does not turn
   vague/path-only signals into write candidates, and does not collapse distinct
   candidates that share one `ticket_id`, `action`, and `evidence_summary`.
@@ -6113,6 +6191,9 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
   rejects expired, unparseable, and compacted contexts inside
   `evaluate_autonomy_intent()` itself and compares target fields/sections as
   canonical unordered sets.
+- The May 30 control doc, current-facing ticket contract, and
+  `test_docs_contract.py` agree on non-create identity wording and the deliberate
+  `correct` authorization tightening before docs-contract PASS.
 - Operation-log details retain only bounded recovery facts and do not add
   semantic ranking, current-mode labels, evidence taxonomies, runtime decision
   kinds, approval state, or private workflow stages. Non-create attempts retain
