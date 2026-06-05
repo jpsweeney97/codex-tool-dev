@@ -14,8 +14,8 @@
 
 Live state checked before writing this plan, after the initial plan commit, after
 the review hardening patch, after the correction-gate clarification, after the
-source-entrypoint coverage patch, and after the operation-log/exact-envelope
-patch:
+source-entrypoint coverage patch, after the operation-log/exact-envelope patch,
+and after the create-recovery plan patch:
 
 - Branch/worktree at plan creation: `main...origin/main`, clean normal status,
   `HEAD` at `92cd4bed`.
@@ -29,6 +29,8 @@ patch:
   `main...origin/main [ahead 4]`, clean normal status, `HEAD` at `d52a81ab`.
 - Branch/worktree after the operation-log/exact-envelope patch:
   `main...origin/main [ahead 5]`, clean normal status, `HEAD` at `574e5cee`.
+- Branch/worktree after the create-recovery plan patch:
+  `main...origin/main [ahead 6]`, clean normal status, `HEAD` at `bed44541`.
 - Active ticket inventory: seven files under `docs/tickets/`; all use ID-only filenames, frontmatter metadata, target statuses, required sections, no unknown frontmatter keys, and no blocked-shape defects.
 - Active ticket statuses: six `open`, one `done`, no `status: in_progress`.
 - Historical references: old-looking `T-20260527-001` examples only appear in `docs/superpowers/specs/2026-05-26-ticket-runtime-first-autonomy-design.md`; placeholders such as `T-YYYYMMDD-NN` appear in ADR/control docs and are not active ticket IDs.
@@ -46,6 +48,10 @@ Modify these files:
   - Converts explicit turn-context candidate mappings into target-shaped `CandidateMutation` objects and stops converting vague/path-only signals into write candidates.
 - `plugins/turbo-mode/ticket/scripts/ticket_mutation_identity.py`
   - Hashes canonical target candidate content, including `target`, `proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`.
+- `plugins/turbo-mode/ticket/scripts/ticket_dedup.py`
+  - Keeps the existing mtime-sensitive `target_fingerprint()` for pre-write
+    TOCTOU checks and adds a content-only target recovery fingerprint helper for
+    expected post-write recovery facts that must be computed before a file write.
 - `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py`
   - Projects evaluated target candidates through the live `apply-turn` source
     entrypoint and constructs target-shaped `GatewayMutation` requests without
@@ -57,7 +63,10 @@ Modify these files:
     allocated target IDs, projects exact target sections into engine dispatch,
     and records bounded recovery facts.
 - `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
-  - Extends update/close/reopen execution to accept or validate exact target section headings from the gateway without changing legacy direct `engine_execute()` field syntax.
+  - Extends update/close/reopen execution to accept or validate exact target
+    section headings from the gateway without changing legacy direct
+    `engine_execute()` field syntax, and provides the exact pre-write projection
+    needed for recovery fingerprints.
 - `plugins/turbo-mode/ticket/scripts/ticket_change_history.py`
   - Removes current `Reopen History` insertion assumptions from normal reopen
     flow and keeps generated `Change History` grammar aligned with the May 30
@@ -68,7 +77,11 @@ Modify these files:
     events and removes durable decision-kind/evidence-kind/current-mode detail
     requirements from mutation attempt events.
 - `plugins/turbo-mode/ticket/scripts/ticket_validate.py`
-  - Removes `reopen_reason` from normal target write-field acceptance once `reopen` uses `evidence_summary`.
+  - Aligns field validation with gateway projection: permits source create-only
+    `key_files` when `_plan_create()` and `_execute_create()` validate rendered
+    create fields, keeps non-create target writes from accepting `key_files`, and
+    removes `reopen_reason` from normal target write-field acceptance once
+    `reopen` uses `evidence_summary`.
 - `plugins/turbo-mode/ticket/README.md`
 - `plugins/turbo-mode/ticket/HANDBOOK.md`
 - `plugins/turbo-mode/ticket/references/ticket-contract.md`
@@ -90,6 +103,7 @@ Test these files:
 - `plugins/turbo-mode/ticket/tests/test_review_findings.py`
 - `plugins/turbo-mode/ticket/tests/test_change_history.py`
 - `plugins/turbo-mode/ticket/tests/test_turn_batch.py`
+- `plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py`
 - `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`
 - `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`
 - `plugins/turbo-mode/ticket/tests/test_docs_contract.py`
@@ -103,12 +117,22 @@ Test these files:
   paired runtime decision is `RuntimeDecisionKind.APPLY_CORRECTION`; that
   decision kind is the approval boundary for `correct -> reopen`.
 - Keep full `reconcile_board` implementation out of this slice. This migration may make the future wrapper possible, but it must not implement discovery ordering, caps, overflow, or broad board search.
-- Keep operation-log work narrow. This slice may update candidate identity, expected pre-write fingerprint, post-write fingerprint, evidence summary, target fields/sections, and write/summary flags. It must not add semantic ranking, evidence-kind taxonomies, approval-state taxonomies, or private workflow stages.
+- Keep operation-log work narrow. This slice may update candidate identity,
+  expected pre-write recovery facts, expected post-write fingerprint, exact
+  generated `Change History` metadata, evidence summary, target
+  fields/sections, and write/summary flags. It must not add semantic ranking,
+  evidence-kind taxonomies, approval-state taxonomies, or private workflow
+  stages.
 - Implement exact `create` idempotency before source-availability docs change.
   Ordinary duplicate detection is not the same guarantee. For `create`, the
   gateway must bind canonical pre-allocation candidate identity to the allocated
   target ID under the write lock before writing the file, and retry must use
   that retained binding while it exists.
+- Keep fresh-create duplicate/current-state preflight separate from retained
+  allocation recovery. A first create attempt still runs the ordinary
+  `_plan_create()` duplicate check before recording an allocation; once a
+  retained `mutation_attempt` exists for the same create candidate, retry uses
+  the retained allocation binding and must not allocate a fresh ID.
 - Treat the target candidate envelope as exact. Do not accept `conflict_reason`
   as a top-level candidate key, do not store it on target-shaped
   `CandidateMutation`, and do not include it in identity, gateway, result, or
@@ -128,7 +152,9 @@ Test these files:
   the source create engine, or this slice must narrow the authority docs in the
   same commit. Do not reject valid optional create sections such as `Context`,
   `Prior Investigation`, `Approach`, `Verification`, or `Key Files` while
-  claiming the broader target contract is implemented.
+  claiming the broader target contract is implemented. `ticket_validate.py` is
+  part of this adapter boundary because live create validation currently runs
+  before `_execute_create()` renders source-supported sections.
 - Treat Tasks 1 and 2 as one atomic source commit group. Runtime identity calls
   start using the target-shaped identity helper before `test_autonomy_runtime.py`
   can be green; do not commit Task 1 by itself.
@@ -151,7 +177,7 @@ Before implementation, build the rename/blast-radius map from live source. Run
 both commands:
 
 ```bash
-rg -n "target_fingerprint|mutation\.fields|\.evidence|EvidenceLink|\"correction\"|conflict_reason|reopen_reason|Reopen History|evidence_kind|current_mode|\"decision\"|decision\.kind|RuntimeDecisionKind|reprioritize|stale_cleanup|blocker_edit|refine|archive|delete|history_repair|summarize|compact|pause_automation|codex\.ticket\.mutation\.v1|ticket_write|mutation_status|ticket_written|allocated_ticket_id|create_allocation" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
+rg -n "target_fingerprint|mutation\.fields|\.evidence|EvidenceLink|\"correction\"|conflict_reason|reopen_reason|Reopen History|evidence_kind|current_mode|\"decision\"|decision\.kind|RuntimeDecisionKind|reprioritize|stale_cleanup|blocker_edit|refine|archive|delete|history_repair|summarize|compact|pause_automation|codex\.ticket\.mutation\.v1|ticket_write|mutation_status|ticket_written|allocated_ticket_id|create_allocation|expected_post_write_fingerprint|post_write_fingerprint|ChangeHistoryEntry|change_history_timestamp|key_files" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 rg -n "GatewayMutation\(|CandidateMutation\(" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 ```
 
@@ -160,6 +186,7 @@ Assign every hit to one of these dispositions before claiming a task is green:
 | Legacy surface | Target disposition | Must be covered in |
 |---|---|---|
 | `target_fingerprint` in candidate/gateway identity | Rename to `expected_ticket_fingerprint` for target candidate/gateway paths. Legacy direct engine plan/execute surfaces may keep `target_fingerprint` only when the task explicitly labels them outside the target candidate path. Calls to `scripts.ticket_dedup.target_fingerprint` may remain only as the helper that computes a current ticket fingerprint; import it as `compute_target_fingerprint` in changed tests when practical. | Tasks 1-3 and final residue check |
+| Post-write recovery fingerprint helper | Do not use the mtime-sensitive `target_fingerprint()` as the pre-write expected post-state, because the post-write mtime is unknowable before the write. Add a content-only target recovery fingerprint helper and use it only for expected/observed post-write recovery comparisons. | Task 5 |
 | `mutation.fields` on `GatewayMutation` | Rename to `mutation.proposed_change`, including create dedup and test fakes. | Task 3 |
 | `GatewayMutation(...)` construction sites | Rewrite every source/test construction to the target-shaped constructor. `ticket_autonomy.py` is the live apply-turn spine and must be migrated in Task 3, not left to final verification. | Task 3 |
 | `CandidateMutation(...)` construction sites | Rewrite every source/test construction to the target-shaped constructor or remove the old test. Construction sites are not covered by vocabulary greps alone. | Tasks 1-5 and final construction-site check |
@@ -168,10 +195,13 @@ Assign every hit to one of these dispositions before claiming a task is green:
 | `conflict_reason` candidate content | Remove from accepted target candidate mappings and from `CandidateMutation`. Conflict evidence may stop candidate construction or produce a short mechanical pause reason outside the target candidate envelope, but it must not enter candidate identity, gateway validation, result data, or mutation-attempt details. | Tasks 1, 2, and final residue check |
 | Wrong-type target candidate fields | Reject non-string, non-null `ticket_id` and `expected_ticket_fingerprint` before constructing `CandidateMutation`. Reject non-string `action` and `evidence_summary` before constructing `CandidateMutation`. Do not use `isinstance(..., str) else None` or `else ""` normalization for raw candidate mappings. | Task 1 |
 | Discovery dedupe keys | Dedupe explicit structured candidates by canonical candidate payload fingerprint. Do not use `(ticket_id, action, evidence_summary)` because it can collapse two different target writes that share one honest reason line. | Task 2 |
+| `key_files` create projection and validation | Treat `Key Files` as a valid source create section only when projected through the create adapter into `_plan_create()`/`_execute_create()`. Patch `ticket_validate.py` in the same task as the create projection test so `key_files` is not rejected before rendering; do not make `key_files` a valid non-create target write field. | Task 3 |
 | Create candidate allocation binding | For `create`, allocate the target ID/path under the gateway write lock, record the retained binding before file write, and make retry reuse that binding. Ordinary `_plan_create()` duplicate detection is not a substitute. | Task 3A |
+| Fresh create duplicate preflight | Preserve `_plan_create()` duplicate/current-state detection for fresh create attempts before recording an allocation. Retained allocation recovery applies only after an existing `mutation_attempt` for the same create candidate is present. | Task 3A |
 | `reprioritize`, `stale_cleanup`, `blocker_edit`, `refine` action literals | These are not target candidate actions. Fold write behavior into ordinary `update` candidates, delete old runtime/gateway/test action branches, and keep `stale_cleanup` only as read-only review-hygiene output that candidate discovery no longer accepts as a write candidate. | Tasks 1, 2, 5, and final residue check |
 | `reopen_reason` and `Reopen History` normal write behavior | Move human reason to `evidence_summary`, append ordinary generated `Change History`, and rewrite/remove tests or helpers that preserve `Reopen History` as target behavior. | Task 4 |
 | `evidence_kind`, `current_mode`, `"decision"`, and `decision.kind` mutation-attempt details | Remove from target candidate operation-log event details unless a separate operation-log redesign explicitly keeps a bounded mechanical fact allowed by the control doc. Runtime mode inputs may keep `current_mode` only when they are not persisted mutation-attempt details. `RuntimeDecisionKind` values may remain internal branch logic, but must not be persisted in mutation-attempt details or result data. | Task 5 |
+| `expected_post_write_fingerprint`, `post_write_fingerprint`, and generated `Change History` metadata | Mutation attempts must retain the expected post-write fingerprint and exact generated history metadata before the file write. `ticket_written` may still record the observed `post_write_fingerprint`, but it cannot be the only source for recovery after a crash between file write and `ticket_written`. | Task 5 |
 | `archive`, `delete`, `history_repair`, `summarize`, `compact`, `pause_automation` action vocabulary | These are not target candidate actions. Keep maintenance vocabulary only in event-type-specific validation or hard discussion guards where the code is not recording a retained candidate action fact. Do not let these values validate a new `mutation_attempt` or `mutation_status`/`ticket_written` candidate action. | Task 5 and final residue check |
 | `ticket_write` event wording | There is no live `ticket_write` operation-log event type in this source snapshot. Use `mutation_status` with status `ticket_written`, or explicitly add a new event type and schema/test coverage in the same task. This plan must not refer to `ticket_write` as an existing event boundary. | Task 5 |
 | `codex.ticket.mutation.v1` candidate identity fixtures | Replace candidate-contract identity helpers and fixtures with `codex.ticket.mutation.v2`. Low-level `make_mutation_id()` tests may keep arbitrary v1 schema examples only when they are not candidate-contract fixtures. | Task 2 and final residue check |
@@ -197,15 +227,15 @@ git status --short --branch
 git rev-parse --short HEAD
 ```
 
-Expected at the last reviewed source baseline before this create-idempotency and
-parser-boundary patch:
+Expected at the last reviewed source baseline before this key-files and
+recovery-facts patch:
 
 ```text
-## main...origin/main [ahead 5]
-574e5cee
+## main...origin/main [ahead 6]
+bed44541
 ```
 
-If `HEAD` has advanced, run `git diff --stat 574e5cee..HEAD` and re-check the
+If `HEAD` has advanced, run `git diff --stat bed44541..HEAD` and re-check the
 plan against the new diff before using the expected output as a gate. If the
 only diff is this plan, record the live status and continue. If source files
 changed, re-check the implementation steps against the new source before
@@ -1266,6 +1296,7 @@ signature change.
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_validate.py`
 - Test: `plugins/turbo-mode/ticket/tests/test_autonomy_cli.py`
 - Test: `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`
 - Test: `plugins/turbo-mode/ticket/tests/test_engine_gateway.py`
@@ -1880,6 +1911,36 @@ return `_policy_blocked(error)`. Do not omit optional sections that
 patch `plugins/turbo-mode/ticket/references/ticket-contract.md` and the skill
 examples in the same commit that narrows the source contract.
 
+In `ticket_validate.py`, split normal target write validation from source create
+field validation so Task 3 does not make `key_files` a non-create write field.
+Add this helper:
+
+```python
+def validate_create_fields(fields: dict[str, Any]) -> list[str]:
+    """Validate source create fields after gateway target-section projection."""
+    errors = validate_fields(
+        {key: value for key, value in fields.items() if key != "key_files"}
+    )
+    if "key_files" in fields:
+        value = fields["key_files"]
+        if not isinstance(value, list):
+            errors.append(f"key_files must be a list, got {type(value).__name__}")
+        elif not all(isinstance(item, Mapping) for item in value):
+            errors.append("key_files must contain only objects")
+        else:
+            for index, item in enumerate(value):
+                for key in ("file", "role", "look_for"):
+                    if not isinstance(item.get(key), str) or not item[key].strip():
+                        errors.append(f"key_files[{index}].{key} must be a non-empty string")
+    return errors
+```
+
+Import `Mapping` from `collections.abc` in `ticket_validate.py`. In
+`ticket_engine_core.py`, change `_plan_create()` and `_execute_create()` to call
+`validate_create_fields(fields)` instead of `validate_fields(fields)`. Keep
+`validate_fields({"key_files": [...]})` rejecting `key_files` for normal
+non-create writes.
+
 The gateway create test above must pass before Task 3 can commit.
 
 For reopen, pass target sections in Task 4 after reopen support lands.
@@ -1900,12 +1961,13 @@ source entrypoint tests pass.
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_engine_policy.py
+git add plugins/turbo-mode/ticket/scripts/ticket_autonomy.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_validate.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_engine_policy.py
 git commit -m "fix(ticket): project target candidates through gateway"
 ```
 
 Expected: commit succeeds with gateway, engine, source-entrypoint, and directly
-affected tests staged. Do not update source-availability docs in this commit.
+affected validation/tests staged. Do not update source-availability docs in this
+commit.
 
 ## Task 3A: Add Exact Create Idempotency Binding
 
@@ -2114,6 +2176,12 @@ def test_create_retry_appends_missing_written_event_for_retained_allocation(
     ]
 ```
 
+Keep `test_gateway_autonomous_create_stops_at_duplicate_candidate()` in
+`test_engine_gateway.py` and update it to the target-shaped `GatewayMutation`
+constructor if Task 3 has not already done so. Fresh create duplicate detection
+is still a live pre-allocation gate; these Task 3A tests add retained allocation
+recovery for interrupted attempts, not an override for duplicate candidates.
+
 - [ ] **Step 2: Run create idempotency tests and verify RED**
 
 Run:
@@ -2203,13 +2271,17 @@ approval state, evidence taxonomies, or copied ticket prose to this binding.
 
 - [ ] **Step 4: Thread create allocation through mutation attempt details**
 
-In `_apply_autonomous_mutation_locked()`, replace the create dedup-only branch
-with retained allocation selection:
+In `_apply_autonomous_mutation_locked()`, keep fresh create duplicate preflight
+before allocation, then replace the old create retry branch with retained
+allocation selection:
 
 ```python
 create_allocation: CreateAllocation | None = None
 if mutation.action == "create":
     if existing_state == "no_attempt":
+        create_error = _validate_autonomous_create_dedup(mutation, thread_id=thread_id)
+        if create_error is not None:
+            return create_error
         create_allocation, create_allocation_error = _allocate_create_target(mutation)
         if create_allocation_error is not None:
             return create_allocation_error
@@ -2226,6 +2298,10 @@ if mutation.action == "create":
                 data={"recovery_state": "create_allocation_missing"},
             )
 ```
+
+Remove the later unconditional `_validate_autonomous_create_dedup()` call for
+create recovery retries. A retained create attempt must reuse the recorded
+allocation instead of falling back to duplicate detection or fresh allocation.
 
 Update the `mutation_attempt` details call so a new create attempt records the
 binding before dispatch:
@@ -2398,10 +2474,11 @@ That old condition can create duplicates after a crash between file write and
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_attempt_records_allocated_ticket_binding_before_dispatch plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_retry_reuses_retained_allocation_when_file_not_written plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_retry_appends_missing_written_event_for_retained_allocation -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_attempt_records_allocated_ticket_binding_before_dispatch plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_retry_reuses_retained_allocation_when_file_not_written plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_retry_appends_missing_written_event_for_retained_allocation plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_autonomous_create_stops_at_duplicate_candidate -q
 ```
 
-Expected: all three create idempotency tests pass. If any test passes by
+Expected: all three create idempotency tests and the existing duplicate-candidate
+test pass. If any idempotency test passes by
 ordinary duplicate detection rather than retained `create_allocation` reuse,
 stop and fix the gateway recovery logic before continuing.
 
@@ -2800,12 +2877,15 @@ the reopen-related tests only.
 ## Task 5: Migrate Correction And Recovery Facts
 
 **Files:**
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_dedup.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py`
+- Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_core.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py`
 - Modify: `plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py`
 - Test: `plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py`
 - Test: `plugins/turbo-mode/ticket/tests/test_engine_gateway.py`
 - Test: `plugins/turbo-mode/ticket/tests/test_turn_batch.py`
+- Test: `plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py`
 - Test: `plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py`
 
 - [ ] **Step 1: Write failing target correction tests**
@@ -2856,17 +2936,110 @@ def test_correction_cannot_target_change_history(tmp_tickets: Path) -> None:
     assert decision.reason == "target_closure_failed"
 ```
 
-- [ ] **Step 2: Run correction tests and verify RED**
+In `test_engine_gateway.py`, add this non-create recovery-facts test:
+
+```python
+def test_update_attempt_records_expected_post_write_facts_before_dispatch(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
+    target = CandidateTarget(fields=("priority",), sections=("Next Action",))
+    proposed_change = {
+        "priority": "low",
+        "Next Action": "Finish the target candidate migration.",
+    }
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        target=target,
+        proposed_change=proposed_change,
+    )
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint or "",
+    )
+
+    def fail_dispatch(**_kwargs: object) -> EngineResponse:
+        return EngineResponse(
+            state="escalate",
+            message="simulated dispatch failure",
+            error_code="simulated_failure",
+        )
+
+    monkeypatch.setattr(gateway, "_execute_dispatch", fail_dispatch)
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    details = _events(project_root)[0]["details"]
+    history = details["change_history_entry"]
+    assert response.error_code == "simulated_failure"
+    assert details["expected_pre_write_fingerprint"] == mutation.expected_ticket_fingerprint
+    assert isinstance(details["expected_post_write_fingerprint"], str)
+    assert details["expected_post_write_fingerprint"]
+    assert history == {
+        "timestamp": _events(project_root)[0]["timestamp"],
+        "actor": "codex",
+        "reason": "Updated ticket from candidate evidence.",
+        "corrects": None,
+    }
+    assert "decision" not in details
+    assert "current_mode" not in details
+    assert "evidence_kind" not in details
+```
+
+In `test_autonomy_recovery.py`, update `_event_with_bound_fingerprints()` so the
+attempt details include exact generated history metadata:
+
+```python
+def _event_with_bound_fingerprints(
+    event: dict[str, object],
+    *,
+    pre: str = "pre-fp",
+    post: str = "post-fp",
+) -> dict[str, object]:
+    details = dict(event["details"])
+    details["expected_pre_write_fingerprint"] = pre
+    details["expected_post_write_fingerprint"] = post
+    details["change_history_entry"] = {
+        "timestamp": "2026-05-27T12:00:00Z",
+        "actor": "codex",
+        "reason": "Updated ticket from candidate evidence.",
+        "corrects": None,
+    }
+    return {**event, "details": details}
+```
+
+Keep
+`test_attempt_recorded_with_post_write_state_appends_missing_write_events()` in
+`test_autonomy_recovery.py`; it is the focused non-create crash-window test for
+an attempt record whose expected post state already matches the current ticket.
+Do not defer this file to the full suite.
+
+- [ ] **Step 2: Run correction and recovery tests and verify RED**
 
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_update_attempt_records_expected_post_write_facts_before_dispatch plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py::test_attempt_recorded_with_post_write_state_appends_missing_write_events -q
 ```
 
 Expected: fail because correction helpers, integration fixtures, gateway recovery
 details, or turn-batch validation still use the old `correction` action, flat
-fields, or persisted decision/current-mode/evidence-kind details.
+fields, persisted decision/current-mode/evidence-kind details, or lack pre-write
+expected post recovery facts.
 
 - [ ] **Step 3: Normalize correction action and unsafe correction checks**
 
@@ -2940,20 +3113,188 @@ Add turn-batch tests proving both sides of the split:
 - existing maintenance event types still accept their own mechanical actions
   where those events are intentionally retained.
 
-- [ ] **Step 4: Record bounded target recovery facts**
+- [ ] **Step 4: Add pre-write expected post recovery facts**
+
+In `ticket_dedup.py`, add content-only target recovery fingerprint helpers. Do
+not replace the existing mtime-sensitive `target_fingerprint()` helper; that
+helper remains the pre-write TOCTOU guard used by `expected_ticket_fingerprint`.
+
+```python
+def target_recovery_fingerprint_for_text(text: str) -> str:
+    """Fingerprint rendered target ticket content for post-write recovery."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def target_recovery_fingerprint(ticket_path: Path) -> str | None:
+    """Fingerprint current target ticket content for post-write recovery."""
+    try:
+        return target_recovery_fingerprint_for_text(
+            ticket_path.read_text(encoding="utf-8")
+        )
+    except OSError:
+        return None
+```
+
+In `ticket_engine_core.py`, extract render-before-write helpers from
+`_execute_create()`, `_execute_update()`, `_execute_close()`, and
+`_execute_reopen()` so the gateway can preview the exact post-write content
+before appending the `mutation_attempt` event. The helper must return the path
+and content fingerprint without writing:
+
+```python
+@dataclass(frozen=True, slots=True)
+class TargetWritePreview:
+    """Rendered target ticket write used for pre-write recovery facts."""
+
+    ticket_path: Path
+    post_write_fingerprint: str
+
+
+def preview_target_write(
+    *,
+    action: str,
+    ticket_id: str | None,
+    fields: Mapping[str, Any],
+    target_sections: Mapping[str, object],
+    session_id: str,
+    request_origin: str,
+    tickets_dir: Path,
+    change_history_entry: ChangeHistoryEntry,
+    reserved_ticket_id: str | None = None,
+) -> EngineResponse | TargetWritePreview:
+    """Render the exact target write without writing a ticket file."""
+```
+
+`preview_target_write()` must use the same render path and validation as the
+corresponding execute helper, including the same `ChangeHistoryEntry`, target
+sections, blocked cleanup, reopen shape, and create `reserved_ticket_id`.
+Return an `EngineResponse` for the same validation failures execute would
+return. If preview and execute would diverge for any action, stop and refactor
+the shared rendering helpers before continuing; do not approximate the expected
+post fingerprint from candidate fields.
+
+In `ticket_turn_batch.py`, update recovery state to compare both pre-write and
+post-write facts. Pre-write comparison keeps the existing mtime-sensitive
+current fingerprint; post-write comparison uses the content-only recovery
+fingerprint:
+
+```python
+@dataclass(frozen=True, slots=True)
+class CurrentRecoveryFingerprints:
+    """Current ticket fingerprints for retry recovery comparisons."""
+
+    pre_write_fingerprint: str | None
+    post_write_fingerprint: str | None
+```
+
+Change `project_mutation_recovery()` to accept
+`current_ticket_fingerprints: CurrentRecoveryFingerprints` instead of one
+`current_ticket_fingerprint` value. In the `attempt_recorded` branch:
+
+```python
+if current_ticket_fingerprints.pre_write_fingerprint == expected_pre:
+    return RecoveryProjection(
+        "retry_with_same_mutation",
+        thread_id,
+        mutation_id,
+        current_ticket_fingerprints.pre_write_fingerprint,
+        expected_pre,
+        expected_post,
+    )
+if expected_post is None:
+    return _pause_projection(
+        thread_id=thread_id,
+        mutation_id=mutation_id,
+        current_ticket_fingerprint=current_ticket_fingerprints.post_write_fingerprint,
+        expected_pre_write_fingerprint=expected_pre,
+        expected_post_write_fingerprint=expected_post,
+        reason="missing_post_write_fingerprint",
+    )
+if current_ticket_fingerprints.post_write_fingerprint == expected_post:
+    ...
+```
+
+Update every caller, including `_existing_mutation_recovery_response()` and
+`test_autonomy_recovery.py`, to pass both current fingerprints. Do not compare a
+content-only post fingerprint to the old mtime-sensitive `target_fingerprint()`.
 
 In `ticket_engine_gateway.py`, update `_fingerprint_details()` and the
 `mutation_attempt` event details so target candidate mutation attempt events
-include only bounded target facts. Replace the whole `details={...}` block that
-currently adds `decision`, `current_mode`, and `evidence_kind`; do not hide
-those fields outside `_fingerprint_details()`. If Task 3A has already added
+include only bounded target facts and the retained recovery facts needed for an
+interrupted write. Replace the whole `details={...}` block that currently adds
+`decision`, `current_mode`, and `evidence_kind`; do not hide those fields
+outside `_fingerprint_details()`. If Task 3A has already added
 `create_allocation`, keep that nested mechanical fact for create attempts.
+
+Add these helpers:
+
+```python
+def _change_history_entry_details(entry: ChangeHistoryEntry) -> dict[str, object]:
+    return {
+        "timestamp": entry.timestamp,
+        "actor": entry.actor,
+        "reason": entry.reason,
+        "corrects": entry.corrects,
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectedWriteFacts:
+    """Recovery facts known before the ticket file write starts."""
+
+    expected_post_write_fingerprint: str
+    change_history_entry: dict[str, object]
+```
+
+Before appending `mutation_attempt`, build the dispatch, create allocation, and
+`ChangeHistoryEntry`, then call `preview_target_write()`. Use one timestamp for
+the attempt event and generated history entry:
+
+```python
+attempt_timestamp = change_history_timestamp or _now_z()
+change_history_entry = _change_history_entry(
+    mutation.action,
+    timestamp=attempt_timestamp,
+)
+preview = preview_target_write(
+    action=dispatch.action.value,
+    ticket_id=mutation.ticket_id,
+    fields=dict(dispatch.fields),
+    target_sections=dispatch.sections or {},
+    session_id=thread_id,
+    request_origin="agent",
+    tickets_dir=mutation.tickets_dir,
+    change_history_entry=change_history_entry,
+    reserved_ticket_id=(
+        create_allocation.ticket_id if create_allocation is not None else None
+    ),
+)
+if isinstance(preview, EngineResponse):
+    return preview
+expected_write_facts = ExpectedWriteFacts(
+    expected_post_write_fingerprint=preview.post_write_fingerprint,
+    change_history_entry=_change_history_entry_details(change_history_entry),
+)
+```
+
+Update `_base_event()` and `_append_gateway_event()` to accept an optional
+`timestamp` argument so the new `mutation_attempt` event timestamp exactly
+matches the generated `ChangeHistoryEntry.timestamp`. Do not generate two
+independent timestamps for the same write attempt.
+
+After `_execute_dispatch()` succeeds, compute `post_write_fingerprint` for the
+`mutation_status`/`ticket_written` event with
+`target_recovery_fingerprint(Path(ticket_path_raw))`, not with the
+mtime-sensitive `compute_target_fingerprint()`. The observed
+`post_write_fingerprint` and the retained `expected_post_write_fingerprint` must
+be comparable recovery fingerprints.
 
 ```python
 def _fingerprint_details(
     *,
     mutation: GatewayMutation,
     project_root: Path,
+    expected_write_facts: ExpectedWriteFacts,
     create_allocation: CreateAllocation | None = None,
 ) -> dict[str, object]:
     details: dict[str, object] = {
@@ -2962,6 +3303,10 @@ def _fingerprint_details(
             "sections": list(mutation.target.sections),
         },
         "evidence_summary": mutation.evidence_summary,
+        "expected_post_write_fingerprint": (
+            expected_write_facts.expected_post_write_fingerprint
+        ),
+        "change_history_entry": expected_write_facts.change_history_entry,
     }
     if mutation.action == "create":
         if create_allocation is not None:
@@ -2980,13 +3325,15 @@ Use the helper as the full details value:
 details=_fingerprint_details(
     mutation=mutation,
     project_root=project_root,
+    expected_write_facts=expected_write_facts,
     create_allocation=create_allocation,
 )
 ```
 
 Do not add confidence scores, evidence-kind lists, current-mode labels, runtime
 decision kinds, approval states, Handoff metadata, private workflow stages, or
-copied ticket content. `create_allocation` is allowed only with
+copied ticket content. `change_history_entry` is allowed only with `timestamp`,
+`actor`, `reason`, and `corrects`. `create_allocation` is allowed only with
 `allocated_ticket_id`, `allocated_ticket_path`, and
 `expected_pre_write_fact="allocated_target_path_unused"`.
 
@@ -2994,7 +3341,8 @@ In `plugins/turbo-mode/ticket/tests/test_engine_gateway.py`, update the Task 3A
 manual create-recovery fixtures in
 `test_create_retry_reuses_retained_allocation_when_file_not_written()` and
 `test_create_retry_appends_missing_written_event_for_retained_allocation()` so
-their `details` contain only `target`, `evidence_summary`, and
+their `details` contain only `target`, `evidence_summary`,
+`expected_post_write_fingerprint`, `change_history_entry`, and
 `create_allocation`. If `valid_attempt_event()` in
 `plugins/turbo-mode/ticket/tests/test_turn_batch.py` still injects `decision`,
 `current_mode`, or `evidence_kind`, update that helper in the same task and
@@ -3006,25 +3354,26 @@ exercise.
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py -q
 ```
 
-Expected: all four files pass. Any failure still using `"correction"` as a
+Expected: all five files pass. Any failure still using `"correction"` as a
 target candidate action, narrowing maintenance event validation into candidate
-action validation, or expecting `decision`, `evidence_kind`, or `current_mode`
-mutation attempt details belongs to this task.
+action validation, expecting `decision`, `evidence_kind`, or `current_mode`
+mutation attempt details, missing `expected_post_write_fingerprint`, or failing
+to recover a missing `ticket_written` event belongs to this task.
 
 - [ ] **Step 6: Commit Task 5**
 
 Run:
 
 ```bash
-git add plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py
+git add plugins/turbo-mode/ticket/scripts/ticket_dedup.py plugins/turbo-mode/ticket/scripts/ticket_autonomy_runtime.py plugins/turbo-mode/ticket/scripts/ticket_engine_core.py plugins/turbo-mode/ticket/scripts/ticket_engine_gateway.py plugins/turbo-mode/ticket/scripts/ticket_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py
 git commit -m "fix(ticket): migrate correction recovery facts"
 ```
 
-Expected: commit succeeds with correction/recovery files and directly affected
-operation-log tests only.
+Expected: commit succeeds with correction/recovery files, the recovery
+fingerprint helper, and directly affected operation-log tests only.
 
 ## Task 6: Update Source Docs, Skills, And Contract Availability
 
@@ -3037,11 +3386,13 @@ operation-log tests only.
 - Test: `plugins/turbo-mode/ticket/tests/test_docs_contract.py`
 
 Precondition: do not start Task 6 until the Task 3 source-entrypoint tests, Task
-3A create-idempotency tests, and Task 5 correction/integration tests pass. The
-docs must not claim that source exposes a target candidate mutation path while
-`ticket_autonomy.py` still constructs old gateway mutations or while create
+3A create-idempotency tests, and Task 5 correction/recovery/integration tests
+pass, including `plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py`.
+The docs must not claim that source exposes a target candidate mutation path
+while `ticket_autonomy.py` still constructs old gateway mutations, while create
 retry can still allocate a duplicate ticket instead of using a retained
-allocation binding.
+allocation binding, or while non-create recovery lacks pre-write
+`expected_post_write_fingerprint` and exact generated `Change History` metadata.
 
 - [ ] **Step 1: Write failing docs-contract tests**
 
@@ -3108,7 +3459,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 ```
 
 Expected: docs-contract test passes, and the Task 3, Task 3A, and Task 5 focused
-source-entrypoint/recovery tests are still passing in the current checkout.
+source-entrypoint/create-idempotency/recovery tests are still passing in the
+current checkout.
 
 - [ ] **Step 5: Commit Task 6**
 
@@ -3131,7 +3483,7 @@ Expected: commit succeeds with docs/skill availability files only.
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_candidate_discovery.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_integration.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_review_findings.py plugins/turbo-mode/ticket/tests/test_change_history.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_docs_contract.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_runtime.py plugins/turbo-mode/ticket/tests/test_mutation_identity.py plugins/turbo-mode/ticket/tests/test_candidate_discovery.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_policy.py plugins/turbo-mode/ticket/tests/test_execute.py plugins/turbo-mode/ticket/tests/test_integration.py plugins/turbo-mode/ticket/tests/test_engine_runner.py plugins/turbo-mode/ticket/tests/test_review_findings.py plugins/turbo-mode/ticket/tests/test_change_history.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_docs_contract.py -q
 ```
 
 Expected: all selected tests pass.
@@ -3141,7 +3493,7 @@ Expected: all selected tests pass.
 Run:
 
 ```bash
-rg -n "EvidenceLink|\.evidence|\"correction\"|conflict_reason|reopen_reason|Reopen History|evidence_kind|current_mode|\"decision\"|decision\.kind|RuntimeDecisionKind|mutation\.fields|target_fingerprint|reprioritize|stale_cleanup|blocker_edit|refine|archive|delete|history_repair|summarize|compact|pause_automation|codex\.ticket\.mutation\.v1|ticket_write|mutation_status|ticket_written|allocated_ticket_id|create_allocation" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
+rg -n "EvidenceLink|\.evidence|\"correction\"|conflict_reason|reopen_reason|Reopen History|evidence_kind|current_mode|\"decision\"|decision\.kind|RuntimeDecisionKind|mutation\.fields|target_fingerprint|reprioritize|stale_cleanup|blocker_edit|refine|archive|delete|history_repair|summarize|compact|pause_automation|codex\.ticket\.mutation\.v1|ticket_write|mutation_status|ticket_written|allocated_ticket_id|create_allocation|expected_post_write_fingerprint|post_write_fingerprint|ChangeHistoryEntry|change_history_timestamp|key_files" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 rg -n "GatewayMutation\(|CandidateMutation\(" plugins/turbo-mode/ticket/scripts plugins/turbo-mode/ticket/tests
 ```
 
@@ -3168,6 +3520,14 @@ Expected: every remaining hit is explicitly one of:
   pseudo-event;
 - `create_allocation`, `allocated_ticket_id`, and `allocated_ticket_path` only
   as bounded retained create recovery facts for `create` attempts;
+- `expected_post_write_fingerprint`, `post_write_fingerprint`, and
+  `ChangeHistoryEntry` only as bounded recovery facts or helpers for
+  comparing the expected and observed post-write target ticket;
+- `change_history_timestamp` only as a local variable used to reuse the retained
+  attempt timestamp for exact generated history recovery;
+- `key_files` only in source create rendering/validation, ingest/envelope tests,
+  historical examples, or target docs that describe create-supported optional
+  sections; it must not be a valid non-create target write field;
 - low-level `make_mutation_id()` tests that use `codex.ticket.mutation.v1` as
   arbitrary schema input and are not candidate-contract fixtures;
 - target-shaped `CandidateMutation(...)` or `GatewayMutation(...)` constructions
@@ -3267,10 +3627,21 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
 - `correct` is an ordinary target-shaped mutation and appends generated correction history.
 - Operation-log details retain only bounded recovery facts and do not add
   semantic ranking, current-mode labels, evidence taxonomies, runtime decision
-  kinds, approval state, or private workflow stages. For create attempts, the
-  bounded recovery facts may include only `create_allocation` with
+  kinds, approval state, or private workflow stages. Non-create attempts retain
+  the expected pre-write fingerprint, expected post-write recovery fingerprint,
+  and exact generated `Change History` metadata before the file write starts.
+  For create attempts, the bounded recovery facts may include only
+  `create_allocation` with
   `allocated_ticket_id`, `allocated_ticket_path`, and
-  `expected_pre_write_fact`.
+  `expected_pre_write_fact`, plus the same expected post-write recovery
+  fingerprint and generated history metadata after allocation.
+- Post-write recovery fingerprint comparisons use content-only target recovery
+  fingerprints. The mtime-sensitive `target_fingerprint()` remains only the
+  pre-write TOCTOU guard for `expected_ticket_fingerprint`.
+- A non-create crash after file write but before `ticket_written` appends the
+  missing `mutation_status`/`ticket_written` and `applied` events when the
+  current post-write recovery fingerprint matches the retained
+  `expected_post_write_fingerprint`.
 - `ticket_turn_batch.py` validates the six target actions for retained
   candidate action facts on `mutation_attempt` and
   `mutation_status`/`ticket_written` boundaries and keeps maintenance event
@@ -3291,8 +3662,9 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
 - Broad `docs/tickets/` normalization. The current inventory is clean; any future dirty active ticket state gets a separate diagnostic/data migration lane.
 - Historical spec example cleanup for old illustrative IDs unless a docs-contract test proves those examples now mislead current behavior.
 - Private operation-log redesign beyond candidate identity, expected pre-write
-  fingerprint, retained create allocation binding, post-write fingerprint,
-  evidence summary, target fields/sections, and write/summary completion facts.
+  fingerprint, retained create allocation binding, content-only post-write
+  recovery fingerprint, exact generated `Change History` metadata, evidence
+  summary, target fields/sections, and write/summary completion facts.
 
 ## Execution Handoff
 
