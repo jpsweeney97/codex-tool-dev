@@ -15,6 +15,10 @@ TARGET_FRONTMATTER_OPTIONAL = ("tags", "related_paths", "blocked_by")
 TARGET_FRONTMATTER_FIELDS = TARGET_FRONTMATTER_REQUIRED + TARGET_FRONTMATTER_OPTIONAL
 TARGET_SECTIONS_REQUIRED = ("Problem", "Next Action", "Change History")
 TARGET_STATUSES = ("idea", "open", "blocked", "done", "wontfix")
+TARGET_TERMINAL_STATUSES = frozenset({"done", "wontfix"})
+TARGET_ACTIVE_STATUSES = tuple(
+    status for status in TARGET_STATUSES if status not in TARGET_TERMINAL_STATUSES
+)
 TARGET_PRIORITIES = ("high", "normal", "low")
 # Canonical legacy (Handoff v1.0 / pre-cutover) -> target priority mapping.
 LEGACY_PRIORITY_MAP = {"critical": "high", "medium": "normal"}
@@ -50,6 +54,13 @@ class TargetTicketValidation:
     ok: bool
     ticket_id: str = ""
     error: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.ok and not self.error:
+            raise ValueError(
+                "TargetTicketValidation validation failed: error is required when ok is False. "
+                f"Got: {self!r:.100}"
+            )
 
 
 def validate_target_section_name(name: str) -> bool:

@@ -29,7 +29,11 @@ from scripts.ticket_id import allocate_id, build_filename
 from scripts.ticket_parse import ParsedTicket
 from scripts.ticket_paths import discover_project_root
 from scripts.ticket_render import render_ticket
-from scripts.ticket_target_schema import validate_target_ticket_text
+from scripts.ticket_target_schema import (
+    TARGET_ACTIVE_STATUSES,
+    TARGET_TERMINAL_STATUSES,
+    validate_target_ticket_text,
+)
 from scripts.ticket_trust import collect_trust_triple_errors
 from scripts.ticket_validate import validate_fields
 
@@ -140,19 +144,28 @@ def _invalid_rendered_ticket_response(
     text: str,
     *,
     ticket_id: str | None = None,
+    state: str = "invalid_state",
+    error_code: str = "invalid_state",
 ) -> EngineResponse | None:
-    """Return an invalid-state response when rendered text fails target validation."""
+    """Return a mutation rejection response when rendered text fails validation."""
     validation = validate_target_ticket_text(ticket_path, text)
     if validation.ok:
         return None
-    return EngineResponse(
-        state="invalid_state",
-        message=(
+    if state == "need_fields":
+        message = (
+            f"{operation} failed: proposed fields render an invalid target ticket: "
+            f"{validation.error}. Got: {text!r:.100}"
+        )
+    else:
+        message = (
             f"{operation} failed: rendered ticket is not target-normalized: "
             f"{validation.error}. Got: {text!r:.100}"
-        ),
+        )
+    return EngineResponse(
+        state=state,
+        message=message,
         ticket_id=ticket_id or validation.ticket_id or None,
-        error_code="invalid_state",
+        error_code=error_code,
         data={"reason": validation.error},
     )
 
@@ -350,7 +363,7 @@ def engine_classify(
 
 # Required fields for create.
 _CREATE_REQUIRED = ("title", "problem")
-_CREATE_STATUSES = frozenset({"idea", "open", "blocked"})
+_CREATE_STATUSES = frozenset(TARGET_ACTIVE_STATUSES)
 
 # Dedup window.
 _DEDUP_WINDOW_HOURS = 24
@@ -363,7 +376,7 @@ def _validate_create_status_shape(fields: dict[str, Any]) -> list[str]:
     errors: list[str] = []
 
     if status not in _CREATE_STATUSES:
-        errors.append("create status must be one of ['blocked', 'idea', 'open']")
+        errors.append(f"create status must be one of {sorted(_CREATE_STATUSES)}")
     if status == "blocked":
         if not isinstance(blocked_on, str) or not blocked_on.strip():
             errors.append("blocked create requires blocked_on")
@@ -545,7 +558,7 @@ _T_BASE = 0.5
 _ORIGIN_MODIFIER: dict[str, float] = {"user": 0.0, "agent": 0.15}
 
 # Terminal statuses for dependency resolution.
-_TERMINAL_STATUSES = frozenset({"done", "wontfix"})
+_TERMINAL_STATUSES = TARGET_TERMINAL_STATUSES
 
 
 def _read_autonomy_config_state(
@@ -1123,8 +1136,10 @@ def _render_target_ticket_text(
 ) -> str:
     """Render a target ticket while preserving untargeted body sections.
 
-    For targeted headings, `None` removes the section and an empty string keeps
-    the section with an empty body.
+    For targeted headings on an existing ticket, `None` removes the section and
+    an empty string keeps the section with an empty body. For new text, `None`
+    omits optional sections and required sections coerce `None` to an empty
+    body.
     """
     from scripts.ticket_target_schema import TARGET_SECTIONS_REQUIRED
 
@@ -1181,7 +1196,7 @@ def _render_update_section_value(key: str, value: Any) -> str | None:
 
 
 def _replace_or_append_section(text: str, heading: str, content: str) -> str:
-    """Replace a level-two section body, appending the section if it does not exist."""
+    """Replace a level-two section body, inserting/appending when missing."""
     replacement = f"## {heading}\n{content.rstrip()}\n\n"
     pattern = re.compile(
         rf"^## {re.escape(heading)}\n.*?(?=^## |\Z)",
@@ -1190,7 +1205,22 @@ def _replace_or_append_section(text: str, heading: str, content: str) -> str:
     updated, count = pattern.subn(replacement, text, count=1)
     if count:
         return updated
+    if heading == "Blocked On":
+        return _insert_section_before(text, replacement, before_heading="Change History")
     return text.rstrip() + "\n\n" + replacement
+
+
+def _insert_section_before(text: str, replacement: str, *, before_heading: str) -> str:
+    """Insert a missing section before another level-two heading when present."""
+    before_match = re.search(rf"^## {re.escape(before_heading)}\n", text, re.MULTILINE)
+    if before_match is None:
+        return text.rstrip() + "\n\n" + replacement
+    return (
+        text[: before_match.start()].rstrip()
+        + "\n\n"
+        + replacement
+        + text[before_match.start() :]
+    )
 
 
 def _remove_section(text: str, heading: str) -> str:
@@ -2050,6 +2080,8 @@ def _execute_update(
         ticket_path,
         new_text,
         ticket_id=ticket_id,
+        state="need_fields",
+        error_code="need_fields",
     )
     if invalid_render is not None:
         return invalid_render

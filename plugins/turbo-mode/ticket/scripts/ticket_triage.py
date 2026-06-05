@@ -21,8 +21,13 @@ from scripts.ticket_payloads import (  # noqa: E402
     TicketPayloadPathError,
     stale_payloads,
 )
+from scripts.ticket_target_schema import (  # noqa: E402
+    TARGET_ACTIVE_STATUSES,
+    TARGET_TERMINAL_STATUSES,
+)
 
-_TERMINAL_STATUSES = frozenset({"done", "wontfix"})
+_TERMINAL_STATUSES = TARGET_TERMINAL_STATUSES
+_ACTIVE_STATUSES = TARGET_ACTIVE_STATUSES
 _DOCTOR_MAX_FILES = 5000
 _DOCTOR_MAX_BYTES = 100 * 1024 * 1024
 
@@ -428,7 +433,7 @@ def triage_dashboard(tickets_dir: Path) -> dict[str, Any]:
     tickets = [t for t in all_tickets if t.status not in _TERMINAL_STATUSES]
     ticket_map = {t.id: t for t in tickets}
 
-    counts: dict[str, int] = {"idea": 0, "open": 0, "blocked": 0}
+    counts: dict[str, int] = {status: 0 for status in _ACTIVE_STATUSES}
     priority_counts: dict[str, int] = {"high": 0, "normal": 0, "low": 0}
     active_ticket_rows: list[dict[str, Any]] = []
     stale: list[dict[str, str]] = []

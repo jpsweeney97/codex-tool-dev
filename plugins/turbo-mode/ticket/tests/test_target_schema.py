@@ -12,6 +12,7 @@ from scripts.ticket_target_schema import (
     TARGET_PRIORITIES,
     TARGET_SECTIONS_REQUIRED,
     TARGET_STATUSES,
+    TargetTicketValidation,
     _validate_status_specific_shape,
     validate_target_section_name,
     validate_target_ticket_file,
@@ -58,6 +59,11 @@ def test_target_ticket_accepts_id_only_yaml_frontmatter(tmp_path: Path) -> None:
     assert result.ok is True
     assert result.ticket_id == "T-20260508-01"
     assert result.error == ""
+
+
+def test_target_ticket_validation_rejects_false_result_without_error() -> None:
+    with pytest.raises(ValueError, match="error is required"):
+        TargetTicketValidation(ok=False)
 
 
 @pytest.mark.parametrize(

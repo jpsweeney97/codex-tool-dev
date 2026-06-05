@@ -582,6 +582,8 @@ class TestUpdate:
         text = ticket_path.read_text(encoding="utf-8")
         assert "status: blocked" in text
         assert "## Blocked On\nWaiting for the user to provide credentials." in text
+        assert text.index("## Next Action") < text.index("## Blocked On")
+        assert text.index("## Blocked On") < text.index("## Change History")
         assert validate_target_ticket_file(ticket_path).ok
 
     def test_update_rejects_blocked_transition_without_blocked_on(
@@ -618,8 +620,8 @@ class TestUpdate:
             },
         )
 
-        assert response.state == "invalid_state"
-        assert response.error_code == "invalid_state"
+        assert response.state == "need_fields"
+        assert response.error_code == "need_fields"
         assert "Blocked On" in response.message
         assert ticket_path.read_text(encoding="utf-8") == before
         assert validate_target_ticket_file(ticket_path).ok
@@ -721,10 +723,39 @@ class TestUpdate:
             },
         )
 
-        assert response.state == "invalid_state"
-        assert response.error_code == "invalid_state"
+        assert response.state == "need_fields"
+        assert response.error_code == "need_fields"
         assert "Blocked On" in response.message
         assert ticket_path.read_text(encoding="utf-8") == before
+        assert validate_target_ticket_file(ticket_path).ok
+
+    def test_update_rewrites_same_status_blocked_on(
+        self,
+        tmp_tickets: Path,
+    ) -> None:
+        ticket_path = make_ticket(
+            tmp_tickets,
+            "ignored.md",
+            id="T-20260302-01",
+            status="blocked",
+            blocked_by=["T-20260302-02"],
+            blocked_on="Waiting for the user to provide credentials.",
+        )
+
+        response = _execute_existing(
+            tmp_tickets,
+            ticket_path,
+            action="update",
+            fields={
+                "status": "blocked",
+                "blocked_on": "Waiting for the upstream deploy job to finish.",
+            },
+        )
+
+        assert response.state == "ok"
+        text = ticket_path.read_text(encoding="utf-8")
+        assert "## Blocked On\nWaiting for the upstream deploy job to finish." in text
+        assert "Waiting for the user to provide credentials." not in text
         assert validate_target_ticket_file(ticket_path).ok
 
     def test_update_rejects_section_field_and_leaves_file_unchanged(
@@ -1368,6 +1399,19 @@ class TestFieldValidation:
 
         assert response.error_code == "need_fields"
         assert "blocked_by" in response.message
+
+    def test_update_invalid_blocked_by_id_rejected(self, tmp_tickets: Path) -> None:
+        ticket_path = make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="open")
+
+        response = _execute_existing(
+            tmp_tickets,
+            ticket_path,
+            action="update",
+            fields={"blocked_by": ["not-a-ticket-id"]},
+        )
+
+        assert response.error_code == "need_fields"
+        assert "blocked_by entries must be target ticket IDs" in response.message
 
     def test_close_invalid_resolution_rejected(self, tmp_tickets: Path) -> None:
         ticket_path = make_ticket(
