@@ -31,6 +31,8 @@ and after the create-recovery plan patch:
   `main...origin/main [ahead 5]`, clean normal status, `HEAD` at `574e5cee`.
 - Branch/worktree after the create-recovery plan patch:
   `main...origin/main [ahead 6]`, clean normal status, `HEAD` at `bed44541`.
+- Branch/worktree after the correction-context and Task 3A verification review:
+  `main...origin/main [ahead 13]`, clean normal status, `HEAD` at `d145ac2d`.
 - Active ticket inventory: seven files under `docs/tickets/`; all use ID-only filenames, frontmatter metadata, target statuses, required sections, no unknown frontmatter keys, and no blocked-shape defects.
 - Active ticket statuses: six `open`, one `done`, no `status: in_progress`.
 - Historical references: old-looking `T-20260527-001` examples only appear in `docs/superpowers/specs/2026-05-26-ticket-runtime-first-autonomy-design.md`; placeholders such as `T-YYYYMMDD-NN` appear in ADR/control docs and are not active ticket IDs.
@@ -261,15 +263,15 @@ git status --short --branch
 git rev-parse --short HEAD
 ```
 
-Expected at the last reviewed source baseline before this key-files and
-recovery-facts patch:
+Expected at the last reviewed source baseline before this correction-context and
+Task 3A verification patch:
 
 ```text
-## main...origin/main [ahead 6]
-bed44541
+## main...origin/main [ahead 13]
+d145ac2d
 ```
 
-If `HEAD` has advanced, run `git diff --stat bed44541..HEAD` and re-check the
+If `HEAD` has advanced, run `git diff --stat d145ac2d..HEAD` and re-check the
 plan against the new diff before using the expected output as a gate. If the
 only diff is this plan, record the live status and continue. If source files
 changed, re-check the implementation steps against the new source before
@@ -3652,16 +3654,20 @@ successfully must derive the retained `expected_post_write_fingerprint` from
 Run:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_turn_batch.py::test_create_attempt_accepts_bounded_recovery_details_without_runtime_decision plugins/turbo-mode/ticket/tests/test_turn_batch.py::test_create_attempt_rejects_runtime_details_when_recovery_facts_present plugins/turbo-mode/ticket/tests/test_turn_batch.py::test_create_attempt_requires_bounded_recovery_details plugins/turbo-mode/ticket/tests/test_turn_batch.py::test_legacy_create_attempt_remains_readable_for_blocking_recovery plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_gateway_lock_is_shared_across_create_candidates plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_attempt_records_allocated_ticket_binding_before_dispatch plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_retry_reuses_retained_allocation_when_file_not_written plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_retry_blocks_allocation_path_that_does_not_match_allocated_id plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_retry_appends_missing_written_event_for_retained_allocation plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_retry_blocks_legacy_attempt_without_expected_write_facts plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_retry_blocks_existing_allocation_with_wrong_post_fingerprint plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_autonomous_create_stops_at_duplicate_candidate -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_turn_batch.py::test_create_attempt_accepts_bounded_recovery_details_without_runtime_decision plugins/turbo-mode/ticket/tests/test_turn_batch.py::test_create_attempt_rejects_runtime_details_when_recovery_facts_present plugins/turbo-mode/ticket/tests/test_turn_batch.py::test_create_attempt_requires_bounded_recovery_details plugins/turbo-mode/ticket/tests/test_turn_batch.py::test_legacy_create_attempt_remains_readable_for_blocking_recovery plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_gateway_lock_is_shared_across_create_candidates plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_attempt_records_allocated_ticket_binding_before_dispatch plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_retry_reuses_retained_allocation_when_file_not_written plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_retry_blocks_allocation_path_that_does_not_match_allocated_id plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_retry_appends_missing_written_event_for_retained_allocation plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_retry_blocks_legacy_attempt_without_expected_write_facts plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_create_retry_blocks_existing_allocation_with_wrong_post_fingerprint plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_autonomous_create_stops_at_duplicate_candidate plugins/turbo-mode/ticket/tests/test_engine_gateway.py::test_gateway_applies_exact_target_section_update plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py::test_agent_primary_apply_turn_applies_update_through_gateway -q
 ```
 
-Expected: all create idempotency tests and the existing duplicate-candidate test
-pass. If any idempotency test passes by ordinary duplicate detection rather than
-retained `create_allocation` reuse, if two create candidates do not share the
-same allocation lock, if old runtime detail keys are still required or persisted
-for bounded create attempts, if legacy create attempts without retained write
-facts can allocate a fresh ticket, or if mismatched post-write content is treated
-as applied, stop and fix the gateway/turn-batch recovery logic before continuing.
+Expected: all create idempotency tests, the existing duplicate-candidate test,
+one non-create gateway target-section smoke, and one apply-turn update smoke
+pass. Task 3A touches shared gateway, engine, and recovery plumbing; do not
+commit it after create-only proof. If any idempotency test passes by ordinary
+duplicate detection rather than retained `create_allocation` reuse, if two create
+candidates do not share the same allocation lock, if old runtime detail keys are
+still required or persisted for bounded create attempts, if legacy create
+attempts without retained write facts can allocate a fresh ticket, if mismatched
+post-write content is treated as applied, or if the non-create gateway/apply-turn
+selectors fail, stop and fix the shared gateway/turn-batch recovery logic before
+continuing.
 
 - [ ] **Step 8: Commit Task 3A**
 
@@ -4095,14 +4101,25 @@ candidate = CandidateMutation(
 ```
 
 Update `_correction_decision()` so tests provide recent correction context from
-`source_context`, not from candidate content:
+`source_context`, not from candidate content. Include the same binding facts the
+apply-turn producer will retain from pending-summary: source mutation ID,
+freshness timestamp, target, and expected ticket fingerprint.
 
 ```python
-def _recent_correction_context(candidate: CandidateMutation) -> dict[str, object]:
+def _recent_correction_context(
+    candidate: CandidateMutation,
+    *,
+    source_mutation_id: str = "mut-prior-correction",
+    retained_at: str = "2026-06-05T12:00:00Z",
+) -> dict[str, object]:
     assert candidate.ticket_id is not None
+    assert candidate.expected_ticket_fingerprint is not None
     return {
         candidate.ticket_id: {
             "correction_ready": True,
+            "source_mutation_id": source_mutation_id,
+            "retained_at": retained_at,
+            "expected_ticket_fingerprint": candidate.expected_ticket_fingerprint,
             "target": {
                 "fields": list(candidate.target.fields),
                 "sections": list(candidate.target.sections),
@@ -4205,6 +4222,51 @@ def test_correction_without_recent_context_requires_discussion(
         ticket_path=ticket_path,
         recent_correction_context=False,
     )
+
+    assert decision.kind == RuntimeDecisionKind.REQUIRE_USER_DISCUSSION
+    assert decision.reason == "correction_detail_missing"
+```
+
+Add this target/fingerprint binding test:
+
+```python
+def test_correction_context_must_match_target_and_expected_fingerprint(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01", priority="low")
+    candidate = CandidateMutation(
+        ticket_id="T-20260527-01",
+        action="correct",
+        target=CandidateTarget(fields=("priority",), sections=()),
+        proposed_change={"priority": "high"},
+        expected_ticket_fingerprint=target_fingerprint(ticket_path),
+        evidence_summary="Prior mutation set priority too low.",
+    )
+    mismatched_context = {
+        "recent_correction_context": {
+            "T-20260527-01": {
+                "correction_ready": True,
+                "source_mutation_id": "mut-prior-correction",
+                "retained_at": "2026-06-05T12:00:00Z",
+                "expected_ticket_fingerprint": "different-fingerprint",
+                "target": {"fields": ["priority"], "sections": []},
+            }
+        }
+    }
+
+    decision = evaluate_autonomy_intent(
+        AutonomyIntent(
+            action_kind="correct_ticket_mutation",
+            candidates=(candidate,),
+            source_context=mismatched_context,
+        ),
+        current_mode="agent_primary",
+        thread_id="thread-1",
+        turn_id="turn-1",
+        now=datetime.now(UTC),
+    )[0]
 
     assert decision.kind == RuntimeDecisionKind.REQUIRE_USER_DISCUSSION
     assert decision.reason == "correction_detail_missing"
@@ -4351,6 +4413,207 @@ def test_user_triggered_terminal_correction_to_open_uses_reopen_policy(
     assert "status: open" in text
     assert "## Reopen History" not in text
     assert " | codex | Corrected ticket from candidate evidence." in text
+```
+
+In `test_autonomy_integration_v1.py`, replace the old
+`test_agent_primary_apply_turn_applies_correction_through_gateway()` fixture.
+It must no longer use `action: "correction"` or candidate-local
+`evidence.kind == "correction_detail"`. Update imports to include:
+
+```python
+from datetime import UTC, datetime, timedelta
+
+from scripts.ticket_dedup import target_fingerprint
+from scripts.ticket_turn_batch import PendingSummaryStore
+
+from tests.test_turn_batch import valid_status_event
+```
+
+Add this retained-context producer helper in the same file:
+
+```python
+def _append_retained_correction_context(
+    project_root: Path,
+    ticket_path: Path,
+    *,
+    target: dict[str, list[str]] | None = None,
+    expected_ticket_fingerprint: str | None = None,
+    timestamp: str | None = None,
+    compacted: bool = False,
+) -> None:
+    details: dict[str, object] = {
+        "correction_ready": True,
+        "target": target or {"fields": ["priority"], "sections": []},
+        "expected_ticket_fingerprint": (
+            expected_ticket_fingerprint or target_fingerprint(ticket_path) or ""
+        ),
+    }
+    if compacted:
+        details["correction_detail_compacted"] = True
+    else:
+        details["correction_detail"] = "Prior automatic mutation wrote the wrong priority."
+    event = valid_status_event(
+        "failed",
+        event_id="evt_prior_correction",
+        timestamp=timestamp or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        thread_id="thread-1",
+        mutation_id="mut-prior-correction",
+        ticket_id="T-20260527-01",
+        error_code="policy_blocked",
+        **details,
+    )
+    assert PendingSummaryStore(project_root).append_event(event).state == "appended"
+```
+
+Replace the old correction integration test with this target-shaped apply-turn
+positive path:
+
+```python
+def test_agent_primary_apply_turn_applies_target_correction_from_retained_context(
+    tmp_path: Path,
+) -> None:
+    tickets_dir = _init_ticket_project(tmp_path)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="low")
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    expected = target_fingerprint(ticket) or ""
+    _append_retained_correction_context(tmp_path, ticket)
+    context = _write_context(
+        tmp_path,
+        {
+            "candidate_mutations": [
+                {
+                    "ticket_id": "T-20260527-01",
+                    "action": "correct",
+                    "target": {"fields": ["priority"], "sections": []},
+                    "proposed_change": {"priority": "high"},
+                    "expected_ticket_fingerprint": expected,
+                    "evidence_summary": "Prior mutation set priority too low.",
+                }
+            ]
+        },
+    )
+
+    result = _apply_turn(tmp_path, context)
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "applied"
+    assert payload["changed"] is True
+    text = ticket.read_text(encoding="utf-8")
+    assert "priority: high" in text
+    assert " | codex | Corrected ticket from candidate evidence." in text
+    events = _events(tmp_path)
+    assert [event["status"] for event in events[-3:]] == [
+        "pending",
+        "ticket_written",
+        "applied",
+    ]
+    assert "decision" not in events[-3]["details"]
+    assert "evidence_kind" not in events[-3]["details"]
+```
+
+Add these negative apply-turn paths in the same file:
+
+```python
+def test_agent_primary_apply_turn_blocks_correction_with_compacted_context(
+    tmp_path: Path,
+) -> None:
+    tickets_dir = _init_ticket_project(tmp_path)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="low")
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    expected = target_fingerprint(ticket) or ""
+    _append_retained_correction_context(tmp_path, ticket, compacted=True)
+    context = _write_context(
+        tmp_path,
+        {
+            "candidate_mutations": [
+                {
+                    "ticket_id": "T-20260527-01",
+                    "action": "correct",
+                    "target": {"fields": ["priority"], "sections": []},
+                    "proposed_change": {"priority": "high"},
+                    "expected_ticket_fingerprint": expected,
+                    "evidence_summary": "Prior mutation set priority too low.",
+                }
+            ]
+        },
+    )
+
+    result = _apply_turn(tmp_path, context)
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "discussion_required"
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
+
+
+def test_agent_primary_apply_turn_blocks_correction_with_expired_context(
+    tmp_path: Path,
+) -> None:
+    tickets_dir = _init_ticket_project(tmp_path)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="low")
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    expected = target_fingerprint(ticket) or ""
+    old_timestamp = (datetime.now(UTC) - timedelta(days=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _append_retained_correction_context(tmp_path, ticket, timestamp=old_timestamp)
+    context = _write_context(
+        tmp_path,
+        {
+            "candidate_mutations": [
+                {
+                    "ticket_id": "T-20260527-01",
+                    "action": "correct",
+                    "target": {"fields": ["priority"], "sections": []},
+                    "proposed_change": {"priority": "high"},
+                    "expected_ticket_fingerprint": expected,
+                    "evidence_summary": "Prior mutation set priority too low.",
+                }
+            ]
+        },
+    )
+
+    result = _apply_turn(tmp_path, context)
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "discussion_required"
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
+
+
+def test_agent_primary_apply_turn_blocks_correction_with_unmatched_context(
+    tmp_path: Path,
+) -> None:
+    tickets_dir = _init_ticket_project(tmp_path)
+    ticket = make_ticket(tickets_dir, "one.md", id="T-20260527-01", priority="low")
+    write_local_config(tmp_path, AutomationMode.AGENT_PRIMARY)
+    expected = target_fingerprint(ticket) or ""
+    _append_retained_correction_context(
+        tmp_path,
+        ticket,
+        expected_ticket_fingerprint="different-fingerprint",
+    )
+    context = _write_context(
+        tmp_path,
+        {
+            "candidate_mutations": [
+                {
+                    "ticket_id": "T-20260527-01",
+                    "action": "correct",
+                    "target": {"fields": ["priority"], "sections": []},
+                    "proposed_change": {"priority": "high"},
+                    "expected_ticket_fingerprint": expected,
+                    "evidence_summary": "Prior mutation set priority too low.",
+                }
+            ]
+        },
+    )
+
+    result = _apply_turn(tmp_path, context)
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "discussion_required"
+    assert "priority: low" in ticket.read_text(encoding="utf-8")
 ```
 
 In `test_engine_gateway.py`, add this non-create recovery-facts test:
@@ -4668,6 +4931,12 @@ def _correction_detail_available(
         return False
     if context.get("correction_ready") is not True:
         return False
+    if not isinstance(context.get("source_mutation_id"), str):
+        return False
+    if not isinstance(context.get("retained_at"), str):
+        return False
+    if context.get("expected_ticket_fingerprint") != candidate.expected_ticket_fingerprint:
+        return False
     expected_target = {
         "fields": list(candidate.target.fields),
         "sections": list(candidate.target.sections),
@@ -4690,18 +4959,70 @@ if not _correction_detail_available(candidate, intent.source_context):
     continue
 ```
 
-In `ticket_autonomy.py`, derive `recent_correction_context` only from bounded
-private pending-summary events that still retain uncompacted correction detail:
+In `ticket_turn_batch.py`, make the retained correction context producer
+explicit. A `mutation_status` event with `status == "failed"` and
+`details.correction_ready is True` is the only producer for automatic correction
+authorization context in this slice. Keep `correction_detail` private, but
+require these bounded mechanical details when `correction_ready` is true:
+
+```python
+{
+    "correction_ready": True,
+    "correction_detail": "Prior automatic mutation wrote the wrong priority.",
+    "target": {"fields": ["priority"], "sections": []},
+    "expected_ticket_fingerprint": "target-fingerprint-before-correction",
+}
+```
+
+The event's top-level `mutation_id`, `ticket_id`, and `timestamp` are part of
+the binding. Add turn-batch validation tests proving a newly appended
+correction-ready failed status event is invalid when any of `correction_detail`,
+`target`, `expected_ticket_fingerprint`, `ticket_id`, `mutation_id`, or parseable
+`timestamp` is missing or wrong-typed. Compacted retained events may keep
+`correction_ready` with `correction_detail_compacted is True`, but they are not
+authorization producers. Update `_correction_ready_event()` in
+`plugins/turbo-mode/ticket/tests/test_turn_batch.py` to carry `target` and
+`expected_ticket_fingerprint`; keep its compaction tests proving old or overflow
+events lose `correction_detail`.
+
+In `ticket_autonomy.py`, derive `recent_correction_context` only from fresh,
+bounded private pending-summary events that still retain uncompacted correction
+detail. Extend the local datetime import to include `timedelta`, and add this
+local timestamp parser near `_now_z()`:
+
+```python
+def _parse_z(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=UTC)
+```
 
 ```python
 def _recent_correction_context_from_events(
     events: Sequence[Mapping[str, object]],
+    *,
+    now: datetime | None = None,
+    max_age_days: int = 14,
 ) -> dict[str, object]:
+    current = now or datetime.now(UTC)
+    age_floor = current - timedelta(days=max(max_age_days, 0))
     context: dict[str, object] = {}
     for event in events:
         ticket_id = event.get("ticket_id")
+        mutation_id = event.get("mutation_id")
+        timestamp = _parse_z(event.get("timestamp"))
         details = event.get("details")
-        if not isinstance(ticket_id, str) or not isinstance(details, Mapping):
+        if (
+            not isinstance(ticket_id, str)
+            or not isinstance(mutation_id, str)
+            or timestamp is None
+            or timestamp < age_floor
+            or not isinstance(details, Mapping)
+        ):
             continue
         if details.get("correction_ready") is not True:
             continue
@@ -4712,10 +5033,16 @@ def _recent_correction_context_from_events(
             continue
         fields = target.get("fields")
         sections = target.get("sections")
+        expected_ticket_fingerprint = details.get("expected_ticket_fingerprint")
         if not isinstance(fields, list) or not isinstance(sections, list):
+            continue
+        if not isinstance(expected_ticket_fingerprint, str) or not expected_ticket_fingerprint:
             continue
         context[ticket_id] = {
             "correction_ready": True,
+            "source_mutation_id": mutation_id,
+            "retained_at": timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "expected_ticket_fingerprint": expected_ticket_fingerprint,
             "target": {"fields": fields, "sections": sections},
         }
     return context
@@ -5100,11 +5427,14 @@ Run:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache uv run pytest plugins/turbo-mode/ticket/tests/test_autonomy_corrections.py plugins/turbo-mode/ticket/tests/test_engine_gateway.py plugins/turbo-mode/ticket/tests/test_turn_batch.py plugins/turbo-mode/ticket/tests/test_autonomy_recovery.py plugins/turbo-mode/ticket/tests/test_autonomy_cli.py plugins/turbo-mode/ticket/tests/test_autonomy_integration_v1.py -q
 ```
 
-Expected: all six files pass. Any failure still using `"correction"` as a
-target candidate action, narrowing maintenance event validation into candidate
-action validation, expecting `decision`, `evidence_kind`, or `current_mode`
-mutation attempt details, missing `expected_post_write_fingerprint`, or failing
-to recover a missing `ticket_written` event from either the gateway retry path or
+Expected: all six files pass, including the target-shaped apply-turn correction
+positive path and the compacted, expired, and unmatched correction-context block
+paths. Any failure still using `"correction"` as a target candidate action,
+narrowing maintenance event validation into candidate action validation,
+expecting `decision`, `evidence_kind`, or `current_mode` mutation attempt
+details, missing `expected_post_write_fingerprint`, authorizing correction from
+candidate content instead of retained pending-summary context, or failing to
+recover a missing `ticket_written` event from either the gateway retry path or
 the apply-turn prior-turn ledger path belongs to this task.
 
 - [ ] **Step 6: Commit Task 5**
@@ -5486,8 +5816,10 @@ Expected: commit succeeds only if this plan changed during execution. If no plan
 - `correct` requires recent correction context from private pending-summary or
   source-context state outside the candidate envelope. `evidence_summary` is not
   an authorization fact; without uncompacted recent correction context matching
-  the current correction target, runtime returns `correction_detail_missing` and
-  does not emit `RuntimeDecisionKind.APPLY_CORRECTION`.
+  the current correction target and `expected_ticket_fingerprint`, with a
+  retained source mutation ID and fresh timestamp, runtime returns
+  `correction_detail_missing` and does not emit
+  `RuntimeDecisionKind.APPLY_CORRECTION`.
 - Operation-log details retain only bounded recovery facts and do not add
   semantic ranking, current-mode labels, evidence taxonomies, runtime decision
   kinds, approval state, or private workflow stages. Non-create attempts retain
