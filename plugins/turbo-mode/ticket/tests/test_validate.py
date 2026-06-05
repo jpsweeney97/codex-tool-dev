@@ -43,6 +43,11 @@ class TestValidateFields:
         assert any("blocked_by" in error for error in validate_fields({"blocked_by": "T-1"}))
         assert any("related_paths" in error for error in validate_fields({"related_paths": "x"}))
 
+    def test_blocked_by_entries_must_be_target_ticket_ids(self):
+        errors = validate_fields({"blocked_by": ["not-a-ticket-id"]})
+
+        assert any("blocked_by entries must be target ticket IDs" in error for error in errors)
+
     def test_deprecated_storage_fields_rejected(self):
         for key, value in {
             "date": "2026-06-02",

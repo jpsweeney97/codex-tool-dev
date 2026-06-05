@@ -676,6 +676,27 @@ class TestUpdate:
         assert "## Blocked On" not in text
         assert validate_target_ticket_file(ticket_path).ok
 
+    def test_update_blocked_on_noop_removal_does_not_report_section_change(
+        self,
+        tmp_tickets: Path,
+    ) -> None:
+        ticket_path = make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="open")
+
+        response = _execute_existing(
+            tmp_tickets,
+            ticket_path,
+            action="update",
+            fields={
+                "status": "open",
+                "blocked_on": None,
+            },
+        )
+
+        assert response.state == "ok"
+        assert response.data["changes"]["sections_changed"] == []
+        assert "## Blocked On" not in ticket_path.read_text(encoding="utf-8")
+        assert validate_target_ticket_file(ticket_path).ok
+
     def test_update_rejects_same_status_blocked_blocked_on_removal(
         self,
         tmp_tickets: Path,

@@ -231,6 +231,70 @@ def test_update_allows_blocked_to_open_without_blocked_by_field_when_already_emp
     assert response is None
 
 
+def test_update_rejects_blocked_to_open_without_blocked_on_even_when_blocked_by_empty(
+    tmp_tickets: Path,
+) -> None:
+    path = make_ticket(
+        tmp_tickets,
+        "blocked.md",
+        id="T-20260503-35",
+        status="blocked",
+        blocked_by=[],
+        blocked_on="Waiting for the upstream fix.",
+    )
+    assert validate_target_ticket_file(path).ok
+    ticket = parse_ticket(path)
+    assert ticket is not None
+
+    response = _evaluate_update_policy(
+        "T-20260503-35",
+        ticket,
+        {"status": "open", "next_action": "Continue."},
+        tmp_tickets,
+    )
+
+    assert response is not None
+    assert response.state == "invalid_transition"
+    assert response.data["precondition_code"] == "blocker_cleanup_required"
+    assert response.data["precondition_detail"] == {
+        "required": ["blocked_by: []", "blocked_on: null"]
+    }
+
+
+def test_update_rejects_blocked_to_open_with_leftover_blocked_on(
+    tmp_tickets: Path,
+) -> None:
+    path = make_ticket(
+        tmp_tickets,
+        "blocked.md",
+        id="T-20260503-36",
+        status="blocked",
+        blocked_by=[],
+        blocked_on="Waiting for the upstream fix.",
+    )
+    assert validate_target_ticket_file(path).ok
+    ticket = parse_ticket(path)
+    assert ticket is not None
+
+    response = _evaluate_update_policy(
+        "T-20260503-36",
+        ticket,
+        {
+            "status": "open",
+            "blocked_on": "Still waiting for the upstream fix.",
+            "next_action": "Continue.",
+        },
+        tmp_tickets,
+    )
+
+    assert response is not None
+    assert response.state == "invalid_transition"
+    assert response.data["precondition_code"] == "blocker_cleanup_required"
+    assert response.data["precondition_detail"] == {
+        "required": ["blocked_by: []", "blocked_on: null"]
+    }
+
+
 def test_update_rejects_blocked_to_open_without_clearing_existing_blocked_by(
     tmp_tickets: Path,
 ) -> None:

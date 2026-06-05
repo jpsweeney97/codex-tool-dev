@@ -225,6 +225,19 @@ def test_contract_preserves_optional_sections_byte_for_byte() -> None:
     assert "Optional sections are preserved byte-for-byte" in text
 
 
+def test_contract_documents_lifecycle_transitions() -> None:
+    text = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
+    lifecycle = _section(text, "## Lifecycle Transitions", "\n## ")
+    normalized = _normalize_whitespace(lifecycle)
+
+    assert "`idea` may move only to `open`" in normalized
+    assert "`open` may move to `blocked`" in normalized
+    assert "`blocked` may move to `open`" in normalized
+    assert "`open` and `blocked` may close to `done` or `wontfix`" in normalized
+    assert "`done` and `wontfix` reopen to `open`" in normalized
+    assert "`blocked -> open` must clear `blocked_by: []` and `blocked_on: null`" in normalized
+
+
 def test_readme_ticket_schema_matches_yaml_contract_boundary() -> None:
     text = _read_text(PLUGIN_ROOT / "README.md")
     schema = _section(text, "## Target Post-Cutover Ticket Shape", "\n## ")
@@ -812,6 +825,8 @@ def test_ticket_update_skill_contract_is_preview_first_and_scoped() -> None:
     assert "expected_ticket_fingerprint" in normalized
     assert "evidence_summary" in normalized
     assert "`blocked_on` is the writable adapter" in normalized
+    assert "`blocked_by: []`" in normalized
+    assert "`blocked_on: null`" in normalized
     assert "`Blocked On`" in text
     candidate_contract = _section(text, "## Target Candidate Mutation Contract", "\n## ")
     assert "acceptance_criteria" not in candidate_contract

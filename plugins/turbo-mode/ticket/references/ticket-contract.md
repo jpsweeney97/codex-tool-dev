@@ -32,6 +32,17 @@ additionally require `Blocked On`. Unknown frontmatter keys are invalid. `blocke
 contains only ticket-ID dependencies and is optional for blocked tickets. Derive
 reverse `blocks` views by scanning tickets.
 
+## Lifecycle Transitions
+
+`idea` may move only to `open`. `open` may move to `blocked`, and `blocked`
+may move to `open`. `open` and `blocked` may close to `done` or `wontfix`.
+`done` and `wontfix` reopen to `open`.
+
+Moving `open -> blocked` requires non-empty `Blocked On` prose. Moving
+`blocked -> open` must clear `blocked_by: []` and `blocked_on: null` in the
+same update, so the machine dependency IDs and visible blocker prose cannot
+drift apart.
+
 ## Target Candidate Mutation Contract
 
 Ticket accepts one target candidate mutation at a time. The candidate fields

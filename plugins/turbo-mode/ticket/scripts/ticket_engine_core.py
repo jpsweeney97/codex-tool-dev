@@ -2030,7 +2030,10 @@ def _execute_update(
         heading = _UPDATE_SECTION_HEADINGS[key]
         rendered = _render_update_section_value(key, fields[key])
         old_rendered = ticket.sections.get(heading, "")
-        if rendered is None or old_rendered.strip() != rendered.strip():
+        if rendered is None:
+            if heading in ticket.sections:
+                changes["sections_changed"].append(heading)
+        elif old_rendered.strip() != rendered.strip():
             changes["sections_changed"].append(heading)
         sections[heading] = rendered
     targeted_headings = tuple(_UPDATE_SECTION_HEADINGS[key] for key in section_fields)
@@ -2230,6 +2233,8 @@ def _close_readiness_from_policy_error(
         allowed_actions = ["resolve blockers", "close as wontfix", "keep current status"]
     elif policy_error.error_code == "need_fields":
         allowed_actions = ["choose done or wontfix", "keep current status"]
+    elif ticket.status == "idea":
+        allowed_actions = ["promote idea to open before closing", "keep current status"]
     elif ticket.status in _TERMINAL_STATUSES:
         allowed_actions = ["reopen before closing", "keep current status"]
     elif missing:

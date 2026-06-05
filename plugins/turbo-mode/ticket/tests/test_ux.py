@@ -107,6 +107,27 @@ def test_close_readiness_rejects_terminal_tickets(tmp_tickets: Path, status: str
     assert result["allowed_actions"] == ["reopen before closing", "keep current status"]
 
 
+def test_close_readiness_tells_idea_to_promote_before_closing(tmp_tickets: Path) -> None:
+    path = make_ticket(
+        tmp_tickets,
+        "2026-05-03-idea.md",
+        id="T-20260503-32",
+        status="idea",
+    )
+    ticket = parse_ticket(path)
+    assert ticket is not None
+
+    result = close_readiness(ticket, tmp_tickets, resolution="wontfix")
+
+    assert result["ready"] is False
+    assert result["error_code"] == "invalid_transition"
+    assert result["status"] == "idea"
+    assert result["allowed_actions"] == [
+        "promote idea to open before closing",
+        "keep current status",
+    ]
+
+
 def test_close_readiness_rejects_legacy_tickets(tmp_tickets: Path) -> None:
     path = make_gen1_ticket(tmp_tickets, "legacy.md")
     ticket = parse_ticket(path)

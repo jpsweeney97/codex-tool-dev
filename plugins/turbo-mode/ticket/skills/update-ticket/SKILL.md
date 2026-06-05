@@ -47,8 +47,11 @@ Target frontmatter fields are `id`, `title`, `status`, `priority`, `tags`,
 `low`. `blocked_on` is the writable adapter for the visible `Blocked On`
 section when moving into or out of `blocked`; `status: blocked` requires that
 section to be non-empty. `blocked_by` is optional ticket-ID dependency data for
-blocked tickets. Unknown frontmatter keys are invalid. There is no persisted
-reverse `blocks` edge; reverse blocker views are derived by scanning tickets.
+blocked tickets. When unblocking with `blocked -> open`, send `blocked_by: []`
+and `blocked_on: null` together so live blocker IDs and visible blocker prose
+clear in the same write. Unknown frontmatter keys are invalid. There is no
+persisted reverse `blocks` edge; reverse blocker views are derived by scanning
+tickets.
 
 ## Target Candidate Mutation Contract
 
