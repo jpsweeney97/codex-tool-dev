@@ -28,14 +28,14 @@ def write_marketplace(repo_root: Path) -> None:
                         "name": "handoff",
                         "source": {
                             "source": "local",
-                            "path": "./plugins/turbo-mode/handoff/1.6.0",
+                            "path": "./plugins/turbo-mode/handoff",
                         },
                     },
                     {
-                        "name": "ticket",
+                        "name": "review-family",
                         "source": {
                             "source": "local",
-                            "path": "./plugins/turbo-mode/ticket/1.4.0",
+                            "path": "./plugins/turbo-mode/review-family",
                         },
                     },
                 ],
@@ -45,57 +45,25 @@ def write_marketplace(repo_root: Path) -> None:
     )
 
 
-def seed_source_marketplace(repo_root: Path, *, ticket_hook_command: str | None = None) -> None:
-    handoff_root = repo_root / "plugins/turbo-mode/handoff/1.6.0"
-    ticket_root = repo_root / "plugins/turbo-mode/ticket/1.4.0"
+def seed_source_marketplace(repo_root: Path) -> None:
+    handoff_root = repo_root / "plugins/turbo-mode/handoff"
+    review_root = repo_root / "plugins/turbo-mode/review-family"
     handoff_root.mkdir(parents=True)
-    ticket_root.mkdir(parents=True)
+    review_root.mkdir(parents=True)
     (handoff_root / ".codex-plugin").mkdir()
     (handoff_root / ".codex-plugin/plugin.json").write_text(
-        json.dumps({"name": "handoff", "version": "1.6.0"}),
+        json.dumps({"name": "handoff", "version": "1.7.0"}),
         encoding="utf-8",
     )
     (handoff_root / "README.md").write_text("handoff source\n", encoding="utf-8")
     (handoff_root / "hooks").mkdir()
     (handoff_root / "hooks/hooks.json").write_text('{"hooks": {}}\n', encoding="utf-8")
-    (ticket_root / ".codex-plugin").mkdir()
-    (ticket_root / ".codex-plugin/plugin.json").write_text(
-        json.dumps({"name": "ticket", "version": "1.4.0"}),
+    (review_root / ".codex-plugin").mkdir()
+    (review_root / ".codex-plugin/plugin.json").write_text(
+        json.dumps({"name": "review-family", "version": "0.1.0"}),
         encoding="utf-8",
     )
-    (ticket_root / "README.md").write_text("ticket source\n", encoding="utf-8")
-    (ticket_root / "hooks").mkdir()
-    (ticket_root / "hooks/ticket_engine_guard.py").write_text(
-        "#!/usr/bin/env python3\nprint('guard')\n",
-        encoding="utf-8",
-    )
-    command = ticket_hook_command or (
-        "python3 /Users/jp/.codex/plugins/cache/turbo-mode/"
-        "ticket/1.4.0/hooks/ticket_engine_guard.py"
-    )
-    (ticket_root / "hooks/hooks.json").write_text(
-        json.dumps(
-            {
-                "hooks": {
-                    "PreToolUse": [
-                        {
-                            "matcher": "Bash",
-                            "hooks": [
-                                {
-                                    "type": "command",
-                                    "command": command,
-                                    "timeout": 10,
-                                }
-                            ],
-                        }
-                    ]
-                }
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    (review_root / "README.md").write_text("review-family source\n", encoding="utf-8")
 
 
 def test_build_dev_install_requests_refreshes_entire_marketplace(tmp_path: Path) -> None:
@@ -109,7 +77,7 @@ def test_build_dev_install_requests_refreshes_entire_marketplace(tmp_path: Path)
         plugin_names=plugin_names,
     )
 
-    assert plugin_names == ("handoff", "ticket")
+    assert plugin_names == ("handoff", "review-family")
     assert [request.get("method") for request in requests] == [
         "initialize",
         "initialized",
@@ -118,7 +86,7 @@ def test_build_dev_install_requests_refreshes_entire_marketplace(tmp_path: Path)
     ]
     assert [request["params"]["pluginName"] for request in requests if request.get("id")] == [
         "handoff",
-        "ticket",
+        "review-family",
     ]
 
 
@@ -130,7 +98,7 @@ def test_marketplace_specs_use_plugin_manifest_version_for_cache_root(tmp_path: 
     seed_source_marketplace(repo_root)
     handoff_manifest = (
         repo_root
-        / "plugins/turbo-mode/handoff/1.6.0/.codex-plugin/plugin.json"
+        / "plugins/turbo-mode/handoff/.codex-plugin/plugin.json"
     )
     handoff_manifest.write_text(
         json.dumps({"name": "handoff", "version": "1.7.0"}),
@@ -144,7 +112,7 @@ def test_marketplace_specs_use_plugin_manifest_version_for_cache_root(tmp_path: 
     )
 
     handoff_spec = next(spec for spec in specs if spec.name == "handoff")
-    assert handoff_spec.source_root == repo_root / "plugins/turbo-mode/handoff/1.6.0"
+    assert handoff_spec.source_root == repo_root / "plugins/turbo-mode/handoff"
     assert handoff_spec.version == "1.7.0"
     assert handoff_spec.cache_root == codex_home / "plugins/cache/turbo-mode/handoff/1.7.0"
 
@@ -156,13 +124,7 @@ def test_run_dev_refresh_installs_marketplace_and_writes_proof(
     codex_home = tmp_path / ".codex"
     repo_root.mkdir()
     write_marketplace(repo_root)
-    seed_source_marketplace(
-        repo_root,
-        ticket_hook_command=(
-            f"python3 {codex_home}/plugins/cache/turbo-mode/ticket/1.4.0/"
-            "hooks/ticket_engine_guard.py"
-        ),
-    )
+    seed_source_marketplace(repo_root)
 
     def fake_roundtrip(
         requests: list[dict[str, object]],
@@ -172,8 +134,8 @@ def test_run_dev_refresh_installs_marketplace_and_writes_proof(
     ) -> list[dict[str, object]]:
         assert env_overrides == {"CODEX_HOME": str(codex_home)}
         assert cwd is not None
-        for plugin_name, version in (("handoff", "1.6.0"), ("ticket", "1.4.0")):
-            source = repo_root / f"plugins/turbo-mode/{plugin_name}/{version}"
+        for plugin_name, version in (("handoff", "1.7.0"), ("review-family", "0.1.0")):
+            source = repo_root / f"plugins/turbo-mode/{plugin_name}"
             cache = codex_home / f"plugins/cache/turbo-mode/{plugin_name}/{version}"
             shutil.copytree(source, cache, dirs_exist_ok=True)
         return [
@@ -189,16 +151,10 @@ def test_run_dev_refresh_installs_marketplace_and_writes_proof(
         inventory = SimpleNamespace(
             state="aligned",
             plugin_read_sources={
-                "handoff": str(repo_root / "plugins/turbo-mode/handoff/1.6.0"),
-                "ticket": str(repo_root / "plugins/turbo-mode/ticket/1.4.0"),
+                "handoff": str(repo_root / "plugins/turbo-mode/handoff"),
+                "review-family": str(repo_root / "plugins/turbo-mode/review-family"),
             },
-            skills=("handoff:save", "ticket:ticket"),
-            ticket_hook={
-                "sourcePath": str(
-                    codex_home
-                    / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
-                )
-            },
+            skills=("handoff:save", "review-family:implementation-review"),
             handoff_hooks=(),
             transcript_sha256="inventory-sha",
         )
@@ -214,23 +170,12 @@ def test_run_dev_refresh_installs_marketplace_and_writes_proof(
     )
 
     assert summary["lane"] == "dev-refresh"
-    assert summary["plugins"] == ["handoff", "ticket"]
+    assert summary["plugins"] == ["handoff", "review-family"]
     assert summary["source_cache_diff_count"] == 0
     assert summary["runtime_inventory_state"] == "aligned"
     assert summary["guarded_refresh_used"] is False
     assert summary["summary_path"].endswith("unit-dev-refresh/dev-refresh.summary.json")
     assert Path(summary["summary_path"]).exists()
-    hooks = json.loads(
-        (
-            codex_home
-            / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
-        ).read_text(encoding="utf-8")
-    )
-    command = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-    assert command == (
-        f"python3 {codex_home}/plugins/cache/turbo-mode/ticket/1.4.0/"
-        "hooks/ticket_engine_guard.py"
-    )
 
 
 def test_run_dev_refresh_rejects_source_cache_drift_after_install(
@@ -240,13 +185,7 @@ def test_run_dev_refresh_rejects_source_cache_drift_after_install(
     codex_home = tmp_path / ".codex"
     repo_root.mkdir()
     write_marketplace(repo_root)
-    seed_source_marketplace(
-        repo_root,
-        ticket_hook_command=(
-            f"python3 {codex_home}/plugins/cache/turbo-mode/ticket/1.4.0/"
-            "hooks/ticket_engine_guard.py"
-        ),
-    )
+    seed_source_marketplace(repo_root)
 
     def fake_roundtrip(
         _requests: list[dict[str, object]],
@@ -256,11 +195,11 @@ def test_run_dev_refresh_rejects_source_cache_drift_after_install(
     ) -> list[dict[str, object]]:
         assert env_overrides == {"CODEX_HOME": str(codex_home)}
         assert cwd is not None
-        for plugin_name, version in (("handoff", "1.6.0"), ("ticket", "1.4.0")):
-            source = repo_root / f"plugins/turbo-mode/{plugin_name}/{version}"
+        for plugin_name, version in (("handoff", "1.7.0"), ("review-family", "0.1.0")):
+            source = repo_root / f"plugins/turbo-mode/{plugin_name}"
             cache = codex_home / f"plugins/cache/turbo-mode/{plugin_name}/{version}"
             shutil.copytree(source, cache, dirs_exist_ok=True)
-        (codex_home / "plugins/cache/turbo-mode/handoff/1.6.0/README.md").write_text(
+        (codex_home / "plugins/cache/turbo-mode/handoff/1.7.0/README.md").write_text(
             "stale cache\n",
             encoding="utf-8",
         )
@@ -287,14 +226,8 @@ def test_run_dev_refresh_ignores_generated_residue_in_dev_manifest(
     codex_home = tmp_path / ".codex"
     repo_root.mkdir()
     write_marketplace(repo_root)
-    seed_source_marketplace(
-        repo_root,
-        ticket_hook_command=(
-            f"python3 {codex_home}/plugins/cache/turbo-mode/ticket/1.4.0/"
-            "hooks/ticket_engine_guard.py"
-        ),
-    )
-    residue = repo_root / "plugins/turbo-mode/handoff/1.6.0/.pytest_cache/.gitignore"
+    seed_source_marketplace(repo_root)
+    residue = repo_root / "plugins/turbo-mode/handoff/.pytest_cache/.gitignore"
     residue.parent.mkdir()
     residue.write_text("*\n", encoding="utf-8")
 
@@ -306,8 +239,8 @@ def test_run_dev_refresh_ignores_generated_residue_in_dev_manifest(
     ) -> list[dict[str, object]]:
         assert env_overrides == {"CODEX_HOME": str(codex_home)}
         assert cwd is not None
-        for plugin_name, version in (("handoff", "1.6.0"), ("ticket", "1.4.0")):
-            source = repo_root / f"plugins/turbo-mode/{plugin_name}/{version}"
+        for plugin_name, version in (("handoff", "1.7.0"), ("review-family", "0.1.0")):
+            source = repo_root / f"plugins/turbo-mode/{plugin_name}"
             cache = codex_home / f"plugins/cache/turbo-mode/{plugin_name}/{version}"
             shutil.copytree(source, cache, dirs_exist_ok=True)
         return [

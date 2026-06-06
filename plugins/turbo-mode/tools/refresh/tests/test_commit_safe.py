@@ -90,7 +90,6 @@ def test_commit_safe_plan06_constants_and_reason_allowlist() -> None:
         ".agents/plugins/marketplace.json",
         "plugins/turbo-mode/handoff",
         "plugins/turbo-mode/review-family",
-        "plugins/turbo-mode/ticket",
         "plugins/turbo-mode/tools/refresh",
         "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
         "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",
@@ -142,7 +141,7 @@ def test_commit_safe_summary_omits_raw_transcript_and_records_omissions(
 def test_commit_safe_summary_preserves_prior_plan_reason_code(tmp_path: Path) -> None:
     result = empty_result(tmp_path)
     classification = PathClassification(
-        canonical_path="handoff/1.6.0/skills/save/SKILL.md",
+        canonical_path="handoff/1.7.0/skills/save/SKILL.md",
         mutation_mode=MutationMode.GUARDED,
         coverage_status=CoverageStatus.COVERED,
         outcome=PathOutcome.GUARDED_ONLY,
@@ -192,10 +191,9 @@ def test_commit_safe_inventory_projection_uses_replay_identity_not_transcript_sh
     inventory = AppServerInventoryCheck(
         state="aligned",
         identity=identity,
-        plugin_read_sources={"handoff": "/raw/source"},
-        plugin_list=("handoff@turbo-mode", "ticket@turbo-mode"),
-        skills=("handoff:load", "ticket:ticket"),
-        ticket_hook={"command": "python3 /raw/ticket_engine_guard.py"},
+        plugin_read_sources={"handoff": "/raw/source", "review-family": "/raw/review"},
+        plugin_list=("handoff@turbo-mode", "review-family@turbo-mode"),
+        skills=("handoff:load", "review-family:implementation-review"),
         handoff_hooks=(),
         request_methods=("initialize", "initialized", "plugin/read"),
         transcript_sha256="raw-transcript-sha",
@@ -292,12 +290,12 @@ def test_nested_projection_uses_allowlisted_reason_codes(tmp_path: Path) -> None
         plugin_hooks_state="true",
         plugin_enablement_state={
             "handoff@turbo-mode": "enabled",
-            "ticket@turbo-mode": "enabled",
+            "review-family@turbo-mode": "enabled",
         },
         reasons=("turbo-mode marketplace source mismatch", "local path /Users/jp/source"),
     )
     classification = PathClassification(
-        canonical_path="handoff/1.6.0/SKILL.md",
+        canonical_path="handoff/1.7.0/SKILL.md",
         mutation_mode=MutationMode.BLOCKED,
         coverage_status=CoverageStatus.COVERAGE_GAP,
         outcome=PathOutcome.COVERAGE_GAP_FAIL,
@@ -344,7 +342,7 @@ def test_nested_projection_uses_allowlisted_reason_codes(tmp_path: Path) -> None
     assert "reasons" not in payload["runtime_config"]
     assert payload["runtime_config"]["plugin_enablement_state"] == {
         "handoff@turbo-mode": "enabled",
-        "ticket@turbo-mode": "enabled",
+        "review-family@turbo-mode": "enabled",
     }
     assert payload["runtime_config"]["reason_codes"] == [
         "config-marketplace-source-mismatch",
@@ -387,7 +385,7 @@ def init_repo(repo_root: Path) -> None:
         "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",
         "plugins/turbo-mode/tools/refresh_validate_redaction.py",
         "plugins/turbo-mode/handoff/README.md",
-        "plugins/turbo-mode/ticket/README.md",
+        "plugins/turbo-mode/review-family/README.md",
         "docs/readme.md",
     ):
         path = repo_root / rel
@@ -402,7 +400,7 @@ def init_repo(repo_root: Path) -> None:
     [
         ".agents/plugins/marketplace.json",
         "plugins/turbo-mode/handoff/README.md",
-        "plugins/turbo-mode/ticket/README.md",
+        "plugins/turbo-mode/review-family/README.md",
         "plugins/turbo-mode/tools/refresh/existing.py",
         "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
         "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",

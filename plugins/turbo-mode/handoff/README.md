@@ -1,6 +1,6 @@
 # Handoff
 
-Session continuity plugin for Codex. Saves session state as structured markdown documents, resumes work across sessions, tracks deferred work as tickets, and extracts durable knowledge from past sessions.
+Session continuity plugin for Codex. Saves session state as structured markdown documents, resumes work across sessions, searches prior handoffs, and extracts durable knowledge from past sessions.
 
 ## Installation
 
@@ -24,10 +24,11 @@ codex plugin install ./plugins/turbo-mode/handoff
 | Capability | Skills | Description |
 |------------|--------|-------------|
 | **Session save/resume** | `/save`, `/load`, `/quicksave`, `/summary` | Create structured handoff documents capturing session state. Resume later with full context. Quicksave for fast checkpoints and summary for medium-depth session capture. |
-| **Deferred work tracking** | `/defer`, `/triage` | Extract work items from conversation into structured tickets. Audit ticket health, detect orphaned items, organize by priority. |
 | **Knowledge extraction** | `/distill` | Synthesize durable insights from handoff documents into a project learnings file with deduplication. |
 | **Handoff search** | `/search` | Query past handoffs by keyword or regex across active and archived files. |
 | **State maintenance** | `/load`, `/save`, `/quicksave`, `/summary` | Manage chain state files during explicit handoff workflows. |
+
+Ticket-backed deferred-work tracking was retired on 2026-06-06. Use handoff prose for follow-up context until a replacement tracking workflow is designed.
 
 ## Components
 
@@ -39,8 +40,6 @@ codex plugin install ./plugins/turbo-mode/handoff
 | **load-handoff** | `/load`, "continue from where we left off" | Resume from a previous handoff. Archives the source file, writes a state file for chain linking. |
 | **quicksave** | `/quicksave`, "checkpoint", "save state" | Lightweight checkpoint (22-55 lines, 5 sections). Warns on 3rd consecutive checkpoint. |
 | **save-summary** | `/summary`, "summary", "summarize" | Medium-depth session summary with project arc context. Writes to `<project_root>/.codex/handoffs/`. |
-| **defer** | `/defer`, "track these for later", "create tickets" | Extract deferred work items from conversation into ticket files in `docs/tickets/`. |
-| **triage** | `/triage`, "what's in the backlog", "any open tickets" | Audit open tickets by priority. Detect orphaned handoff items not tracked by tickets. |
 | **distill** | `/distill`, "extract knowledge", "graduate knowledge" | Extract durable insights from handoffs into `docs/learnings/learnings.md` with SHA256 deduplication. |
 | **search-handoffs** | `/search`, "find in handoffs", "what did we decide about" | Section-aware search across active and archived handoffs. Supports literal and regex queries. |
 
@@ -54,14 +53,11 @@ Core logic lives in `turbo_mode_handoff_runtime/`. The `scripts/` directory now 
 
 | Script Facade | Purpose | Called By |
 |---------------|---------|-----------|
-| `defer.py` | Ticket ID allocation, rendering, writing | `/defer` skill |
 | `distill.py` | Candidate extraction, dedup, metadata | `/distill` skill |
 | `list_handoffs.py` | Enumerate active handoff candidates | `/load` skill |
 | `load_transactions.py` | Load transaction lifecycle management | `/load` skill |
-| `plugin_siblings.py` | Resolve sibling plugin roots | `/defer` skill |
 | `search.py` | Section-aware handoff search | `/search` skill |
 | `session_state.py` | Chain and active-writer state operations | `/save`, `/quicksave`, `/summary` skills |
-| `triage.py` | Ticket scanning, orphan detection, matching | `/triage` skill |
 
 Runtime-only helpers such as `turbo_mode_handoff_runtime/quality_check.py`, `turbo_mode_handoff_runtime/cleanup.py`, and `turbo_mode_handoff_runtime/storage_authority_inventory.py` remain source utilities and are not wired into Handoff `1.7.0` skill entrypoints or hooks.
 
@@ -83,7 +79,6 @@ Runtime module ownership for storage and chain behavior (layering order, lowest 
 | `<project_root>/.codex/handoffs/` | Active handoffs and checkpoints | No auto-prune |
 | `<project_root>/.codex/handoffs/archive/` | Archived handoffs (moved by `/load`) | No auto-prune |
 | `<project_root>/.codex/handoffs/.session-state/handoff-<project>-<resume_token>.json` | Chain protocol state files | 24 hours |
-| `docs/tickets/` | Deferred work tickets | Permanent |
 | `docs/learnings/learnings.md` | Distilled knowledge entries | Permanent |
 
 The plugin writes filesystem artifacts only. It does not add gitignore rules, stage files, or auto-commit files.
@@ -107,19 +102,6 @@ Every handoff/checkpoint uses YAML frontmatter with these fields:
 | `resumed_from` | No | path | Previous handoff (chain protocol) |
 
 Full schema: `references/handoff-contract.md`.
-
-### Ticket Frontmatter
-
-Tickets created by `/defer` include:
-
-| Field | Type | Values |
-|-------|------|--------|
-| `id` | string | `T-YYYYMMDD-NN` (auto-allocated) |
-| `date` | `YYYY-MM-DD` | Creation date |
-| `summary` | string | One-line title |
-| `priority` | enum | `critical`, `high`, `medium`, `low` |
-| `effort` | enum | `XS`, `S`, `M`, `L`, `XL` |
-| `status` | enum | `tracked`, `in-progress`, `done`, `wontfix` |
 
 ## Usage Patterns
 
@@ -149,19 +131,6 @@ Session 2:
   /save                              → Full handoff when work is complete
 ```
 
-### Defer and Triage Workflow
-
-```
-  /defer                             → Extract work items from conversation
-                                        Creates ticket files in docs/tickets/
-
-  ... later session ...
-
-  /triage                            → Review open tickets by priority
-                                        Detect orphaned items from handoffs
-                                        Match tickets to source sessions
-```
-
 ### Knowledge Extraction
 
 ```
@@ -181,14 +150,14 @@ Session 2:
 
 ```
 ┌─ Skills (User Entry Points) ──────────────────────┐
-│  /save  /quicksave  /load  /defer                  │
-│  /search  /distill  /triage                        │
+│  /save  /quicksave  /load  /summary                │
+│  /search  /distill                                 │
 ├─ Runtime Package (Implementation) ─────────────────┤
 │  turbo_mode_handoff_runtime/*                      │
 ├─ CLI Facades (Executable Paths) ───────────────────┤
-│  scripts/defer.py, distill.py, list_handoffs.py    │
-│  scripts/load_transactions.py, plugin_siblings.py  │
-│  scripts/search.py, session_state.py, triage.py    │
+│  scripts/distill.py, list_handoffs.py              │
+│  scripts/load_transactions.py, search.py           │
+│  scripts/session_state.py                          │
 ├─ Runtime-only Helpers (Not Skill/Hook-wired) ──────┤
 │  cleanup, quality_check, storage_authority_inventory│
 ├─ Storage ─────────────────────────────────────────┤
@@ -221,7 +190,7 @@ State files are JSON records under `.codex/handoffs/.session-state/handoff-<proj
 
 - **Skills handle judgment, runtime modules handle computation.** Skills analyze conversation and prompt users. Runtime modules parse files, allocate IDs, and validate structure.
 - **JSON contracts between layers.** CLI facades communicate with skills via JSON on stdin/stdout and delegate to runtime modules.
-- **Provenance tracking.** Tickets and learnings include metadata (`defer-meta`, `distill-meta`) for source tracing and dedup.
+- **Provenance tracking.** Learnings include `distill-meta` metadata for source tracing and dedup.
 - **Validation helpers are non-gating in 1.7.0.** Hook-compatible validation code remains in source, but installed Handoff does not expose plugin-bundled command hooks in this release.
 - **Safety-first I/O.** Uses `trash` instead of `rm`. Graceful degradation on read errors. TTL cleanup for orphaned files.
 
@@ -275,7 +244,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycach
 To run a single module from the plugin directory:
 
 ```bash
-uv run pytest tests/test_defer.py -q
+uv run pytest tests/test_search.py -q
 ```
 
 ### Linting

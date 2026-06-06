@@ -36,12 +36,6 @@ from refresh.planner import (
     validate_repo_marketplace,
 )
 
-HANDOFF_STATE_HELPER_DOC_FIXTURES = json.loads(
-    (
-        Path(__file__).parent / "fixtures" / "handoff_state_helper_doc_migration.json"
-    ).read_text(encoding="utf-8")
-)
-
 
 def test_build_plugin_specs_uses_repo_source_and_codex_cache_roots(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
@@ -50,16 +44,13 @@ def test_build_plugin_specs_uses_repo_source_and_codex_cache_roots(tmp_path: Pat
     specs = build_plugin_specs(repo_root=repo_root, codex_home=codex_home)
 
     assert [(spec.name, spec.version) for spec in specs] == [
-        ("handoff", "1.6.0"),
-        ("ticket", "1.4.0"),
+        ("handoff", "1.7.0"),
         ("review-family", "0.1.0"),
     ]
     assert specs[0].source_root == repo_root / "plugins/turbo-mode/handoff"
-    assert specs[0].cache_root == codex_home / "plugins/cache/turbo-mode/handoff/1.6.0"
-    assert specs[1].source_root == repo_root / "plugins/turbo-mode/ticket"
-    assert specs[1].cache_root == codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
-    assert specs[2].source_root == repo_root / "plugins/turbo-mode/review-family"
-    assert specs[2].cache_root == (
+    assert specs[0].cache_root == codex_home / "plugins/cache/turbo-mode/handoff/1.7.0"
+    assert specs[1].source_root == repo_root / "plugins/turbo-mode/review-family"
+    assert specs[1].cache_root == (
         codex_home / "plugins/cache/turbo-mode/review-family/0.1.0"
     )
 
@@ -98,7 +89,7 @@ def test_planner_passes_manifest_hashes_to_exact_storage_contract(tmp_path: Path
     )
     spec = PluginSpec(
         name="handoff",
-        version="1.6.0",
+        version="1.7.0",
         source_root=tmp_path / "source",
         cache_root=tmp_path / "cache",
     )
@@ -108,11 +99,7 @@ def test_planner_passes_manifest_hashes_to_exact_storage_contract(tmp_path: Path
     assert result.outcome == PathOutcome.GUARDED_ONLY
 
 
-def write_marketplace(
-    path: Path,
-    *,
-    ticket_path: str = "./plugins/turbo-mode/ticket",
-) -> None:
+def write_marketplace(path: Path) -> None:
     path.parent.mkdir(parents=True)
     path.write_text(
         json.dumps(
@@ -125,10 +112,6 @@ def write_marketplace(
                             "source": "local",
                             "path": "./plugins/turbo-mode/handoff",
                         },
-                    },
-                    {
-                        "name": "ticket",
-                        "source": {"source": "local", "path": ticket_path},
                     },
                     {
                         "name": "review-family",
@@ -153,15 +136,19 @@ def test_validate_repo_marketplace_accepts_expected_local_plugins(tmp_path: Path
     assert result == {
         "handoff": "./plugins/turbo-mode/handoff",
         "review-family": "./plugins/turbo-mode/review-family",
-        "ticket": "./plugins/turbo-mode/ticket",
     }
 
 
-def test_validate_repo_marketplace_rejects_wrong_ticket_source(tmp_path: Path) -> None:
+def test_validate_repo_marketplace_rejects_missing_review_family_source(tmp_path: Path) -> None:
     marketplace = tmp_path / "repo/.agents/plugins/marketplace.json"
-    write_marketplace(marketplace, ticket_path="./wrong")
+    write_marketplace(marketplace)
+    payload = json.loads(marketplace.read_text(encoding="utf-8"))
+    payload["plugins"] = [
+        plugin for plugin in payload["plugins"] if plugin["name"] != "review-family"
+    ]
+    marketplace.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(RefreshError, match="ticket source path mismatch"):
+    with pytest.raises(RefreshError, match="review-family source path mismatch"):
         validate_repo_marketplace(marketplace)
 
 
@@ -173,8 +160,7 @@ def test_read_runtime_config_state_aligned_when_marketplace_and_hooks_true(
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/repo"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
 
@@ -186,7 +172,6 @@ def test_read_runtime_config_state_aligned_when_marketplace_and_hooks_true(
     assert state.plugin_enablement_state == {
         "handoff@turbo-mode": "enabled",
         "review-family@turbo-mode": "enabled",
-        "ticket@turbo-mode": "enabled",
     }
 
 
@@ -195,8 +180,7 @@ def test_read_runtime_config_state_absent_hooks_is_unchecked(tmp_path: Path) -> 
     config.write_text(
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/repo"\n'
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
 
@@ -214,8 +198,7 @@ def test_read_runtime_config_state_conflicting_marketplace_is_repairable(
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/other"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
 
@@ -231,8 +214,7 @@ def test_read_runtime_config_state_disabled_hooks_is_unrepairable(tmp_path: Path
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/repo"\n'
         "[features]\nplugin_hooks = false\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
 
@@ -256,15 +238,14 @@ def test_read_runtime_config_state_disabled_plugin_is_unrepairable(tmp_path: Pat
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/repo"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = false\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = false\n',
         encoding="utf-8",
     )
 
     state = read_runtime_config_state(config, expected_marketplace_source=Path("/repo"))
 
     assert state.state == RuntimeConfigState.UNREPAIRABLE_MISMATCH
-    assert state.plugin_enablement_state["ticket@turbo-mode"] == "disabled"
+    assert state.plugin_enablement_state["review-family@turbo-mode"] == "disabled"
 
 
 def test_read_runtime_config_state_missing_plugin_enablement_is_unknown(
@@ -274,15 +255,14 @@ def test_read_runtime_config_state_missing_plugin_enablement_is_unknown(
     config.write_text(
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/repo"\n'
         "[features]\nplugin_hooks = true\n"
-        '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
+        '[plugins."handoff@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
 
     state = read_runtime_config_state(config, expected_marketplace_source=Path("/repo"))
 
     assert state.state == RuntimeConfigState.UNKNOWN
-    assert state.plugin_enablement_state["ticket@turbo-mode"] == "missing"
+    assert state.plugin_enablement_state["review-family@turbo-mode"] == "missing"
 
 
 def test_read_runtime_config_state_missing_enabled_key_is_unknown(
@@ -293,15 +273,14 @@ def test_read_runtime_config_state_missing_enabled_key_is_unknown(
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/repo"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\n',
+        '[plugins."review-family@turbo-mode"]\n',
         encoding="utf-8",
     )
 
     state = read_runtime_config_state(config, expected_marketplace_source=Path("/repo"))
 
     assert state.state == RuntimeConfigState.UNKNOWN
-    assert state.plugin_enablement_state["ticket@turbo-mode"] == "missing"
+    assert state.plugin_enablement_state["review-family@turbo-mode"] == "missing"
 
 
 def test_read_runtime_config_state_non_boolean_plugin_enablement_is_unrepairable(
@@ -312,15 +291,14 @@ def test_read_runtime_config_state_non_boolean_plugin_enablement_is_unrepairable
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/repo"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = "yes"\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = "yes"\n',
         encoding="utf-8",
     )
 
     state = read_runtime_config_state(config, expected_marketplace_source=Path("/repo"))
 
     assert state.state == RuntimeConfigState.UNREPAIRABLE_MISMATCH
-    assert state.plugin_enablement_state["ticket@turbo-mode"] == "malformed"
+    assert state.plugin_enablement_state["review-family@turbo-mode"] == "malformed"
 
 
 def test_read_runtime_config_state_normalizes_config_source_path(
@@ -333,8 +311,7 @@ def test_read_runtime_config_state_normalizes_config_source_path(
         f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo}/."\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
 
@@ -364,8 +341,7 @@ def test_read_runtime_config_state_fallback_parser_handles_unrelated_config_shap
         '[marketplaces.turbo-mode]\nsource_type = "local"\n'
         f'source = "{repo}"\n'
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
     monkeypatch.setattr(planner, "tomllib", None)
@@ -374,7 +350,7 @@ def test_read_runtime_config_state_fallback_parser_handles_unrelated_config_shap
 
     assert state.state == RuntimeConfigState.ALIGNED
     assert state.plugin_hooks_state == "true"
-    assert state.plugin_enablement_state["ticket@turbo-mode"] == "enabled"
+    assert state.plugin_enablement_state["review-family@turbo-mode"] == "enabled"
 
 
 def test_read_runtime_config_state_fallback_parser_rejects_duplicate_tables(
@@ -389,7 +365,6 @@ def test_read_runtime_config_state_fallback_parser_rejects_duplicate_tables(
         "[features]\nplugin_hooks = false\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
         '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n'
         "[features]\nplugin_hooks = true\n",
         encoding="utf-8",
     )
@@ -410,8 +385,7 @@ def test_read_runtime_config_state_fallback_parser_rejects_duplicate_keys(
         f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo}"\n'
         "[features]\nplugin_hooks = false\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
     monkeypatch.setattr(planner, "tomllib", None)
@@ -443,19 +417,10 @@ def ensure_complete_plugin_roots(repo_root: Path, codex_home: Path) -> None:
         repo_root,
         codex_home,
         plugin="handoff",
-        version="1.6.0",
+        version="1.7.0",
         rel="README.md",
         source_text="handoff same\n",
         cache_text="handoff same\n",
-    )
-    write_plugin_pair(
-        repo_root,
-        codex_home,
-        plugin="ticket",
-        version="1.4.0",
-        rel="README.md",
-        source_text="ticket same\n",
-        cache_text="ticket same\n",
     )
     write_plugin_pair(
         repo_root,
@@ -475,8 +440,7 @@ def write_aligned_config(codex_home: Path, repo_root: Path) -> None:
         f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
 
@@ -500,36 +464,16 @@ def aligned_inventory() -> AppServerInventoryCheck:
         plugin_read_sources={
             "handoff": "/repo/plugins/turbo-mode/handoff",
             "review-family": "/repo/plugins/turbo-mode/review-family",
-            "ticket": "/repo/plugins/turbo-mode/ticket",
         },
         plugin_list=(
             "handoff@turbo-mode",
             "review-family@turbo-mode",
-            "ticket@turbo-mode",
         ),
-        skills=("handoff:save", "ticket:ticket"),
-        ticket_hook={"command": "python3 ticket_engine_guard.py", "sourcePath": "hooks.json"},
+        skills=("handoff:save", "review-family:implementation-review"),
         handoff_hooks=(),
         request_methods=("initialize", "plugin/read"),
         transcript_sha256="abc",
     )
-
-
-def write_handoff_state_helper_doc_migration_fixture(
-    repo_root: Path,
-    codex_home: Path,
-) -> None:
-    for path, contract in HANDOFF_STATE_HELPER_DOC_FIXTURES.items():
-        relative_path = Path(*Path(path).parts[2:]).as_posix()
-        write_plugin_pair(
-            repo_root,
-            codex_home,
-            plugin="handoff",
-            version="1.6.0",
-            rel=relative_path,
-            source_text=contract["source_text"],
-            cache_text=contract["cache_text"],
-        )
 
 
 def test_plan_refresh_no_drift_with_aligned_config(tmp_path: Path) -> None:
@@ -606,58 +550,6 @@ def test_plan_refresh_missing_review_family_cache_is_installable_guarded_drift(
     assert not any("missing cache root" in reason for reason in result.axes.reasons)
 
 
-def test_plan_refresh_handoff_state_helper_doc_migration_requires_guarded_refresh(
-    tmp_path: Path,
-) -> None:
-    repo_root = tmp_path / "repo"
-    codex_home = tmp_path / ".codex"
-    write_valid_marketplace(repo_root)
-    write_aligned_config(codex_home, repo_root)
-    ensure_complete_plugin_roots(repo_root, codex_home)
-    write_handoff_state_helper_doc_migration_fixture(repo_root, codex_home)
-
-    result = plan_refresh(
-        repo_root=repo_root,
-        codex_home=codex_home,
-        mode="dry-run",
-        inventory_check=True,
-        inventory_collector=lambda _paths: (aligned_inventory(), ({"direction": "recv"},)),
-    )
-
-    expected_paths = [
-        "handoff/1.6.0/skills/load/SKILL.md",
-        "handoff/1.6.0/skills/quicksave/SKILL.md",
-        "handoff/1.6.0/skills/save/SKILL.md",
-        "handoff/1.6.0/skills/summary/SKILL.md",
-        "handoff/1.6.0/tests/test_session_state.py",
-        "handoff/1.6.0/tests/test_skill_docs.py",
-    ]
-
-    assert result.terminal_status == TerminalPlanStatus.GUARDED_REFRESH_REQUIRED
-    assert result.axes.coverage_state == CoverageState.COVERED
-    assert result.axes.selected_mutation_mode == SelectedMutationMode.GUARDED_REFRESH
-    assert [item.canonical_path for item in result.diff_classification] == expected_paths
-    assert [item.outcome for item in result.diff_classification] == [
-        PathOutcome.GUARDED_ONLY,
-        PathOutcome.GUARDED_ONLY,
-        PathOutcome.GUARDED_ONLY,
-        PathOutcome.GUARDED_ONLY,
-        PathOutcome.GUARDED_ONLY,
-        PathOutcome.GUARDED_ONLY,
-    ]
-
-    for item in result.diff_classification[:4]:
-        assert item.reasons == ("handoff-state-helper-direct-python-doc-migration",)
-        assert item.smoke == (
-            "handoff-state-helper-docs",
-            "handoff-session-state-write-read-clear",
-        )
-
-    for item in result.diff_classification[4:]:
-        assert item.reasons == ("unmatched-path",)
-        assert item.smoke == ()
-
-
 def test_plan_refresh_inventory_failure_blocks_without_erasing_manifest_facts(
     tmp_path: Path,
 ) -> None:
@@ -670,7 +562,7 @@ def test_plan_refresh_inventory_failure_blocks_without_erasing_manifest_facts(
         repo_root,
         codex_home,
         plugin="handoff",
-        version="1.6.0",
+        version="1.7.0",
         rel="scripts/search.py",
         source_text="print('new')\n",
         cache_text="print('old')\n",
@@ -779,7 +671,7 @@ def test_plan_refresh_fast_safe_drift_allows_refresh(tmp_path: Path) -> None:
         repo_root,
         codex_home,
         plugin="handoff",
-        version="1.6.0",
+        version="1.7.0",
         rel="scripts/search.py",
         source_text="print('new')\n",
         cache_text="print('old')\n",
@@ -809,7 +701,7 @@ def test_plan_refresh_fast_safe_drift_recommends_dev_refresh(
         repo_root,
         codex_home,
         plugin="handoff",
-        version="1.6.0",
+        version="1.7.0",
         rel="scripts/search.py",
         source_text="print('new')\n",
         cache_text="print('old')\n",
@@ -833,9 +725,9 @@ def test_plan_refresh_guarded_drift_requires_guarded_refresh(tmp_path: Path) -> 
     write_plugin_pair(
         repo_root,
         codex_home,
-        plugin="ticket",
-        version="1.4.0",
-        rel="scripts/ticket_engine_core.py",
+        plugin="handoff",
+        version="1.7.0",
+        rel="turbo_mode_handoff_runtime/quality_check.py",
         source_text="print('new')\n",
         cache_text="print('old')\n",
     )
@@ -853,7 +745,7 @@ def test_plan_refresh_residue_blocks_preflight(tmp_path: Path) -> None:
     write_valid_marketplace(repo_root)
     write_aligned_config(codex_home, repo_root)
     ensure_complete_plugin_roots(repo_root, codex_home)
-    residue = repo_root / "plugins/turbo-mode/handoff/1.6.0/scripts/__pycache__/x.pyc"
+    residue = repo_root / "plugins/turbo-mode/handoff/scripts/__pycache__/x.pyc"
     residue.parent.mkdir(parents=True)
     residue.write_bytes(b"compiled")
 
@@ -887,7 +779,7 @@ def test_plan_refresh_preserves_diff_facts_when_config_blocks(tmp_path: Path) ->
         repo_root,
         codex_home,
         plugin="handoff",
-        version="1.6.0",
+        version="1.7.0",
         rel="scripts/search.py",
         source_text="print('new')\n",
         cache_text="print('old')\n",
@@ -899,7 +791,7 @@ def test_plan_refresh_preserves_diff_facts_when_config_blocks(tmp_path: Path) ->
     assert result.axes.filesystem_state == FilesystemState.DRIFT
     assert result.axes.coverage_state == CoverageState.COVERED
     assert [item.canonical_path for item in result.diff_classification] == [
-        "handoff/1.6.0/scripts/search.py"
+        "handoff/1.7.0/scripts/search.py"
     ]
 
 
@@ -909,15 +801,15 @@ def test_plan_refresh_added_command_bearing_doc_is_coverage_gap(tmp_path: Path) 
     write_valid_marketplace(repo_root)
     write_aligned_config(codex_home, repo_root)
     ensure_complete_plugin_roots(repo_root, codex_home)
-    source_doc = repo_root / "plugins/turbo-mode/ticket/skills/ticket/references/new.md"
+    source_doc = repo_root / "plugins/turbo-mode/handoff/skills/new/references/new.md"
     source_doc.parent.mkdir(parents=True, exist_ok=True)
-    source_doc.write_text("```bash\npython3 scripts/ticket_read.py list\n```\n", encoding="utf-8")
+    source_doc.write_text("```bash\npython3 scripts/search.py query\n```\n", encoding="utf-8")
 
     result = plan_refresh(repo_root=repo_root, codex_home=codex_home, mode="dry-run")
 
     assert result.terminal_status == TerminalPlanStatus.COVERAGE_GAP_BLOCKED
     assert result.diff_classification[0].canonical_path == (
-        "ticket/1.4.0/skills/ticket/references/new.md"
+        "handoff/1.7.0/skills/new/references/new.md"
     )
     assert result.diff_classification[0].outcome == PathOutcome.COVERAGE_GAP_FAIL
 
@@ -932,7 +824,7 @@ def test_plan_refresh_emits_no_future_command_for_coverage_gap(tmp_path: Path) -
         repo_root,
         codex_home,
         plugin="handoff",
-        version="1.6.0",
+        version="1.7.0",
         rel=".codex-plugin/plugin.json",
         source_text='{"name":"new"}\n',
         cache_text='{"name":"old"}\n',
@@ -957,8 +849,7 @@ def test_plan_refresh_repairable_runtime_mismatch_emits_future_guarded_advice(
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/other"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
     ensure_complete_plugin_roots(repo_root, codex_home)
@@ -984,8 +875,7 @@ def test_plan_refresh_unrepairable_config_suppresses_future_advice_for_covered_d
         f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
         "[features]\nplugin_hooks = false\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
     ensure_complete_plugin_roots(repo_root, codex_home)
@@ -993,7 +883,7 @@ def test_plan_refresh_unrepairable_config_suppresses_future_advice_for_covered_d
         repo_root,
         codex_home,
         plugin="handoff",
-        version="1.6.0",
+        version="1.7.0",
         rel="scripts/search.py",
         source_text="print('new')\n",
         cache_text="print('old')\n",
@@ -1018,7 +908,7 @@ def test_plan_refresh_unknown_config_suppresses_future_advice_for_covered_drift(
         repo_root,
         codex_home,
         plugin="handoff",
-        version="1.6.0",
+        version="1.7.0",
         rel="scripts/search.py",
         source_text="print('new')\n",
         cache_text="print('old')\n",
@@ -1044,7 +934,7 @@ def test_plan_refresh_disabled_plugin_enablement_blocks_filesystem_no_drift(
         f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = false\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = false\n',
         encoding="utf-8",
     )
     ensure_complete_plugin_roots(repo_root, codex_home)
@@ -1055,7 +945,7 @@ def test_plan_refresh_disabled_plugin_enablement_blocks_filesystem_no_drift(
     assert result.terminal_status == TerminalPlanStatus.UNREPAIRABLE_RUNTIME_CONFIG_MISMATCH
     assert result.future_external_command is None
     assert result.runtime_config is not None
-    assert result.runtime_config.plugin_enablement_state["ticket@turbo-mode"] == "disabled"
+    assert result.runtime_config.plugin_enablement_state["review-family@turbo-mode"] == "disabled"
 
 
 def test_plan_refresh_missing_plugin_enablement_blocks_filesystem_no_drift(
@@ -1080,7 +970,7 @@ def test_plan_refresh_missing_plugin_enablement_blocks_filesystem_no_drift(
     assert result.terminal_status == TerminalPlanStatus.BLOCKED_PREFLIGHT
     assert result.future_external_command is None
     assert result.runtime_config is not None
-    assert result.runtime_config.plugin_enablement_state["ticket@turbo-mode"] == "missing"
+    assert result.runtime_config.plugin_enablement_state["review-family@turbo-mode"] == "missing"
 
 
 def test_plan_refresh_absent_hooks_blocks_repairable_future_advice(
@@ -1094,8 +984,7 @@ def test_plan_refresh_absent_hooks_blocks_repairable_future_advice(
     config.write_text(
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/other"\n'
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
     ensure_complete_plugin_roots(repo_root, codex_home)
@@ -1125,7 +1014,6 @@ def test_plan_refresh_fallback_duplicate_config_blocks_future_advice(
         "[features]\nplugin_hooks = false\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
         '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n'
         "[features]\nplugin_hooks = true\n",
         encoding="utf-8",
     )
@@ -1134,7 +1022,7 @@ def test_plan_refresh_fallback_duplicate_config_blocks_future_advice(
         repo_root,
         codex_home,
         plugin="handoff",
-        version="1.6.0",
+        version="1.7.0",
         rel="scripts/search.py",
         source_text="print('new')\n",
         cache_text="print('old')\n",
@@ -1161,14 +1049,13 @@ def test_plan_refresh_repairable_mismatch_suppresses_future_advice_for_coverage_
         '[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "/other"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
     ensure_complete_plugin_roots(repo_root, codex_home)
-    source_doc = repo_root / "plugins/turbo-mode/ticket/skills/ticket/references/new.md"
+    source_doc = repo_root / "plugins/turbo-mode/handoff/skills/new/references/new.md"
     source_doc.parent.mkdir(parents=True, exist_ok=True)
-    source_doc.write_text("```bash\npython3 scripts/ticket_read.py list\n```\n", encoding="utf-8")
+    source_doc.write_text("```bash\npython3 scripts/search.py query\n```\n", encoding="utf-8")
 
     result = plan_refresh(repo_root=repo_root, codex_home=codex_home, mode="plan-refresh")
 

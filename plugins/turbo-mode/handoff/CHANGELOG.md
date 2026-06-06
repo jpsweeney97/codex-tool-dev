@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **BREAKING:** Retired Ticket-backed `/defer` and `/triage` workflows from active Handoff source. Handoff now covers save, load, quicksave, summary, search, and distill only; retired Ticket material is archived outside the active tree.
 - Removed `allowed-tools` from Handoff skill frontmatter so skill invocation does not request up-front tool permissions before the normal workflow runs.
 
 ## [1.7.0] - 2026-05-15

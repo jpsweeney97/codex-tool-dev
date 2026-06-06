@@ -76,8 +76,8 @@ def get_state_dir() -> Path:
 def get_legacy_handoffs_dir() -> Path:
     """Get legacy handoffs directory: <project_root>/docs/handoffs/
 
-    Used by search, triage, and load for fallback discovery of
-    pre-migration handoff files.
+    Used by search and load for fallback discovery of pre-migration handoff
+    files.
     """
     root, _ = get_project_root()
     return get_storage_layout(root).legacy_active_dir

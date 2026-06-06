@@ -10,7 +10,7 @@ Current baseline:
 
 - Repo source is authoritative:
   - Stable Turbo Mode plugin source roots live at `plugins/turbo-mode/<plugin-name>/`.
-  - Current roots include `plugins/turbo-mode/handoff/` and `plugins/turbo-mode/ticket/`.
+  - Current roots include `plugins/turbo-mode/handoff/` and `plugins/turbo-mode/review-family/`.
 - Personal plugin copies live under:
   - `~/.codex/plugins/<plugin-name>`
 - The personal marketplace file is `~/.agents/plugins/marketplace.json`.

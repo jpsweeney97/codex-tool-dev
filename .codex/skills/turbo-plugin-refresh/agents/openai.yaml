@@ -1,4 +1,4 @@
 interface:
   display_name: "Turbo Plugin Refresh"
-  short_description: "Plan and sync Handoff, Ticket, and Review Family plugins"
-  default_prompt: "Use $turbo-plugin-refresh to plan a Turbo Mode plugin sync for Handoff, Ticket, and Review Family."
+  short_description: "Plan and sync Handoff and Review Family plugins"
+  default_prompt: "Use $turbo-plugin-refresh to plan a Turbo Mode plugin sync for Handoff and Review Family."

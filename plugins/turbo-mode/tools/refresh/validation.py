@@ -138,7 +138,6 @@ NESTED_ALLOWED_KEYS = {
     "runtime_config_plugin_enablement_state": {
         "handoff@turbo-mode",
         "review-family@turbo-mode",
-        "ticket@turbo-mode",
     },
     "diff_classification_item": {
         "canonical_path",
@@ -270,7 +269,6 @@ ALLOWED_DIRTY_RELEVANT_PATHS = {
     ".agents/plugins/marketplace.json",
     "plugins/turbo-mode/handoff",
     "plugins/turbo-mode/review-family",
-    "plugins/turbo-mode/ticket",
     "plugins/turbo-mode/tools/refresh",
     "plugins/turbo-mode/tools/refresh_installed_turbo_mode.py",
     "plugins/turbo-mode/tools/refresh_validate_run_metadata.py",

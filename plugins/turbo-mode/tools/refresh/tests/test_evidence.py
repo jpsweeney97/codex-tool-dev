@@ -130,7 +130,6 @@ def test_write_local_evidence_writes_inventory_transcript_outside_summary(
         plugin_read_sources={},
         plugin_list=(),
         skills=(),
-        ticket_hook={},
         handoff_hooks=(),
         request_methods=("initialize",),
         transcript_sha256="abc",

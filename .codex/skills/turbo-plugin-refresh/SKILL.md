@@ -6,15 +6,14 @@ description: Use when the user asks to plan, refresh, sync, update, or locally i
 # Turbo Plugin Refresh
 
 Run the official local-plugin baseline for Turbo Mode plugins. The repo remains
-source authority for the expected Turbo Mode plugin set: Handoff, Ticket, and
-Review Family. The sync helper copies manifest-backed plugin directories under
+source authority for the expected Turbo Mode plugin set: Handoff and Review
+Family. The sync helper copies manifest-backed plugin directories under
 `plugins/turbo-mode/` to the user's personal Codex plugin directories.
 
 ## Rules
 
 - Use the repo at `/Users/jp/Projects/active/codex-tool-dev`.
-- Expect at least these source packages: `handoff`, `ticket`, and
-  `review-family`.
+- Expect at least these source packages: `handoff` and `review-family`.
 - Use npm scripts for the normal workflow.
 - Always start with the non-mutating plan workflow.
 - Do not run the sync command on the first turn, even if the user says
@@ -49,8 +48,8 @@ Report:
 
 - current branch and whether the working tree is dirty
 - the planned plugin copy operations from the npm output
-- whether `handoff`, `ticket`, and `review-family` all appear in the planned
-  copy operations
+- whether `handoff` and `review-family` both appear in the planned copy
+  operations
 - the intended personal marketplace path and JSON from the npm output
 - whether the user must say `sync now` to copy files
 
@@ -84,7 +83,7 @@ Report:
 - whether the sync command succeeded
 - any copied plugin paths shown by the helper
 - whether dirty source was copied
-- the `codex plugin list` status for `handoff`, `ticket`, and `review-family`
+- the `codex plugin list` status for `handoff` and `review-family`
 - whether any expected plugin still needs `codex plugin add <plugin>@turbo-mode`
 - whether a restart or new thread is needed to load newly installed plugin
   skills and tools

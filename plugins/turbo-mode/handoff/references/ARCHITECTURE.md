@@ -48,7 +48,7 @@ Tripwires: (i) any write putting `completed` or `unreadable` into an
 operation-state file or `committed`/`begun`/`unreadable` into a transaction
 file falsifies the model — stop and triage. (ii) >~3 new pyright suppressions to land the
 `transaction_status` annotation → drop to runtime-gate-only + tracked
-ticket. (iii) Make pyright blocking only if a low-noise prototype holds
+follow-up. (iii) Make pyright blocking only if a low-noise prototype holds
 and status/payload bugs recur beyond PR #15.
 
 `storage_authority_inventory.py` is a non-wired dev/CI helper (not part of the runtime load path): it builds and checks the storage-authority documentation-coverage fixture. See CONTRIBUTING.md for how to regenerate that fixture after a storage-authority doc change.

@@ -9,7 +9,7 @@ from .paths import canonical_key
 
 GENERATED_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".venv"}
 GENERATED_FILES = {".DS_Store"}
-GENERATED_PATH_FRAGMENTS = {".codex/ticket-tmp"}
+GENERATED_PATH_FRAGMENTS: set[str] = set()
 
 
 def has_shebang(path: Path) -> bool:

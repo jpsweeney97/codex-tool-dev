@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import shlex
 import subprocess
 from collections.abc import Sequence
@@ -14,7 +13,6 @@ from .models import fail
 
 EXCLUSIVE_WINDOW_STATUS = "exclusive_window_observed_by_process_samples"
 PROCESS_GATE_SCHEMA_VERSION = "turbo-mode-refresh-process-gate-v1"
-TICKET_HOOK_ROOT = "/plugins/cache/turbo-mode/ticket/1.4.0/hooks/"
 
 
 @dataclass(frozen=True)
@@ -173,10 +171,6 @@ def _classify_row(
         return _finding(row, "codex-app-server", True, "codex app-server")
     if _is_codex_cli(row):
         return _finding(row, "codex-cli", True, "codex")
-    if _is_ticket_hook_runtime(row):
-        return _finding(row, "ticket-hook-runtime", True, "ticket-hook-runtime")
-    if _is_ticket_hook_path_consumer(row):
-        return _finding(row, "ticket-hook-path-consumer", True, "ticket-hook-path")
     return _finding(row, "non-blocking", False, "none")
 
 
@@ -277,35 +271,18 @@ def _is_codex_cli(row: ProcessRow) -> bool:
     return bool(row.argv and Path(row.argv[0]).name == "codex")
 
 
-def _is_ticket_hook_runtime(row: ProcessRow) -> bool:
-    if not row.argv:
-        return False
-    command_text = " ".join(row.argv)
-    return (
-        "ticket_engine_guard.py" in command_text
-        or "ticket_workflow.py" in command_text
-    )
-
-
-def _is_ticket_hook_path_consumer(row: ProcessRow) -> bool:
-    return TICKET_HOOK_ROOT in row.command
-
-
 def _contains_high_risk_marker(command: str) -> bool:
     return _first_high_risk_marker(command) != "none"
 
 
 def _first_high_risk_marker(command: str) -> str:
     markers: list[tuple[str, str]] = [
-        ("codex-app-server", r"\bcodex\s+app-server\b"),
-        ("codex-cli", r"(^|[\s/])codex(\s|$)"),
-        ("codex-desktop", r"Codex(\.app|/Contents/MacOS/Codex|\s|$)"),
-        ("ticket-engine", r"ticket_engine_"),
-        ("ticket-workflow", r"ticket_workflow\.py"),
-        ("ticket-hook-path", re.escape(TICKET_HOOK_ROOT)),
+        ("codex-app-server", "codex app-server"),
+        ("codex-cli", "codex"),
+        ("codex-desktop", "Codex"),
     ]
-    for marker, pattern in markers:
-        if re.search(pattern, command):
+    for marker, needle in markers:
+        if needle in command:
             return marker
     return "none"
 
