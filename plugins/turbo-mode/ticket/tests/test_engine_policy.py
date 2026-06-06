@@ -14,8 +14,15 @@ from scripts.ticket_engine_core import (
 )
 from scripts.ticket_parse import ParsedTicket, parse_legacy_ticket_for_cutover, parse_ticket
 from scripts.ticket_target_schema import validate_target_ticket_file
+from scripts.ticket_validate import validate_fields
 
 from tests.support.builders import make_gen1_ticket, make_ticket
+
+
+def test_validate_fields_rejects_reopen_reason_as_target_write_field() -> None:
+    assert "reopen_reason is not a target write field" in validate_fields(
+        {"reopen_reason": "Regression recurred."}
+    )
 
 
 def _parsed_ticket_with_status(status: str) -> ParsedTicket:
@@ -211,7 +218,7 @@ def test_reopen_invalid_transition_returns_structured_policy_data(tmp_tickets: P
     response = _evaluate_reopen_policy(
         "T-20260503-26",
         ticket,
-        {"reopen_reason": "Need more work"},
+        {"status": "open"},
         tmp_tickets,
     )
 
@@ -495,11 +502,11 @@ def test_reopen_evaluator_matches_execute_rejection(tmp_tickets: Path) -> None:
     policy = _evaluate_reopen_policy(
         "T-20260503-28",
         ticket,
-        {"reopen_reason": "Need more work"},
+        {"status": "open"},
         tmp_tickets,
     )
     execute = _execute_reopen(
-        "T-20260503-28", {"reopen_reason": "Need more work"}, "session", "user", tmp_tickets
+        "T-20260503-28", {"status": "open"}, "session", "user", tmp_tickets
     )
 
     assert policy is not None

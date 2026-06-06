@@ -1123,13 +1123,13 @@ class TestCloseAndReopen:
             tmp_tickets,
             ticket_path,
             action="reopen",
-            fields={"reopen_reason": "Bug reoccurred after merge"},
+            fields={"status": "open"},
         )
 
         assert response.state == "ok"
         content = ticket_path.read_text(encoding="utf-8")
         assert "status: open" in content
-        assert "Reopen History" in content
+        assert "Reopen History" not in content
 
     def test_reopen_rejects_invalid_fields_before_write(self, tmp_tickets: Path) -> None:
         ticket_path = make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="done")
@@ -1138,7 +1138,7 @@ class TestCloseAndReopen:
             tmp_tickets,
             ticket_path,
             action="reopen",
-            fields={"reopen_reason": "Bug reoccurred after merge", "status": "pending"},
+            fields={"status": "pending"},
         )
 
         assert response.state == "need_fields"
@@ -1146,7 +1146,7 @@ class TestCloseAndReopen:
         assert "status" in response.message
         assert "status: done" in ticket_path.read_text(encoding="utf-8")
 
-    def test_reopen_requires_reason(self, tmp_tickets: Path) -> None:
+    def test_reopen_requires_status(self, tmp_tickets: Path) -> None:
         ticket_path = make_ticket(tmp_tickets, "ignored.md", id="T-20260302-01", status="done")
 
         response = _execute_existing(
@@ -1158,7 +1158,7 @@ class TestCloseAndReopen:
 
         assert response.state == "need_fields"
         assert response.error_code == "need_fields"
-        assert "reopen_reason" in response.message
+        assert "status" in response.message
 
 
 class TestTransportAndPrerequisites:

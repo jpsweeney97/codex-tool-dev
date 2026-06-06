@@ -1,6 +1,6 @@
 ---
 name: capture-ticket
-description: "Create repo-local tickets from natural language capture intent. Use when the user says to track, file, capture, ticket, or remember a bug, feature, follow-up, task, or cleanup item. temporarily unavailable for writes until Ticket exposes the target candidate mutation path. Do not trigger from casual statements like 'this is a bug' unless the user also asks to track or file it."
+description: "Create repo-local tickets from natural language capture intent. Use when the user says to track, file, capture, ticket, or remember a bug, feature, follow-up, task, or cleanup item through the target candidate mutation path. Do not trigger from casual statements like 'this is a bug' unless the user also asks to track or file it."
 allowed-tools:
   - Bash
   - Write
@@ -9,8 +9,9 @@ allowed-tools:
 
 # Ticket Capture
 
-Capture intent is still a useful user signal, but active create mutation is
-temporarily unavailable until source exposes a live target-candidate entrypoint.
+Capture intent is still a useful user signal. Source now exposes the target
+candidate mutation path, while installed-runtime write availability still
+requires separate runtime proof.
 
 ## Setup
 
@@ -84,14 +85,14 @@ The actor is not a workflow label and must not encode action type.
 
 ## Active Create Guidance
 
-Create mutation is temporarily unavailable from this skill until Ticket exposes
-and documents a live source entrypoint that accepts the target candidate
-mutation contract. In `discussion_only`, any future user approval must be
-tied to candidate identity before writing. This is approval tied to the
-candidate identity, not general permission to write.
+Before mutating, confirm the installed Ticket runtime exposes the target
+candidate mutation path. If runtime proof is unavailable in the current turn,
+summarize the intended target candidate and say runtime write proof is missing.
+Do not write through legacy flat candidate paths.
 
-While unavailable, summarize the intended ticket in prose and stop without
-writing.
+In `discussion_only`, any user approval must be tied to candidate identity
+before writing. This is approval tied to the candidate identity, not general
+permission to write.
 
 Never store raw user wording: do not write verbatim transcript text, and do not
 include `raw_user_text`, `raw_request`, or `transcript_excerpt`.

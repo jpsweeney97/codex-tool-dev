@@ -166,8 +166,8 @@ The plugin registers its hook, skills, and scripts automatically. No build step 
 
 ## What It Does
 
-- **Check capture and update availability** while write mutation is rebaselined
-  onto the target candidate contract.
+- **Route capture and update target candidates** through the source target
+  candidate contract while keeping installed-runtime write proof separate.
 - **List, query, and check close readiness** with read-only status, priority,
   tag, and ID-prefix search.
 - **Review backlog health** with read-only stale-ticket and blocker summaries.
@@ -182,35 +182,36 @@ The plugin registers its hook, skills, and scripts automatically. No build step 
 
 | Skill | Trigger | Purpose |
 |-------|---------|---------|
-| `capture-ticket` | Track, file, capture, ticket, or remember follow-up work | Report capture availability and summarize the intended create candidate; write mutation is temporarily unavailable |
+| `capture-ticket` | Track, file, capture, ticket, or remember follow-up work | Describe and route the intended create target candidate when installed runtime proof is available |
 | `read-ticket` | Show, list, find, open, or check close readiness | Read-only `ticket_read.py list`, `query`, and `check` |
-| `update-ticket` | Update existing ticket metadata, lifecycle, priority, tags, or blockers | Summarize the intended update candidate; write mutation is temporarily unavailable |
+| `update-ticket` | Update existing ticket metadata, lifecycle, priority, tags, or blockers | Describe and route the intended update target candidate when installed runtime proof is available |
 | `ticket-backlog-triage` | Backlog health, stale, blocked, or next-work questions | Read-only `ticket_review.py review` and `audit`; may suggest capture prompts |
 | `ticket-doctor` | Explicit storage/plugin diagnostics, installed runtime activation, stale payload cleanup, or audit repair | Maintenance-only `ticket_doctor.py diagnose`, explicit `activate-runtime`, confirmed `clean-stale-payloads`, and dry-run-first `repair-audit` |
 
 Generic creation through the old broad `ticket` skill is no longer user-facing.
-Use `capture-ticket` for capture-intent handling. Until a live source entrypoint
-accepts the target candidate mutation contract, capture and update skills stop
-after a prose candidate summary and do not write tickets.
+Use `capture-ticket` for capture-intent handling. Source now exposes the target
+candidate mutation path. Installed-runtime availability still requires a
+separate cache refresh and runtime inventory before claiming the active Codex
+plugin can perform writes.
 
 **Skill-backed operations:**
 
 | Operation | Required Args | Current Source Action |
 |-----------|--------------|-----------------------|
-| capture intent | natural-language follow-up | Report unavailable write path and summarize the create candidate |
-| update intent | ticket ID plus requested field, section, or lifecycle change | Report unavailable write path and summarize the update candidate |
+| capture intent | natural-language follow-up | Describe or route the create target candidate after runtime proof |
+| update intent | ticket ID plus requested field, section, or lifecycle change | Describe or route the update target candidate after runtime proof |
 | list/query/check | filters, ID prefix, or ticket ID | Direct read (`ticket_read.py`) |
 | backlog review | tickets directory | Read-only `ticket_review.py review` and `audit` |
 | doctor/repair | explicit maintenance request | `ticket_doctor.py diagnose`, explicit `activate-runtime`, confirmed `clean-stale-payloads`, or dry-run-first `repair-audit` |
 
 #### Target Candidate Mutation Path
 
-Ticket writes tickets today through the user-origin `ingest` engine path and the
-`ticket_autonomy.py apply-turn` autonomy gateway. What this docs slice does not
-identify is a live source entrypoint for the literal *target candidate* envelope.
-When source exposes that entrypoint, it must accept the target candidate fields
-`action`, `ticket_id`, `target.fields`, `target.sections`, `proposed_change`,
-`expected_ticket_fingerprint`, and `evidence_summary`, and it must reject unknown
+Source now exposes the target candidate mutation path. Installed-runtime
+availability still requires a separate cache refresh and runtime inventory
+before claiming the active Codex plugin can perform writes. The source
+entrypoint accepts the target candidate fields `action`, `ticket_id`,
+`target.fields`, `target.sections`, `proposed_change`,
+`expected_ticket_fingerprint`, and `evidence_summary`, and rejects unknown
 fields.
 
 ### Hook (1)
@@ -342,9 +343,9 @@ Tickets with `status: blocked` also require a non-empty `Blocked On` section.
 Check ticket capture availability for: authentication fails on expired tokens.
 ```
 
-Codex should report that create mutation is temporarily unavailable until source
-exposes a live target-candidate entrypoint, then summarize the intended ticket
-candidate without writing.
+Codex should confirm whether the installed Ticket runtime exposes the target
+candidate mutation path. If runtime proof is unavailable in the current turn,
+summarize the intended target candidate and say runtime write proof is missing.
 
 ### Summarize an update candidate
 
@@ -466,8 +467,8 @@ Source lives in `scripts/` rather than a standard Python package directory. Modu
 
 - The read-only `docs/tickets/` cutover inventory gate has not run in this
   source slice.
-- Capture and update writes are temporarily unavailable from active skills until
-  source exposes a live target-candidate entrypoint.
+- Source now exposes the target candidate mutation path; installed write
+  availability still requires separate runtime proof.
 - Installed-cache and live runtime behavior remain unproved by this source
   documentation.
 

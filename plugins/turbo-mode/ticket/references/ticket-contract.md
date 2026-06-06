@@ -36,7 +36,9 @@ reverse `blocks` views by scanning tickets.
 
 `idea` may move only to `open`. `open` may move to `blocked`, and `blocked`
 may move to `open`. `open` and `blocked` may close to `done` or `wontfix`.
-`done` and `wontfix` reopen to `open`.
+`done` and `wontfix` reopen to `open` or `blocked`. `reopen -> blocked`
+requires valid `Blocked On` prose and any visible `blocked_by` ticket-ID
+dependencies.
 
 For close actions, without `dependency_override`, closing as `done` is blocked
 while `blocked_by` references are unresolved or missing; closing as `wontfix`
@@ -55,10 +57,17 @@ are `action`, `ticket_id`, `target.fields`, `target.sections`,
 
 `target.fields` and `target.sections` name the exact frontmatter fields or
 Markdown sections the candidate proposes to change. `proposed_change` may
-contain only those named targets. non-create writes require an expected ticket
-fingerprint. Ticket computes candidate identity from canonical candidate
-content plus the live target fingerprint; callers do not supply authoritative
-identity values. Unknown fields are invalid.
+contain only those named targets. For non-create writes,
+`expected_ticket_fingerprint` is the candidate-supplied copy of the live target
+fingerprint at discovery/evaluation time and participates in candidate
+identity. Ticket recomputes the current live target fingerprint before writing
+and rejects stale candidates whose current fingerprint no longer matches
+`expected_ticket_fingerprint`; callers do not supply authoritative identity
+values. non-create writes require an expected ticket fingerprint. In prose,
+expected_ticket_fingerprint is the candidate-supplied copy of the live target
+fingerprint. Ticket recomputes the current live target fingerprint before
+writing. Ticket computes candidate identity from canonical candidate content.
+Unknown fields are invalid.
 
 ## Target Result Envelope
 
@@ -183,11 +192,13 @@ helpers may diagnose source/cache/storage state, repair historical audit files,
 clean stale payloads after confirmation, or run installed-runtime activation
 when the operator explicitly asks for that proof lane.
 
-Tickets are still written today through the user-origin `ingest` engine path and
-the `ticket_autonomy.py apply-turn` autonomy gateway. What is unavailable is the
-literal target candidate envelope: active capture and update mutation guidance is
-temporarily unavailable until source exposes a live entrypoint that accepts the
-target candidate mutation contract.
+Source now exposes the target candidate mutation path. Installed-runtime
+availability still requires a separate cache refresh and runtime inventory
+before claiming the active Codex plugin can perform writes.
+
+Capture and update skills may describe and route target candidates through the
+source entrypoint when the installed Ticket runtime matches this source. Do not
+claim installed write availability from source files alone.
 
 ## Autonomy Model
 
@@ -205,9 +216,19 @@ of silently falling back.
 
 ## Fingerprints And Write Safety
 
-Target non-create writes require `expected_ticket_fingerprint`. Ticket computes
-candidate identity from canonical candidate content plus the live target
-fingerprint. Callers do not supply authoritative identity values.
+For non-create writes, `expected_ticket_fingerprint` is the candidate-supplied
+copy of the live target fingerprint at discovery/evaluation time and
+participates in candidate identity. Ticket recomputes the current live target
+fingerprint before writing and rejects stale candidates whose current
+fingerprint no longer matches `expected_ticket_fingerprint`; callers do not
+supply authoritative identity values.
+
+Automatic `correct` requires recent uncompacted correction context outside the
+candidate envelope. If that context is absent, expired, compacted, or not bound
+to the candidate target and `expected_ticket_fingerprint`, runtime returns
+`correction_detail_missing` instead of emitting `APPLY_CORRECTION`.
+Put plainly, recent uncompacted correction context is required before automatic
+correct.
 
 ## Integration
 

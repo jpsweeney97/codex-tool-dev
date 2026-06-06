@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "Ticket",
     "shortDescription": "Read, triage, and diagnose repo-local tickets",
-    "longDescription": "Read, validate, triage, and diagnose repo-local Ticket state while write mutation is rebaselined onto the target candidate contract.",
+    "longDescription": "Read, validate, triage, diagnose, and route repo-local Ticket state through the source target candidate contract. Installed write availability still requires separate runtime proof.",
     "developerName": "JP",
     "category": "Productivity",
     "capabilities": [

@@ -5,9 +5,9 @@
 The ticket plugin provides repo-local ticket reading, triage, diagnostics, and
 runtime-first ticket authority work for Codex sessions.
 
-**Scope:** Ticket capture availability, existing-ticket update availability,
-read queries, backlog health review, explicit diagnostics, and historical audit
-repair while write mutation is rebaselined onto the target candidate contract.
+**Scope:** Ticket target candidate routing, read queries, backlog health review,
+explicit diagnostics, and historical audit repair while installed write
+availability remains separate runtime proof.
 
 **Not covered:** External issue tracker integrations, UI rendering, cross-project ticket syncing, or agent-orchestration workflows (roadmap).
 
@@ -171,16 +171,17 @@ evidence.
 
 | Skill | Trigger | Purpose |
 |-------|---------|---------|
-| `capture-ticket` | `skills/capture-ticket/SKILL.md` | Report capture availability and summarize the intended create candidate; write mutation is temporarily unavailable |
+| `capture-ticket` | `skills/capture-ticket/SKILL.md` | Describe and route the intended create target candidate when installed runtime proof is available |
 | `read-ticket` | `skills/read-ticket/SKILL.md` | Read-only show, list, query, and close-readiness checks |
-| `update-ticket` | `skills/update-ticket/SKILL.md` | Summarize intended update candidates; write mutation is temporarily unavailable |
+| `update-ticket` | `skills/update-ticket/SKILL.md` | Describe and route intended update target candidates when installed runtime proof is available |
 | `ticket-backlog-triage` | `skills/ticket-backlog-triage/SKILL.md` | Read-only backlog health, stale, blocker, and next-action review |
 | `ticket-doctor` | `skills/ticket-doctor/SKILL.md` | Explicit-only storage/plugin diagnostics, stale payload cleanup, and audit repair |
 
 Generic creation through the old broad `ticket` skill is no longer user-facing.
-Use `capture-ticket` for capture-intent handling. Until a live source entrypoint
-accepts the target candidate mutation contract, capture and update skills stop
-after a prose candidate summary and do not write tickets.
+Use `capture-ticket` for capture-intent handling. Source now exposes the target
+candidate mutation path. Installed-runtime availability still requires a
+separate cache refresh and runtime inventory before claiming the active Codex
+plugin can perform writes.
 
 ### CLI Entrypoints
 
@@ -200,13 +201,12 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_read.py list <PROJECT_ROOT>/docs/t
 
 ### Target Candidate Mutation Path
 
-Ticket writes tickets today through the user-origin `ingest` engine path and the
-`ticket_autonomy.py apply-turn` autonomy gateway. What this docs slice does not
-identify is a live source entrypoint for the literal *target candidate* envelope.
-When source exposes that entrypoint, it must accept `action`, `ticket_id`,
-`target.fields`, `target.sections`, `proposed_change`,
-`expected_ticket_fingerprint`, and `evidence_summary`, and it must reject
-unknown fields.
+Source now exposes the target candidate mutation path. Installed-runtime
+availability still requires a separate cache refresh and runtime inventory
+before claiming the active Codex plugin can perform writes. The source
+entrypoint accepts `action`, `ticket_id`, `target.fields`, `target.sections`,
+`proposed_change`, `expected_ticket_fingerprint`, and `evidence_summary`, and
+rejects unknown fields.
 
 ### Recovery Hints
 
@@ -349,14 +349,16 @@ feature, follow-up, task, or cleanup item.
 1. Resolve plugin root from the skill's own directory
 2. Resolve `PROJECT_ROOT` from the current working directory
 3. Determine `TICKETS_DIR` as `<PROJECT_ROOT>/docs/tickets/`
-4. Report that active create mutation is temporarily unavailable
-5. Summarize the intended target candidate in prose without writing
+4. Confirm whether the installed Ticket runtime exposes the target candidate
+   mutation path
+5. If runtime proof is unavailable, summarize the intended target candidate and
+   say runtime write proof is missing
 
 **Failure modes**
 | Symptom | Cause | Recovery |
 |---------|-------|---------|
 | `error: path_traversal` | `tickets_dir` resolves outside project root | Confirm project has `.git/` or `.codex/` at expected root |
-| Write requested | Target candidate entrypoint is unavailable in this source slice | Summarize the candidate and stop |
+| Write requested without runtime proof | Installed runtime proof is unavailable in this turn | Summarize the candidate and say runtime write proof is missing |
 
 ---
 
@@ -384,8 +386,10 @@ blockers, related paths, or target sections.
 **Flow**
 1. Resolve plugin root
 2. Resolve `PROJECT_ROOT` from the current working directory
-3. Report that active update mutation is temporarily unavailable
-4. Summarize the intended target candidate in prose without writing
+3. Confirm whether the installed Ticket runtime exposes the target candidate
+   mutation path
+4. If runtime proof is unavailable, summarize the intended target candidate and
+   say runtime write proof is missing
 
 ---
 
@@ -681,9 +685,8 @@ uv run python -B <PLUGIN_ROOT>/scripts/ticket_triage.py dashboard <PROJECT_ROOT>
 ### 6. Capture Availability Check
 
 Read [skills/capture-ticket/SKILL.md](skills/capture-ticket/SKILL.md) and
-confirm active create guidance says mutation is temporarily unavailable until
-source exposes a live target-candidate entrypoint. This is a docs check only;
-do not write a ticket.
+confirm active create guidance separates source target-candidate routing from
+installed runtime write proof. This is a docs check only; do not write a ticket.
 
 ### 7. Historical Audit Repair Verification
 

@@ -234,10 +234,61 @@ def test_contract_documents_lifecycle_transitions() -> None:
     assert "`open` may move to `blocked`" in normalized
     assert "`blocked` may move to `open`" in normalized
     assert "`open` and `blocked` may close to `done` or `wontfix`" in normalized
-    assert "`done` and `wontfix` reopen to `open`" in normalized
+    assert "`done` and `wontfix` reopen to `open` or `blocked`" in normalized
+    assert "`reopen -> blocked` requires valid `Blocked On`" in normalized
     assert "`blocked -> open` must clear `blocked_by: []` and `blocked_on: null`" in normalized
     assert "without `dependency_override`, closing as `done` is blocked" in normalized
     assert "closing as `wontfix` bypasses blocker resolution" in normalized
+
+
+def test_ticket_write_docs_no_longer_claim_source_entrypoint_missing() -> None:
+    paths = [
+        PLUGIN_ROOT / "README.md",
+        PLUGIN_ROOT / "HANDBOOK.md",
+        PLUGIN_ROOT / "references" / "ticket-contract.md",
+        PLUGIN_ROOT / "TERMS.md",
+        CAPTURE_SKILL,
+        UPDATE_SKILL,
+    ]
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    text_sources = [(path, path.read_text(encoding="utf-8")) for path in paths]
+    text_sources.append((MANIFEST, manifest["interface"]["longDescription"]))
+    forbidden = (
+        "temporarily unavailable until source exposes",
+        "source exposes a live target-candidate entrypoint",
+        "until Ticket exposes and documents a live source entrypoint",
+        "write mutation is rebaselined",
+        "rebaselined onto the target candidate contract",
+    )
+    for path, text in text_sources:
+        for phrase in forbidden:
+            assert phrase not in text, f"{path} still contains {phrase!r}"
+
+
+def test_authority_docs_align_identity_and_correction_context() -> None:
+    control = _read_text(
+        REPO_ROOT
+        / "docs"
+        / "superpowers"
+        / "specs"
+        / "2026-05-30-ticket-runtime-first-state-kernel-control.md"
+    )
+    contract = _read_text(PLUGIN_ROOT / "references" / "ticket-contract.md")
+    combined = _normalize_whitespace(control + "\n" + contract)
+
+    assert (
+        "expected_ticket_fingerprint is the candidate-supplied copy of the live target fingerprint"
+        in combined
+    )
+    assert (
+        "Ticket recomputes the current live target fingerprint before writing"
+        in combined
+    )
+    assert (
+        "recent uncompacted correction context is required before automatic correct"
+        in combined
+    )
+    assert "correction_detail_missing" in combined
 
 
 def test_readme_ticket_schema_matches_yaml_contract_boundary() -> None:
@@ -561,7 +612,8 @@ def test_ticket_capture_skill_frontmatter_matches_task3_contract() -> None:
         "unless the user also asks to track or file it",
     ):
         assert snippet in description
-    assert "temporarily unavailable" in description
+    assert "temporarily unavailable" not in description
+    assert "target candidate mutation path" in description
     assert "prepare" not in description
     assert "execute" not in description
     assert "preview" not in description
@@ -580,7 +632,7 @@ def test_ticket_capture_skill_contains_exact_compact_preview_labels() -> None:
         "Create this ticket? [create / edit / cancel]",
     ):
         assert label not in target
-    assert "temporarily unavailable" in target
+    assert "runtime write proof is missing" in target
     assert "preview" not in _normalize_whitespace(target).lower()
 
 
@@ -597,7 +649,10 @@ def test_ticket_capture_skill_requires_explicit_confirmation_before_writing() ->
     text = _read_text(CAPTURE_SKILL)
     target = _section(text, "## Active Create Guidance", "\n## ")
     normalized = _normalize_whitespace(target)
-    assert "temporarily unavailable" in normalized
+    assert "temporarily unavailable" not in normalized
+    assert "installed Ticket runtime exposes the target candidate mutation path" in normalized
+    assert "runtime write proof is missing" in normalized
+    assert "Do not write through legacy flat candidate paths" in normalized
     assert "discussion_only" in normalized
     assert "approval tied to the candidate identity" in normalized
     assert "Require explicit `create` confirmation before writing" not in target
@@ -676,7 +731,8 @@ def test_ticket_capture_skill_documents_refinement_and_preview_rules() -> None:
     text = _read_text(CAPTURE_SKILL)
     target = _section(text, "## Active Create Guidance", "\n## ")
     normalized = _normalize_whitespace(target).lower()
-    assert "temporarily unavailable" in normalized
+    assert "temporarily unavailable" not in normalized
+    assert "runtime write proof is missing" in normalized
     assert "refinement_status" not in normalized
     assert "persistent preview" not in normalized
     assert "preview-first" not in normalized
@@ -688,7 +744,7 @@ def test_ticket_capture_skill_documents_create_edit_cancel_handling() -> None:
     assert "`create`: run execute" not in target
     assert "`edit`: safely update the payload" not in target
     assert "canonical prepare command" not in target
-    assert "temporarily unavailable" in target
+    assert "runtime write proof is missing" in target
 
 
 def test_ticket_capture_skill_documents_split_deferral_behavior() -> None:
@@ -737,7 +793,7 @@ def test_contract_documents_recovery_hint_schema_and_codes() -> None:
 def test_ticket_capture_skill_owns_creation_without_broad_ticket_skill() -> None:
     text = _read_text(CAPTURE_SKILL)
     target = _section(text, "## Active Create Guidance", "\n## ")
-    assert "temporarily unavailable" in target
+    assert "runtime write proof is missing" in target
     assert "ticket_capture.py prepare" not in target
     assert "ticket_capture.py execute" not in target
     assert "ticket_workflow.py" not in text
@@ -811,12 +867,13 @@ def test_ticket_update_skill_contract_is_preview_first_and_scoped() -> None:
         "add blockers",
     ):
         assert snippet in description
-    assert "temporarily unavailable" in description
+    assert "temporarily unavailable" not in description
+    assert "target candidate mutation path" in description
     assert "component" not in description
     assert "acceptance criteria" not in description
     assert "preview" not in description
     target = _section(text, "## Active Update Guidance", "\n## ")
-    assert "temporarily unavailable" in target
+    assert "runtime write proof is missing" in target
     assert "Show the returned preview and wait for explicit user confirmation" not in target
     assert "ticket_update.py prepare" not in target
     assert "ticket_update.py execute" not in target
@@ -1151,7 +1208,14 @@ def test_readme_and_handbook_do_not_advertise_counted_test_inventory() -> None:
 def test_update_skill_uses_focused_update_backend_as_mutation_path() -> None:
     text = _read_text(UPDATE_SKILL)
     active = _section(text, "## Active Update Guidance", "\n## ")
-    assert "temporarily unavailable" in active
+    normalized_active = _normalize_whitespace(active)
+    assert "temporarily unavailable" not in active
+    assert (
+        "installed Ticket runtime exposes the target candidate mutation path"
+        in normalized_active
+    )
+    assert "runtime write proof is missing" in normalized_active
+    assert "Do not write through legacy flat candidate paths" in normalized_active
     assert "ticket_update.py prepare" not in active
     assert "ticket_update.py execute" not in active
     assert "<PLUGIN_ROOT>/scripts/ticket_update.py prepare <PAYLOAD_PATH>" not in active
@@ -1335,7 +1399,8 @@ def test_task4_docs_do_not_overclaim_current_placeholder_refinement() -> None:
         "replace placeholder problem, next action, or acceptance criteria"
         not in update_description
     )
-    assert "temporarily unavailable" in update_description
+    assert "temporarily unavailable" not in update_description
+    assert "target candidate mutation path" in update_description
 
     update_text = _normalize_whitespace(_read_text(UPDATE_SKILL))
     assert "Only the focused refinement fields `problem`, `next_action`, and" not in update_text
