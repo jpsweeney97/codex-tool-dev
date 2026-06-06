@@ -15,12 +15,22 @@ from scripts.ticket_autonomy_runtime import (
     AutonomyDecision,
     AutonomyIntent,
     CandidateMutation,
-    EvidenceLink,
+    CandidateTarget,
     RuntimeDecisionKind,
     evaluate_autonomy_intent,
 )
-from scripts.ticket_dedup import target_fingerprint
-from scripts.ticket_engine_core import EngineResponse, engine_execute
+from scripts.ticket_change_history import ChangeHistoryEntry
+from scripts.ticket_dedup import (
+    target_fingerprint,
+    target_recovery_fingerprint,
+    target_recovery_fingerprint_for_text,
+)
+from scripts.ticket_engine_core import (
+    EngineResponse,
+    TargetWritePreview,
+    engine_execute,
+    preview_target_write,
+)
 from scripts.ticket_engine_gateway import (
     GatewayMutation,
     apply_autonomous_mutation,
@@ -29,7 +39,7 @@ from scripts.ticket_engine_gateway import (
 from scripts.ticket_turn_batch import PendingSummaryStore, VerifiedRepoContext
 
 from tests.support.builders import make_legacy_ticket_for_cutover, make_ticket
-from tests.test_turn_batch import valid_attempt_event
+from tests.test_turn_batch import valid_attempt_event, valid_create_attempt_event
 
 
 def _declare_ignored_workspace(project_root: Path) -> None:
@@ -49,25 +59,43 @@ def _repo_context(project_root: Path) -> VerifiedRepoContext:
     )
 
 
+def _target(
+    *,
+    fields: tuple[str, ...] = ("priority",),
+    sections: tuple[str, ...] = (),
+) -> CandidateTarget:
+    return CandidateTarget(fields=fields, sections=sections)
+
+
 def _decision_for(
     *,
-    ticket_id: str,
+    ticket_id: str | None,
     action: str = "update",
+    target: CandidateTarget | None = None,
+    proposed_change: dict[str, object] | None = None,
+    expected_ticket_fingerprint: str | None = "ticket-fp",
+    evidence_summary: str = "Current turn justifies this ticket change.",
     fields: dict[str, object] | None = None,
-    target_fp: str = "ticket-fp",
+    target_fp: str | None = None,
     turn_id: str = "turn-1",
 ):
+    if proposed_change is None and fields is not None:
+        proposed_change = fields
+    if target_fp is not None:
+        expected_ticket_fingerprint = target_fp
     candidate = CandidateMutation(
         ticket_id=ticket_id,
         action=action,
-        proposed_change=fields or {"priority": "low"},
-        evidence=(EvidenceLink("current_thread_reason", "test"),),
+        target=target or _target(),
+        proposed_change=proposed_change or {"priority": "low"},
+        expected_ticket_fingerprint=expected_ticket_fingerprint,
+        evidence_summary=evidence_summary,
     )
     return evaluate_autonomy_intent(
         AutonomyIntent(
             action_kind=action,
             candidates=(candidate,),
-            source_context={"ticket_state_fingerprints": {ticket_id: target_fp}},
+            source_context={},
         ),
         current_mode="agent_primary",
         thread_id="thread-1",
@@ -82,14 +110,111 @@ def _mutation(
     *,
     ticket_id: str = "T-20260527-01",
     action: str = "update",
+    target: CandidateTarget | None = None,
+    proposed_change: dict[str, object] | None = None,
     fields: dict[str, object] | None = None,
 ) -> GatewayMutation:
+    if proposed_change is None and fields is not None:
+        proposed_change = fields
+    expected = target_fingerprint(ticket_path)
     return GatewayMutation(
         action=action,
         ticket_id=ticket_id,
-        fields=fields or {"priority": "low"},
+        target=target or _target(),
+        proposed_change=proposed_change or {"priority": "low"},
         tickets_dir=tickets_dir,
-        target_fingerprint=target_fingerprint(ticket_path),
+        expected_ticket_fingerprint=expected,
+        evidence_summary="Current turn justifies this ticket change.",
+    )
+
+
+def _create_target() -> CandidateTarget:
+    return CandidateTarget(
+        fields=("title", "priority"),
+        sections=("Problem", "Next Action"),
+    )
+
+
+def _create_change() -> dict[str, object]:
+    return {
+        "title": "Add retry to publisher",
+        "priority": "high",
+        "Problem": "Publisher drops transient broker messages.",
+        "Next Action": "Add retry around broker publish.",
+    }
+
+
+def _create_mutation(tmp_tickets: Path) -> GatewayMutation:
+    return GatewayMutation(
+        action="create",
+        ticket_id=None,
+        target=_create_target(),
+        proposed_change=_create_change(),
+        tickets_dir=tmp_tickets,
+        expected_ticket_fingerprint=None,
+        evidence_summary="The user asked to track the publisher retry follow-up.",
+    )
+
+
+def _create_decision() -> AutonomyDecision:
+    return _decision_for(
+        ticket_id=None,
+        action="create",
+        target=_create_target(),
+        proposed_change=_create_change(),
+        expected_ticket_fingerprint=None,
+        evidence_summary="The user asked to track the publisher retry follow-up.",
+    )
+
+
+def _change_history_entry() -> ChangeHistoryEntry:
+    return ChangeHistoryEntry(
+        timestamp="2026-06-05T12:00:00Z",
+        actor="codex",
+        reason="Created ticket from candidate evidence.",
+        corrects=None,
+    )
+
+
+def _change_history_details() -> dict[str, object]:
+    entry = _change_history_entry()
+    return {
+        "timestamp": entry.timestamp,
+        "actor": entry.actor,
+        "reason": entry.reason,
+        "corrects": entry.corrects,
+    }
+
+
+def _retained_create_attempt_event(
+    *,
+    event_id: str = "evt_create_attempt",
+    mutation_id: str | None,
+    allocation_id: str = "T-20260605-01",
+    allocation_path: str = "docs/tickets/T-20260605-01.md",
+    expected_post_write_fingerprint: str,
+    details: dict[str, object] | None = None,
+) -> dict[str, object]:
+    bounded_details = {
+        "target": {
+            "fields": list(_create_target().fields),
+            "sections": list(_create_target().sections),
+        },
+        "evidence_summary": "The user asked to track the publisher retry follow-up.",
+        "expected_post_write_fingerprint": expected_post_write_fingerprint,
+        "change_history_entry": _change_history_details(),
+        "create_allocation": {
+            "allocated_ticket_id": allocation_id,
+            "allocated_ticket_path": allocation_path,
+            "expected_pre_write_fact": "allocated_target_path_unused",
+        },
+    }
+    if details:
+        bounded_details.update(details)
+    return valid_create_attempt_event(
+        event_id=event_id,
+        mutation_id=mutation_id,
+        details=bounded_details,
     )
 
 
@@ -107,8 +232,19 @@ def _event_with_recovery_fingerprints(
     post: str,
 ) -> dict[str, object]:
     details = dict(event["details"])
+    details.pop("decision", None)
+    details.pop("current_mode", None)
+    details.pop("evidence_kind", None)
+    details["target"] = {"fields": ["priority"], "sections": []}
+    details["evidence_summary"] = "Current turn justifies this ticket change."
     details["expected_pre_write_fingerprint"] = pre
     details["expected_post_write_fingerprint"] = post
+    details["change_history_entry"] = {
+        "timestamp": event["timestamp"],
+        "actor": "codex",
+        "reason": "Updated ticket from candidate evidence.",
+        "corrects": None,
+    }
     return {**event, "details": details}
 
 
@@ -127,7 +263,10 @@ def test_gateway_rejects_non_autonomous_or_mismatched_decisions(
     _declare_ignored_workspace(project_root)
     ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
     mutation = _mutation(tmp_tickets, ticket_path)
-    decision = _decision_for(ticket_id="T-20260527-01", target_fp=mutation.target_fingerprint or "")
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target_fp=mutation.expected_ticket_fingerprint or "",
+    )
     store = PendingSummaryStore(project_root)
 
     discussion = apply_autonomous_mutation(
@@ -155,8 +294,10 @@ def test_gateway_rejects_non_autonomous_or_mismatched_decisions(
             candidate=CandidateMutation(
                 ticket_id="T-20260527-99",
                 action="update",
+                target=_target(),
                 proposed_change={"priority": "low"},
-                evidence=(EvidenceLink("current_thread_reason", "test"),),
+                expected_ticket_fingerprint=mutation.expected_ticket_fingerprint,
+                evidence_summary="Current turn justifies this ticket change.",
             ),
         ),
         pending_summary=store,
@@ -172,8 +313,10 @@ def test_gateway_rejects_non_autonomous_or_mismatched_decisions(
             candidate=CandidateMutation(
                 ticket_id="T-20260527-01",
                 action="update",
+                target=_target(),
                 proposed_change={"priority": "normal"},
-                evidence=(EvidenceLink("current_thread_reason", "test"),),
+                expected_ticket_fingerprint=mutation.expected_ticket_fingerprint,
+                evidence_summary="Current turn justifies this ticket change.",
             ),
         ),
         pending_summary=store,
@@ -183,7 +326,7 @@ def test_gateway_rejects_non_autonomous_or_mismatched_decisions(
         thread_id="thread-1",
         turn_id="turn-1",
         repo_context=_repo_context(project_root),
-        mutation=replace(mutation, target_fingerprint="different-ticket-state"),
+        mutation=replace(mutation, expected_ticket_fingerprint="different-ticket-state"),
         decision=decision,
         pending_summary=store,
     )
@@ -204,7 +347,7 @@ def test_gateway_rejects_non_autonomous_or_mismatched_decisions(
     assert mismatched_fields.error_code == "gateway_required"
     assert "mutation_fingerprint_mismatch" in mismatched_fields.message
     assert mismatched_target_fingerprint.error_code == "gateway_required"
-    assert "mutation_id_mismatch" in mismatched_target_fingerprint.message
+    assert "expected_ticket_fingerprint_mismatch" in mismatched_target_fingerprint.message
     assert forged_mutation_id.error_code == "gateway_required"
     assert "mutation_id_mismatch" in forged_mutation_id.message
     assert "priority: high" in ticket_path.read_text(encoding="utf-8")
@@ -216,17 +359,23 @@ def test_gateway_autonomous_create_writes_ticket_without_target_fingerprint(
 ) -> None:
     project_root = tmp_tickets.parent.parent
     _declare_ignored_workspace(project_root)
-    fields = {
+    target = CandidateTarget(
+        fields=("title", "priority", "related_paths"),
+        sections=("Problem",),
+    )
+    proposed_change = {
         "title": "Add retry to publisher",
-        "problem": "Publisher drops messages on transient broker errors.",
         "priority": "high",
         "related_paths": ["publisher.py"],
+        "Problem": "Publisher drops messages on transient broker errors.",
     }
     candidate = CandidateMutation(
         ticket_id=None,
         action="create",
-        proposed_change=fields,
-        evidence=(EvidenceLink("current_thread_reason", "discussed this turn"),),
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=None,
+        evidence_summary="The user asked to track the publisher retry follow-up.",
     )
     decision = evaluate_autonomy_intent(
         AutonomyIntent(
@@ -241,7 +390,15 @@ def test_gateway_autonomous_create_writes_ticket_without_target_fingerprint(
     )[0]
     assert decision.kind == RuntimeDecisionKind.APPLY_AUTONOMOUSLY
     assert decision.mutation_id is not None
-    mutation = GatewayMutation("create", None, fields, tmp_tickets, None)
+    mutation = GatewayMutation(
+        action="create",
+        ticket_id=None,
+        target=target,
+        proposed_change=proposed_change,
+        tickets_dir=tmp_tickets,
+        expected_ticket_fingerprint=None,
+        evidence_summary="The user asked to track the publisher retry follow-up.",
+    )
 
     response = apply_autonomous_mutation(
         project_root=project_root,
@@ -278,7 +435,10 @@ def test_gateway_applies_update_records_events_and_writes_change_history(tmp_tic
     _declare_ignored_workspace(project_root)
     ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
     mutation = _mutation(tmp_tickets, ticket_path)
-    decision = _decision_for(ticket_id="T-20260527-01", target_fp=mutation.target_fingerprint or "")
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target_fp=mutation.expected_ticket_fingerprint or "",
+    )
 
     response = apply_autonomous_mutation(
         project_root=project_root,
@@ -321,6 +481,806 @@ def test_gateway_applies_update_records_events_and_writes_change_history(tmp_tic
     assert reused.error_code == "gateway_required"
 
 
+def test_gateway_applies_exact_target_section_update(tmp_tickets: Path) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
+    target = CandidateTarget(fields=("priority",), sections=("Next Action",))
+    proposed_change = {
+        "priority": "low",
+        "Next Action": "Finish the target candidate migration.",
+    }
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        target=target,
+        proposed_change=proposed_change,
+    )
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint or "",
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    text = ticket_path.read_text(encoding="utf-8")
+    assert response.state == "ok"
+    assert "priority: low" in text
+    assert "## Next Action\nFinish the target candidate migration." in text
+    assert "| codex | Updated ticket from candidate evidence." in text
+
+
+def test_gateway_removes_exact_optional_target_section(tmp_tickets: Path) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
+    assert "## Verification" in ticket_path.read_text(encoding="utf-8")
+    target = CandidateTarget(fields=(), sections=("Verification",))
+    proposed_change = {"Verification": None}
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        target=target,
+        proposed_change=proposed_change,
+    )
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint or "",
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    text = ticket_path.read_text(encoding="utf-8")
+    assert response.state == "ok"
+    assert "## Verification" not in text
+    assert "## Approach" in text
+    assert "## Key Files" in text
+    assert "| codex | Updated ticket from candidate evidence." in text
+
+
+def test_gateway_updates_blocked_ticket_to_open_with_target_section_cleanup(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    blocker = make_ticket(tmp_tickets, "blocker.md", id="T-20260527-02", status="open")
+    assert blocker.exists()
+    ticket_path = make_ticket(
+        tmp_tickets,
+        "one.md",
+        id="T-20260527-01",
+        status="blocked",
+        blocked_by=["T-20260527-02"],
+        blocked_on="Waiting for T-20260527-02.",
+    )
+    target = CandidateTarget(
+        fields=("status", "blocked_by"),
+        sections=("Blocked On", "Next Action"),
+    )
+    proposed_change = {
+        "status": "open",
+        "blocked_by": [],
+        "Blocked On": None,
+        "Next Action": "Continue the candidate-contract migration.",
+    }
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        target=target,
+        proposed_change=proposed_change,
+    )
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint or "",
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    text = ticket_path.read_text(encoding="utf-8")
+    assert response.state == "ok"
+    assert "status: open" in text
+    assert "blocked_by: []" in text
+    assert "## Blocked On" not in text
+    assert "## Next Action\nContinue the candidate-contract migration." in text
+    assert "| codex | Updated ticket from candidate evidence." in text
+
+
+def test_gateway_rejects_blocked_to_open_without_next_action(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    blocker = make_ticket(tmp_tickets, "blocker.md", id="T-20260527-02", status="open")
+    assert blocker.exists()
+    ticket_path = make_ticket(
+        tmp_tickets,
+        "one.md",
+        id="T-20260527-01",
+        status="blocked",
+        blocked_by=["T-20260527-02"],
+        blocked_on="Waiting for T-20260527-02.",
+    )
+    before_text = ticket_path.read_text(encoding="utf-8")
+    target = CandidateTarget(fields=("status", "blocked_by"), sections=("Blocked On",))
+    proposed_change = {
+        "status": "open",
+        "blocked_by": [],
+        "Blocked On": None,
+    }
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        target=target,
+        proposed_change=proposed_change,
+    )
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint or "",
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    text = ticket_path.read_text(encoding="utf-8")
+    assert response.state == "blocked"
+    assert response.error_code == "gateway_required"
+    assert "blocked_to_open_target_not_allowlisted" in response.message
+    assert text == before_text
+
+
+def test_gateway_rejects_status_only_close_for_blocked_ticket(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    blocker = make_ticket(tmp_tickets, "blocker.md", id="T-20260527-02", status="open")
+    assert blocker.exists()
+    ticket_path = make_ticket(
+        tmp_tickets,
+        "one.md",
+        id="T-20260527-01",
+        status="blocked",
+        blocked_by=["T-20260527-02"],
+        blocked_on="Waiting for T-20260527-02.",
+    )
+    before_text = ticket_path.read_text(encoding="utf-8")
+    target = CandidateTarget(fields=("status",), sections=())
+    proposed_change = {"status": "done"}
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        action="done",
+        target=target,
+        proposed_change=proposed_change,
+    )
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        action="done",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint or "",
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    text = ticket_path.read_text(encoding="utf-8")
+    assert response.state == "blocked"
+    assert "close_target_not_allowlisted" in response.message
+    assert text == before_text
+
+
+def test_gateway_reopens_terminal_ticket_to_blocked_with_visible_blocker_shape(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    blocker = make_ticket(tmp_tickets, "blocker.md", id="T-20260527-02", status="open")
+    assert blocker.exists()
+    ticket_path = make_ticket(tmp_tickets, "done.md", id="T-20260527-01", status="done")
+    target = CandidateTarget(fields=("status", "blocked_by"), sections=("Blocked On",))
+    proposed_change = {
+        "status": "blocked",
+        "blocked_by": ["T-20260527-02"],
+        "Blocked On": "Waiting for T-20260527-02.",
+    }
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        action="reopen",
+        target=target,
+        proposed_change=proposed_change,
+    )
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        action="reopen",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint or "",
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    text = ticket_path.read_text(encoding="utf-8")
+    assert response.state == "ok"
+    assert "status: blocked" in text
+    assert "blocked_by: [T-20260527-02]" in text
+    assert "## Blocked On\nWaiting for T-20260527-02." in text
+    assert "## Reopen History" not in text
+    assert "| codex | Reopened ticket from candidate evidence." in text
+
+
+def test_gateway_reopens_terminal_ticket_to_open_without_reopen_reason(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "done.md", id="T-20260527-01", status="done")
+    target = CandidateTarget(fields=("status",), sections=())
+    proposed_change = {"status": "open"}
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        action="reopen",
+        target=target,
+        proposed_change=proposed_change,
+    )
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        action="reopen",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint or "",
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    text = ticket_path.read_text(encoding="utf-8")
+    assert response.state == "ok"
+    assert "status: open" in text
+    assert "## Reopen History" not in text
+    assert "reopen_reason" not in text
+
+
+def test_gateway_rejects_reopen_to_open_with_blocker_target_content(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "done.md", id="T-20260527-01", status="done")
+    target = CandidateTarget(fields=("status", "blocked_by"), sections=("Blocked On",))
+    proposed_change = {
+        "status": "open",
+        "blocked_by": [],
+        "Blocked On": None,
+    }
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        action="reopen",
+        target=target,
+        proposed_change=proposed_change,
+    )
+    dispatch = build_engine_dispatch(mutation)
+
+    text = ticket_path.read_text(encoding="utf-8")
+    assert dispatch.state == "policy_blocked"
+    assert dispatch.reason == "reopen_target_not_allowlisted"
+    assert "status: done" in text
+    assert "## Blocked On" not in text
+
+
+def test_gateway_create_accepts_every_source_supported_target_section(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    target = CandidateTarget(
+        fields=("title", "status", "priority", "blocked_by"),
+        sections=(
+            "Problem",
+            "Next Action",
+            "Blocked On",
+            "Captured Request",
+            "Context",
+            "Prior Investigation",
+            "Approach",
+            "Decisions Made",
+            "Acceptance Criteria",
+            "Verification",
+            "Key Files",
+            "Related",
+        ),
+    )
+    proposed_change = {
+        "title": "Add retry to publisher",
+        "status": "blocked",
+        "priority": "high",
+        "blocked_by": ["T-20260605-02"],
+        "Problem": "Publisher drops transient broker messages.",
+        "Next Action": "Add retry around broker publish.",
+        "Blocked On": "Waiting for T-20260605-02 to expose broker retry policy.",
+        "Captured Request": "Track the publisher retry follow-up.",
+        "Context": "Broker publishes sometimes fail transiently.",
+        "Prior Investigation": "Logs show retryable broker timeouts.",
+        "Approach": "Wrap publish in bounded retry.",
+        "Decisions Made": "Use bounded retry instead of unbounded replay.",
+        "Acceptance Criteria": [
+            "Publisher retries transient broker failures.",
+            "Permanent broker failures still surface clearly.",
+        ],
+        "Verification": "uv run pytest plugins/turbo-mode/ticket/tests/test_publish.py -q",
+        "Key Files": [
+            {
+                "file": "plugins/turbo-mode/ticket/scripts/publisher.py",
+                "role": "Publisher",
+                "look_for": "retry around broker publish",
+            }
+        ],
+        "Related": "T-20260605-02",
+    }
+    mutation = GatewayMutation(
+        action="create",
+        ticket_id=None,
+        target=target,
+        proposed_change=proposed_change,
+        tickets_dir=tmp_tickets,
+        expected_ticket_fingerprint=None,
+        evidence_summary="The user asked to track the publisher retry follow-up.",
+    )
+    decision = _decision_for(
+        ticket_id=None,
+        action="create",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=None,
+        evidence_summary="The user asked to track the publisher retry follow-up.",
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    assert response.state == "ok"
+    ticket_path = Path(str(response.data["ticket_path"]))
+    text = ticket_path.read_text(encoding="utf-8")
+    assert "status: blocked" in text
+    assert "blocked_by: [T-20260605-02]" in text
+    assert "## Blocked On\nWaiting for T-20260605-02 to expose broker retry policy." in text
+    assert "## Captured Request\nTrack the publisher retry follow-up." in text
+    assert "## Context\nBroker publishes sometimes fail transiently." in text
+    assert "## Prior Investigation\nLogs show retryable broker timeouts." in text
+    assert "## Approach\nWrap publish in bounded retry." in text
+    assert "## Decisions Made\nUse bounded retry instead of unbounded replay." in text
+    assert "## Acceptance Criteria\n- [ ] Publisher retries transient broker failures." in text
+    assert "## Verification\n```bash\nuv run pytest" in text
+    assert (
+        "| plugins/turbo-mode/ticket/scripts/publisher.py | Publisher | "
+        "retry around broker publish |"
+    ) in text
+    assert "## Related\nT-20260605-02" in text
+
+
+def test_create_gateway_lock_is_shared_across_create_candidates(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    first = _create_mutation(tmp_tickets)
+    second = replace(
+        first,
+        proposed_change={
+            **_create_change(),
+            "title": "Add retry metrics to publisher",
+            "Problem": "Publisher retry metrics are missing.",
+        },
+        evidence_summary="The user asked to track publisher retry metrics.",
+    )
+
+    assert gateway._gateway_lock_path(project_root, first) == gateway._gateway_lock_path(
+        project_root,
+        second,
+    )
+
+
+def test_create_attempt_records_allocated_ticket_binding_before_dispatch(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    mutation = _create_mutation(tmp_tickets)
+    decision = _create_decision()
+
+    def fail_dispatch(**_kwargs: object) -> EngineResponse:
+        return EngineResponse(
+            state="escalate",
+            message="simulated dispatch failure",
+            error_code="simulated_failure",
+        )
+
+    monkeypatch.setattr(gateway, "_execute_dispatch", fail_dispatch)
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    events = _events(project_root)
+    details = events[0]["details"]
+    allocation = details["create_allocation"]
+    assert response.error_code == "simulated_failure"
+    assert events[0]["event_type"] == "mutation_attempt"
+    assert "expected_post_write_fingerprint" in details
+    assert details["change_history_entry"]["actor"] == "codex"
+    assert "decision" not in details
+    assert "current_mode" not in details
+    assert "evidence_kind" not in details
+    assert events[0]["timestamp"] == details["change_history_entry"]["timestamp"]
+    assert allocation["allocated_ticket_id"].startswith("T-")
+    assert allocation["allocated_ticket_path"].startswith("docs/tickets/T-")
+    assert allocation["expected_pre_write_fact"] == "allocated_target_path_unused"
+    assert not (project_root / str(allocation["allocated_ticket_path"])).exists()
+
+
+def test_update_attempt_records_expected_post_write_facts_before_dispatch(
+    tmp_tickets: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
+    target = CandidateTarget(fields=("priority",), sections=("Next Action",))
+    proposed_change = {
+        "priority": "low",
+        "Next Action": "Finish the target candidate migration.",
+    }
+    mutation = _mutation(
+        tmp_tickets,
+        ticket_path,
+        target=target,
+        proposed_change=proposed_change,
+    )
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=mutation.expected_ticket_fingerprint or "",
+    )
+
+    def fail_dispatch(**_kwargs: object) -> EngineResponse:
+        return EngineResponse(
+            state="escalate",
+            message="simulated dispatch failure",
+            error_code="simulated_failure",
+        )
+
+    monkeypatch.setattr(gateway, "_execute_dispatch", fail_dispatch)
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=PendingSummaryStore(project_root),
+    )
+
+    details = _events(project_root)[0]["details"]
+    history = details["change_history_entry"]
+    assert response.error_code == "simulated_failure"
+    assert details["expected_pre_write_fingerprint"] == mutation.expected_ticket_fingerprint
+    assert isinstance(details["expected_post_write_fingerprint"], str)
+    assert details["expected_post_write_fingerprint"]
+    assert history == {
+        "timestamp": _events(project_root)[0]["timestamp"],
+        "actor": "codex",
+        "reason": "Updated ticket from candidate evidence.",
+        "corrects": None,
+    }
+    assert "decision" not in details
+    assert "current_mode" not in details
+    assert "evidence_kind" not in details
+
+
+def test_create_retry_reuses_retained_allocation_when_file_not_written(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    mutation = _create_mutation(tmp_tickets)
+    decision = _create_decision()
+    allocated_ticket_id = "T-20260605-01"
+    allocated_ticket_path = "docs/tickets/T-20260605-01.md"
+    dispatch = build_engine_dispatch(mutation)
+    preview = preview_target_write(
+        action=dispatch.action.value,
+        ticket_id=mutation.ticket_id,
+        fields=dict(dispatch.fields),
+        target_sections=dispatch.sections or {},
+        session_id="thread-1",
+        request_origin="agent",
+        tickets_dir=tmp_tickets,
+        change_history_entry=_change_history_entry(),
+        reserved_ticket_id=allocated_ticket_id,
+    )
+    assert isinstance(preview, TargetWritePreview)
+    expected_post = preview.post_write_fingerprint
+    store = PendingSummaryStore(project_root)
+    assert (
+        store.append_event(
+            _retained_create_attempt_event(
+                mutation_id=decision.mutation_id,
+                allocation_id=allocated_ticket_id,
+                allocation_path=allocated_ticket_path,
+                expected_post_write_fingerprint=expected_post,
+            )
+        ).state
+        == "appended"
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=store,
+    )
+
+    assert response.state == "ok"
+    assert response.ticket_id == allocated_ticket_id
+    assert (project_root / allocated_ticket_path).is_file()
+    assert sorted(path.name for path in tmp_tickets.glob("*.md")) == [
+        "T-20260605-01.md"
+    ]
+
+
+def test_create_retry_blocks_allocation_path_that_does_not_match_allocated_id(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    mutation = _create_mutation(tmp_tickets)
+    decision = _create_decision()
+    store = PendingSummaryStore(project_root)
+    assert (
+        store.append_event(
+            _retained_create_attempt_event(
+                mutation_id=decision.mutation_id,
+                allocation_id="T-20260605-01",
+                allocation_path="docs/tickets/T-20260605-99.md",
+                expected_post_write_fingerprint="unused-post-fingerprint",
+            )
+        ).state
+        == "appended"
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=store,
+    )
+
+    assert response.error_code == "gateway_required"
+    assert response.data["recovery_state"] == "create_allocation_missing"
+
+
+def test_create_retry_appends_missing_written_event_for_retained_allocation(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    mutation = _create_mutation(tmp_tickets)
+    decision = _create_decision()
+    allocated_ticket_id = "T-20260605-01"
+    allocated_ticket_path = tmp_tickets / "T-20260605-01.md"
+    dispatch = build_engine_dispatch(mutation)
+    preview = preview_target_write(
+        action=dispatch.action.value,
+        ticket_id=mutation.ticket_id,
+        fields=dict(dispatch.fields),
+        target_sections=dispatch.sections or {},
+        session_id="thread-1",
+        request_origin="agent",
+        tickets_dir=tmp_tickets,
+        change_history_entry=_change_history_entry(),
+        reserved_ticket_id=allocated_ticket_id,
+    )
+    assert isinstance(preview, TargetWritePreview)
+    allocated_ticket_path.write_text(preview.rendered_text, encoding="utf-8")
+    before = allocated_ticket_path.read_text(encoding="utf-8")
+    expected_post = preview.post_write_fingerprint
+    assert target_recovery_fingerprint(allocated_ticket_path) == expected_post
+    assert target_recovery_fingerprint_for_text(before) == expected_post
+    assert "Add retry around broker publish." in before
+    assert "Created ticket from candidate evidence." in before
+    store = PendingSummaryStore(project_root)
+    assert (
+        store.append_event(
+            _retained_create_attempt_event(
+                mutation_id=decision.mutation_id,
+                expected_post_write_fingerprint=expected_post,
+            )
+        ).state
+        == "appended"
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=store,
+    )
+
+    assert response.error_code == "gateway_required"
+    assert response.data["recovery_state"] == "append_missing_ticket_written"
+    assert allocated_ticket_path.read_text(encoding="utf-8") == before
+    assert [event["status"] for event in _events(project_root)] == [
+        "pending",
+        "ticket_written",
+        "applied",
+    ]
+
+
+def test_create_retry_blocks_legacy_attempt_without_expected_write_facts(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    mutation = _create_mutation(tmp_tickets)
+    decision = _create_decision()
+    store = PendingSummaryStore(project_root)
+    assert (
+        store.append_event(
+            valid_attempt_event(
+                event_id="evt_legacy_create_attempt",
+                action="create",
+                ticket_id=None,
+                mutation_id=decision.mutation_id,
+            )
+        ).state
+        == "appended"
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=store,
+    )
+
+    assert response.error_code == "gateway_required"
+    assert response.data["recovery_state"] == "create_allocation_missing"
+    assert list(tmp_tickets.glob("*.md")) == []
+
+
+def test_create_retry_blocks_existing_allocation_with_wrong_post_fingerprint(
+    tmp_tickets: Path,
+) -> None:
+    project_root = tmp_tickets.parent.parent
+    _declare_ignored_workspace(project_root)
+    mutation = _create_mutation(tmp_tickets)
+    decision = _create_decision()
+    allocated_ticket_id = "T-20260605-01"
+    make_ticket(
+        tmp_tickets,
+        "T-20260605-01.md",
+        id=allocated_ticket_id,
+        priority="low",
+        title="Different retained file",
+        problem="This is not the expected create candidate.",
+    )
+    store = PendingSummaryStore(project_root)
+    assert (
+        store.append_event(
+            _retained_create_attempt_event(
+                mutation_id=decision.mutation_id,
+                allocation_id=allocated_ticket_id,
+                expected_post_write_fingerprint="not-the-current-post-fingerprint",
+            )
+        ).state
+        == "appended"
+    )
+
+    response = apply_autonomous_mutation(
+        project_root=project_root,
+        thread_id="thread-1",
+        turn_id="turn-1",
+        repo_context=_repo_context(project_root),
+        mutation=mutation,
+        decision=decision,
+        pending_summary=store,
+    )
+
+    assert response.state in {"blocked", "invalid_state"}
+    assert response.data["recovery_state"] == "create_post_write_mismatch"
+
+
 def test_gateway_replay_after_summary_recorded_does_not_rewrite_ticket(
     tmp_tickets: Path,
 ) -> None:
@@ -328,7 +1288,10 @@ def test_gateway_replay_after_summary_recorded_does_not_rewrite_ticket(
     _declare_ignored_workspace(project_root)
     ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
     mutation = _mutation(tmp_tickets, ticket_path)
-    decision = _decision_for(ticket_id="T-20260527-01", target_fp=mutation.target_fingerprint or "")
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target_fp=mutation.expected_ticket_fingerprint or "",
+    )
     store = PendingSummaryStore(project_root)
 
     first = apply_autonomous_mutation(
@@ -388,7 +1351,7 @@ def test_gateway_retry_uses_original_attempt_timestamp_for_change_history_dedupe
         encoding="utf-8",
     )
     mutation = _mutation(tmp_tickets, ticket_path)
-    pre = mutation.target_fingerprint or ""
+    pre = mutation.expected_ticket_fingerprint or ""
     decision = _decision_for(ticket_id="T-20260527-01", target_fp=pre, turn_id="turn-retry")
     store = PendingSummaryStore(project_root)
     assert (
@@ -425,7 +1388,10 @@ def test_gateway_write_lock_clears_dead_pid_lock_and_proceeds(tmp_tickets: Path)
     _declare_ignored_workspace(project_root)
     ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
     mutation = _mutation(tmp_tickets, ticket_path)
-    decision = _decision_for(ticket_id="T-20260527-01", target_fp=mutation.target_fingerprint or "")
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target_fp=mutation.expected_ticket_fingerprint or "",
+    )
     lock_path = gateway._gateway_lock_path(project_root, mutation)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text("999999999\n", encoding="utf-8")
@@ -507,9 +1473,9 @@ def test_concurrent_same_ticket_gateway_calls_serialize_and_second_sees_stale_fi
         with active_lock:
             active_dispatches += 1
             max_active_dispatches = max(max_active_dispatches, active_dispatches)
-            dispatch_priorities.append(dict(mutation.fields).get("priority"))
+            dispatch_priorities.append(dict(mutation.proposed_change).get("priority"))
         try:
-            if dict(mutation.fields).get("priority") != "low":
+            if dict(mutation.proposed_change).get("priority") != "low":
                 raise AssertionError("second gateway call entered dispatch")
             first_entered.set()
             if not release_first.wait(timeout=5):
@@ -584,16 +1550,19 @@ def test_gateway_autonomous_create_stops_at_duplicate_candidate(tmp_tickets: Pat
         title="Fix auth bug",
         problem="Auth times out.",
     )
-    fields = {
+    target = CandidateTarget(fields=("title", "priority"), sections=("Problem",))
+    proposed_change = {
         "title": "Fix auth bug",
-        "problem": "Auth times out.",
         "priority": "high",
+        "Problem": "Auth times out.",
     }
     candidate = CandidateMutation(
         ticket_id=None,
         action="create",
-        proposed_change=fields,
-        evidence=(EvidenceLink("current_thread_reason", "same issue"),),
+        target=target,
+        proposed_change=proposed_change,
+        expected_ticket_fingerprint=None,
+        evidence_summary="The user asked to track the duplicate auth fix.",
     )
     decision = evaluate_autonomy_intent(
         AutonomyIntent(
@@ -606,7 +1575,15 @@ def test_gateway_autonomous_create_stops_at_duplicate_candidate(tmp_tickets: Pat
         turn_id="turn-1",
         now=datetime.now(UTC),
     )[0]
-    mutation = GatewayMutation("create", None, fields, tmp_tickets, None)
+    mutation = GatewayMutation(
+        action="create",
+        ticket_id=None,
+        target=target,
+        proposed_change=proposed_change,
+        tickets_dir=tmp_tickets,
+        expected_ticket_fingerprint=None,
+        evidence_summary="The user asked to track the duplicate auth fix.",
+    )
 
     response = apply_autonomous_mutation(
         project_root=project_root,
@@ -637,9 +1614,11 @@ def test_gateway_returns_invalid_state_for_non_normalized_active_ticket(
     mutation = GatewayMutation(
         action="update",
         ticket_id="legacy-ticket",
-        fields={"priority": "low"},
+        target=_target(),
+        proposed_change={"priority": "low"},
         tickets_dir=tmp_tickets,
-        target_fingerprint=target_fp,
+        expected_ticket_fingerprint=target_fp,
+        evidence_summary="Current turn justifies this ticket change.",
     )
     decision = _decision_for(ticket_id="legacy-ticket", target_fp=target_fp)
 
@@ -666,14 +1645,14 @@ def test_gateway_recovers_missing_write_events_without_rewriting_ticket(
     _declare_ignored_workspace(project_root)
     ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
     mutation = _mutation(tmp_tickets, ticket_path)
-    pre = mutation.target_fingerprint or ""
+    pre = mutation.expected_ticket_fingerprint or ""
     decision = _decision_for(ticket_id="T-20260527-01", target_fp=pre)
 
     ticket_path.write_text(
         ticket_path.read_text(encoding="utf-8").replace("priority: high", "priority: low"),
         encoding="utf-8",
     )
-    post = target_fingerprint(ticket_path) or ""
+    post = target_recovery_fingerprint(ticket_path) or ""
     before = ticket_path.read_text(encoding="utf-8")
     store = PendingSummaryStore(project_root)
     assert (
@@ -716,7 +1695,10 @@ def test_pending_summary_failure_and_pause_prevent_ticket_mutation(tmp_tickets: 
     ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
     before = ticket_path.read_text(encoding="utf-8")
     mutation = _mutation(tmp_tickets, ticket_path)
-    decision = _decision_for(ticket_id="T-20260527-01", target_fp=mutation.target_fingerprint or "")
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target_fp=mutation.expected_ticket_fingerprint or "",
+    )
 
     lock_path = project_root / ".codex" / "ticket-workspace" / "ticket.pending-summary.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -761,7 +1743,10 @@ def test_gateway_rechecks_pause_after_attempt_record_before_dispatch(
     ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
     before = ticket_path.read_text(encoding="utf-8")
     mutation = _mutation(tmp_tickets, ticket_path)
-    decision = _decision_for(ticket_id="T-20260527-01", target_fp=mutation.target_fingerprint or "")
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target_fp=mutation.expected_ticket_fingerprint or "",
+    )
     checks = iter([False, True])
 
     monkeypatch.setattr(gateway, "_workspace_is_paused", lambda _project_root: next(checks))
@@ -791,7 +1776,10 @@ def test_gateway_treats_success_without_ticket_path_as_failed_mutation(
     ticket_path = make_ticket(tmp_tickets, "one.md", id="T-20260527-01")
     before = ticket_path.read_text(encoding="utf-8")
     mutation = _mutation(tmp_tickets, ticket_path)
-    decision = _decision_for(ticket_id="T-20260527-01", target_fp=mutation.target_fingerprint or "")
+    decision = _decision_for(
+        ticket_id="T-20260527-01",
+        target_fp=mutation.expected_ticket_fingerprint or "",
+    )
 
     monkeypatch.setattr(
         gateway,
@@ -822,19 +1810,59 @@ def test_gateway_dispatch_maps_ticket_actions_and_rejects_archive_smuggling(
     tmp_tickets: Path,
 ) -> None:
     done = build_engine_dispatch(
-        GatewayMutation("done", "T-1", {}, tmp_tickets, "fp"),
+        GatewayMutation(
+            action="done",
+            ticket_id="T-1",
+            target=CandidateTarget(fields=("status",), sections=()),
+            proposed_change={"status": "done"},
+            tickets_dir=tmp_tickets,
+            expected_ticket_fingerprint="fp",
+            evidence_summary="Current turn justifies closing the ticket.",
+        ),
     )
     wontfix = build_engine_dispatch(
-        GatewayMutation("wontfix", "T-1", {}, tmp_tickets, "fp"),
+        GatewayMutation(
+            action="wontfix",
+            ticket_id="T-1",
+            target=CandidateTarget(fields=("status",), sections=()),
+            proposed_change={"status": "wontfix"},
+            tickets_dir=tmp_tickets,
+            expected_ticket_fingerprint="fp",
+            evidence_summary="Current turn justifies closing the ticket.",
+        ),
     )
     update = build_engine_dispatch(
-        GatewayMutation("blocker_edit", "T-1", {"blocks": []}, tmp_tickets, "fp"),
+        GatewayMutation(
+            action="update",
+            ticket_id="T-1",
+            target=_target(),
+            proposed_change={"priority": "low"},
+            tickets_dir=tmp_tickets,
+            expected_ticket_fingerprint="fp",
+            evidence_summary="Current turn justifies updating the ticket.",
+        ),
     )
     reopen = build_engine_dispatch(
-        GatewayMutation("reopen", "T-1", {"reopen_reason": "Regression."}, tmp_tickets, "fp"),
+        GatewayMutation(
+            action="reopen",
+            ticket_id="T-1",
+            target=CandidateTarget(fields=("status",), sections=()),
+            proposed_change={"status": "open"},
+            tickets_dir=tmp_tickets,
+            expected_ticket_fingerprint="fp",
+            evidence_summary="Current turn justifies reopening the ticket.",
+        ),
     )
     archive = build_engine_dispatch(
-        GatewayMutation("done", "T-1", {"archive": True}, tmp_tickets, "fp"),
+        GatewayMutation(
+            action="done",
+            ticket_id="T-1",
+            target=CandidateTarget(fields=("status",), sections=()),
+            proposed_change={"status": "done", "archive": True},
+            tickets_dir=tmp_tickets,
+            expected_ticket_fingerprint="fp",
+            evidence_summary="Current turn justifies closing the ticket.",
+        ),
     )
 
     assert done.action.value == "close"
@@ -842,6 +1870,7 @@ def test_gateway_dispatch_maps_ticket_actions_and_rejects_archive_smuggling(
     assert wontfix.action.value == "close"
     assert wontfix.fields == {"resolution": "wontfix"}
     assert update.action.value == "update"
+    assert update.fields == {"priority": "low"}
     assert reopen.action.value == "reopen"
     assert archive.state == "policy_blocked"
 

@@ -56,6 +56,36 @@ def valid_attempt_event(**overrides: object) -> dict[str, object]:
     return data
 
 
+def valid_create_attempt_event(**overrides: object) -> dict[str, object]:
+    timestamp = overrides.pop("timestamp", "2026-06-05T12:00:00Z")
+    details: dict[str, object] = {
+        "target": {"fields": ["title"], "sections": ["Problem", "Next Action"]},
+        "evidence_summary": "The user asked to track the publisher retry follow-up.",
+        "expected_post_write_fingerprint": "post-fp-before-write",
+        "change_history_entry": {
+            "timestamp": timestamp,
+            "actor": "codex",
+            "reason": "Created ticket from candidate evidence.",
+            "corrects": None,
+        },
+        "create_allocation": {
+            "allocated_ticket_id": "T-20260605-01",
+            "allocated_ticket_path": "docs/tickets/T-20260605-01.md",
+            "expected_pre_write_fact": "allocated_target_path_unused",
+        },
+    }
+    details.update(overrides.pop("details", {}))
+    data = valid_attempt_event(
+        action="create",
+        ticket_id=None,
+        timestamp=timestamp,
+        details={},
+        **overrides,
+    )
+    data["details"] = details
+    return data
+
+
 def valid_status_event(status: str, **detail_overrides: object) -> dict[str, object]:
     details_by_status: dict[str, dict[str, object]] = {
         "ticket_written": {"post_write_fingerprint": "post-fp"},
@@ -107,6 +137,88 @@ def without_detail(event: dict[str, object], key: str) -> dict[str, object]:
     details = dict(event["details"])
     details.pop(key, None)
     return {**event, "details": details}
+
+
+def test_create_attempt_accepts_bounded_recovery_details_without_runtime_decision() -> None:
+    event = valid_create_attempt_event()
+
+    assert validate_pending_summary_event(event).ok is True
+    assert "decision" not in event["details"]
+    assert "current_mode" not in event["details"]
+    assert "evidence_kind" not in event["details"]
+    assert event["timestamp"] == event["details"]["change_history_entry"]["timestamp"]
+
+
+@pytest.mark.parametrize("detail_key", ["decision", "current_mode", "evidence_kind"])
+def test_create_attempt_rejects_runtime_details_when_recovery_facts_present(
+    detail_key: str,
+) -> None:
+    event = valid_create_attempt_event(details={detail_key: "apply_autonomously"})
+
+    assert_invalid(event, detail_key)
+
+
+@pytest.mark.parametrize(
+    "detail_key",
+    ["target", "expected_post_write_fingerprint", "change_history_entry", "create_allocation"],
+)
+def test_create_attempt_requires_bounded_recovery_details(detail_key: str) -> None:
+    event = valid_create_attempt_event()
+    details = dict(event["details"])
+    details.pop(detail_key)
+    event["details"] = details
+
+    assert_invalid(event, detail_key)
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        "reprioritize",
+        "stale_cleanup",
+        "blocker_edit",
+        "refine",
+        "archive",
+        "delete",
+        "history_repair",
+        "correction",
+    ],
+)
+def test_target_candidate_events_reject_legacy_action_values(action: str) -> None:
+    assert_invalid(valid_attempt_event(action=action), "action")
+    assert_invalid(valid_status_event("ticket_written", action=action), "action")
+
+
+@pytest.mark.parametrize(
+    ("event_type", "status", "action", "details"),
+    [
+        ("summary_receipt", "summarized", "summarize", {}),
+        ("compaction_receipt", "compacted", "compact", {}),
+        ("automation_pause", "paused", "pause_automation", {"pause_reason": "user_requested"}),
+    ],
+)
+def test_maintenance_event_actions_remain_valid(
+    event_type: str,
+    status: str,
+    action: str,
+    details: dict[str, object],
+) -> None:
+    event = valid_attempt_event(
+        event_type=event_type,
+        status=status,
+        action=action,
+        ticket_id=None,
+        mutation_id=None,
+        details=details,
+    )
+
+    assert validate_pending_summary_event(event).ok is True
+
+
+def test_legacy_create_attempt_remains_readable_for_blocking_recovery() -> None:
+    event = valid_attempt_event(action="create", ticket_id=None)
+
+    assert validate_pending_summary_event(event).ok is True
 
 
 def test_pending_summary_envelope_requires_strict_fields() -> None:
@@ -203,6 +315,24 @@ def test_valid_event_status_matrix(event_type: str, status: str) -> None:
             status=status,
             action="pause_automation",
             details={"pause_reason": "user_requested"},
+        )
+    elif event_type == "summary_receipt":
+        event = valid_attempt_event(
+            event_type=event_type,
+            status=status,
+            action="summarize",
+            ticket_id=None,
+            mutation_id=None,
+            details={},
+        )
+    elif event_type == "compaction_receipt":
+        event = valid_attempt_event(
+            event_type=event_type,
+            status=status,
+            action="compact",
+            ticket_id=None,
+            mutation_id=None,
+            details={},
         )
     else:
         event = valid_status_event(status)
@@ -435,7 +565,32 @@ def _correction_ready_event(index: int, timestamp: str) -> dict[str, object]:
         error_code="policy_blocked",
         correction_ready=True,
         correction_detail=f"full correction detail {index}",
+        correction_detail_retained=True,
+        target={"fields": ["priority"], "sections": []},
+        proposed_change={"priority": "high"},
+        expected_ticket_fingerprint=f"target-fingerprint-{index}",
     )
+
+
+@pytest.mark.parametrize(
+    "detail_key",
+    [
+        "correction_detail",
+        "correction_detail_retained",
+        "target",
+        "proposed_change",
+        "expected_ticket_fingerprint",
+    ],
+)
+def test_correction_ready_failed_status_requires_retained_context_details(
+    detail_key: str,
+) -> None:
+    event = _correction_ready_event(0, "2026-05-27T12:00:00Z")
+    details = dict(event["details"])
+    details.pop(detail_key)
+    event["details"] = details
+
+    assert_invalid(event, detail_key)
 
 
 def test_compaction_keeps_recent_correction_detail_under_age_and_count_limits(
@@ -473,7 +628,9 @@ def test_compaction_keeps_recent_correction_detail_under_age_and_count_limits(
     assert len(detailed) == 500
     assert len(compacted) == 6
     assert "correction_detail" not in old["details"]
+    assert "correction_detail_retained" not in old["details"]
     assert newest["details"]["correction_detail"] == "full correction detail 505"
+    assert newest["details"]["correction_detail_retained"] is True
 
 
 def test_compaction_validates_temp_jsonl_before_replacing_active_log(

@@ -8,8 +8,9 @@ import hashlib
 import json
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -33,14 +34,21 @@ from scripts.ticket_autonomy_runtime import (  # noqa: E402
     RuntimeDecisionKind,
     evaluate_autonomy_intent,
 )
-from scripts.ticket_candidate_discovery import discover_candidate_mutations  # noqa: E402
+from scripts.ticket_candidate_discovery import (  # noqa: E402
+    InvalidCandidateMutations,
+    discover_candidate_mutations,
+)
 from scripts.ticket_change_history import plan_change_history_migration  # noqa: E402
-from scripts.ticket_dedup import target_fingerprint as compute_target_fingerprint  # noqa: E402
+from scripts.ticket_dedup import (  # noqa: E402
+    target_fingerprint as compute_target_fingerprint,
+)
+from scripts.ticket_dedup import target_recovery_fingerprint  # noqa: E402
 from scripts.ticket_engine_gateway import GatewayMutation, apply_autonomous_mutation  # noqa: E402
 from scripts.ticket_parse import parse_ticket  # noqa: E402
 from scripts.ticket_read import InvalidTicketState, find_ticket_by_id  # noqa: E402
 from scripts.ticket_turn_batch import (  # noqa: E402
     PENDING_SUMMARY_SCHEMA,
+    CurrentRecoveryFingerprints,
     PendingSummaryStore,
     RecoveryProjection,
     VerifiedRepoContext,
@@ -230,6 +238,18 @@ def _paused_response(reason: str) -> dict[str, Any]:
     }
 
 
+def _invalid_candidate_response(error: InvalidCandidateMutations) -> dict[str, object]:
+    return {
+        "state": "invalid_candidate",
+        "changed": False,
+        "ticket_updates": None,
+        "invalid_candidates": error.as_payload(),
+        "discussion_question": (
+            "Fix the explicit Ticket candidate payload before automatic ticket mutation."
+        ),
+    }
+
+
 def _no_change_response() -> dict[str, Any]:
     return {
         "state": "no_change",
@@ -348,9 +368,70 @@ def _event_payload(
 
 
 def _now_z() -> str:
-    from datetime import UTC, datetime
-
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_z(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=UTC)
+
+
+def _recent_correction_context_from_events(
+    events: Sequence[Mapping[str, object]],
+    *,
+    now: datetime | None = None,
+    max_age_days: int = 14,
+) -> dict[str, object]:
+    current = now or datetime.now(UTC)
+    age_floor = current - timedelta(days=max(max_age_days, 0))
+    context: dict[str, object] = {}
+    for event in events:
+        ticket_id = event.get("ticket_id")
+        mutation_id = event.get("mutation_id")
+        timestamp = _parse_z(event.get("timestamp"))
+        details = event.get("details")
+        if (
+            not isinstance(ticket_id, str)
+            or not isinstance(mutation_id, str)
+            or timestamp is None
+            or timestamp < age_floor
+            or not isinstance(details, Mapping)
+        ):
+            continue
+        if details.get("correction_ready") is not True:
+            continue
+        if "correction_detail" not in details:
+            continue
+        if details.get("correction_detail_retained") is not True:
+            continue
+        target = details.get("target")
+        if not isinstance(target, Mapping):
+            continue
+        fields = target.get("fields")
+        sections = target.get("sections")
+        proposed_change = details.get("proposed_change")
+        expected_ticket_fingerprint = details.get("expected_ticket_fingerprint")
+        if not isinstance(fields, list) or not isinstance(sections, list):
+            continue
+        if not isinstance(proposed_change, Mapping):
+            continue
+        if not isinstance(expected_ticket_fingerprint, str) or not expected_ticket_fingerprint:
+            continue
+        context[ticket_id] = {
+            "correction_ready": True,
+            "correction_detail_retained": True,
+            "source_mutation_id": mutation_id,
+            "retained_at": timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "expected_ticket_fingerprint": expected_ticket_fingerprint,
+            "proposed_change": dict(proposed_change),
+            "target": {"fields": fields, "sections": sections},
+        }
+    return context
 
 
 def _append_non_write_decision(
@@ -590,20 +671,42 @@ def _summarizable_terminal_mutation_id(
     return None
 
 
-def _current_ticket_fingerprint_for_event(
+def _current_recovery_fingerprints_for_event(
     project_root: Path,
     event: Mapping[str, object],
-) -> str | None:
+) -> CurrentRecoveryFingerprints:
+    if event.get("action") == "create":
+        details = event.get("details")
+        allocation = details.get("create_allocation") if isinstance(details, Mapping) else None
+        raw_path = (
+            allocation.get("allocated_ticket_path")
+            if isinstance(allocation, Mapping)
+            else None
+        )
+        if not isinstance(raw_path, str) or not raw_path:
+            return CurrentRecoveryFingerprints(None, None)
+        path = project_root / raw_path
+        if not path.is_file():
+            return CurrentRecoveryFingerprints(None, None)
+        return CurrentRecoveryFingerprints(
+            pre_write_fingerprint=None,
+            post_write_fingerprint=target_recovery_fingerprint(path),
+        )
+
     ticket_id = event.get("ticket_id")
     if not isinstance(ticket_id, str) or not ticket_id:
-        return None
+        return CurrentRecoveryFingerprints(None, None)
     try:
         ticket = find_ticket_by_id(project_root / "docs" / "tickets", ticket_id)
     except InvalidTicketState:
-        return None
+        return CurrentRecoveryFingerprints(None, None)
     if ticket is None:
-        return None
-    return compute_target_fingerprint(Path(ticket.path))
+        return CurrentRecoveryFingerprints(None, None)
+    path = Path(ticket.path)
+    return CurrentRecoveryFingerprints(
+        pre_write_fingerprint=compute_target_fingerprint(path),
+        post_write_fingerprint=target_recovery_fingerprint(path),
+    )
 
 
 def _mutation_recovery_items(
@@ -631,7 +734,10 @@ def _mutation_recovery_items(
             store=store,
             thread_id=thread_id,
             mutation_id=mutation_id,
-            current_ticket_fingerprint=_current_ticket_fingerprint_for_event(project_root, event),
+            current_ticket_fingerprints=_current_recovery_fingerprints_for_event(
+                project_root,
+                event,
+            ),
         )
         if projection.state == "healthy":
             continue
@@ -919,7 +1025,11 @@ def _run_apply_turn(args: argparse.Namespace) -> int:
             _emit(_paused_response("repair"))
             return 3
         if args.resume_paused and _read_pause_reason(project_root) == "source_context_unhealthy":
-            collection = _source_context_resume_collection(project_root, context)
+            try:
+                collection = _source_context_resume_collection(project_root, context)
+            except InvalidCandidateMutations as exc:
+                _emit(_invalid_candidate_response(exc))
+                return 2
             if collection.state == "unhealthy":
                 _emit(_paused_response(collection.reason or "source_context_unhealthy"))
                 return 3
@@ -943,6 +1053,23 @@ def _run_apply_turn(args: argparse.Namespace) -> int:
     if unsafe is not None:
         return unsafe
     return _run_apply_turn_with_mode(project_root, context, repo_context, resolved.mode)
+
+
+def _runtime_source_context(
+    context: Mapping[str, Any],
+    *,
+    events: Sequence[Mapping[str, object]] = (),
+) -> dict[str, object]:
+    runtime_keys = (
+        "correction_detail",
+        "explicit_linked_batch",
+        "shared_decision_evidence",
+    )
+    source_context = {key: context[key] for key in runtime_keys if key in context}
+    recent_correction_context = _recent_correction_context_from_events(events)
+    if recent_correction_context:
+        source_context["recent_correction_context"] = recent_correction_context
+    return source_context
 
 
 def _run_apply_turn_with_mode(
@@ -975,6 +1102,9 @@ def _run_apply_turn_with_mode(
     tickets_dir = project_root / "docs" / "tickets"
     try:
         candidates = discover_candidate_mutations(context, tickets_dir)
+    except InvalidCandidateMutations as exc:
+        _emit(_invalid_candidate_response(exc))
+        return 2
     except InvalidTicketState:
         pause_workspace_automation(project_root, reason="source_context_unhealthy")
         _emit(_paused_response("source_context_unhealthy"))
@@ -993,12 +1123,11 @@ def _run_apply_turn_with_mode(
         )
         _emit(_paused_response(fingerprint_collection.reason or "source_context_unhealthy"))
         return 3
-    fingerprints = fingerprint_collection.fingerprints
     decisions = evaluate_autonomy_intent(
         AutonomyIntent(
             action_kind="apply_ticket_mutations",
             candidates=candidates,
-            source_context={"ticket_state_fingerprints": fingerprints},
+            source_context=_runtime_source_context(context, events=events),
         ),
         current_mode=mode.value,
         thread_id=str(context["thread_id"]),
@@ -1021,13 +1150,11 @@ def _run_apply_turn_with_mode(
             mutation = GatewayMutation(
                 action=decision.candidate.action,
                 ticket_id=decision.candidate.ticket_id,
-                fields=dict(decision.candidate.proposed_change),
+                target=decision.candidate.target,
+                proposed_change=dict(decision.candidate.proposed_change),
                 tickets_dir=tickets_dir,
-                target_fingerprint=(
-                    fingerprints.get(decision.candidate.ticket_id)
-                    if isinstance(decision.candidate.ticket_id, str)
-                    else None
-                ),
+                expected_ticket_fingerprint=decision.candidate.expected_ticket_fingerprint,
+                evidence_summary=decision.candidate.evidence_summary,
             )
             response = apply_autonomous_mutation(
                 project_root=project_root,

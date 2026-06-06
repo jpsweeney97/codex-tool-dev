@@ -61,21 +61,18 @@ _EVENT_STATUSES = {
     "compaction_receipt": {"compacted", "failed"},
     "automation_pause": {"paused"},
 }
-_ACTIONS = frozenset(
+_TARGET_MUTATION_ACTIONS = frozenset(
     {
         "create",
         "update",
-        "reprioritize",
-        "blocker_edit",
-        "stale_cleanup",
-        "refine",
         "done",
         "wontfix",
         "reopen",
-        "archive",
-        "delete",
-        "history_repair",
-        "correction",
+        "correct",
+    }
+)
+_MAINTENANCE_ACTIONS = frozenset(
+    {
         "summarize",
         "compact",
         "pause_automation",
@@ -179,6 +176,14 @@ class RecoveryProjection:
     reason: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class CurrentRecoveryFingerprints:
+    """Current ticket fingerprints for retry recovery comparisons."""
+
+    pre_write_fingerprint: str | None
+    post_write_fingerprint: str | None
+
+
 def _path_text(path: Path) -> str:
     return str(path).replace("\\", "/")
 
@@ -275,6 +280,123 @@ def _require_detail(details: Mapping[str, object], key: str) -> ValidationResult
     return _ok()
 
 
+def _validate_create_attempt_details(details: Mapping[str, object]) -> ValidationResult:
+    if "create_allocation" not in details:
+        return (
+            _ok()
+            if details.get("decision") in _DECISIONS
+            else _invalid("details.create_allocation is required")
+        )
+    for key in ("decision", "current_mode", "evidence_kind"):
+        if key in details:
+            return _invalid(f"details.{key} is not supported for create attempts")
+    target = details.get("target")
+    if not isinstance(target, Mapping):
+        return _invalid("details.target is required")
+    fields = target.get("fields")
+    sections = target.get("sections")
+    if not isinstance(fields, list) or not all(_nonempty_string(item) for item in fields):
+        return _invalid("details.target.fields is required")
+    if not isinstance(sections, list) or not all(_nonempty_string(item) for item in sections):
+        return _invalid("details.target.sections is required")
+    if not _nonempty_string(details.get("evidence_summary")):
+        return _invalid("details.evidence_summary is required")
+    if not _nonempty_string(details.get("expected_post_write_fingerprint")):
+        return _invalid("details.expected_post_write_fingerprint is required")
+    history = details.get("change_history_entry")
+    if not isinstance(history, Mapping):
+        return _invalid("details.change_history_entry is required")
+    for key in ("timestamp", "actor", "reason"):
+        if not _nonempty_string(history.get(key)):
+            return _invalid(f"details.change_history_entry.{key} is required")
+    if history.get("corrects") is not None and not _nonempty_string(history.get("corrects")):
+        return _invalid("details.change_history_entry.corrects must be a string or null")
+    allocation = details.get("create_allocation")
+    if not isinstance(allocation, Mapping):
+        return _invalid("details.create_allocation is required")
+    allocated_ticket_id = allocation.get("allocated_ticket_id")
+    allocated_ticket_path = allocation.get("allocated_ticket_path")
+    if not _nonempty_string(allocated_ticket_id):
+        return _invalid("details.create_allocation.allocated_ticket_id is required")
+    if (
+        not _nonempty_string(allocated_ticket_path)
+        or "\\" in str(allocated_ticket_path)
+        or not str(allocated_ticket_path).startswith("docs/tickets/")
+        or not str(allocated_ticket_path).endswith(".md")
+    ):
+        return _invalid("details.create_allocation.allocated_ticket_path is invalid")
+    if allocation.get("expected_pre_write_fact") != "allocated_target_path_unused":
+        return _invalid("details.create_allocation.expected_pre_write_fact is invalid")
+    return _ok()
+
+
+def _validate_target_attempt_details(details: Mapping[str, object]) -> ValidationResult:
+    for key in ("decision", "current_mode", "evidence_kind"):
+        if key in details:
+            return _invalid(f"details.{key} is not supported for target attempts")
+    target = details.get("target")
+    if not isinstance(target, Mapping):
+        return _invalid("details.target is required")
+    fields = target.get("fields")
+    sections = target.get("sections")
+    if not isinstance(fields, list) or not all(_nonempty_string(item) for item in fields):
+        return _invalid("details.target.fields is required")
+    if not isinstance(sections, list) or not all(_nonempty_string(item) for item in sections):
+        return _invalid("details.target.sections is required")
+    if not _nonempty_string(details.get("evidence_summary")):
+        return _invalid("details.evidence_summary is required")
+    if not _nonempty_string(details.get("expected_pre_write_fingerprint")):
+        return _invalid("details.expected_pre_write_fingerprint is required")
+    if not _nonempty_string(details.get("expected_post_write_fingerprint")):
+        return _invalid("details.expected_post_write_fingerprint is required")
+    history = details.get("change_history_entry")
+    if not isinstance(history, Mapping):
+        return _invalid("details.change_history_entry is required")
+    for key in ("timestamp", "actor", "reason"):
+        if not _nonempty_string(history.get(key)):
+            return _invalid(f"details.change_history_entry.{key} is required")
+    if history.get("corrects") is not None and not _nonempty_string(history.get("corrects")):
+        return _invalid("details.change_history_entry.corrects must be a string or null")
+    return _ok()
+
+
+def _validate_target_value(value: object) -> ValidationResult:
+    if not isinstance(value, Mapping):
+        return _invalid("details.target is required")
+    fields = value.get("fields")
+    sections = value.get("sections")
+    if not isinstance(fields, list) or not all(_nonempty_string(item) for item in fields):
+        return _invalid("details.target.fields is required")
+    if not isinstance(sections, list) or not all(_nonempty_string(item) for item in sections):
+        return _invalid("details.target.sections is required")
+    return _ok()
+
+
+def _validate_correction_ready_details(details: Mapping[str, object]) -> ValidationResult:
+    if details.get("correction_ready") is not True:
+        return _ok()
+    if details.get("correction_detail_compacted") is True:
+        if "correction_detail" in details:
+            return _invalid("details.correction_detail is not supported when compacted")
+        if "correction_detail_retained" in details:
+            return _invalid(
+                "details.correction_detail_retained is not supported when compacted"
+            )
+        return _ok()
+    if not _nonempty_string(details.get("correction_detail")):
+        return _invalid("details.correction_detail is required")
+    if details.get("correction_detail_retained") is not True:
+        return _invalid("details.correction_detail_retained is required")
+    target = _validate_target_value(details.get("target"))
+    if not target.ok:
+        return target
+    if not isinstance(details.get("proposed_change"), Mapping):
+        return _invalid("details.proposed_change is required")
+    if not _nonempty_string(details.get("expected_ticket_fingerprint")):
+        return _invalid("details.expected_ticket_fingerprint is required")
+    return _ok()
+
+
 def _validate_details(
     *,
     event_type: str,
@@ -288,6 +410,10 @@ def _validate_details(
 
     decision = details.get("decision")
     if event_type == "mutation_attempt":
+        if action == "create":
+            return _validate_create_attempt_details(details)
+        if "expected_post_write_fingerprint" in details or "target" in details:
+            return _validate_target_attempt_details(details)
         if decision not in _DECISIONS:
             return _invalid("details.decision is required")
 
@@ -304,7 +430,35 @@ def _validate_details(
         if not result.ok:
             return result
 
+    if status == "failed":
+        correction_ready = _validate_correction_ready_details(details)
+        if not correction_ready.ok:
+            return correction_ready
+
     return _ok()
+
+
+def _validate_action_for_event(
+    *,
+    event_type: str,
+    status: str,
+    action: object,
+) -> ValidationResult:
+    if not isinstance(action, str):
+        return _invalid("action is not supported")
+    if event_type in {"mutation_attempt", "mutation_status"}:
+        return _ok() if action in _TARGET_MUTATION_ACTIONS else _invalid("action is not supported")
+    expected_actions = {
+        "summary_receipt": "summarize",
+        "compaction_receipt": "compact",
+        "automation_pause": "pause_automation",
+    }
+    expected = expected_actions.get(event_type)
+    if expected is None:
+        return _invalid("action is not supported")
+    if action == expected:
+        return _ok()
+    return _invalid(f"action is not supported for {event_type}/{status}")
 
 
 def validate_pending_summary_event(event: Mapping[str, object]) -> ValidationResult:
@@ -335,9 +489,14 @@ def validate_pending_summary_event(event: Mapping[str, object]) -> ValidationRes
     if not isinstance(status, str) or status not in _EVENT_STATUSES[event_type]:
         return _invalid("status is not supported for event_type")
 
-    action = event["action"]
-    if action not in _ACTIONS:
-        return _invalid("action is not supported")
+    action_result = _validate_action_for_event(
+        event_type=event_type,
+        status=status,
+        action=event["action"],
+    )
+    if not action_result.ok:
+        return action_result
+    action = str(event["action"])
 
     for key in ("ticket_id", "mutation_id"):
         optional = _validate_optional_string(event, key)
@@ -702,6 +861,7 @@ class PendingSummaryStore:
                 continue
             compacted_details = dict(details)
             compacted_details.pop("correction_detail", None)
+            compacted_details.pop("correction_detail_retained", None)
             compacted_details["correction_detail_compacted"] = True
             compacted.append({**event, "details": compacted_details})
         return tuple(compacted)
@@ -827,7 +987,7 @@ def project_mutation_recovery(
     store: PendingSummaryStore,
     thread_id: str,
     mutation_id: str,
-    current_ticket_fingerprint: str | None,
+    current_ticket_fingerprints: CurrentRecoveryFingerprints,
 ) -> RecoveryProjection:
     """Project recovery action for one mutation from append-only events.
 
@@ -835,17 +995,20 @@ def project_mutation_recovery(
         store: Pending-summary event store.
         thread_id: Thread that owns the mutation.
         mutation_id: Mutation to inspect.
-        current_ticket_fingerprint: Live ticket fingerprint, when a ticket exists.
+        current_ticket_fingerprints: Live ticket fingerprints, when a ticket exists.
 
     Returns:
         Recovery projection. The caller decides whether to append returned events.
     """
     events = _matching_mutation_events(store, thread_id=thread_id, mutation_id=mutation_id)
+    current_pre = current_ticket_fingerprints.pre_write_fingerprint
+    current_post = current_ticket_fingerprints.post_write_fingerprint
+    current_display = current_post or current_pre
     if events is None:
         return _pause_projection(
             thread_id=thread_id,
             mutation_id=mutation_id,
-            current_ticket_fingerprint=current_ticket_fingerprint,
+            current_ticket_fingerprint=current_display,
             expected_pre_write_fingerprint=None,
             expected_post_write_fingerprint=None,
             reason="pending_summary_unhealthy",
@@ -858,7 +1021,7 @@ def project_mutation_recovery(
             "healthy",
             thread_id,
             mutation_id,
-            current_ticket_fingerprint,
+            current_display,
             expected_pre,
             expected_post,
         )
@@ -869,36 +1032,80 @@ def project_mutation_recovery(
             "healthy",
             thread_id,
             mutation_id,
-            current_ticket_fingerprint,
+            current_display,
             expected_pre,
             expected_post,
         )
 
     if state == "attempt_recorded":
-        if expected_pre is None:
-            if reference.get("action") == "create" and current_ticket_fingerprint is None:
+        if reference.get("action") == "create":
+            if expected_post is None:
+                return _pause_projection(
+                    thread_id=thread_id,
+                    mutation_id=mutation_id,
+                    current_ticket_fingerprint=current_post,
+                    expected_pre_write_fingerprint=expected_pre,
+                    expected_post_write_fingerprint=expected_post,
+                    reason="missing_post_write_fingerprint",
+                )
+            if current_post == expected_post:
+                events_to_append = (
+                    _recovery_event(
+                        reference=reference,
+                        event_type="mutation_status",
+                        status="ticket_written",
+                        reason="Recovered missing autonomous Ticket write event.",
+                        details={"post_write_fingerprint": expected_post},
+                    ),
+                    _recovery_event(
+                        reference=reference,
+                        event_type="mutation_status",
+                        status="applied",
+                        reason="Recovered autonomous Ticket terminal status.",
+                        details={},
+                    ),
+                )
                 return RecoveryProjection(
-                    "retry_with_same_mutation",
+                    "append_missing_ticket_written",
                     thread_id,
                     mutation_id,
-                    current_ticket_fingerprint,
+                    current_post,
                     expected_pre,
                     expected_post,
+                    events_to_append,
+                )
+            if current_post is None:
+                return _pause_projection(
+                    thread_id=thread_id,
+                    mutation_id=mutation_id,
+                    current_ticket_fingerprint=None,
+                    expected_pre_write_fingerprint=expected_pre,
+                    expected_post_write_fingerprint=expected_post,
+                    reason="create_allocation_unwritten",
                 )
             return _pause_projection(
                 thread_id=thread_id,
                 mutation_id=mutation_id,
-                current_ticket_fingerprint=current_ticket_fingerprint,
+                current_ticket_fingerprint=current_post,
+                expected_pre_write_fingerprint=expected_pre,
+                expected_post_write_fingerprint=expected_post,
+                reason="create_post_write_mismatch",
+            )
+        if expected_pre is None:
+            return _pause_projection(
+                thread_id=thread_id,
+                mutation_id=mutation_id,
+                current_ticket_fingerprint=current_display,
                 expected_pre_write_fingerprint=expected_pre,
                 expected_post_write_fingerprint=expected_post,
                 reason="missing_pre_write_fingerprint",
             )
-        if current_ticket_fingerprint == expected_pre:
+        if current_pre == expected_pre:
             return RecoveryProjection(
                 "retry_with_same_mutation",
                 thread_id,
                 mutation_id,
-                current_ticket_fingerprint,
+                current_pre,
                 expected_pre,
                 expected_post,
             )
@@ -906,12 +1113,12 @@ def project_mutation_recovery(
             return _pause_projection(
                 thread_id=thread_id,
                 mutation_id=mutation_id,
-                current_ticket_fingerprint=current_ticket_fingerprint,
+                current_ticket_fingerprint=current_post,
                 expected_pre_write_fingerprint=expected_pre,
                 expected_post_write_fingerprint=expected_post,
                 reason="missing_post_write_fingerprint",
             )
-        if current_ticket_fingerprint == expected_post:
+        if current_post == expected_post:
             events_to_append = (
                 _recovery_event(
                     reference=reference,
@@ -932,7 +1139,7 @@ def project_mutation_recovery(
                 "append_missing_ticket_written",
                 thread_id,
                 mutation_id,
-                current_ticket_fingerprint,
+                current_post,
                 expected_pre,
                 expected_post,
                 events_to_append,
@@ -940,7 +1147,7 @@ def project_mutation_recovery(
         return _pause_projection(
             thread_id=thread_id,
             mutation_id=mutation_id,
-            current_ticket_fingerprint=current_ticket_fingerprint,
+            current_ticket_fingerprint=current_post,
             expected_pre_write_fingerprint=expected_pre,
             expected_post_write_fingerprint=expected_post,
             reason="ticket_state_mismatch",
@@ -951,16 +1158,16 @@ def project_mutation_recovery(
             return _pause_projection(
                 thread_id=thread_id,
                 mutation_id=mutation_id,
-                current_ticket_fingerprint=current_ticket_fingerprint,
+                current_ticket_fingerprint=current_post,
                 expected_pre_write_fingerprint=expected_pre,
                 expected_post_write_fingerprint=expected_post,
                 reason="missing_post_write_fingerprint",
             )
-        if current_ticket_fingerprint != expected_post:
+        if current_post != expected_post:
             return _pause_projection(
                 thread_id=thread_id,
                 mutation_id=mutation_id,
-                current_ticket_fingerprint=current_ticket_fingerprint,
+                current_ticket_fingerprint=current_post,
                 expected_pre_write_fingerprint=expected_pre,
                 expected_post_write_fingerprint=expected_post,
                 reason="ticket_state_mismatch",
@@ -978,7 +1185,7 @@ def project_mutation_recovery(
             "append_missing_terminal_status",
             thread_id,
             mutation_id,
-            current_ticket_fingerprint,
+            current_post,
             expected_pre,
             expected_post,
             events_to_append,
@@ -998,7 +1205,7 @@ def project_mutation_recovery(
             "summary_ready",
             thread_id,
             mutation_id,
-            current_ticket_fingerprint,
+            current_display,
             expected_pre,
             expected_post,
             events_to_append,
@@ -1007,7 +1214,7 @@ def project_mutation_recovery(
     return _pause_projection(
         thread_id=thread_id,
         mutation_id=mutation_id,
-        current_ticket_fingerprint=current_ticket_fingerprint,
+        current_ticket_fingerprint=current_display,
         expected_pre_write_fingerprint=expected_pre,
         expected_post_write_fingerprint=expected_post,
         reason="unsupported_recovery_state",

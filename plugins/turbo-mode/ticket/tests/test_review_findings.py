@@ -88,7 +88,7 @@ class TestF1ReopenUnarchive:
         reopen_resp = engine_execute(
             action="reopen",
             ticket_id=ticket_id,
-            fields={"reopen_reason": "Need more work"},
+            fields={"status": "open"},
             session_id="f1-sess",
             request_origin="user",
             dedup_override=False,

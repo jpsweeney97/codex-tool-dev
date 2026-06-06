@@ -371,7 +371,7 @@ class TestEngineExecuteIntegration:
         resp = engine_execute(
             action="reopen",
             ticket_id=ticket_id,
-            fields={"reopen_reason": "Reconsidered — will fix after all"},
+            fields={"status": "open"},
             session_id="test-session",
             request_origin="user",
             dedup_override=False,
@@ -388,7 +388,7 @@ class TestEngineExecuteIntegration:
         # Verify final state.
         content = ticket_path.read_text(encoding="utf-8")
         assert "status: open" in content
-        assert "Reopen History" in content
+        assert "Reopen History" not in content
 
     def test_full_lifecycle_preserves_canonical_yaml_shape(self, tmp_tickets):
         resp = engine_execute(
@@ -472,7 +472,7 @@ class TestEngineExecuteIntegration:
         resp = engine_execute(
             action="reopen",
             ticket_id=ticket_id,
-            fields={"reopen_reason": "Follow-up work is required"},
+            fields={"status": "open"},
             session_id="test-session",
             request_origin="user",
             dedup_override=False,
@@ -489,7 +489,7 @@ class TestEngineExecuteIntegration:
         ticket = parse_ticket(ticket_path)
         assert ticket is not None
         assert ticket.status == "open"
-        assert "## Reopen History" in content
+        assert "## Reopen History" not in content
 
     def test_unknown_action_escalates(self, tmp_tickets):
         """Dispatcher rejects unknown actions."""

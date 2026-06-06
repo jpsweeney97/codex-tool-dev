@@ -1,6 +1,6 @@
 ---
 name: update-ticket
-description: "Refine or change existing repo-local tickets. Use when the user asks to update a ticket, mark work open or blocked, close, reopen, change priority, edit tags, or add blockers. temporarily unavailable for writes until Ticket exposes the target candidate mutation path."
+description: "Refine or change existing repo-local tickets. Use when the user asks to update a ticket, mark work open or blocked, close, reopen, change priority, edit tags, or add blockers through the target candidate mutation path."
 allowed-tools:
   - Bash
   - Write
@@ -9,9 +9,9 @@ allowed-tools:
 
 # Ticket Update
 
-Existing-ticket mutation is temporarily unavailable until source exposes a live
-target-candidate entrypoint. Use `read-ticket` for inspection and summarize
-requested updates without writing.
+Source now exposes the target candidate mutation path for existing-ticket
+mutation. Installed-runtime write availability still requires separate runtime
+proof.
 
 ## Setup
 
@@ -105,9 +105,10 @@ The actor is not a workflow label and must not encode action type.
 
 ## Active Update Guidance
 
-Update mutation is temporarily unavailable from this skill until Ticket exposes
-and documents a live source entrypoint that accepts the target candidate
-mutation contract. Summarize the requested candidate and stop without writing.
+Before mutating, confirm the installed Ticket runtime exposes the target
+candidate mutation path. If runtime proof is unavailable in the current turn,
+summarize the intended target candidate and say runtime write proof is missing.
+Do not write through legacy flat candidate paths.
 
 ## Deprecated Source Drift
 
