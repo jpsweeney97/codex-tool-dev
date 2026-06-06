@@ -31,15 +31,18 @@ def test_standard_smoke_derives_installed_plugin_roots_from_codex_home(
         repo_root=repo_root,
     )
 
-    handoff_root = codex_home / "plugins/cache/turbo-mode/handoff/1.6.0"
-    ticket_root = codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
+    command_text = "\n".join(runner.command_texts)
     assert summary["final_status"] == "passed"
     assert summary["selected_smoke_tier"] == "standard"
-    assert str(handoff_root) in "\n".join(runner.command_texts)
-    assert str(ticket_root) in "\n".join(runner.command_texts)
-    assert "/Users/jp/.codex/plugins/cache" not in "\n".join(runner.command_texts)
-    assert "handoff-session-state-archive" in summary["smoke_labels"]
-    assert "ticket-audit-repair-dry-run" in summary["smoke_labels"]
+    assert str(codex_home / "plugins/cache/turbo-mode/handoff/1.7.0") in command_text
+    assert "/Users/jp/.codex/plugins/cache" not in command_text
+    assert summary["smoke_labels"] == [
+        "smoke-repo-git-init",
+        "handoff-session-state-archive",
+        "handoff-session-state-write",
+        "handoff-session-state-read",
+        "handoff-session-state-clear",
+    ]
 
 
 def test_standard_smoke_uses_current_handoff_storage_root(
@@ -69,10 +72,10 @@ def test_isolated_smoke_rejects_real_home_command_paths_before_execution(
         label="leaky-command",
         argv=(
             "python3",
-            str(REAL_CODEX_HOME / "plugins/cache/turbo-mode/handoff/1.6.0/scripts/defer.py"),
+            str(REAL_CODEX_HOME / "plugins/cache/turbo-mode/handoff/1.7.0/scripts/search.py"),
         ),
         command_string=(
-            f"python3 {REAL_CODEX_HOME}/plugins/cache/turbo-mode/handoff/1.6.0/scripts/defer.py"
+            f"python3 {REAL_CODEX_HOME}/plugins/cache/turbo-mode/handoff/1.7.0/scripts/search.py"
         ),
     )
     monkeypatch.setattr(smoke_module, "_build_smoke_plan", lambda **kwargs: (command,))
@@ -129,46 +132,13 @@ def test_minimal_subprocess_env_scrubs_real_home_path_entries(
     assert env["PATH"] == os.pathsep.join(["/usr/bin", "/opt/bin"])
 
 
-def test_defer_smoke_fails_when_stdout_is_not_json(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    runner = FakeSmokeRunner(stdout=b"not json\n")
-    monkeypatch.setattr(smoke_module.subprocess, "run", runner.run)
-
-    with pytest.raises(RefreshError, match="defer stdout was not JSON"):
-        run_standard_smoke(
-            local_only_run_root=tmp_path / "home/local-only/turbo-mode-refresh/run-1",
-            codex_home=tmp_path / "home",
-            repo_root=tmp_path / "repo",
-        )
-
-
-def test_ticket_update_payload_uses_only_update_supported_fields(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    runner = FakeSmokeRunner()
-    monkeypatch.setattr(smoke_module.subprocess, "run", runner.run)
-
-    run_standard_smoke(
-        local_only_run_root=tmp_path / "home/local-only/turbo-mode-refresh/run-1",
-        codex_home=tmp_path / "home",
-        repo_root=tmp_path / "repo",
-    )
-
-    update_payload = runner.payloads["ticket-update.json"]
-    assert update_payload["fields"] == {"tags": ["smoke", "updated"]}
-    assert "acceptance_criteria" not in update_payload["fields"]
-
-
 def test_raw_outputs_are_private_and_summary_records_only_hashes(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     runner = FakeSmokeRunner(
-        stdout_by_label={"ticket-list-open": b"RAW-SECRET-PAYLOAD\n"},
-        stderr_by_label={"ticket-list-open": b"RAW-SECRET-ERR\n"},
+        stdout_by_label={"smoke-repo-git-init": b"RAW-SECRET-PAYLOAD\n"},
+        stderr_by_label={"smoke-repo-git-init": b"RAW-SECRET-ERR\n"},
     )
     monkeypatch.setattr(smoke_module.subprocess, "run", runner.run)
 
@@ -196,7 +166,7 @@ def test_nonzero_command_marks_smoke_failed(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    runner = FakeSmokeRunner(fail_labels={"ticket-audit-repair-dry-run"})
+    runner = FakeSmokeRunner(fail_labels={"handoff-session-state-read"})
     monkeypatch.setattr(smoke_module.subprocess, "run", runner.run)
 
     summary = run_standard_smoke(
@@ -206,11 +176,11 @@ def test_nonzero_command_marks_smoke_failed(
     )
 
     assert summary["final_status"] == "failed"
-    audit_result = [
-        result for result in summary["results"] if result["label"] == "ticket-audit-repair-dry-run"
+    read_result = [
+        result for result in summary["results"] if result["label"] == "handoff-session-state-read"
     ][0]
-    assert audit_result["exit_code"] == 2
-    assert audit_result["redacted_status"] == "failed"
+    assert read_result["exit_code"] == 2
+    assert read_result["redacted_status"] == "failed"
 
 
 def test_handoff_clear_state_smoke_uses_recorded_state_path(
@@ -249,7 +219,7 @@ class FakeSmokeRunner:
     def __init__(
         self,
         *,
-        stdout: bytes = b'{"status":"ok"}\n',
+        stdout: bytes = b"",
         stderr: bytes = b"",
         stdout_by_label: dict[str, bytes] | None = None,
         stderr_by_label: dict[str, bytes] | None = None,
@@ -265,8 +235,6 @@ class FakeSmokeRunner:
         self.require_clear_state_path = require_clear_state_path
         self.warn_clear_state_not_removed = warn_clear_state_not_removed
         self.command_texts: list[str] = []
-        self.payloads: dict[str, dict[str, Any]] = {}
-        self.ticket_id = "T-SMOKE-1"
         self.state_file: Path | None = None
 
     def run(self, args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
@@ -275,9 +243,6 @@ class FakeSmokeRunner:
         label = _label_from_output_path(kwargs)
         if label in self.fail_labels:
             return subprocess.CompletedProcess(args, 2, b"", b"failed\n")
-        cwd = Path(kwargs.get("cwd") or ".")
-        env = kwargs.get("env") or {}
-        input_bytes = kwargs.get("input")
         stdout = self.stdout
         stderr = self.stderr
 
@@ -323,42 +288,6 @@ class FakeSmokeRunner:
                 )
             if self.state_file is not None:
                 self.state_file.unlink()
-        elif "defer.py" in command_text:
-            envelopes = cwd / "docs/tickets/.envelopes"
-            envelopes.mkdir(parents=True, exist_ok=True)
-            (envelopes / "smoke.json").write_text("{}", encoding="utf-8")
-        elif "ticket_engine_guard.py" in command_text:
-            assert input_bytes is not None
-            hook_input = json.loads(input_bytes.decode("utf-8"))
-            payload_path = Path(shlex.split(hook_input["tool_input"]["command"])[-1])
-            payload = json.loads(payload_path.read_text(encoding="utf-8"))
-            payload.update(
-                {
-                    "hook_injected": True,
-                    "hook_request_origin": "user",
-                    "session_id": "plan06-smoke",
-                }
-            )
-            payload_path.write_text(json.dumps(payload), encoding="utf-8")
-            self.payloads[payload_path.name] = payload
-            stdout = json.dumps({"hookSpecificOutput": {"permissionDecision": "allow"}}).encode()
-        elif "ticket_workflow.py" in command_text and "execute" in args:
-            payload = json.loads(Path(args[-1]).read_text(encoding="utf-8"))
-            action = payload["action"]
-            if action == "create":
-                ticket_path = cwd / f"docs/tickets/{self.ticket_id}.md"
-                ticket_path.parent.mkdir(parents=True, exist_ok=True)
-                ticket_path.write_text("# Smoke ticket\n", encoding="utf-8")
-                stdout = json.dumps({"ticket_id": self.ticket_id}).encode()
-            else:
-                stdout = json.dumps({"ticket_id": self.ticket_id, "status": "ok"}).encode()
-        elif "ticket_read.py" in command_text:
-            stdout = json.dumps({"ticket_id": self.ticket_id, "status": "ok"}).encode()
-        elif "ticket_audit.py" in command_text:
-            stdout = json.dumps({"status": "ok", "unrecoverable": 0}).encode()
-        elif env.get("CODEX_HOME"):
-            stdout = self.stdout
-            stderr = self.stderr
 
         if label in self.stdout_by_label:
             stdout = self.stdout_by_label[label]
@@ -371,11 +300,6 @@ def _label_from_output_path(kwargs: dict[str, Any]) -> str | None:
     env = kwargs.get("env") or {}
     if "TURBO_MODE_SMOKE_LABEL" in env:
         return str(env["TURBO_MODE_SMOKE_LABEL"])
-    stdout = kwargs.get("stdout")
-    if hasattr(stdout, "name"):
-        name = Path(stdout.name).name
-        if name.endswith(".stdout.txt"):
-            return name[: -len(".stdout.txt")]
     return None
 
 

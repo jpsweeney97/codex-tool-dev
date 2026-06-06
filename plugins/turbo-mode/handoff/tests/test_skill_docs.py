@@ -6,8 +6,6 @@ PLUGIN_ROOT = Path(__file__).parent.parent
 COMMAND_SKILLS = [
     PLUGIN_ROOT / "skills" / "search-handoffs" / "SKILL.md",
     PLUGIN_ROOT / "skills" / "distill" / "SKILL.md",
-    PLUGIN_ROOT / "skills" / "triage" / "SKILL.md",
-    PLUGIN_ROOT / "skills" / "defer" / "SKILL.md",
 ]
 STATE_SKILLS = [
     PLUGIN_ROOT / "skills" / "load-handoff" / "SKILL.md",
@@ -104,48 +102,6 @@ def test_load_skill_documents_fail_closed_operator_recovery_boundaries() -> None
     assert "Re-run `/load`; pending transactions are recovered before new selection" not in text
 
 
-def test_defer_skill_uses_plugin_siblings_plain_field() -> None:
-    text = (PLUGIN_ROOT / "skills" / "defer" / "SKILL.md").read_text(encoding="utf-8")
-    assert (
-        'plugin_siblings.py" --plugin-root "$PLUGIN_ROOT" --sibling ticket --field plugin_root'
-    ) in text
-    assert (
-        'python "$PLUGIN_ROOT/scripts/defer.py" --tickets-dir "$PROJECT_ROOT/docs/tickets"'
-    ) in text
-    assert (
-        "python3 /absolute/ticket/root/scripts/ticket_engine_user.py ingest "
-        '"$PROJECT_ROOT/.codex/ticket-tmp/payload-' in text
-    )
-    assert "relative payload path" in text
-    assert "$TICKET_PLUGIN_ROOT" not in text
-    assert "/tmp/ingest_payload.json" not in text
-    assert "../../../../ticket/" not in text
-    assert "ticket/1.4.0/scripts" not in text
-
-
-def test_defer_skill_hides_ticket_ingest_transcript_internals() -> None:
-    skill = (PLUGIN_ROOT / "skills" / "defer" / "SKILL.md").read_text(encoding="utf-8")
-    details = (PLUGIN_ROOT / "references" / "skill-details.md").read_text(encoding="utf-8")
-    normalized_skill = " ".join(skill.split())
-    normalized_details = " ".join(details.split())
-    hidden_mechanics_sentence = (
-        "Do not report Ticket ingest payload paths, processed envelope paths, "
-        "incoming envelope paths, or envelope provenance in the human transcript."
-    )
-    render_only_sentence = (
-        "Parse Ticket ingest JSON stdout and render only recovery summaries, "
-        "next steps, safe messages, ticket IDs, duplicate candidate ticket IDs, "
-        "and user-safe ingest outcome prose."
-    )
-
-    assert (
-        "When Ticket ingest returns `data.recovery_hint`, show the recovery summary and next step"
-        in normalized_skill
-    )
-    assert render_only_sentence in normalized_skill
-    assert render_only_sentence in normalized_details
-    assert hidden_mechanics_sentence in normalized_skill
-    assert hidden_mechanics_sentence in normalized_details
-    assert "duplicate candidate ticket IDs" in normalized_details
-    assert "Report ticket IDs, file paths, envelope provenance" not in normalized_skill
-    assert "report ticket IDs, paths, processed envelopes" not in normalized_details
+def test_ticket_backed_skills_are_not_active() -> None:
+    assert not (PLUGIN_ROOT / "skills" / "defer").exists()
+    assert not (PLUGIN_ROOT / "skills" / "triage").exists()

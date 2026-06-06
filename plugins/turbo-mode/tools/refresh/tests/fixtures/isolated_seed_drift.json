@@ -1,0 +1,6 @@
+{
+  "handoff/1.7.0/turbo_mode_handoff_runtime/project_paths.py": {
+    "cache_text": "from __future__ import annotations\n\nfrom pathlib import Path\n\n\nLEGACY_STORAGE_ROOT = \"docs/handoffs\"\n\n\ndef active_handoff_root(project_root: Path) -> Path:\n    return project_root / LEGACY_STORAGE_ROOT\n",
+    "source_sha256": "6ee05498e6a559966fb64c9c7ff8422213177162a23529917f884622370cdef6"
+  }
+}

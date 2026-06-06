@@ -4,7 +4,6 @@ import copy
 import hashlib
 import json
 import os
-import shlex
 import shutil
 import subprocess
 import tempfile
@@ -18,7 +17,6 @@ from refresh.app_server_inventory import (
     EXPECTED_HANDOFF_SKILLS,
     EXPECTED_RESPONSE_IDS,
     EXPECTED_REVIEW_FAMILY_SKILLS,
-    EXPECTED_TICKET_SKILLS,
     PLUGIN_VERSIONS,
     AppServerInstallAuthority,
     AppServerLaunchAuthority,
@@ -34,7 +32,6 @@ from refresh.app_server_inventory import (
     collect_codex_runtime_identity,
     collect_readonly_runtime_inventory,
     real_codex_home,
-    rewrite_ticket_hook_manifest,
     serialize_authority_record,
     transcript_bytes,
     validate_install_responses,
@@ -44,20 +41,6 @@ from refresh.app_server_inventory import (
 from refresh.models import RefreshError
 from refresh.paths import RefreshPaths
 
-REAL_HOME_TICKET_COMMAND = (
-    "python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/"
-    "hooks/ticket_engine_guard.py"
-)
-OTHER_HOME_TICKET_COMMAND = (
-    "python3 /private/tmp/other/plugins/cache/turbo-mode/ticket/1.4.0/"
-    "hooks/ticket_engine_guard.py"
-)
-OTHER_HOME_WRONG_LAYOUT_TICKET_COMMAND = "python3 /private/tmp/other/hooks/ticket_engine_guard.py"
-REAL_HOME_TICKET_COMMAND_WITH_ARGS = REAL_HOME_TICKET_COMMAND + " --guard"
-REAL_HOME_WRONG_TICKET_COMMAND = (
-    "python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/"
-    "hooks/not_ticket_engine_guard.py"
-)
 PLUGIN_CACHE_COPY_IGNORE = shutil.ignore_patterns(
     "__pycache__",
     ".pytest_cache",
@@ -112,10 +95,6 @@ def install_transcript(
             "appsNeedingAuth": [],
             "authPolicy": "ON_INSTALL",
         }
-        ticket_result: dict[str, object] = {
-            "appsNeedingAuth": [],
-            "authPolicy": "ON_INSTALL",
-        }
         review_family_result: dict[str, object] = {
             "appsNeedingAuth": [],
             "authPolicy": "ON_INSTALL",
@@ -132,13 +111,6 @@ def install_transcript(
                 "direction": "recv",
                 "body": {
                     "id": 2,
-                    "result": ticket_result,
-                },
-            },
-            {
-                "direction": "recv",
-                "body": {
-                    "id": 3,
                     "result": review_family_result,
                 },
             },
@@ -147,14 +119,7 @@ def install_transcript(
         "pluginName": "handoff",
         "marketplacePath": str(refresh_paths.marketplace_path),
         "remoteMarketplaceName": None,
-        "installedPath": str(active_installed_root / "handoff/1.6.0"),
-        "status": "installed",
-    }
-    ticket_result: dict[str, object] = {
-        "pluginName": "ticket",
-        "marketplacePath": str(refresh_paths.marketplace_path),
-        "remoteMarketplaceName": None,
-        "installedPath": str(active_installed_root / "ticket/1.4.0"),
+        "installedPath": str(active_installed_root / "handoff/1.7.0"),
         "status": "installed",
     }
     review_family_result: dict[str, object] = {
@@ -169,10 +134,6 @@ def install_transcript(
             "plugin": "handoff",
             "postInstallManifestSha256": "handoff-post",
         }
-        ticket_result["cacheDelta"] = {
-            "plugin": "ticket",
-            "postInstallManifestSha256": "ticket-post",
-        }
         review_family_result["cacheDelta"] = {
             "plugin": "review-family",
             "postInstallManifestSha256": "review-family-post",
@@ -184,45 +145,26 @@ def install_transcript(
                 "id": 1,
                 "result": handoff_result,
             },
-        },
-        {
-            "direction": "recv",
-            "body": {
-                "id": 2,
-                "result": ticket_result,
             },
-        },
-        {
-            "direction": "recv",
-            "body": {
-                "id": 3,
-                "result": review_family_result,
+            {
+                "direction": "recv",
+                "body": {
+                    "id": 2,
+                    "result": review_family_result,
+                },
             },
-        },
     )
 
 
 def seed_installed_plugin_roots(installed_root: Path) -> None:
-    handoff_root = installed_root / "handoff/1.6.0"
+    handoff_root = installed_root / "handoff/1.7.0"
     handoff_root.mkdir(parents=True, exist_ok=True)
     (handoff_root / "plugin.json").write_text(
-        '{"name":"handoff","version":"1.6.0"}\n',
+        '{"name":"handoff","version":"1.7.0"}\n',
         encoding="utf-8",
     )
     (handoff_root / "skills/save/SKILL.md").parent.mkdir(parents=True, exist_ok=True)
     (handoff_root / "skills/save/SKILL.md").write_text("# save\n", encoding="utf-8")
-
-    ticket_root = installed_root / "ticket/1.4.0"
-    ticket_root.mkdir(parents=True, exist_ok=True)
-    (ticket_root / "plugin.json").write_text(
-        '{"name":"ticket","version":"1.4.0"}\n',
-        encoding="utf-8",
-    )
-    (ticket_root / "hooks/ticket_engine_guard.py").parent.mkdir(parents=True, exist_ok=True)
-    (ticket_root / "hooks/ticket_engine_guard.py").write_text(
-        "#!/usr/bin/env python3\nprint('guard')\n",
-        encoding="utf-8",
-    )
 
     review_family_root = installed_root / "review-family/0.1.0"
     review_family_root.mkdir(parents=True, exist_ok=True)
@@ -263,7 +205,7 @@ def launch_authority_for_tests(
         initialize_result={"codexHome": str(refresh_paths.codex_home)},
         accepted_response_schema_version="app-server-readonly-inventory-v1",
         candidate_mechanisms_checked=(),
-        plugin_read_sources={"handoff": "x", "ticket": "y", "review-family": "z"},
+        plugin_read_sources={"handoff": "x", "review-family": "z"},
         skill_paths=(),
         hook_paths=(),
     )
@@ -362,18 +304,11 @@ def seed_isolated_codex_home(*, repo_root: Path, isolated_home: Path) -> None:
         isolated_home=isolated_home,
         plugin_name="review-family",
     )
-    ticket_plugin_root = copy_source_plugin_to_isolated_cache(
-        repo_root=repo_root,
-        isolated_home=isolated_home,
-        plugin_name="ticket",
-    )
-    rewrite_ticket_hook_manifest(ticket_plugin_root=ticket_plugin_root)
     (isolated_home / "config.toml").write_text(
         f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
 
@@ -432,8 +367,8 @@ def normalize_same_child_post_install_transcript(
 def blocker_inventory_counts(
     responses: dict[int, dict[str, object]],
 ) -> tuple[int | None, int | None]:
-    skills_result = responses.get(4)
-    hooks_result = responses.get(5)
+    skills_result = responses.get(3)
+    hooks_result = responses.get(4)
     skills_count = (
         len(inventory_module.skill_records_by_name({"result": skills_result}))
         if isinstance(skills_result, dict)
@@ -449,10 +384,8 @@ def blocker_inventory_counts(
 
 def transcript(refresh_paths: RefreshPaths) -> tuple[dict[str, object], ...]:
     handoff_source = refresh_paths.repo_root / "plugins/turbo-mode/handoff"
-    ticket_source = refresh_paths.repo_root / "plugins/turbo-mode/ticket"
     review_family_source = refresh_paths.repo_root / "plugins/turbo-mode/review-family"
-    handoff_cache = refresh_paths.codex_home / "plugins/cache/turbo-mode/handoff/1.6.0"
-    ticket_cache = refresh_paths.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
+    handoff_cache = refresh_paths.codex_home / "plugins/cache/turbo-mode/handoff/1.7.0"
     review_family_cache = (
         refresh_paths.codex_home / "plugins/cache/turbo-mode/review-family/0.1.0"
     )
@@ -473,17 +406,12 @@ def transcript(refresh_paths: RefreshPaths) -> tuple[dict[str, object], ...]:
         },
         {
             "direction": "recv",
-            "body": {"id": 2, "result": {"source": {"path": str(ticket_source)}}},
-        },
-        {
-            "direction": "recv",
             "body": {
-                "id": 3,
+                "id": 2,
                 "result": {
                     "plugins": [
                         "handoff@turbo-mode",
                         "review-family@turbo-mode",
-                        "ticket@turbo-mode",
                     ]
                 },
             },
@@ -491,7 +419,7 @@ def transcript(refresh_paths: RefreshPaths) -> tuple[dict[str, object], ...]:
         {
             "direction": "recv",
             "body": {
-                "id": 4,
+                "id": 3,
                 "result": {
                     "skills": [
                         {
@@ -515,24 +443,8 @@ def transcript(refresh_paths: RefreshPaths) -> tuple[dict[str, object], ...]:
                             "sourcePath": str(handoff_cache / "skills/search/SKILL.md"),
                         },
                         {
-                            "name": "handoff:defer",
-                            "sourcePath": str(handoff_cache / "skills/defer/SKILL.md"),
-                        },
-                        {
-                            "name": "handoff:triage",
-                            "sourcePath": str(handoff_cache / "skills/triage/SKILL.md"),
-                        },
-                        {
                             "name": "handoff:distill",
                             "sourcePath": str(handoff_cache / "skills/distill/SKILL.md"),
-                        },
-                        {
-                            "name": "ticket:ticket",
-                            "sourcePath": str(ticket_cache / "skills/ticket/SKILL.md"),
-                        },
-                        {
-                            "name": "ticket:ticket-triage",
-                            "sourcePath": str(ticket_cache / "skills/ticket-triage/SKILL.md"),
                         },
                         *[
                             {
@@ -553,24 +465,14 @@ def transcript(refresh_paths: RefreshPaths) -> tuple[dict[str, object], ...]:
         {
             "direction": "recv",
             "body": {
-                "id": 5,
-                "result": {
-                    "hooks": [
-                        {
-                            "pluginId": "ticket@turbo-mode",
-                            "eventName": "preToolUse",
-                            "matcher": "Bash",
-                            "command": f"python3 {ticket_cache}/hooks/ticket_engine_guard.py",
-                            "sourcePath": str(ticket_cache / "hooks/hooks.json"),
-                        }
-                    ]
-                },
+                "id": 4,
+                "result": {"hooks": []},
             },
         },
         {
             "direction": "recv",
             "body": {
-                "id": 6,
+                "id": 5,
                 "result": {"source": {"path": str(review_family_source)}},
             },
         },
@@ -585,7 +487,6 @@ def test_build_readonly_inventory_requests_never_installs(tmp_path: Path) -> Non
     assert [request["method"] for request in requests] == [
         "initialize",
         "initialized",
-        "plugin/read",
         "plugin/read",
         "plugin/list",
         "skills/list",
@@ -608,7 +509,6 @@ def test_validate_readonly_inventory_contract_accepts_aligned_runtime(tmp_path: 
 
     assert inventory.state == "aligned"
     assert inventory.plugin_read_sources["handoff"].endswith("plugins/turbo-mode/handoff")
-    assert inventory.ticket_hook["command"].endswith("ticket_engine_guard.py")
     assert inventory.handoff_hooks == ()
     assert inventory.transcript_sha256 == hashlib.sha256(
         transcript_bytes(raw_transcript)
@@ -620,14 +520,13 @@ def test_validate_readonly_inventory_contract_accepts_structural_top_level_plugi
 ) -> None:
     refresh_paths = paths(tmp_path)
     raw = copy.deepcopy(list(transcript(refresh_paths)))
-    raw[3]["body"]["result"] = {
+    raw[2]["body"]["result"] = {
         "plugins": [
             {"id": "handoff@turbo-mode", "source": {"path": "/source/handoff"}},
             {
                 "id": "review-family@turbo-mode",
                 "source": {"path": "/source/review-family"},
             },
-            {"id": "ticket@turbo-mode", "source": {"path": "/source/ticket"}},
         ]
     }
 
@@ -641,7 +540,6 @@ def test_validate_readonly_inventory_contract_accepts_structural_top_level_plugi
     assert inventory.plugin_list == (
         "handoff@turbo-mode",
         "review-family@turbo-mode",
-        "ticket@turbo-mode",
     )
 
 
@@ -715,8 +613,8 @@ def test_validate_readonly_inventory_contract_rejects_plugin_list_id_in_wrong_fi
 ) -> None:
     refresh_paths = paths(tmp_path)
     raw = copy.deepcopy(list(transcript(refresh_paths)))
-    raw[3]["body"]["result"] = {
-        "notes": ["handoff@turbo-mode", "ticket@turbo-mode"],
+    raw[2]["body"]["result"] = {
+        "notes": ["handoff@turbo-mode", "review-family@turbo-mode"],
         "marketplaces": [],
     }
 
@@ -734,9 +632,9 @@ def test_validate_readonly_inventory_contract_rejects_missing_review_family_plug
 ) -> None:
     refresh_paths = paths(tmp_path)
     raw = copy.deepcopy(list(transcript(refresh_paths)))
-    raw[3]["body"]["result"]["plugins"] = [
+    raw[2]["body"]["result"]["plugins"] = [
         plugin
-        for plugin in raw[3]["body"]["result"]["plugins"]
+        for plugin in raw[2]["body"]["result"]["plugins"]
         if plugin != "review-family@turbo-mode"
     ]
 
@@ -754,13 +652,10 @@ def test_validate_readonly_inventory_contract_rejects_skill_name_in_wrong_field(
 ) -> None:
     refresh_paths = paths(tmp_path)
     raw = copy.deepcopy(list(transcript(refresh_paths)))
-    cache_prefix = str(refresh_paths.codex_home / "plugins/cache/turbo-mode/handoff/1.6.0/skills")
-    ticket_cache_prefix = str(
-        refresh_paths.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0/skills"
-    )
-    raw[4]["body"]["result"] = {
-        "notes": list(EXPECTED_HANDOFF_SKILLS + EXPECTED_TICKET_SKILLS),
-        "paths": [cache_prefix, ticket_cache_prefix],
+    cache_prefix = str(refresh_paths.codex_home / "plugins/cache/turbo-mode/handoff/1.7.0/skills")
+    raw[3]["body"]["result"] = {
+        "notes": list(EXPECTED_HANDOFF_SKILLS),
+        "paths": [cache_prefix],
         "skills": [],
     }
 
@@ -773,40 +668,22 @@ def test_validate_readonly_inventory_contract_rejects_skill_name_in_wrong_field(
         )
 
 
-def test_validate_readonly_inventory_contract_rejects_missing_ticket_hook(
+def test_validate_readonly_inventory_contract_accepts_empty_hooks(
     tmp_path: Path,
 ) -> None:
     refresh_paths = paths(tmp_path)
     raw = list(transcript(refresh_paths))
-    raw[-2] = {"direction": "recv", "body": {"id": 5, "result": {"hooks": []}}}
-
-    with pytest.raises(RefreshError, match="expected exactly one Ticket hook"):
-        validate_readonly_inventory_contract(
-            tuple(raw),
-            paths=refresh_paths,
-            identity=identity(),
-            request_methods=("initialize",),
-        )
-
-
-def test_validate_readonly_inventory_contract_accepts_disabled_ticket_hooks(
-    tmp_path: Path,
-) -> None:
-    refresh_paths = paths(tmp_path)
-    raw = list(transcript(refresh_paths))
-    raw[-2] = {"direction": "recv", "body": {"id": 5, "result": {"hooks": []}}}
 
     inventory = validate_readonly_inventory_contract(
         tuple(raw),
         paths=refresh_paths,
         identity=identity(),
         request_methods=("initialize",),
-        ticket_hook_policy="disabled",
     )
 
     assert inventory.state == "aligned"
-    assert inventory.ticket_hook == {}
-    assert inventory.reasons == ("ticket-hook-disabled-by-config",)
+    assert inventory.handoff_hooks == ()
+    assert inventory.reasons == ()
 
 
 def test_validate_readonly_inventory_contract_rejects_unexpected_handoff_hook(
@@ -836,7 +713,6 @@ def test_validate_readonly_inventory_contract_rejects_unexpected_handoff_hook(
 @pytest.mark.parametrize(
     "missing_skill",
     [
-        "ticket:ticket-triage",
         "review-family:scrutinize",
     ],
 )
@@ -846,9 +722,9 @@ def test_validate_readonly_inventory_contract_rejects_missing_skill(
 ) -> None:
     refresh_paths = paths(tmp_path)
     raw = list(transcript(refresh_paths))
-    raw[4]["body"]["result"]["skills"] = [
+    raw[3]["body"]["result"]["skills"] = [
         item
-        for item in raw[4]["body"]["result"]["skills"]
+        for item in raw[3]["body"]["result"]["skills"]
         if item["name"] != missing_skill
     ]
 
@@ -866,9 +742,9 @@ def test_validate_readonly_inventory_contract_allows_missing_review_family_skill
 ) -> None:
     refresh_paths = paths(tmp_path)
     raw = copy.deepcopy(list(transcript(refresh_paths)))
-    raw[4]["body"]["result"]["skills"] = [
+    raw[3]["body"]["result"]["skills"] = [
         item
-        for item in raw[4]["body"]["result"]["skills"]
+        for item in raw[3]["body"]["result"]["skills"]
         if not str(item["name"]).startswith("review-family:")
     ]
 
@@ -894,7 +770,7 @@ def test_validate_readonly_inventory_contract_rejects_review_family_skill_wrong_
         refresh_paths.codex_home
         / "plugins/cache/turbo-mode/review-family/9.9.9/skills/scrutinize/SKILL.md"
     )
-    for item in raw[4]["body"]["result"]["skills"]:
+    for item in raw[3]["body"]["result"]["skills"]:
         if item["name"] == "review-family:scrutinize":
             item["sourcePath"] = str(wrong_path)
             break
@@ -913,7 +789,7 @@ def test_validate_readonly_inventory_contract_rejects_review_family_skill_wrong_
         )
 
 
-@pytest.mark.parametrize("response_index", [1, 2, 6])
+@pytest.mark.parametrize("response_index", [1, 5])
 def test_validate_readonly_inventory_contract_rejects_plugin_read_plugin_dev_paths(
     tmp_path: Path,
     response_index: int,
@@ -936,7 +812,7 @@ def test_validate_readonly_inventory_contract_rejects_plugin_list_plugin_dev_pat
 ) -> None:
     refresh_paths = paths(tmp_path)
     raw = list(transcript(refresh_paths))
-    raw[3]["body"]["result"]["sourcePath"] = "/tmp/plugin-dev/turbo-mode/plugin.json"
+    raw[2]["body"]["result"]["sourcePath"] = "/tmp/plugin-dev/turbo-mode/plugin.json"
 
     with pytest.raises(RefreshError, match="plugin/list contains plugin-dev path"):
         validate_readonly_inventory_contract(
@@ -952,65 +828,9 @@ def test_validate_readonly_inventory_contract_rejects_skills_plugin_dev_path(
 ) -> None:
     refresh_paths = paths(tmp_path)
     raw = list(transcript(refresh_paths))
-    raw[4]["body"]["result"]["skills"][0]["sourcePath"] = "/tmp/plugin-dev/SKILL.md"
+    raw[3]["body"]["result"]["skills"][0]["sourcePath"] = "/tmp/plugin-dev/SKILL.md"
 
     with pytest.raises(RefreshError, match="skills/list contains plugin-dev path"):
-        validate_readonly_inventory_contract(
-            tuple(raw),
-            paths=refresh_paths,
-            identity=identity(),
-            request_methods=("initialize",),
-        )
-
-
-def test_validate_readonly_inventory_contract_rejects_wrong_ticket_hook_command(
-    tmp_path: Path,
-) -> None:
-    refresh_paths = paths(tmp_path)
-    raw = list(transcript(refresh_paths))
-    raw[-2]["body"]["result"]["hooks"][0]["command"] = "python3 /wrong/ticket_engine_guard.py"
-
-    with pytest.raises(RefreshError, match="Ticket hook command mismatch"):
-        validate_readonly_inventory_contract(
-            tuple(raw),
-            paths=refresh_paths,
-            identity=identity(),
-            request_methods=("initialize",),
-        )
-
-
-def test_validate_readonly_inventory_contract_rejects_wrong_ticket_hook_source_path(
-    tmp_path: Path,
-) -> None:
-    refresh_paths = paths(tmp_path)
-    raw = list(transcript(refresh_paths))
-    raw[-2]["body"]["result"]["hooks"][0]["sourcePath"] = "/wrong/hooks.json"
-
-    with pytest.raises(RefreshError, match="Ticket hook sourcePath mismatch"):
-        validate_readonly_inventory_contract(
-            tuple(raw),
-            paths=refresh_paths,
-            identity=identity(),
-            request_methods=("initialize",),
-        )
-
-
-def test_validate_readonly_inventory_contract_rejects_additional_ticket_hook(
-    tmp_path: Path,
-) -> None:
-    refresh_paths = paths(tmp_path)
-    raw = copy.deepcopy(list(transcript(refresh_paths)))
-    raw[-2]["body"]["result"]["hooks"].append(
-        {
-            "pluginId": "ticket@turbo-mode",
-            "eventName": "postToolUse",
-            "matcher": "Bash",
-            "command": "python3 other.py",
-            "sourcePath": "/other/hooks.json",
-        }
-    )
-
-    with pytest.raises(RefreshError, match="expected exactly one Ticket hook"):
         validate_readonly_inventory_contract(
             tuple(raw),
             paths=refresh_paths,
@@ -1116,7 +936,7 @@ def test_app_server_roundtrip_runs_after_response_callback_before_next_request(
         def write(self, value: str) -> None:
             request = json.loads(value)
             if request.get("id") == 3:
-                assert "rewrote-ticket-hook" in events
+                assert "post-install-callback" in events
             events.append(f"send-{request.get('id')}")
 
         def flush(self) -> None:
@@ -1146,7 +966,7 @@ def test_app_server_roundtrip_runs_after_response_callback_before_next_request(
         _transcript: list[dict[str, object]],
     ) -> None:
         if request.get("id") == 2 and response.get("id") == 2:
-            events.append("rewrote-ticket-hook")
+            events.append("post-install-callback")
 
     monkeypatch.setattr(inventory_module.subprocess, "Popen", FakeProcess)
 
@@ -1166,7 +986,7 @@ def test_app_server_roundtrip_runs_after_response_callback_before_next_request(
         2,
         3,
     ]
-    assert events == ["send-1", "send-2", "rewrote-ticket-hook", "send-3"]
+    assert events == ["send-1", "send-2", "post-install-callback", "send-3"]
 
 
 def test_app_server_roundtrip_drains_stderr_while_waiting_for_response(
@@ -1453,8 +1273,8 @@ def test_collect_app_server_launch_authority_rejects_real_home_resolution_for_is
     refresh_paths = paths(tmp_path)
     raw = list(transcript(refresh_paths))
     raw[0]["body"]["result"]["codexHome"] = "/Users/jp/.codex"
-    raw[4]["body"]["result"]["skills"][0]["sourcePath"] = (
-        "/Users/jp/.codex/plugins/cache/turbo-mode/handoff/1.6.0/skills/save/SKILL.md"
+    raw[3]["body"]["result"]["skills"][0]["sourcePath"] = (
+        "/Users/jp/.codex/plugins/cache/turbo-mode/handoff/1.7.0/skills/save/SKILL.md"
     )
 
     with pytest.raises(RefreshError, match="requested Codex home binding mismatch"):
@@ -1488,7 +1308,7 @@ def test_build_install_requests_require_matching_preinstall_authority(tmp_path: 
         initialize_result={"codexHome": str(refresh_paths.codex_home)},
         accepted_response_schema_version="app-server-readonly-inventory-v1",
         candidate_mechanisms_checked=(),
-        plugin_read_sources={"handoff": "x", "ticket": "y", "review-family": "z"},
+        plugin_read_sources={"handoff": "x", "review-family": "z"},
         skill_paths=(),
         hook_paths=(),
     )
@@ -1516,7 +1336,6 @@ def test_build_install_requests_require_matching_preinstall_authority(tmp_path: 
     )
 
     assert [request["method"] for request in requests] == [
-        "plugin/install",
         "plugin/install",
         "plugin/install",
     ]
@@ -1575,34 +1394,25 @@ def test_validate_install_responses_require_post_install_corroboration(
     )
 
     assert isinstance(install_authority, AppServerInstallAuthority)
-    assert install_authority.installed_destination_paths["handoff"].endswith("/handoff/1.6.0")
+    assert install_authority.installed_destination_paths["handoff"].endswith("/handoff/1.7.0")
     assert install_authority.installed_destination_paths["review-family"].endswith(
         "/review-family/0.1.0"
     )
-    assert install_authority.installed_destination_paths["ticket"].endswith("/ticket/1.4.0")
     assert install_authority.accepted_install_response_schema_by_plugin == {
         "handoff": "sparse-success-auth-v1",
         "review-family": "sparse-success-auth-v1",
-        "ticket": "sparse-success-auth-v1",
     }
     assert install_authority.same_child_post_install_corroboration_sha256
     assert install_authority.fresh_child_post_install_corroboration_sha256
     assert install_authority.pre_install_cache_manifest_sha256["handoff"]
     assert install_authority.pre_install_cache_manifest_sha256["review-family"]
-    assert install_authority.pre_install_cache_manifest_sha256["ticket"]
     assert install_authority.post_install_cache_manifest_sha256["handoff"]
     assert install_authority.post_install_cache_manifest_sha256["review-family"]
-    assert install_authority.post_install_cache_manifest_sha256["ticket"]
     assert install_authority.cache_manifest_delta_sha256["handoff"]
     assert install_authority.cache_manifest_delta_sha256["review-family"]
-    assert install_authority.cache_manifest_delta_sha256["ticket"]
     assert (
         install_authority.pre_install_cache_manifest_sha256["handoff"]
         != install_authority.post_install_cache_manifest_sha256["handoff"]
-    )
-    assert (
-        install_authority.pre_install_cache_manifest_sha256["ticket"]
-        != install_authority.post_install_cache_manifest_sha256["ticket"]
     )
     assert (
         install_authority.pre_install_cache_manifest_sha256["review-family"]
@@ -1641,16 +1451,11 @@ def test_validate_install_responses_record_noop_pre_and_post_manifests(
         == install_authority.post_install_cache_manifest_sha256["handoff"]
     )
     assert (
-        install_authority.pre_install_cache_manifest_sha256["ticket"]
-        == install_authority.post_install_cache_manifest_sha256["ticket"]
-    )
-    assert (
         install_authority.pre_install_cache_manifest_sha256["review-family"]
         == install_authority.post_install_cache_manifest_sha256["review-family"]
     )
     assert install_authority.cache_manifest_delta_sha256["handoff"]
     assert install_authority.cache_manifest_delta_sha256["review-family"]
-    assert install_authority.cache_manifest_delta_sha256["ticket"]
 
 
 def test_validate_install_responses_accepts_disabled_same_child_hooks(
@@ -1669,17 +1474,13 @@ def test_validate_install_responses_accepts_disabled_same_child_hooks(
         expected_launch_authority_sha256=authority_digest(launch_authority),
         expected_marketplace_path=refresh_paths.marketplace_path,
     )
-    same_child = list(transcript(refresh_paths))
-    same_child[-2] = {"direction": "recv", "body": {"id": 5, "result": {"hooks": []}}}
-
     install_authority = validate_install_responses(
         transcript=install_transcript(refresh_paths, sparse_success=True),
         launch_authority=launch_authority,
         pre_install_authority=pre_install_authority,
         install_requests=tuple(install_requests),
-        same_child_post_install_transcript=tuple(same_child),
+        same_child_post_install_transcript=transcript(refresh_paths),
         fresh_child_post_install_transcript=transcript(refresh_paths),
-        same_child_ticket_hook_policy="disabled",
     )
 
     assert install_authority.same_child_post_install_corroboration_sha256
@@ -1722,7 +1523,7 @@ def test_validate_install_responses_reject_stale_preinstall_authority_digest(
                     "method": "plugin/install",
                     "params": {
                         "marketplacePath": str(refresh_paths.marketplace_path),
-                        "pluginName": "ticket",
+                        "pluginName": "review-family",
                         "remoteMarketplaceName": None,
                     },
                 },
@@ -1800,7 +1601,7 @@ def test_validate_install_responses_reject_mismatched_preinstall_install_root(
                     "method": "plugin/install",
                     "params": {
                         "marketplacePath": str(refresh_paths.marketplace_path),
-                        "pluginName": "ticket",
+                        "pluginName": "review-family",
                         "remoteMarketplaceName": None,
                     },
                 },
@@ -1828,7 +1629,7 @@ def test_authority_serialization_and_artifact_writes_use_module_helpers(tmp_path
         initialize_result={"codexHome": str(refresh_paths.codex_home)},
         accepted_response_schema_version="app-server-readonly-inventory-v1",
         candidate_mechanisms_checked=(),
-        plugin_read_sources={"handoff": "x", "ticket": "y", "review-family": "z"},
+        plugin_read_sources={"handoff": "x", "review-family": "z"},
         skill_paths=(),
         hook_paths=(),
     )
@@ -1847,23 +1648,23 @@ def test_authority_serialization_and_artifact_writes_use_module_helpers(tmp_path
 
 def test_blocker_inventory_counts_include_nested_data_shapes() -> None:
     responses = {
-        4: {
+        3: {
             "data": [
                 {
                     "skills": [
                         {"name": "handoff:save", "path": "/tmp/handoff-save"},
-                        {"name": "ticket:ticket", "path": "/tmp/ticket"},
+                        {"name": "review-family:scrutinize", "path": "/tmp/review-family"},
                     ]
                 }
             ]
         },
-        5: {
+        4: {
             "data": [
                 {
                     "hooks": [
                         {
-                            "pluginId": "ticket@turbo-mode",
-                            "command": "python3 /tmp/ticket_engine_guard.py",
+                            "pluginId": "review-family@turbo-mode",
+                            "command": "python3 /tmp/review_family.py",
                         }
                     ]
                 }
@@ -1877,143 +1678,7 @@ def test_blocker_inventory_counts_include_nested_data_shapes() -> None:
     assert hooks_count == 1
 
 
-@pytest.mark.parametrize(
-    "source_command",
-    [
-        REAL_HOME_TICKET_COMMAND,
-        OTHER_HOME_TICKET_COMMAND,
-    ],
-)
-def test_rewrite_ticket_hook_manifest_binds_command_to_requested_plugin_root(
-    tmp_path: Path,
-    source_command: str,
-) -> None:
-    plugin_root = tmp_path / ".codex/plugins/cache/turbo-mode/ticket/1.4.0"
-    plugin_root.mkdir(parents=True)
-    hooks_path = plugin_root / "hooks/hooks.json"
-    hooks_path.parent.mkdir(parents=True)
-    hooks_path.write_text(
-        json.dumps(
-            {
-                "description": "Ticket engine guard",
-                "hooks": {
-                    "PreToolUse": [
-                        {
-                            "matcher": "Bash",
-                            "hooks": [
-                                {
-                                    "type": "command",
-                                    "command": source_command,
-                                    "timeout": 10,
-                                }
-                            ],
-                        }
-                    ]
-                },
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    rewrite_ticket_hook_manifest(ticket_plugin_root=plugin_root)
-
-    payload = json.loads(hooks_path.read_text(encoding="utf-8"))
-    command = payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-    assert command == f"python3 {plugin_root}/hooks/ticket_engine_guard.py"
-    assert "/Users/jp/.codex/" not in command
-
-
-def test_rewrite_ticket_hook_manifest_quotes_requested_plugin_root_with_spaces(
-    tmp_path: Path,
-) -> None:
-    plugin_root = (
-        tmp_path / "operator home/.codex/plugins/cache/turbo-mode/ticket/1.4.0"
-    )
-    plugin_root.mkdir(parents=True)
-    hooks_path = plugin_root / "hooks/hooks.json"
-    hooks_path.parent.mkdir(parents=True)
-    hooks_path.write_text(
-        json.dumps(
-            {
-                "description": "Ticket engine guard",
-                "hooks": {
-                    "PreToolUse": [
-                        {
-                            "matcher": "Bash",
-                            "hooks": [
-                                {
-                                    "type": "command",
-                                    "command": OTHER_HOME_TICKET_COMMAND,
-                                    "timeout": 10,
-                                }
-                            ],
-                        }
-                    ]
-                },
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    rewrite_ticket_hook_manifest(ticket_plugin_root=plugin_root)
-
-    payload = json.loads(hooks_path.read_text(encoding="utf-8"))
-    command = payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-    script_path = plugin_root / "hooks/ticket_engine_guard.py"
-    assert shlex.split(command) == ["python3", str(script_path)]
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        REAL_HOME_TICKET_COMMAND.replace("python3 ", "python ", 1),
-        OTHER_HOME_WRONG_LAYOUT_TICKET_COMMAND,
-        REAL_HOME_TICKET_COMMAND_WITH_ARGS,
-        REAL_HOME_WRONG_TICKET_COMMAND,
-    ],
-)
-def test_rewrite_ticket_hook_manifest_rejects_unexpected_command_shape(
-    tmp_path: Path,
-    command: str,
-) -> None:
-    plugin_root = tmp_path / ".codex/plugins/cache/turbo-mode/ticket/1.4.0"
-    plugin_root.mkdir(parents=True)
-    hooks_path = plugin_root / "hooks/hooks.json"
-    hooks_path.parent.mkdir(parents=True)
-    hooks_path.write_text(
-        json.dumps(
-            {
-                "description": "Ticket engine guard",
-                "hooks": {
-                    "PreToolUse": [
-                        {
-                            "matcher": "Bash",
-                            "hooks": [
-                                {
-                                    "type": "command",
-                                    "command": command,
-                                    "timeout": 10,
-                                }
-                            ],
-                        }
-                    ]
-                },
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(RefreshError, match="unexpected Ticket hook command"):
-        rewrite_ticket_hook_manifest(ticket_plugin_root=plugin_root)
-
-
-def test_seed_isolated_codex_home_rewrites_ticket_hook_manifest_to_isolated_root(
+def test_seed_isolated_codex_home_copies_active_plugins_and_ignores_residue(
     tmp_path: Path,
 ) -> None:
     repo_root = tmp_path / "repo"
@@ -2031,40 +1696,6 @@ def test_seed_isolated_codex_home_rewrites_ticket_hook_manifest_to_isolated_root
     (handoff_source_root / ".venv").mkdir()
     (handoff_source_root / ".venv/pyvenv.cfg").write_text(
         "synthetic residue\n",
-        encoding="utf-8",
-    )
-
-    ticket_source_root = repo_root / "plugins/turbo-mode/ticket"
-    (ticket_source_root / ".codex-plugin").mkdir(parents=True)
-    (ticket_source_root / ".codex-plugin/plugin.json").write_text(
-        json.dumps({"name": "ticket", "version": "1.4.0"}) + "\n",
-        encoding="utf-8",
-    )
-    (ticket_source_root / "hooks").mkdir(parents=True)
-    (ticket_source_root / "hooks/hooks.json").write_text(
-        json.dumps(
-            {
-                "hooks": {
-                    "PreToolUse": [
-                        {
-                            "matcher": "Bash",
-                            "hooks": [
-                                {
-                                    "type": "command",
-                                    "command": REAL_HOME_TICKET_COMMAND,
-                                    "timeout": 10,
-                                }
-                            ],
-                        }
-                    ]
-                }
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    (ticket_source_root / "hooks/ticket_engine_guard.py").write_text(
-        "#!/usr/bin/env python3\n",
         encoding="utf-8",
     )
 
@@ -2087,15 +1718,8 @@ def test_seed_isolated_codex_home_rewrites_ticket_hook_manifest_to_isolated_root
     handoff_cache = isolated_home / "plugins/cache/turbo-mode/handoff/1.7.0"
     assert (handoff_cache / ".codex-plugin/plugin.json").exists()
     assert not (handoff_cache / ".venv").exists()
-
-    hooks_path = isolated_home / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
-    payload = json.loads(hooks_path.read_text(encoding="utf-8"))
-    command = payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-    expected_command = (
-        f"python3 {isolated_home}/plugins/cache/turbo-mode/ticket/1.4.0/"
-        "hooks/ticket_engine_guard.py"
-    )
-    assert command == expected_command
+    review_family_cache = isolated_home / "plugins/cache/turbo-mode/review-family/0.1.0"
+    assert (review_family_cache / ".codex-plugin/plugin.json").exists()
 
 
 @pytest.mark.skipif(
@@ -2191,24 +1815,11 @@ def test_app_server_authority_spike() -> None:
         blocker_stage = "isolated-install-authority"
         install_transcript_path = isolated_run_root / "install.transcript.json"
 
-        def repair_ticket_hook_after_install(
-            request: dict[str, object],
-            response: dict[str, object],
-            _transcript: list[dict[str, object]],
-        ) -> None:
-            if request.get("id") != 2 or response.get("id") != 2:
-                return
-            rewrite_ticket_hook_manifest(
-                ticket_plugin_root=isolated_home
-                / "plugins/cache/turbo-mode/ticket/1.4.0"
-            )
-
         install_transcript_live = tuple(
             app_server_roundtrip(
                 install_roundtrip_requests,
                 env_overrides={"CODEX_HOME": str(isolated_home)},
                 cwd=scratch,
-                after_response=repair_ticket_hook_after_install,
             )
         )
         write_json_artifact(install_transcript_path, install_transcript_live)

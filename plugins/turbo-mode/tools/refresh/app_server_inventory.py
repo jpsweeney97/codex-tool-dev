@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 import queue
-import shlex
 import shutil
 import subprocess
 import tempfile
@@ -23,16 +22,13 @@ PARSER_VERSION = "refresh-app-server-inventory-1"
 ACCEPTED_RESPONSE_SCHEMA_VERSION = "app-server-readonly-inventory-v1"
 REQUEST_TIMEOUT_SECONDS = 30.0
 EXPECTED_HANDOFF_SKILLS = (
-    "handoff:defer",
     "handoff:distill",
     "handoff:load",
     "handoff:quicksave",
     "handoff:save",
     "handoff:search",
     "handoff:summary",
-    "handoff:triage",
 )
-EXPECTED_TICKET_SKILLS = ("ticket:ticket", "ticket:ticket-triage")
 EXPECTED_REVIEW_FAMILY_SKILLS = (
     "review-family:adversarial-review",
     "review-family:implementation-review",
@@ -44,7 +40,7 @@ EXPECTED_REVIEW_FAMILY_SKILLS = (
     "review-family:scrutinize-skill",
     "review-family:system-design-review",
 )
-EXPECTED_RESPONSE_IDS = frozenset({0, 1, 2, 3, 4, 5, 6})
+EXPECTED_RESPONSE_IDS = frozenset({0, 1, 2, 3, 4, 5})
 
 
 def real_codex_home() -> Path:
@@ -53,11 +49,10 @@ def real_codex_home() -> Path:
 
 REAL_CODEX_HOME = real_codex_home()
 APP_SERVER_RESPONSE_SCHEMA_VERSION = ACCEPTED_RESPONSE_SCHEMA_VERSION
-PLUGIN_VERSIONS = {"handoff": "1.6.0", "ticket": "1.4.0", "review-family": "0.1.0"}
-PLUGIN_READ_RESPONSE_IDS = {"handoff": 1, "ticket": 2, "review-family": 6}
+PLUGIN_VERSIONS = {"handoff": "1.7.0", "review-family": "0.1.0"}
+PLUGIN_READ_RESPONSE_IDS = {"handoff": 1, "review-family": 5}
 EXPECTED_SKILLS_BY_PLUGIN = {
     "handoff": EXPECTED_HANDOFF_SKILLS,
-    "ticket": EXPECTED_TICKET_SKILLS,
     "review-family": EXPECTED_REVIEW_FAMILY_SKILLS,
 }
 
@@ -153,7 +148,6 @@ class AppServerInventoryCheck:
     plugin_read_sources: dict[str, str]
     plugin_list: tuple[str, ...]
     skills: tuple[str, ...]
-    ticket_hook: dict[str, str]
     handoff_hooks: tuple[dict[str, str], ...]
     request_methods: tuple[str, ...]
     transcript_sha256: str
@@ -207,34 +201,6 @@ def write_json_artifact(path: Path, payload: object) -> None:
     path.chmod(0o600)
 
 
-def rewrite_ticket_hook_manifest(*, ticket_plugin_root: Path) -> Path:
-    hooks_path = ticket_plugin_root / "hooks" / "hooks.json"
-    try:
-        payload = json.loads(hooks_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        fail("rewrite Ticket hook manifest", str(exc), str(hooks_path))
-    try:
-        hook = payload["hooks"]["PreToolUse"][0]["hooks"][0]
-    except (KeyError, IndexError, TypeError) as exc:
-        fail("rewrite Ticket hook manifest", f"unexpected hook structure: {exc}", str(hooks_path))
-    if not isinstance(hook, dict):
-        fail("rewrite Ticket hook manifest", "hook entry is not an object", hook)
-    current_command = hook.get("command")
-    if not isinstance(current_command, str):
-        fail(
-            "rewrite Ticket hook manifest",
-            "unexpected Ticket hook command",
-            current_command,
-        )
-    parse_ticket_guard_command(
-        current_command,
-        operation="rewrite Ticket hook manifest",
-    )
-    hook["command"] = _ticket_guard_command(ticket_plugin_root)
-    hooks_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    return hooks_path
-
-
 def build_readonly_inventory_requests(paths: Any, *, scratch_cwd: Path) -> list[dict[str, Any]]:
     marketplace = str(paths.marketplace_path)
     return [
@@ -258,22 +224,13 @@ def build_readonly_inventory_requests(paths: Any, *, scratch_cwd: Path) -> list[
         },
         {
             "id": 2,
-            "method": "plugin/read",
-            "params": {
-                "marketplacePath": marketplace,
-                "pluginName": "ticket",
-                "remoteMarketplaceName": None,
-            },
-        },
-        {
-            "id": 3,
             "method": "plugin/list",
             "params": {"marketplacePath": marketplace, "remoteMarketplaceName": None},
         },
-        {"id": 4, "method": "skills/list", "params": {"cwds": [str(scratch_cwd)]}},
-        {"id": 5, "method": "hooks/list", "params": {"cwds": [str(scratch_cwd)]}},
+        {"id": 3, "method": "skills/list", "params": {"cwds": [str(scratch_cwd)]}},
+        {"id": 4, "method": "hooks/list", "params": {"cwds": [str(scratch_cwd)]}},
         {
-            "id": 6,
+            "id": 5,
             "method": "plugin/read",
             "params": {
                 "marketplacePath": marketplace,
@@ -570,7 +527,6 @@ def collect_app_server_launch_authority(
     app_server_help_text: str | None = None,
     codex_help_text: str | None = None,
     executable: str | None = None,
-    ticket_hook_policy: str = "required",
     allow_missing_plugins: tuple[str, ...] = (),
 ) -> tuple[AppServerLaunchAuthority, tuple[dict[str, Any], ...]]:
     needs_executable = (
@@ -638,7 +594,6 @@ def collect_app_server_launch_authority(
         paths=paths,
         identity=identity,
         request_methods=tuple(request.get("method", "") for request in requests),
-        ticket_hook_policy=ticket_hook_policy,
         allow_missing_plugins=allow_missing_plugins,
     )
     candidates = discover_binding_candidates(
@@ -647,8 +602,8 @@ def collect_app_server_launch_authority(
         initialize_result=initialize_result,
         requested_codex_home=paths.codex_home,
     )
-    skill_paths = observed_skill_paths(responses[4])
-    hook_paths = observed_hook_paths(responses[5])
+    skill_paths = observed_skill_paths(responses[3])
+    hook_paths = observed_hook_paths(responses[4])
     if paths.codex_home != REAL_CODEX_HOME:
         real_home_prefix = f"{REAL_CODEX_HOME}/"
         for path_value in (
@@ -785,7 +740,6 @@ def validate_install_responses(
     install_requests: tuple[dict[str, Any], ...],
     same_child_post_install_transcript: tuple[dict[str, Any], ...] | None = None,
     fresh_child_post_install_transcript: tuple[dict[str, Any], ...] | None = None,
-    same_child_ticket_hook_policy: str = "required",
 ) -> AppServerInstallAuthority:
     _validate_install_authority_link(
         launch_authority=launch_authority,
@@ -809,14 +763,12 @@ def validate_install_responses(
         label="same-child",
         launch_authority=launch_authority,
         pre_install_authority=pre_install_authority,
-        ticket_hook_policy=same_child_ticket_hook_policy,
     )
     fresh_child_corroboration_sha256 = _validate_post_install_corroboration(
         transcript=fresh_child_post_install_transcript,
         label="fresh-child",
         launch_authority=launch_authority,
         pre_install_authority=pre_install_authority,
-        ticket_hook_policy="required",
     )
     for request_id, plugin_name in enumerate(PLUGIN_VERSIONS, start=1):
         request = request_by_id.get(request_id)
@@ -910,7 +862,6 @@ def _validate_post_install_corroboration(
     label: str,
     launch_authority: AppServerLaunchAuthority,
     pre_install_authority: AppServerPreInstallTargetAuthority,
-    ticket_hook_policy: str,
 ) -> str:
     if transcript is None:
         fail(
@@ -935,7 +886,6 @@ def _validate_post_install_corroboration(
         paths=paths,
         identity=identity,
         request_methods=("post-install-corroboration", label),
-        ticket_hook_policy=ticket_hook_policy,
     )
     if paths.codex_home != REAL_CODEX_HOME and json_contains(transcript, f"{REAL_CODEX_HOME}/"):
         fail(
@@ -964,40 +914,6 @@ def _install_authority_paths(
         codex_home=Path(pre_install_authority.requested_codex_home),
         marketplace_path=marketplace_path,
     )
-
-
-def _ticket_guard_command(plugin_root: Path) -> str:
-    script_path = plugin_root / "hooks/ticket_engine_guard.py"
-    return f"python3 {shlex.quote(str(script_path))}"
-
-
-def parse_ticket_guard_command(
-    command: str,
-    *,
-    operation: str,
-    ticket_version: str = PLUGIN_VERSIONS["ticket"],
-) -> Path:
-    try:
-        argv = shlex.split(command)
-    except ValueError as exc:
-        fail(operation, f"unexpected Ticket hook command: {exc}", command)
-    if len(argv) != 2 or argv[0] != "python3":
-        fail(operation, "unexpected Ticket hook command", command)
-    script_path = Path(argv[1])
-    if not script_path.is_absolute():
-        fail(operation, "unexpected Ticket hook command", command)
-    expected_suffix = (
-        "plugins",
-        "cache",
-        "turbo-mode",
-        "ticket",
-        ticket_version,
-        "hooks",
-        "ticket_engine_guard.py",
-    )
-    if tuple(script_path.parts[-len(expected_suffix) :]) != expected_suffix:
-        fail(operation, "unexpected Ticket hook command", command)
-    return script_path
 
 
 def _validate_install_authority_link(
@@ -1251,11 +1167,8 @@ def validate_readonly_inventory_contract(
     paths: Any,
     identity: CodexRuntimeIdentity,
     request_methods: tuple[str, ...],
-    ticket_hook_policy: str = "required",
     allow_missing_plugins: tuple[str, ...] = (),
 ) -> AppServerInventoryCheck:
-    if ticket_hook_policy not in {"required", "disabled"}:
-        fail("inventory contract", "unexpected Ticket hook policy", ticket_hook_policy)
     responses = response_by_id(transcript)
     missing = sorted(EXPECTED_RESPONSE_IDS - set(responses))
     if missing:
@@ -1269,31 +1182,23 @@ def validate_readonly_inventory_contract(
         )
         for plugin, response_id in PLUGIN_READ_RESPONSE_IDS.items()
     }
-    plugin_list = validate_plugin_list_response(responses[3], paths)
+    plugin_list = validate_plugin_list_response(responses[2], paths)
     skills, skill_reasons = validate_skills_response(
-        responses[4],
+        responses[3],
         paths,
         allow_missing_plugins=allow_missing_plugins,
     )
-    if ticket_hook_policy == "required":
-        ticket_hook = validate_hooks_response(responses[5], paths)
-        reasons = skill_reasons
-    else:
-        validate_hooks_disabled_response(responses[5])
-        ticket_hook = {}
-        reasons = (*skill_reasons, "ticket-hook-disabled-by-config")
-    handoff_hooks = validate_no_handoff_hooks(responses[5])
+    handoff_hooks = validate_no_handoff_hooks(responses[4])
     return AppServerInventoryCheck(
         state="aligned",
         identity=identity,
         plugin_read_sources=plugin_read_sources,
         plugin_list=tuple(plugin_list),
         skills=tuple(skills),
-        ticket_hook=ticket_hook,
         handoff_hooks=tuple(handoff_hooks),
         request_methods=request_methods,
         transcript_sha256=transcript_sha256(transcript),
-        reasons=reasons,
+        reasons=skill_reasons,
     )
 
 
@@ -1375,35 +1280,6 @@ def _normalize_allowed_missing_plugins(allow_missing_plugins: tuple[str, ...]) -
     if unknown:
         fail("inventory contract", "unexpected allowed missing plugins", unknown)
     return allowed
-
-
-def validate_hooks_response(response: dict[str, Any], paths: Any) -> dict[str, str]:
-    ticket_hooks = [
-        item for item in hook_records(response) if item.get("pluginId") == "ticket@turbo-mode"
-    ]
-    if len(ticket_hooks) != 1:
-        fail("inventory contract", "expected exactly one Ticket hook", len(ticket_hooks))
-    hook = ticket_hooks[0]
-    if hook.get("eventName") != "preToolUse" or hook.get("matcher") != "Bash":
-        fail("inventory contract", "Ticket hook event or matcher mismatch", hook)
-    command = str(hook.get("command", ""))
-    source_path = str(hook.get("sourcePath", ""))
-    expected_cache = paths.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
-    expected_command = f"python3 {expected_cache}/hooks/ticket_engine_guard.py"
-    expected_source = f"{expected_cache}/hooks/hooks.json"
-    if command != expected_command:
-        fail("inventory contract", "Ticket hook command mismatch", command)
-    if source_path != expected_source:
-        fail("inventory contract", "Ticket hook sourcePath mismatch", source_path)
-    if "/plugin-dev/" in command or "/plugin-dev/" in source_path:
-        fail("inventory contract", "Ticket hook contains plugin-dev path", hook)
-    return {"command": command, "sourcePath": source_path}
-
-
-def validate_hooks_disabled_response(response: dict[str, Any]) -> None:
-    hooks = hook_records(response)
-    if hooks:
-        fail("inventory contract", "expected no hooks while plugin hooks are disabled", hooks)
 
 
 def validate_no_handoff_hooks(response: dict[str, Any]) -> list[dict[str, str]]:

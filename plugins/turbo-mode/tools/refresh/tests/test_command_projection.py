@@ -8,19 +8,16 @@ def test_projection_extracts_shell_blocks_and_command_lines() -> None:
     text = """# Command
 
 ```bash
-python3 -B <PLUGIN_ROOT>/scripts/ticket_triage.py dashboard <TICKETS_DIR>
+python3 -B <PLUGIN_ROOT>/scripts/search.py query
 ```
 
-uv run pytest tests/test_ticket.py -q
+uv run pytest tests/test_skill_docs.py -q
 """
 
     projection = extract_command_projection(text)
 
-    assert (
-        "python3 -B <PLUGIN_ROOT>/scripts/ticket_triage.py dashboard <TICKETS_DIR>"
-        in projection.items
-    )
-    assert "uv run pytest tests/test_ticket.py -q" in projection.items
+    assert "python3 -B <PLUGIN_ROOT>/scripts/search.py query" in projection.items
+    assert "uv run pytest tests/test_skill_docs.py -q" in projection.items
 
 
 def test_projection_preserves_shell_fence_non_comment_commands() -> None:
@@ -29,14 +26,14 @@ def test_projection_preserves_shell_fence_non_comment_commands() -> None:
 ```shell
 # inspect branch state
 git status --short
-PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/test_ticket.py -q
+PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/test_skill_docs.py -q
 ```
 """
 
     projection = extract_command_projection(text)
 
     assert "git status --short" in projection.items
-    assert "PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/test_ticket.py -q" in projection.items
+    assert "PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/test_skill_docs.py -q" in projection.items
     assert "# inspect branch state" not in projection.items
 
 
@@ -58,18 +55,21 @@ def test_projection_extracts_untyped_command_blocks_and_json_payloads() -> None:
     text = """# Examples
 
 ```
-codex plugin/read turbo-mode ticket
+codex plugin/read turbo-mode handoff
 ```
 
 ```json
-{"request": "tool/execute", "action": "ticket.open", "ticket": "T-123"}
+{"request": "tool/execute", "action": "handoff.search", "query": "release"}
 ```
 """
 
     projection = extract_command_projection(text)
 
-    assert "codex plugin/read turbo-mode ticket" in projection.items
-    assert '{"action":"ticket.open","request":"tool/execute","ticket":"T-123"}' in projection.items
+    assert "codex plugin/read turbo-mode handoff" in projection.items
+    assert (
+        '{"action":"handoff.search","query":"release","request":"tool/execute"}'
+        in projection.items
+    )
 
 
 def test_projection_warns_on_malformed_json_payloads() -> None:
@@ -98,18 +98,18 @@ def test_projection_extracts_command_table_rows() -> None:
 def test_projection_extracts_command_header_table_cells() -> None:
     text = """| Command | Purpose |
 | --- | --- |
-| `plugin/read turbo-mode ticket` | inspect runtime inventory |
+| `plugin/read turbo-mode handoff` | inspect runtime inventory |
 """
 
     projection = extract_command_projection(text)
 
-    assert "plugin/read turbo-mode ticket" in projection.items
+    assert "plugin/read turbo-mode handoff" in projection.items
 
 
 def test_projection_extracts_longest_and_all_slash_commands() -> None:
-    projection = extract_command_projection("Run /ticket-triage, then /save and /load.\n")
+    projection = extract_command_projection("Run /search, then /save and /load.\n")
 
-    assert projection.items == ("/ticket-triage", "/save", "/load")
+    assert projection.items == ("/search", "/save", "/load")
 
 
 def test_projection_ignores_generic_state_and_action_table() -> None:

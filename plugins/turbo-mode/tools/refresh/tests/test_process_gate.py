@@ -24,15 +24,6 @@ REFRESH_COMMAND = (
 )
 
 
-TICKET_GUARD_COMMAND = (
-    "python3 "
-    "/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/hooks/"
-    "ticket_engine_guard.py"
-)
-TICKET_HOOKS_CONSUMER_COMMAND = (
-    "python3 -c "
-    "open('/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json')"
-)
 REFRESH_COMMAND_TEXT = (
     "python3 plugins/turbo-mode/tools/refresh_installed_turbo_mode.py "
     "--guarded-refresh"
@@ -162,30 +153,6 @@ def test_unrelated_codex_app_server_blocks() -> None:
     )
 
 
-def test_installed_ticket_hook_runtime_blocks() -> None:
-    assert_classification(
-        row(300, TICKET_GUARD_COMMAND),
-        "ticket-hook-runtime",
-        blocking=True,
-    )
-
-
-def test_ticket_hook_path_consumer_blocks() -> None:
-    assert_classification(
-        row(
-            301,
-            TICKET_HOOKS_CONSUMER_COMMAND,
-            argv=(
-                "python3",
-                "-c",
-                "open('/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json')",
-            ),
-        ),
-        "ticket-hook-path-consumer",
-        blocking=True,
-    )
-
-
 def test_harmless_codex_substring_path_is_non_blocking() -> None:
     assert_classification(
         row(400, "python3 /tmp/codex-not-a-process/file.txt"),
@@ -256,8 +223,6 @@ def test_truncated_high_risk_rows_block_as_uncertain() -> None:
     markers = [
         "codex app-server --listen",
         "/Applications/Codex.app/Contents",
-        "python3 /Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0/hooks/ticket_engine_",
-        "python3 ticket_workflow.py",
     ]
     for index, command in enumerate(markers, start=1):
         assert_classification(

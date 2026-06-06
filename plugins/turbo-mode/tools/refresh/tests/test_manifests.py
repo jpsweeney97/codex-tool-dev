@@ -27,7 +27,7 @@ from refresh.state_machine import derive_terminal_plan_status
 def plugin_spec(tmp_path: Path) -> PluginSpec:
     return PluginSpec(
         name="handoff",
-        version="1.6.0",
+        version="1.7.0",
         source_root=tmp_path / "source",
         cache_root=tmp_path / "cache",
     )
@@ -37,7 +37,7 @@ def test_canonical_key_uses_plugin_version_and_posix_relative_path(tmp_path: Pat
     spec = plugin_spec(tmp_path)
     path = spec.source_root / "skills" / "search" / "SKILL.md"
     assert canonical_key(spec, path, root=spec.source_root) == (
-        "handoff/1.6.0/skills/search/SKILL.md"
+        "handoff/1.7.0/skills/search/SKILL.md"
     )
 
 
@@ -146,9 +146,9 @@ def test_diff_manifests_reports_added_removed_and_changed(tmp_path: Path) -> Non
     )
 
     assert [(diff.canonical_path, diff.kind) for diff in diffs] == [
-        ("handoff/1.6.0/CHANGELOG.md", DiffKind.REMOVED),
-        ("handoff/1.6.0/README.md", DiffKind.ADDED),
-        ("handoff/1.6.0/skills/search/SKILL.md", DiffKind.CHANGED),
+        ("handoff/1.7.0/CHANGELOG.md", DiffKind.REMOVED),
+        ("handoff/1.7.0/README.md", DiffKind.ADDED),
+        ("handoff/1.7.0/skills/search/SKILL.md", DiffKind.CHANGED),
     ]
 
 
@@ -169,7 +169,7 @@ def test_diff_manifests_reports_executable_metadata_drift(tmp_path: Path) -> Non
     )
 
     assert [(diff.canonical_path, diff.kind) for diff in diffs] == [
-        ("handoff/1.6.0/scripts/search.py", DiffKind.CHANGED)
+        ("handoff/1.7.0/scripts/search.py", DiffKind.CHANGED)
     ]
 
 
@@ -184,7 +184,7 @@ def test_fixture_backed_diff_classification_and_aggregate_state(tmp_path: Path) 
     )
     _write_pair(
         spec,
-        "scripts/defer.py",
+        "turbo_mode_handoff_runtime/project_paths.py",
         source_text="print('guarded new')\n",
         cache_text="print('guarded old')\n",
     )
@@ -218,10 +218,10 @@ def test_fixture_backed_diff_classification_and_aggregate_state(tmp_path: Path) 
     )
 
     assert [(diff.canonical_path, diff.kind) for diff in diffs] == [
-        ("handoff/1.6.0/notes/operator.md", DiffKind.CHANGED),
-        ("handoff/1.6.0/scripts/defer.py", DiffKind.CHANGED),
-        ("handoff/1.6.0/scripts/distill.py", DiffKind.CHANGED),
-        ("handoff/1.6.0/scripts/search.py", DiffKind.CHANGED),
+        ("handoff/1.7.0/notes/operator.md", DiffKind.CHANGED),
+        ("handoff/1.7.0/scripts/distill.py", DiffKind.CHANGED),
+        ("handoff/1.7.0/scripts/search.py", DiffKind.CHANGED),
+        ("handoff/1.7.0/turbo_mode_handoff_runtime/project_paths.py", DiffKind.CHANGED),
     ]
 
     classifications = [
@@ -243,27 +243,29 @@ def test_fixture_backed_diff_classification_and_aggregate_state(tmp_path: Path) 
     }
 
     assert (
-        classification_by_path["handoff/1.6.0/scripts/search.py"].mutation_mode
+        classification_by_path["handoff/1.7.0/scripts/search.py"].mutation_mode
         == MutationMode.FAST
     )
     assert (
-        classification_by_path["handoff/1.6.0/scripts/search.py"].coverage_status.value
+        classification_by_path["handoff/1.7.0/scripts/search.py"].coverage_status.value
         == CoverageStatus.COVERED.value
     )
     assert (
-        classification_by_path["handoff/1.6.0/scripts/defer.py"].mutation_mode
+        classification_by_path[
+            "handoff/1.7.0/turbo_mode_handoff_runtime/project_paths.py"
+        ].mutation_mode
         == MutationMode.GUARDED
     )
     assert (
-        classification_by_path["handoff/1.6.0/scripts/distill.py"].coverage_status.value
+        classification_by_path["handoff/1.7.0/scripts/distill.py"].coverage_status.value
         == CoverageStatus.COVERAGE_GAP.value
     )
     assert (
-        classification_by_path["handoff/1.6.0/scripts/distill.py"].mutation_mode
+        classification_by_path["handoff/1.7.0/scripts/distill.py"].mutation_mode
         == MutationMode.BLOCKED
     )
     assert (
-        classification_by_path["handoff/1.6.0/notes/operator.md"].mutation_mode
+        classification_by_path["handoff/1.7.0/notes/operator.md"].mutation_mode
         == MutationMode.GUARDED
     )
 

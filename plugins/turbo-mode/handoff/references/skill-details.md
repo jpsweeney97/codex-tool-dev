@@ -40,16 +40,6 @@ Avoid auto-injecting handoffs, suggesting old handoffs without user request, loa
 
 Troubleshooting: if no handoff is found, run `/list-handoffs`, check primary storage, or load an explicit archive path. If a pending transaction is recovered, continue from the returned archive before starting another load. If transaction state is corrupt, report the path and require operator repair before retrying.
 
-## Defer
-
-Candidate fields: `summary`, `problem`, `source_text`, `proposed_approach`, `acceptance_criteria`, `priority`, `source_type`, `source_ref`, `branch`, `session_id`, `effort`, and `files`. `summary` and `problem` are required by the envelope contract. Use imperative summaries under 80 characters when possible.
-
-High-confidence signals include explicit deferral language, review findings marked as deferred or design debt, TODO/FIXME references discussed in the conversation, and unresolved items from consultations. Medium-confidence signals include conditional actions and open questions that imply future work. Low-confidence observations without action go in Possible Misses only.
-
-Present candidates in a table and full detail blocks before asking for confirmation. Accept `all`, explicit numbers, edits, or `none`. On ingest: Parse Ticket ingest JSON stdout and render only recovery summaries, next steps, safe messages, ticket IDs, duplicate candidate ticket IDs, and user-safe ingest outcome prose. Do not report Ticket ingest payload paths, processed envelope paths, incoming envelope paths, or envelope provenance in the human transcript.
-
-Failure handling: stop on `defer.py` error; ingest successful envelopes on partial success; treat Ticket resolver ambiguity as a release blocker; report duplicate candidates as already tracked.
-
 ## Distill
 
 Source mapping: Decisions preserve choice, driver, alternatives, trade-offs, and confidence; Learnings preserve mechanism, evidence, implication, and caveat; Codebase Knowledge preserves patterns and conventions; Gotchas preserve pitfalls and workarounds. Synthesize into Phase 0 paragraphs of roughly 6-8 sentences, max 10.
@@ -66,14 +56,6 @@ Append format:
 ```
 
 If replacing a promoted entry, warn that replacement invalidates the promotion unless the user chooses replace plus keep promoted metadata.
-
-## Triage
-
-Report open tickets grouped by priority and age. Report orphaned handoff items requiring manual review before matched informational items. Include match coverage counts for `uid_match`, `id_ref`, `manual_review`, and `skipped_prose`.
-
-Match strategies: `uid_match` joins handoff `session_id` to Ticket provenance, `id_ref` detects explicit ticket IDs in handoff text, and `manual_review` means no deterministic match. UID match only works for tickets created from handoff-derived contexts; PR review, Codex, and ad-hoc tickets route to manual review by design.
-
-Offer orphan actions: create selected tickets through `/defer`, mark already tracked, mark not actionable, or skip all. Triage itself is read-only.
 
 ## Search
 

@@ -31,7 +31,6 @@ def seed_plugin_source(repo_root: Path, plugin: str, version: str) -> Path:
 def seed_turbo_mode_sources(repo_root: Path) -> None:
     seed_plugin_source(repo_root, "handoff", "1.7.0")
     seed_plugin_source(repo_root, "review-family", "0.1.0")
-    seed_plugin_source(repo_root, "ticket", "1.4.0")
 
 
 def test_personal_marketplace_payload_uses_home_relative_plugin_paths() -> None:
@@ -40,11 +39,6 @@ def test_personal_marketplace_payload_uses_home_relative_plugin_paths() -> None:
             plugin="handoff",
             source_root=Path("/repo/plugins/turbo-mode/handoff"),
             target_root=Path("/home/.codex/plugins/handoff"),
-        ),
-        sync_module.SyncPlanItem(
-            plugin="ticket",
-            source_root=Path("/repo/plugins/turbo-mode/ticket"),
-            target_root=Path("/home/.codex/plugins/ticket"),
         ),
         sync_module.SyncPlanItem(
             plugin="review-family",
@@ -60,10 +54,6 @@ def test_personal_marketplace_payload_uses_home_relative_plugin_paths() -> None:
     assert plugins["handoff"]["source"] == {
         "source": "local",
         "path": "./.codex/plugins/handoff",
-    }
-    assert plugins["ticket"]["source"] == {
-        "source": "local",
-        "path": "./.codex/plugins/ticket",
     }
     assert plugins["review-family"]["source"] == {
         "source": "local",
@@ -89,11 +79,6 @@ def test_sync_plan_reports_repo_sources_and_personal_targets(tmp_path: Path) -> 
             repo_root / "plugins/turbo-mode/review-family",
             codex_home / "plugins/review-family",
         ),
-        (
-            "ticket",
-            repo_root / "plugins/turbo-mode/ticket",
-            codex_home / "plugins/ticket",
-        ),
     ]
 
 
@@ -111,7 +96,6 @@ def test_sync_plan_discovers_new_configured_plugin_roots(tmp_path: Path) -> None
         "handoff",
         "review-family",
         "review-helper",
-        "ticket",
     ]
     assert {
         plugin["name"]: plugin["source"]["path"] for plugin in payload["plugins"]
@@ -119,7 +103,6 @@ def test_sync_plan_discovers_new_configured_plugin_roots(tmp_path: Path) -> None
         "handoff": "./.codex/plugins/handoff",
         "review-family": "./.codex/plugins/review-family",
         "review-helper": "./.codex/plugins/review-helper",
-        "ticket": "./.codex/plugins/ticket",
     }
 
 
@@ -156,11 +139,6 @@ def test_sync_copies_sources_and_excludes_generated_residue(tmp_path: Path) -> N
             "plugin": "review-family",
             "source": str(repo_root / "plugins/turbo-mode/review-family"),
             "target": str(codex_home / "plugins/review-family"),
-        },
-        {
-            "plugin": "ticket",
-            "source": str(repo_root / "plugins/turbo-mode/ticket"),
-            "target": str(codex_home / "plugins/ticket"),
         },
     ]
     assert (codex_home / "plugins/handoff/README.md").read_text(encoding="utf-8") == (
@@ -254,7 +232,6 @@ def test_cli_sync_copies_into_temp_codex_home_and_replaces_stale_target(
     assert exit_code == 0
     assert (codex_home / "plugins/handoff/README.md").exists()
     assert (codex_home / "plugins/review-family/README.md").exists()
-    assert (codex_home / "plugins/ticket/README.md").exists()
     assert not stale.exists()
     assert not (agents_home / "plugins/marketplace.json").exists()
 
@@ -334,4 +311,3 @@ def test_cli_writes_personal_marketplace_only_with_explicit_flag(tmp_path: Path)
     assert plugins["review-family"]["source"]["path"] == (
         "./.codex/plugins/review-family"
     )
-    assert plugins["ticket"]["source"]["path"] == "./.codex/plugins/ticket"

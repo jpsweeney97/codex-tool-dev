@@ -23,7 +23,6 @@ from refresh.app_server_inventory import (  # noqa: E402
     app_server_roundtrip,
     authority_digest,
     collect_readonly_runtime_inventory,
-    rewrite_ticket_hook_manifest,
     write_json_artifact,
 )
 from refresh.manifests import (  # noqa: E402
@@ -168,7 +167,6 @@ def run_dev_refresh(
         plugin_names=plugin_names,
         codex_home=paths.codex_home,
     )
-    _repair_installed_plugin_metadata(codex_home=paths.codex_home, plugin_specs=plugin_specs)
     diffs, ignored_residue = _verify_source_cache_equality(plugin_specs)
     runtime_inventory_state = "not-requested"
     runtime_inventory_summary: dict[str, Any] | None = None
@@ -181,7 +179,6 @@ def run_dev_refresh(
         runtime_inventory_summary = {
             "plugin_read_sources": dict(getattr(inventory, "plugin_read_sources", {})),
             "skills": list(getattr(inventory, "skills", ())),
-            "ticket_hook": dict(getattr(inventory, "ticket_hook", {})),
             "handoff_hooks": list(getattr(inventory, "handoff_hooks", ())),
             "transcript_sha256": getattr(inventory, "transcript_sha256", None),
         }
@@ -332,20 +329,6 @@ def _validate_dev_install_transcript(
         apps_needing_auth = result.get("appsNeedingAuth", [])
         if not isinstance(apps_needing_auth, list):
             fail("validate dev install", "install response appsNeedingAuth is not a list", result)
-
-
-def _repair_installed_plugin_metadata(
-    *,
-    codex_home: Path,
-    plugin_specs: tuple[PluginSpec, ...],
-) -> None:
-    if "ticket" not in {spec.name for spec in plugin_specs}:
-        return
-    ticket_spec = next(spec for spec in plugin_specs if spec.name == "ticket")
-    ticket_root = codex_home / "plugins/cache/turbo-mode/ticket" / ticket_spec.version
-    hooks_path = ticket_root / "hooks/hooks.json"
-    if hooks_path.exists():
-        rewrite_ticket_hook_manifest(ticket_plugin_root=ticket_root)
 
 
 def _verify_source_cache_equality(

@@ -23,15 +23,15 @@ EXPECTED_MARKETPLACE = {
     "plugins": [
         {
             "name": "handoff",
-            "source": {"source": "local", "path": "./plugins/turbo-mode/handoff/1.6.0"},
+            "source": {"source": "local", "path": "./plugins/turbo-mode/handoff"},
             "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
             "category": "Productivity",
         },
         {
-            "name": "ticket",
-            "source": {"source": "local", "path": "./plugins/turbo-mode/ticket/1.4.0"},
+            "name": "review-family",
+            "source": {"source": "local", "path": "./plugins/turbo-mode/review-family"},
             "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
-            "category": "Productivity",
+            "category": "Developer Tools",
         },
     ],
 }
@@ -129,8 +129,8 @@ def run_validation(args: argparse.Namespace) -> None:
     prefixed_expected = {
         rel: digest
         for rel, digest in source_manifest.items()
-        if rel.startswith("plugins/turbo-mode/handoff/1.6.0/")
-        or rel.startswith("plugins/turbo-mode/ticket/1.4.0/")
+        if rel.startswith("plugins/turbo-mode/handoff/")
+        or rel.startswith("plugins/turbo-mode/review-family/")
     }
     if not prefixed_expected:
         fail(
@@ -140,7 +140,7 @@ def run_validation(args: argparse.Namespace) -> None:
         )
     actual = staged_manifest(
         str(args.repo_root),
-        ["plugins/turbo-mode/handoff/1.6.0", "plugins/turbo-mode/ticket/1.4.0"],
+        ["plugins/turbo-mode/handoff", "plugins/turbo-mode/review-family"],
     )
     if actual != prefixed_expected:
         fail(

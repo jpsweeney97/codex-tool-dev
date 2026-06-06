@@ -13,9 +13,9 @@ class CommandProjection:
 
 
 _FENCE_RE = re.compile(r"^```\s*(?P<info>.*?)\s*$")
-_COMMAND_LINE_RE = re.compile(r"^(?:python|python3|uv|codex|ticket_[A-Za-z0-9_-]+|\./)(?:\s|$)")
+_COMMAND_LINE_RE = re.compile(r"^(?:python|python3|uv|codex|\./)(?:\s|$)")
 _SLASH_COMMAND_RE = re.compile(
-    r"(?<![\w/])/(?:ticket-triage|quicksave|summary|distill|ticket|search|triage|defer|save|load)\b"
+    r"(?<![\w/])/(?:quicksave|summary|distill|search|save|load)\b"
 )
 _INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)

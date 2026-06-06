@@ -55,7 +55,7 @@ def snapshot_ready_state() -> RunState:
         phase="snapshot-written",
         pre_snapshot_app_server_launch_authority_sha256="launch-sha",
         original_config_sha256="original-config",
-        pre_refresh_cache_manifest_sha256={"handoff": "handoff-pre", "ticket": "ticket-pre"},
+        pre_refresh_cache_manifest_sha256={"handoff": "handoff-pre", "review-family": "review-pre"},
         snapshot_path_map={"config": "/tmp/snapshot/config.toml"},
         snapshot_manifest_digest="snapshot-manifest",
         recovery_eligibility="restore-cache-and-config",
@@ -71,8 +71,11 @@ def install_ready_state() -> RunState:
         original_config_sha256="original-config",
         expected_intermediate_config_sha256="disabled-config",
         hook_disabled_config_sha256="disabled-config",
-        pre_refresh_cache_manifest_sha256={"handoff": "handoff-pre", "ticket": "ticket-pre"},
-        post_install_cache_manifest_sha256={"handoff": "handoff-post", "ticket": "ticket-post"},
+        pre_refresh_cache_manifest_sha256={"handoff": "handoff-pre", "review-family": "review-pre"},
+        post_install_cache_manifest_sha256={
+            "handoff": "handoff-post",
+            "review-family": "review-post",
+        },
         snapshot_path_map={"config": "/tmp/snapshot/config.toml"},
         snapshot_manifest_digest="snapshot-manifest",
         recovery_eligibility="restore-cache-and-config",
@@ -224,7 +227,7 @@ def test_full_state_replacement_persists_recovery_critical_fields(tmp_path: Path
     assert persisted.pre_install_app_server_target_authority_sha256 == "target-sha"
     assert persisted.post_install_cache_manifest_sha256 == {
         "handoff": "handoff-post",
-        "ticket": "ticket-post",
+        "review-family": "review-post",
     }
     assert persisted.recovery_eligibility == "restore-cache-and-config"
 

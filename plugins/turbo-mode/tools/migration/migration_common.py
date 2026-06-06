@@ -22,12 +22,12 @@ PLAN_PATH = Path(
 CONFIG_PATH = Path("/Users/jp/.codex/config.toml")
 MARKETPLACE_PATH = REPO_ROOT / ".agents/plugins/marketplace.json"
 SOURCE_ROOTS = [
-    REPO_ROOT / "plugins/turbo-mode/handoff/1.6.0",
-    REPO_ROOT / "plugins/turbo-mode/ticket/1.4.0",
+    REPO_ROOT / "plugins/turbo-mode/handoff",
+    REPO_ROOT / "plugins/turbo-mode/review-family",
 ]
 CACHE_ROOTS = [
-    Path("/Users/jp/.codex/plugins/cache/turbo-mode/handoff/1.6.0"),
-    Path("/Users/jp/.codex/plugins/cache/turbo-mode/ticket/1.4.0"),
+    Path("/Users/jp/.codex/plugins/cache/turbo-mode/handoff/1.7.0"),
+    Path("/Users/jp/.codex/plugins/cache/turbo-mode/review-family/0.1.0"),
 ]
 MIGRATION_BASE_HEAD = "f72236b8402cafdcc056ef1b3b4a891a98363873"
 MIGRATION_BASE_REF = "main"
@@ -154,7 +154,6 @@ def should_ignore_generated(rel: Path | PurePosixPath) -> bool:
     return (
         rel.name in GENERATED_FILES
         or bool(parts & GENERATED_DIRS)
-        or ".codex/ticket-tmp" in rel.as_posix()
     )
 
 

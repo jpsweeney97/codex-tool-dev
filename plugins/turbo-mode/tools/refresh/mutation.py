@@ -10,7 +10,6 @@ import sys
 import tempfile
 from collections.abc import Callable
 from contextlib import contextmanager
-from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,8 +28,6 @@ from .app_server_inventory import (
     collect_app_server_launch_authority,
     collect_readonly_runtime_inventory,
     normalize_same_child_post_install_transcript,
-    parse_ticket_guard_command,
-    rewrite_ticket_hook_manifest,
     serialize_authority_record,
     validate_install_responses,
 )
@@ -52,7 +49,7 @@ from .lock_state import (
     write_initial_run_state,
 )
 from .manifests import build_manifest, diff_manifests
-from .models import DiffEntry, DiffKind, PluginSpec, RefreshError, fail
+from .models import RefreshError, fail
 from .paths import RefreshPaths
 from .planner import INSTALLABLE_MISSING_CACHE_PLUGINS, build_plugin_specs, plan_refresh
 from .process_gate import capture_process_gate
@@ -64,19 +61,12 @@ from .publication import (
 from .smoke import run_standard_smoke
 from .validation import assert_commit_safe_payload
 
-PLAN05_DRIFT_PATHS = (
-    "handoff/1.6.0/skills/load/SKILL.md",
-    "handoff/1.6.0/skills/quicksave/SKILL.md",
-    "handoff/1.6.0/skills/save/SKILL.md",
-    "handoff/1.6.0/skills/summary/SKILL.md",
-    "handoff/1.6.0/tests/test_session_state.py",
-    "handoff/1.6.0/tests/test_skill_docs.py",
+ISOLATED_SEED_DRIFT_PATHS = (
+    "handoff/1.7.0/turbo_mode_handoff_runtime/project_paths.py",
 )
-PLAN05_SEED_FIXTURE = Path(__file__).parent / (
-    "tests/fixtures/handoff_state_helper_doc_migration.json"
+ISOLATED_SEED_FIXTURE = Path(__file__).parent / (
+    "tests/fixtures/isolated_seed_drift.json"
 )
-TICKET_HOOK_MANIFEST_CANONICAL_PATH = "ticket/1.4.0/hooks/hooks.json"
-TICKET_HOOK_COMMAND_SENTINEL = "<ticket-hook-command>"
 REHEARSAL_PROOF_SCHEMA_VERSION = "turbo-mode-refresh-rehearsal-proof-v1"
 REHEARSAL_CAPTURE_SCHEMA_VERSION = "turbo-mode-refresh-rehearsal-capture-v1"
 NO_REAL_HOME_AUTHORITY_SCHEMA_VERSION = "turbo-mode-refresh-no-real-home-proof-v1"
@@ -86,8 +76,6 @@ NO_REAL_HOME_AUTHORITY_PATH_FIELDS = (
     "resolved_local_only_root",
     "resolved_run_root",
     "resolved_handoff_plugin_root",
-    "resolved_ticket_plugin_root",
-    "resolved_ticket_hook_manifest_path",
 )
 REQUIRED_REHEARSAL_PROOF_FIELDS = frozenset(
     {
@@ -222,12 +210,10 @@ class RehearsalProofCaptureResult:
 def prove_app_server_home_authority(
     context: MutationContext,
     *,
-    ticket_hook_policy: str = "required",
     allow_missing_plugins: tuple[str, ...] = (),
 ) -> AppServerLaunchAuthority:
     authority, transcript = collect_app_server_launch_authority(
         _refresh_paths(context),
-        ticket_hook_policy=ticket_hook_policy,
         allow_missing_plugins=allow_missing_plugins,
     )
     _validate_launch_authority(authority, context=context, transcript=transcript)
@@ -575,7 +561,7 @@ def seed_isolated_rehearsal_home(
             fail("seed isolated rehearsal home", "target already exists", str(target))
 
     _write_seed_config(config_path, repo_root=normalized_repo_root)
-    seed_records = _load_plan05_seed_records()
+    seed_records = _load_isolated_seed_records()
     for spec in build_plugin_specs(
         repo_root=normalized_repo_root,
         codex_home=normalized_codex_home,
@@ -584,7 +570,7 @@ def seed_isolated_rehearsal_home(
             fail("seed isolated rehearsal home", "source root missing", str(spec.source_root))
         shutil.copytree(spec.source_root, spec.cache_root)
 
-    for canonical_path in PLAN05_DRIFT_PATHS:
+    for canonical_path in ISOLATED_SEED_DRIFT_PATHS:
         record = seed_records.get(canonical_path)
         if not isinstance(record, dict):
             fail("seed isolated rehearsal home", "missing seed fixture record", canonical_path)
@@ -619,16 +605,12 @@ def seed_isolated_rehearsal_home(
         observed_drift_paths.extend(
             diff.canonical_path for diff in diff_manifests(source_manifest, cache_manifest)
         )
-    if tuple(sorted(observed_drift_paths)) != PLAN05_DRIFT_PATHS:
+    if tuple(sorted(observed_drift_paths)) != ISOLATED_SEED_DRIFT_PATHS:
         fail(
             "seed isolated rehearsal home",
             "seeded drift set mismatch",
             sorted(observed_drift_paths),
         )
-    isolated_ticket_hook_manifest = rewrite_ticket_hook_manifest(
-        ticket_plugin_root=normalized_codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
-    )
-
     post_seed_dry_run = plan_refresh(
         repo_root=normalized_repo_root,
         codex_home=normalized_codex_home,
@@ -655,7 +637,6 @@ def seed_isolated_rehearsal_home(
                 cache_root,
                 local_only_root,
                 local_only_run_root,
-                isolated_ticket_hook_manifest,
                 post_seed_dry_run_path,
             )
         )
@@ -674,9 +655,8 @@ def seed_isolated_rehearsal_home(
             "execution_head": source_identity.execution_head,
             "execution_tree": source_identity.execution_tree,
             "requested_codex_home": str(normalized_codex_home),
-            "isolated_ticket_hook_manifest_path": str(isolated_ticket_hook_manifest),
-            "canonical_drift_paths": PLAN05_DRIFT_PATHS,
-            "canonical_drift_paths_sha256": authority_digest(PLAN05_DRIFT_PATHS),
+            "canonical_drift_paths": ISOLATED_SEED_DRIFT_PATHS,
+            "canonical_drift_paths_sha256": authority_digest(ISOLATED_SEED_DRIFT_PATHS),
             "source_manifest_sha256": authority_digest(source_manifest_sha256),
             "source_manifest_sha256_by_plugin": source_manifest_sha256,
             "pre_refresh_isolated_cache_manifest_sha256": authority_digest(
@@ -698,7 +678,7 @@ def seed_isolated_rehearsal_home(
         post_seed_dry_run_id=post_seed_dry_run_id,
         post_seed_dry_run_path=str(post_seed_dry_run_path),
         terminal_plan_status=post_seed_dry_run.terminal_status.value,
-        canonical_drift_paths=PLAN05_DRIFT_PATHS,
+        canonical_drift_paths=ISOLATED_SEED_DRIFT_PATHS,
     )
 
 
@@ -879,12 +859,6 @@ def run_guarded_refresh_orchestration(
                         snapshot,
                         current_expected_sha256=hook_state["expected_intermediate_config_sha256"],
                     ),
-                    pre_install_ticket_hook_policy=(
-                        "disabled"
-                        if hook_state["plugin_hooks_start_state"] == "true"
-                        else "required"
-                    ),
-                    same_child_ticket_hook_policy="required",
                 )
             except (RefreshError, OSError, ValueError) as exc:
                 return rollback_failed_mutation(
@@ -953,15 +927,7 @@ def run_guarded_refresh_orchestration(
                         "resolved_run_root": str(context.local_only_run_root),
                         "resolved_handoff_plugin_root": str(
                             context.codex_home
-                            / "plugins/cache/turbo-mode/handoff/1.6.0"
-                        ),
-                        "resolved_ticket_plugin_root": str(
-                            context.codex_home
-                            / "plugins/cache/turbo-mode/ticket/1.4.0"
-                        ),
-                        "resolved_ticket_hook_manifest_path": str(
-                            context.codex_home
-                            / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+                            / "plugins/cache/turbo-mode/handoff/1.7.0"
                         ),
                         "app_server_authority_proof_sha256": _sha256_file(
                             launch_authority_proof_path
@@ -1784,8 +1750,6 @@ def install_plugins_via_app_server(
     context: MutationContext,
     *,
     restore_config_before_post_install: Callable[[], None] | None = None,
-    pre_install_ticket_hook_policy: str = "required",
-    same_child_ticket_hook_policy: str = "required",
 ) -> tuple[dict[str, object], ...]:
     if context.live_target or context.codex_home == REAL_CODEX_HOME:
         state = _read_existing_run_state(context)
@@ -1794,14 +1758,10 @@ def install_plugins_via_app_server(
     if missing_cache_plugins:
         launch_authority = prove_app_server_home_authority(
             context,
-            ticket_hook_policy=pre_install_ticket_hook_policy,
             allow_missing_plugins=missing_cache_plugins,
         )
     else:
-        launch_authority = prove_app_server_home_authority(
-            context,
-            ticket_hook_policy=pre_install_ticket_hook_policy,
-        )
+        launch_authority = prove_app_server_home_authority(context)
     pre_install_authority = build_pre_install_target_authority(
         launch_authority=launch_authority,
         marketplace_path=context.repo_root / ".agents/plugins/marketplace.json",
@@ -1837,14 +1797,6 @@ def install_plugins_via_app_server(
                 return
             if request.get("id") != response.get("id"):
                 return
-            params = request.get("params")
-            plugin_name = params.get("pluginName") if isinstance(params, dict) else None
-            if plugin_name == "ticket":
-                rewrite_ticket_hook_manifest(
-                    ticket_plugin_root=(
-                        context.codex_home / "plugins/cache/turbo-mode/ticket/1.4.0"
-                    )
-                )
             if request.get("id") == len(install_requests) and restore_config_before_post_install:
                 restore_config_before_post_install()
 
@@ -1865,7 +1817,6 @@ def install_plugins_via_app_server(
         install_requests=tuple(install_requests),
         same_child_post_install_transcript=same_child_transcript,
         fresh_child_post_install_transcript=fresh_child_transcript,
-        same_child_ticket_hook_policy=same_child_ticket_hook_policy,
     )
     install_authority_path = context.local_only_run_root / "install-authority.proof.json"
     _write_private_json(install_authority_path, install_authority)
@@ -1888,90 +1839,14 @@ def verify_source_cache_equality(context: MutationContext) -> dict[str, str]:
         source_manifest = build_manifest(spec, root_kind="source")
         cache_manifest = build_manifest(spec, root_kind="cache")
         diffs = diff_manifests(source_manifest, cache_manifest)
-        unexpected_diffs = [
-            diff
-            for diff in diffs
-            if not _is_expected_ticket_hook_manifest_localization(context, spec, diff)
-        ]
-        if unexpected_diffs:
+        if diffs:
             fail(
                 "verify source/cache equality",
                 "source/cache manifest mismatch",
-                [diff.canonical_path for diff in unexpected_diffs],
+                [diff.canonical_path for diff in diffs],
             )
         equality[spec.name] = authority_digest(source_manifest)
     return equality
-
-
-def _is_expected_ticket_hook_manifest_localization(
-    context: MutationContext,
-    spec: PluginSpec,
-    diff: DiffEntry,
-) -> bool:
-    if (
-        spec.name != "ticket"
-        or spec.version != "1.4.0"
-        or diff.kind is not DiffKind.CHANGED
-        or diff.canonical_path != TICKET_HOOK_MANIFEST_CANONICAL_PATH
-        or diff.source is None
-        or diff.cache is None
-    ):
-        return False
-    if (
-        diff.source.mode != diff.cache.mode
-        or diff.source.executable != diff.cache.executable
-        or diff.source.has_shebang != diff.cache.has_shebang
-    ):
-        return False
-
-    source_path = spec.source_root / "hooks/hooks.json"
-    cache_path = spec.cache_root / "hooks/hooks.json"
-    try:
-        source_payload = json.loads(source_path.read_text(encoding="utf-8"))
-        cache_payload = json.loads(cache_path.read_text(encoding="utf-8"))
-        source_command = _ticket_hook_manifest_command(source_payload)
-        cache_command = _ticket_hook_manifest_command(cache_payload)
-        parse_ticket_guard_command(
-            source_command,
-            operation="verify source/cache equality",
-            ticket_version=spec.version,
-        )
-        cache_script_path = parse_ticket_guard_command(
-            cache_command,
-            operation="verify source/cache equality",
-            ticket_version=spec.version,
-        )
-    except (
-        OSError,
-        UnicodeDecodeError,
-        json.JSONDecodeError,
-        KeyError,
-        IndexError,
-        TypeError,
-        RefreshError,
-    ):
-        return False
-
-    expected_cache_script_path = spec.cache_root / "hooks/ticket_engine_guard.py"
-    if cache_script_path != expected_cache_script_path:
-        return False
-
-    normalized_source = deepcopy(source_payload)
-    normalized_cache = deepcopy(cache_payload)
-    _set_ticket_hook_manifest_command(normalized_source, TICKET_HOOK_COMMAND_SENTINEL)
-    _set_ticket_hook_manifest_command(normalized_cache, TICKET_HOOK_COMMAND_SENTINEL)
-    return normalized_source == normalized_cache
-
-
-def _ticket_hook_manifest_command(payload: dict[str, Any]) -> str:
-    command = payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-    if not isinstance(command, str):
-        raise TypeError("Ticket hook command is not a string")
-    return command
-
-
-def _set_ticket_hook_manifest_command(payload: dict[str, Any], command: str) -> None:
-    payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = command
 
 
 def rollback_guarded_refresh(
@@ -2533,7 +2408,7 @@ def _validate_seed_manifest(
                 f"seed manifest {key} mismatch",
                 {"expected": expected, "actual": seed.get(key)},
             )
-    if tuple(seed.get("canonical_drift_paths", ())) != PLAN05_DRIFT_PATHS:
+    if tuple(seed.get("canonical_drift_paths", ())) != ISOLATED_SEED_DRIFT_PATHS:
         fail(
             "validate rehearsal proof",
             "seed manifest drift path set mismatch",
@@ -2664,13 +2539,7 @@ def _validate_no_real_home_authority_proof(
             / str(proof["rehearsal_run_id"])
         ),
         "resolved_handoff_plugin_root": (
-            requested_home / "plugins/cache/turbo-mode/handoff/1.6.0"
-        ),
-        "resolved_ticket_plugin_root": (
-            requested_home / "plugins/cache/turbo-mode/ticket/1.4.0"
-        ),
-        "resolved_ticket_hook_manifest_path": (
-            requested_home / "plugins/cache/turbo-mode/ticket/1.4.0/hooks/hooks.json"
+            requested_home / "plugins/cache/turbo-mode/handoff/1.7.0"
         ),
     }
     for field, expected_path in expected_paths.items():
@@ -2897,18 +2766,17 @@ def _write_seed_config(config_path: Path, *, repo_root: Path) -> None:
             "[features]\nplugin_hooks = true\n"
             '[plugins."handoff@turbo-mode"]\nenabled = true\n'
             '[plugins."review-family@turbo-mode"]\nenabled = true\n'
-            '[plugins."ticket@turbo-mode"]\nenabled = true\n'
         )
     os.chmod(config_path, 0o600)
 
 
-def _load_plan05_seed_records() -> dict[str, object]:
+def _load_isolated_seed_records() -> dict[str, object]:
     try:
-        data = json.loads(PLAN05_SEED_FIXTURE.read_text(encoding="utf-8"))
+        data = json.loads(ISOLATED_SEED_FIXTURE.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        fail("load Plan 05 seed fixture", str(exc), str(PLAN05_SEED_FIXTURE))
+        fail("load isolated seed fixture", str(exc), str(ISOLATED_SEED_FIXTURE))
     if not isinstance(data, dict):
-        fail("load Plan 05 seed fixture", "top-level value is not an object", data)
+        fail("load isolated seed fixture", "top-level value is not an object", data)
     return data
 
 
@@ -3013,7 +2881,6 @@ def _untracked_relevant_paths(repo_root: Path) -> tuple[str, ...]:
         "plugins/turbo-mode/tools/",
         "plugins/turbo-mode/handoff/",
         "plugins/turbo-mode/review-family/",
-        "plugins/turbo-mode/ticket/",
         "plugins/turbo-mode/evidence/refresh/",
         ".agents/plugins/marketplace.json",
     )

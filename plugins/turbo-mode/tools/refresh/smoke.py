@@ -13,7 +13,6 @@ from .models import fail
 
 SMOKE_SCHEMA_VERSION = "turbo-mode-refresh-standard-smoke-v1"
 SMOKE_TIER = "standard"
-SESSION_ID = "plan06-smoke"
 
 
 @dataclass(frozen=True)
@@ -48,13 +47,10 @@ class _SmokeState:
     smoke_root: Path
     smoke_repo: Path
     smoke_state: Path
-    smoke_payloads: Path
     raw_root: Path
     handoff_plugin: Path
-    ticket_plugin: Path
     archived_handoff_path: Path | None = None
     session_state_path: Path | None = None
-    ticket_id: str | None = None
 
 
 def run_standard_smoke(
@@ -119,13 +115,10 @@ def _prepare_state(
     smoke_root = local_only_run_root / "standard-smoke"
     smoke_repo = smoke_root / "repo"
     smoke_state = smoke_root / "state"
-    smoke_payloads = smoke_repo / ".smoke-payloads"
     raw_root = smoke_root / "raw"
     for path in (
         local_only_run_root,
         smoke_root,
-        smoke_repo / "docs/tickets",
-        smoke_payloads,
         smoke_state,
         raw_root,
     ):
@@ -138,10 +131,8 @@ def _prepare_state(
         smoke_root=smoke_root,
         smoke_repo=smoke_repo,
         smoke_state=smoke_state,
-        smoke_payloads=smoke_payloads,
         raw_root=raw_root,
-        handoff_plugin=codex_home / "plugins/cache/turbo-mode/handoff/1.6.0",
-        ticket_plugin=codex_home / "plugins/cache/turbo-mode/ticket/1.4.0",
+        handoff_plugin=codex_home / "plugins/cache/turbo-mode/handoff/1.7.0",
     )
     return state
 
@@ -155,13 +146,9 @@ def _build_smoke_plan(
 ) -> Sequence[SmokeCommand]:
     del local_only_run_root, codex_home, repo_root
     handoff_script = state.handoff_plugin / "scripts/session_state.py"
-    defer_script = state.handoff_plugin / "scripts/defer.py"
-    ticket_workflow = state.ticket_plugin / "scripts/ticket_workflow.py"
-    ticket_read = state.ticket_plugin / "scripts/ticket_read.py"
-    ticket_audit = state.ticket_plugin / "scripts/ticket_audit.py"
     handoff_archive_dir = state.smoke_repo / ".codex/handoffs/archive"
     handoff_state_dir = state.smoke_repo / ".codex/handoffs/.session-state"
-    commands: list[SmokeCommand] = [
+    return (
         SmokeCommand(
             label="smoke-repo-git-init",
             argv=("git", "init"),
@@ -257,193 +244,6 @@ def _build_smoke_plan(
             ),
             env={"PYTHONDONTWRITEBYTECODE": "1"},
             after=_assert_state_cleared,
-        ),
-        SmokeCommand(
-            label="handoff-defer",
-            argv=("python3", str(defer_script), "--tickets-dir", "docs/tickets"),
-            command_string=(
-                f"PYTHONDONTWRITEBYTECODE=1 python3 {defer_script} --tickets-dir docs/tickets"
-            ),
-            cwd=state.smoke_repo,
-            env={"PYTHONDONTWRITEBYTECODE": "1"},
-            stdin=_defer_payload,
-            after=_assert_defer_emitted_envelope,
-        ),
-    ]
-    commands.extend(
-        _ticket_workflow_pair(
-            state,
-            action="create",
-            workflow_script=ticket_workflow,
-            payload_name="ticket-create.json",
-            payload_factory=_ticket_create_payload,
-        )
-    )
-    commands.extend(
-        [
-            SmokeCommand(
-                label="ticket-list-open",
-                argv=(
-                    "python3",
-                    "-B",
-                    str(ticket_read),
-                    "list",
-                    "docs/tickets",
-                    "--status",
-                    "open",
-                ),
-                command_string=(f"python3 -B {ticket_read} list docs/tickets --status open"),
-                cwd=state.smoke_repo,
-            ),
-            SmokeCommand(
-                label="ticket-query-created",
-                argv=(
-                    "python3",
-                    "-B",
-                    str(ticket_read),
-                    "query",
-                    "docs/tickets",
-                    "{ticket_id}",
-                ),
-                command_string=(f"python3 -B {ticket_read} query docs/tickets {{ticket_id}}"),
-                cwd=state.smoke_repo,
-            ),
-        ]
-    )
-    commands.extend(
-        _ticket_workflow_pair(
-            state,
-            action="update",
-            workflow_script=ticket_workflow,
-            payload_name="ticket-update.json",
-            payload_factory=_ticket_update_payload,
-        )
-    )
-    commands.append(
-        SmokeCommand(
-            label="ticket-query-updated",
-            argv=(
-                "python3",
-                "-B",
-                str(ticket_read),
-                "query",
-                "docs/tickets",
-                "{ticket_id}",
-            ),
-            command_string=f"python3 -B {ticket_read} query docs/tickets {{ticket_id}}",
-            cwd=state.smoke_repo,
-        )
-    )
-    commands.extend(
-        _ticket_workflow_pair(
-            state,
-            action="close",
-            workflow_script=ticket_workflow,
-            payload_name="ticket-close.json",
-            payload_factory=_ticket_close_payload,
-        )
-    )
-    commands.extend(
-        _ticket_workflow_pair(
-            state,
-            action="reopen",
-            workflow_script=ticket_workflow,
-            payload_name="ticket-reopen.json",
-            payload_factory=_ticket_reopen_payload,
-        )
-    )
-    commands.append(
-        SmokeCommand(
-            label="ticket-audit-repair-dry-run",
-            argv=(
-                "python3",
-                "-B",
-                str(ticket_audit),
-                "repair",
-                "docs/tickets",
-                "--dry-run",
-            ),
-            command_string=(
-                f"PYTHONDONTWRITEBYTECODE=1 python3 -B {ticket_audit} repair docs/tickets --dry-run"
-            ),
-            cwd=state.smoke_repo,
-            env={"PYTHONDONTWRITEBYTECODE": "1"},
-        )
-    )
-    return tuple(commands)
-
-
-def _ticket_workflow_pair(
-    state: _SmokeState,
-    *,
-    action: str,
-    workflow_script: Path,
-    payload_name: str,
-    payload_factory: Callable[[_SmokeState], dict[str, object]],
-) -> Sequence[SmokeCommand]:
-    prepare = _ticket_workflow_command(
-        state,
-        action=action,
-        phase="prepare",
-        workflow_script=workflow_script,
-        payload_name=payload_name,
-        payload_factory=payload_factory,
-    )
-    execute = _ticket_workflow_command(
-        state,
-        action=action,
-        phase="execute",
-        workflow_script=workflow_script,
-        payload_name=payload_name,
-        payload_factory=payload_factory,
-    )
-    return (
-        _ticket_hook_command(state, target=prepare),
-        prepare,
-        _ticket_hook_command(state, target=execute),
-        execute,
-    )
-
-
-def _ticket_workflow_command(
-    state: _SmokeState,
-    *,
-    action: str,
-    phase: str,
-    workflow_script: Path,
-    payload_name: str,
-    payload_factory: Callable[[_SmokeState], dict[str, object]],
-) -> SmokeCommand:
-    payload_path = state.smoke_payloads / payload_name
-    label = f"ticket-{action}-{phase}"
-    after = _record_ticket_id if action == "create" and phase == "execute" else None
-    return SmokeCommand(
-        label=label,
-        argv=("python3", "-B", str(workflow_script), phase, str(payload_path)),
-        command_string=f"python3 -B {workflow_script} {phase} {payload_path}",
-        cwd=state.smoke_repo,
-        before=lambda active_state: _ensure_payload(
-            payload_path,
-            payload_factory(active_state),
-        ),
-        after=after,
-    )
-
-
-def _ticket_hook_command(state: _SmokeState, *, target: SmokeCommand) -> SmokeCommand:
-    guard = state.ticket_plugin / "hooks/ticket_engine_guard.py"
-    return SmokeCommand(
-        label=f"ticket-hook-{target.label}",
-        argv=("python3", str(guard)),
-        command_string=f"CODEX_PLUGIN_ROOT={state.ticket_plugin} python3 {guard}",
-        cwd=state.smoke_repo,
-        env={"CODEX_PLUGIN_ROOT": str(state.ticket_plugin)},
-        before=target.before,
-        stdin=lambda active_state: _ticket_hook_input(target, active_state),
-        after=lambda active_state, result: _assert_ticket_hook_allowed(
-            active_state,
-            target=target,
-            result=result,
         ),
     )
 
@@ -599,161 +399,6 @@ def _assert_state_cleared(state: _SmokeState, result: SmokeResult) -> None:
         )
 
 
-def _defer_payload(state: _SmokeState) -> bytes:
-    del state
-    return (
-        json.dumps(
-            {
-                "summary": "Smoke deferred task",
-                "problem": "Verify installed defer command shape.",
-                "source_type": "plan",
-                "source_ref": "plan06-smoke",
-                "session_id": SESSION_ID,
-                "acceptance_criteria": [
-                    "Installed defer command emits an envelope.",
-                ],
-                "priority": "low",
-                "effort": "S",
-            },
-            sort_keys=True,
-        )
-        + "\n"
-    ).encode("utf-8")
-
-
-def _assert_defer_emitted_envelope(state: _SmokeState, result: SmokeResult) -> None:
-    stdout = _read_stdout(result).decode("utf-8", errors="replace")
-    try:
-        payload = json.loads(stdout)
-    except json.JSONDecodeError:
-        fail("run handoff defer smoke", "defer stdout was not JSON", stdout)
-    if payload.get("status") not in {"ok", None}:
-        fail("run handoff defer smoke", "defer status was not ok", payload)
-    envelope_root = state.smoke_repo / "docs/tickets/.envelopes"
-    if not any(envelope_root.glob("*")):
-        fail("run handoff defer smoke", "deferred envelope missing", str(envelope_root))
-
-
-def _ticket_create_payload(state: _SmokeState) -> dict[str, object]:
-    del state
-    return {
-        "action": "create",
-        "fields": {
-            "title": "Smoke ticket",
-            "problem": "Verify installed Ticket command shape.",
-            "priority": "low",
-            "status": "open",
-            "tags": ["smoke"],
-            "acceptance_criteria": ["Smoke read/query can find this ticket."],
-            "key_files": [],
-        },
-    }
-
-
-def _ticket_update_payload(state: _SmokeState) -> dict[str, object]:
-    return {
-        "action": "update",
-        "ticket_id": _require_ticket_id(state),
-        "fields": {"tags": ["smoke", "updated"]},
-    }
-
-
-def _ticket_close_payload(state: _SmokeState) -> dict[str, object]:
-    return {
-        "action": "close",
-        "ticket_id": _require_ticket_id(state),
-        "fields": {"resolution": "done"},
-    }
-
-
-def _ticket_reopen_payload(state: _SmokeState) -> dict[str, object]:
-    return {
-        "action": "reopen",
-        "ticket_id": _require_ticket_id(state),
-        "fields": {"reopen_reason": "Plan 06 smoke verifies reopen lifecycle."},
-    }
-
-
-def _ticket_hook_input(target: SmokeCommand, state: _SmokeState) -> bytes:
-    return (
-        json.dumps(
-            {
-                "tool_name": "Bash",
-                "tool_input": {"command": _format_text(target.command_string, state)},
-                "cwd": str(state.smoke_repo),
-                "session_id": SESSION_ID,
-            },
-            sort_keys=True,
-        )
-        + "\n"
-    ).encode("utf-8")
-
-
-def _assert_ticket_hook_allowed(
-    state: _SmokeState,
-    *,
-    target: SmokeCommand,
-    result: SmokeResult,
-) -> None:
-    stdout = _read_stdout(result).decode("utf-8", errors="replace")
-    try:
-        payload = json.loads(stdout)
-    except json.JSONDecodeError as exc:
-        fail("run Ticket hook smoke", f"hook output was not JSON: {exc}", stdout)
-    decision = payload.get("hookSpecificOutput", {}).get("permissionDecision")
-    if decision != "allow":
-        fail("run Ticket hook smoke", "ticket hook did not allow command", payload)
-    payload_path = Path(_format_sequence(target.argv, state)[-1])
-    command_payload = json.loads(payload_path.read_text(encoding="utf-8"))
-    expected = {
-        "hook_injected": True,
-        "hook_request_origin": "user",
-        "session_id": SESSION_ID,
-    }
-    for key, expected_value in expected.items():
-        if command_payload.get(key) != expected_value:
-            fail(
-                "run Ticket hook smoke",
-                f"ticket hook did not inject {key}",
-                command_payload.get(key),
-            )
-
-
-def _record_ticket_id(state: _SmokeState, result: SmokeResult) -> None:
-    stdout = _read_stdout(result).decode("utf-8", errors="replace")
-    try:
-        payload = json.loads(stdout)
-    except json.JSONDecodeError as exc:
-        fail("run Ticket create smoke", f"create output was not JSON: {exc}", stdout)
-    ticket_id = payload.get("ticket_id")
-    if not isinstance(ticket_id, str) or not ticket_id:
-        fail("run Ticket create smoke", "missing ticket_id", payload)
-    state.ticket_id = ticket_id
-    ticket_files = list((state.smoke_repo / "docs/tickets").glob("*.md"))
-    if len(ticket_files) != 1:
-        fail(
-            "run Ticket create smoke",
-            "expected one ticket file",
-            [str(path) for path in ticket_files],
-        )
-
-
-def _write_payload(path: Path, payload: dict[str, object]) -> None:
-    forbidden = {"session_id", "request_origin", "hook_injected", "hook_request_origin"}
-    leaked = sorted(forbidden.intersection(payload))
-    if leaked:
-        fail("write smoke payload", "payload pre-seeded trust fields", leaked)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
-    path.chmod(0o600)
-
-
-def _ensure_payload(path: Path, payload: dict[str, object]) -> None:
-    if path.exists():
-        return
-    _write_payload(path, payload)
-
-
 def _format_sequence(values: Sequence[str], state: _SmokeState) -> tuple[str, ...]:
     return tuple(_format_text(value, state) for value in values)
 
@@ -768,7 +413,6 @@ def _format_text(value: str, state: _SmokeState) -> str:
     return value.format(
         archived_handoff_path=archived,
         session_state_path=session_state_path,
-        ticket_id=_require_ticket_id(state) if "{ticket_id}" in value else "{ticket_id}",
     )
 
 
@@ -776,12 +420,6 @@ def _require_session_state_path(state: _SmokeState) -> str:
     if state.session_state_path is None:
         fail("build smoke command", "session state path is not available yet", None)
     return str(state.session_state_path)
-
-
-def _require_ticket_id(state: _SmokeState) -> str:
-    if state.ticket_id is None:
-        fail("build smoke command", "ticket id is not available yet", None)
-    return state.ticket_id
 
 
 def _single_line_from_stdout(result: SmokeResult) -> Path:

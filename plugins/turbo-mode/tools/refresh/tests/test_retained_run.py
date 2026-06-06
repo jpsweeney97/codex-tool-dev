@@ -367,7 +367,7 @@ def test_retained_run_rejects_blocked_source_to_certification_delta(
     evidence_path = run_root / "retained-certification-evidence.json"
     evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
     evidence["source_to_certification_changed_paths"] = [
-        "plugins/turbo-mode/handoff/1.6.0/SKILL.md"
+        "plugins/turbo-mode/handoff/README.md"
     ]
     write_json(evidence_path, evidence)
 

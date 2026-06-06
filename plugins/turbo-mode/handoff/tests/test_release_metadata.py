@@ -9,10 +9,10 @@ PLUGIN_ROOT = Path(__file__).parent.parent
 POLICY_DOCS = [
     PLUGIN_ROOT / "README.md",
     PLUGIN_ROOT / "references" / "handoff-contract.md",
-    PLUGIN_ROOT / "skills" / "load" / "SKILL.md",
-    PLUGIN_ROOT / "skills" / "save" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "load-handoff" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "save-handoff" / "SKILL.md",
     PLUGIN_ROOT / "skills" / "quicksave" / "SKILL.md",
-    PLUGIN_ROOT / "skills" / "summary" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "save-summary" / "SKILL.md",
 ]
 CURRENT_STORAGE_DOCS = [
     PLUGIN_ROOT / "README.md",
@@ -20,14 +20,14 @@ CURRENT_STORAGE_DOCS = [
     PLUGIN_ROOT / "references" / "format-reference.md",
 ]
 CHAIN_WRITER_DOCS = [
-    PLUGIN_ROOT / "skills" / "save" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "save-handoff" / "SKILL.md",
     PLUGIN_ROOT / "skills" / "quicksave" / "SKILL.md",
-    PLUGIN_ROOT / "skills" / "summary" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "save-summary" / "SKILL.md",
 ]
 STATE_WRITER_DOCS = [
     PLUGIN_ROOT / "README.md",
     PLUGIN_ROOT / "references" / "handoff-contract.md",
-    PLUGIN_ROOT / "skills" / "load" / "SKILL.md",
+    PLUGIN_ROOT / "skills" / "load-handoff" / "SKILL.md",
 ]
 POLICY_CODE_COMMENTS = [
     PLUGIN_ROOT / "turbo_mode_handoff_runtime" / "cleanup.py",
@@ -58,6 +58,10 @@ def test_readme_documents_current_summary_and_development_commands() -> None:
     assert "uv run --package handoff-plugin pytest" not in text
     assert "354 tests across 10 test modules" not in text
     assert "allowed-tools:" not in text
+    assert "/defer" not in text
+    assert "/triage" not in text
+    assert "docs/tickets" not in text
+    assert "Ticket-backed deferred-work tracking was retired on 2026-06-06" in text
 
 
 def test_contributor_architecture_docs_exist_and_are_linked() -> None:
@@ -135,7 +139,7 @@ def test_readme_does_not_publish_bundled_hook_launcher_contract() -> None:
 
 
 def test_load_skill_does_not_instruct_plugin_managed_gitignore() -> None:
-    text = (PLUGIN_ROOT / "skills" / "load" / "SKILL.md").read_text(encoding="utf-8")
+    text = (PLUGIN_ROOT / "skills" / "load-handoff" / "SKILL.md").read_text(encoding="utf-8")
     assert ".gitignore" not in text
     assert "does not ship plugin-bundled command hooks" in text
     assert "SessionStart hook runs silently" not in text

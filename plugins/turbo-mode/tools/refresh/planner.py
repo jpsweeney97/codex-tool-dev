@@ -49,12 +49,10 @@ DEV_REFRESH_COMMAND = "npm run turbo:sync-personal-plugins"
 EXPECTED_MARKETPLACE_SOURCES = {
     "handoff": "./plugins/turbo-mode/handoff",
     "review-family": "./plugins/turbo-mode/review-family",
-    "ticket": "./plugins/turbo-mode/ticket",
 }
 EXPECTED_CONFIG_PLUGINS = (
     "handoff@turbo-mode",
     "review-family@turbo-mode",
-    "ticket@turbo-mode",
 )
 INSTALLABLE_MISSING_CACHE_PLUGINS = frozenset({"review-family"})
 MISSING_CACHE_ROOT_INSTALL_REASON = "missing-cache-root-install"
@@ -99,15 +97,9 @@ def build_plugin_specs(*, repo_root: Path, codex_home: Path) -> list[PluginSpec]
     return [
         PluginSpec(
             name="handoff",
-            version="1.6.0",
+            version="1.7.0",
             source_root=repo_root / "plugins/turbo-mode/handoff",
-            cache_root=codex_home / "plugins/cache/turbo-mode/handoff/1.6.0",
-        ),
-        PluginSpec(
-            name="ticket",
-            version="1.4.0",
-            source_root=repo_root / "plugins/turbo-mode/ticket",
-            cache_root=codex_home / "plugins/cache/turbo-mode/ticket/1.4.0",
+            cache_root=codex_home / "plugins/cache/turbo-mode/handoff/1.7.0",
         ),
         PluginSpec(
             name="review-family",

@@ -12,15 +12,12 @@ RUNTIME_MODULES = {
     "active_writes.py",
     "cleanup.py",
     "chain_state.py",
-    "defer.py",
     "distill.py",
     "handoff_parsing.py",
     "installed_host_harness.py",
     "list_handoffs.py",
     "load_transactions.py",
-    "plugin_siblings.py",
     "project_paths.py",
-    "provenance.py",
     "quality_check.py",
     "search.py",
     "session_state.py",
@@ -29,19 +26,14 @@ RUNTIME_MODULES = {
     "storage_inspection.py",
     "storage_layout.py",
     "storage_primitives.py",
-    "ticket_parsing.py",
-    "triage.py",
 }
 
 CLI_FACADES = {
-    "defer.py",
     "distill.py",
     "list_handoffs.py",
     "load_transactions.py",
-    "plugin_siblings.py",
     "search.py",
     "session_state.py",
-    "triage.py",
 }
 
 STRING_RETURNING_FACADES = {

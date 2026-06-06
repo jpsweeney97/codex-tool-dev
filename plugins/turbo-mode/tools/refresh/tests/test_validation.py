@@ -351,10 +351,10 @@ def init_refresh_repo(tmp_path: Path) -> tuple[Path, Path, RefreshPlanResult]:
                         },
                     },
                     {
-                        "name": "ticket",
+                        "name": "review-family",
                         "source": {
                             "source": "local",
-                            "path": "./plugins/turbo-mode/ticket",
+                            "path": "./plugins/turbo-mode/review-family",
                         },
                     },
                 ],
@@ -368,14 +368,14 @@ def init_refresh_repo(tmp_path: Path) -> tuple[Path, Path, RefreshPlanResult]:
         f'[marketplaces.turbo-mode]\nsource_type = "local"\nsource = "{repo_root}"\n'
         "[features]\nplugin_hooks = true\n"
         '[plugins."handoff@turbo-mode"]\nenabled = true\n'
-        '[plugins."ticket@turbo-mode"]\nenabled = true\n',
+        '[plugins."review-family@turbo-mode"]\nenabled = true\n',
         encoding="utf-8",
     )
     for base in (
         repo_root / "plugins/turbo-mode/handoff",
-        repo_root / "plugins/turbo-mode/ticket",
-        codex_home / "plugins/cache/turbo-mode/handoff/1.6.0",
-        codex_home / "plugins/cache/turbo-mode/ticket/1.4.0",
+        repo_root / "plugins/turbo-mode/review-family",
+        codex_home / "plugins/cache/turbo-mode/handoff/1.7.0",
+        codex_home / "plugins/cache/turbo-mode/review-family/0.1.0",
     ):
         base.mkdir(parents=True)
         (base / "README.md").write_text("same\n", encoding="utf-8")
@@ -456,7 +456,7 @@ def build_candidate_summary(tmp_path: Path) -> dict[str, object]:
     }
 
 
-def inventory_fixture(*, version: str, hook_command: str) -> AppServerInventoryCheck:
+def inventory_fixture(*, version: str, source_suffix: str = "") -> AppServerInventoryCheck:
     identity = CodexRuntimeIdentity(
         codex_version=version,
         executable_path="/opt/homebrew/bin/codex",
@@ -469,18 +469,11 @@ def inventory_fixture(*, version: str, hook_command: str) -> AppServerInventoryC
         state="aligned",
         identity=identity,
         plugin_read_sources={
-            "handoff": "/repo/plugins/turbo-mode/handoff",
-            "ticket": "/repo/plugins/turbo-mode/ticket",
+            "handoff": f"/repo/plugins/turbo-mode/handoff{source_suffix}",
+            "review-family": f"/repo/plugins/turbo-mode/review-family{source_suffix}",
         },
-        plugin_list=("handoff@turbo-mode", "ticket@turbo-mode"),
-        skills=("handoff:save", "ticket:ticket"),
-        ticket_hook={
-            "plugin_id": "ticket@turbo-mode",
-            "event_name": "preToolUse",
-            "matcher": "Bash",
-            "command": hook_command,
-            "source_path": "/cache/hooks/hooks.json",
-        },
+        plugin_list=("handoff@turbo-mode", "review-family@turbo-mode"),
+        skills=("handoff:save", "review-family:implementation-review"),
         handoff_hooks=(),
         request_methods=(
             "initialize",
@@ -497,8 +490,8 @@ def inventory_fixture(*, version: str, hook_command: str) -> AppServerInventoryC
 
 def test_current_run_identity_recollects_collected_inventory(tmp_path: Path) -> None:
     repo_root, codex_home, _result = init_refresh_repo(tmp_path)
-    stale_inventory = inventory_fixture(version="codex-cli stale", hook_command="old")
-    current_inventory = inventory_fixture(version="codex-cli current", hook_command="new")
+    stale_inventory = inventory_fixture(version="codex-cli stale")
+    current_inventory = inventory_fixture(version="codex-cli current", source_suffix="-current")
     local_summary = {
         "schema_version": "turbo-mode-refresh-plan-03",
         "run_id": "run-1",
@@ -523,7 +516,6 @@ def test_current_run_identity_recollects_collected_inventory(tmp_path: Path) -> 
             "plugin_read_sources": stale_inventory.plugin_read_sources,
             "plugin_list": list(stale_inventory.plugin_list),
             "skills": list(stale_inventory.skills),
-            "ticket_hook": stale_inventory.ticket_hook,
             "handoff_hooks": list(stale_inventory.handoff_hooks),
             "request_methods": list(stale_inventory.request_methods),
             "reasons": list(stale_inventory.reasons),
@@ -549,7 +541,6 @@ def test_current_run_identity_recollects_collected_inventory(tmp_path: Path) -> 
             "plugin_read_sources": dict(stale_inventory.plugin_read_sources),
             "plugin_list": list(stale_inventory.plugin_list),
             "skills": list(stale_inventory.skills),
-            "ticket_hook": dict(stale_inventory.ticket_hook),
             "handoff_hooks": [dict(item) for item in stale_inventory.handoff_hooks],
             "request_methods": list(stale_inventory.request_methods),
             "reasons": [],
@@ -1120,7 +1111,7 @@ def test_metadata_validator_rejects_stale_existing_candidate_summary(tmp_path: P
     "dirty_path",
     [
         "plugins/turbo-mode/handoff/README.md",
-        "plugins/turbo-mode/ticket/README.md",
+        "plugins/turbo-mode/review-family/README.md",
     ],
 )
 def test_metadata_validator_rejects_dirty_plugin_source_paths(
@@ -1207,7 +1198,7 @@ def test_redaction_validator_rejects_raw_transcript_and_marketplace_plugin_keys(
             "state": "aligned",
             "marketplace_state": "aligned",
             "plugin_hooks_state": "true",
-            "plugin_enablement_state": {"handoff": "enabled", "ticket": "enabled"},
+            "plugin_enablement_state": {"handoff": "enabled", "review-family": "enabled"},
             "reason_codes": [],
             "reason_count": 0,
         },
