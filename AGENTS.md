@@ -39,126 +39,58 @@ This framing applies to conversation, not to authored artifacts.
 
 ## Development Tenet
 
-This repo builds Codex-facing systems (plugins, skills, hooks, agents,
-commands, MCP servers, prompts Codex reads at runtime). For these systems,
-prefer giving Codex judgment-supporting context over encoding behavior in
-rule machinery. Before adding a structured field, status enum, workflow
-stage, validation rule, or imperative decision logic to a Codex-facing
-system, run four tests:
+This repo builds Codex-facing systems: plugins, skills, hooks, agents,
+commands, MCP servers, prompts Codex reads at runtime, and persistent artifacts
+Codex uses while doing the user's work.
 
-**Test 1 — Whose failure is it?** If Codex populates this wrong, does the
-**work product** (the artifact a non-plugin reader consumes) suffer, or
-does **only the plugin's own machinery** (validators, internal pipelines,
-audit trails, derived caches) break? A field counts as ontology if Codex
-has to know about it *anywhere* — schema, contract, pipeline stage, audit
-log, engine interface. "Derive at runtime" only removes a field from the
-ontology when the value is computed on demand AND discarded; it does not
-help when the value is computed once and passed forward between stages.
-"Move to audit logs" does not help when Codex must populate the logs
-correctly. Fields whose only consumer is the plugin's pipeline (internal
-state classifications, confidence scores between stages, derived hashes
-that couple pipeline steps, override flags, version stamps for contract
-checking) are over-fit ontology — remove them, demote them to truly
-transient runtime values, or acknowledge that they are over-fit and count
-them in Test 2.
+Default away from Codex-facing machinery unless it clearly protects or improves
+the user's work product more than lighter context would. Codex-facing machinery
+includes schemas, validators, workflow stages, status systems, routers, scripts,
+and heavy prose instructions that force Codex through a rigid process.
 
-**Test 2 — Tooling or thinking?** Separate fields that help Codex reason
-(small, bounded, content-shaped — the things a human reader of the output
-would also reference) from fields that exist for tooling (queries, audits,
-downstream automation). Thinking fields stay roughly proportionate to the
-concept's complexity; tooling fields multiply without limit if unchecked.
-When tooling fields outnumber thinking fields, the artifact has inverted
-its purpose: the plugin is the customer, not the work. Apply per-addition
-AND on the full set at Test 4's cadence.
+Before adding or materially changing Codex-facing machinery, run the global
+Agent-Facing Design Gate in `/Users/jp/.codex/AGENTS.md`. Read
+`/Users/jp/.codex/references/codex-facing-design.md` for full calibration.
 
-**Test 3 — Could Codex do this work inline?** Before writing a script
-that classifies, triages, validates with semantic judgment, scores,
-decides, or routes within plugin/skill/agent workflows, ask: given the
-same context the script will consume, could a thinking Codex produce the
-same decision in prose? If yes, the script is replacing judgment with
-code. Move the decision back to Codex; keep only the deterministic
-mechanics in code (file I/O, schema parsing, persistence, idempotent state
-mutations).
+Use these fixed tests before adding a structured field, status enum, workflow
+stage, validation rule, semantic router, classifier, scoring path, imperative
+decision path, or rigid prose workflow:
 
-*Exempt from Test 3: infrastructure code.* (a) Hooks running synchronously
-on every Codex tool invocation; (b) security/policy guards (credential
-scanners, destructive-action blockers, branch protection); (c)
-deterministic computational machinery (search ranking, indexing, parsing,
-encoding, hashing) where the algorithm itself is the value, not the
-decision the algorithm produces. The "unacceptable latency / token cost /
-fail-open risk" argument applies only *within* (a), (b), or (c) — it is
-not a freestanding exemption, and it does not exempt semantic decisions
-(classifying, triaging, scoring) even when called at high frequency.
-Infrastructure code is justified by stakes and operational constraints
-rather than by its decision shape.
+1. **Work product:** Does a wrong value or wrong step damage the user's work
+   product, or only this repo's bookkeeping, validator, audit trail, pipeline,
+   or derived cache?
+2. **Judgment support:** Does this help Codex reason, or does it replace
+   judgment with a rule?
+3. **Lighter context:** Could concise prose, an example, a boundary, or
+   recoverable state produce the same outcome?
+4. **Harm boundary:** Would a mistake cause real damage: deletion, credential
+   exposure, corrupted state, broken recovery, stale authority, unsafe action,
+   security failure, or loss of user trust?
+5. **Surface area:** What must future Codex now understand, populate, follow, or
+   maintain?
 
-Within workflow contexts, imperative code that pre-decides for Codex is
-the form of rule machinery that hides best — it passes Tests 1 and 2
-because it isn't a field — but it produces exactly the harm the tenet
-exists to prevent.
+Justify the answers in plain language before continuing. The justification
+usually belongs in chat. Write it into the artifact only when the choice is
+high-risk, becomes part of a durable contract, or would be hard for a future
+agent to reconstruct.
 
-**Test 4 — Re-test the whole artifact, not just additions.** Tests 1-3
-fire per-addition. Re-run all three on the full Codex-facing surface
-(every field, every script, every line of prose) at any of these triggers,
-whichever first:
+If the machinery fails the tests, choose whichever design is smaller and
+clearer: remove the machinery, replace it with lighter context, keep only a
+narrow deterministic check, move the semantic decision back to Codex, or make
+state recoverable instead of making the workflow more elaborate.
 
-- **Deterministic floor:** after every ~25 commits touching the artifact's
-  directory, or whenever its Codex-facing surface has grown by ~50% since
-  last review (numbers are calibration, not a contract).
-- **Subjective signal:** when adding the next item makes you hesitate.
+Use hard rules where a mistake degrades the work itself: safety, destructive
+actions, data integrity, recovery guarantees, stale state, credential exposure,
+authentication, security, permissions, or similar high-stakes boundaries. Do not
+use latency, token cost, tidy audits, or process completeness by themselves to
+justify semantic classifiers, workflow routers, status systems, or rigid
+multi-stage instructions.
 
-The deterministic floor exists because momentum-driven development
-suppresses the hesitation signal exactly when re-evaluation is most
-needed. Balanced incrementalism — adding one thinking field per tooling
-field — passes per-addition checks indefinitely while accumulating into a
-heavy ontology; only periodic full-surface re-evaluation catches it.
-
-If the artifact's Codex-facing surface feels disproportionate to the work
-it does — compared to lighter plugins in this repo like `handoff` or
-`context-metrics` — that is the redesign signal. Responsibility for Test 4
-falls on whoever next adds to the artifact; if you can't tell when it last
-ran, run it now.
-
-### Illustrative shapes
-
-| Shape | Verdict | Why |
-|---|---|---|
-| A document artifact with `title`, `body`, `priority`, `tags` | Keep | A non-plugin reader uses each field; passes Test 1 and Test 2 |
-| The same artifact also carrying internal pipeline fields (process-stage enum, derived hash persisted across stages, classification-confidence float, contract version stamp, hook-origin marker) | Over-fit | Only the plugin's machinery cares; "derived at runtime" does not save it because the value crosses stages; "in audit logs" does not save it because Codex must populate them |
-| A script that classifies user intent into N categories then routes to one of N handlers within a plugin workflow | Over-fit (Test 3) | A thinking Codex given the same input could pick a category in prose; the script is making Codex's decision for it |
-| A hook that scans files for credentials and blocks egress | Hard rule, Test 3 exempt | Runs synchronously on every tool call; latency-sensitive; security-critical. Semantically a "classifier" but exempt because infrastructure |
-| A hook that blocks edits to protected branches (multi-state state machine + env-var configuration) | Hard rule, justified | Wrong = real branch/data damage; failure lands in the work. Codex's role here is one decision (edit/don't), not navigating a taxonomy |
-| A skill that lays out a fixed N-stage workflow Codex must walk in order regardless of situation | Over-fit | Cases needing 1 stage and cases needing N are both forced through N |
-| A skill that exposes a checklist Codex consults but isn't forced to walk | Keep | Structure offered as context, not imposed as workflow; Codex decides which items apply |
-| A session-state plugin with `session_id`, `timestamp`, `branch`, `summary` persisted to disk | Keep | Fields are content-shaped (a non-plugin reader uses them); the plugin's existence is justified by an otherwise-unsolvable problem (cross-session memory); Test 1 passes because a wrong field = wrong handoff = wrong work |
-
-### Supporting frame
-
-Codex-facing systems support judgment; they do not replace it with rule
-machinery. The four tests above are how that stance becomes a filter at
-design time. Hard rules remain appropriate where a mistake degrades the
-work itself — safety, destructive actions, data integrity, recovery
-guarantees, stale state. Everywhere else, prefer giving Codex durable
-context, clear boundaries, recoverable state, and structured evidence,
-then trust the judgment that follows.
-
-This tenet sits alongside `/Users/jp/.codex/tenets.md` and does
-not override it. The methodology tenets are broader: they cover code
-design (Deterministic over Heuristic, Explicit over Silent), problem-
-solving approach (counteract capability-first thinking), and risk
-awareness for irreversible actions. This tenet is narrower: it covers the
-design of Codex-facing artifacts in this repo specifically. The two are
-mostly compatible — code-design tenets apply to the runtime behavior under
-a Codex-facing artifact while this tenet applies to the surface above.
-Where they directly conflict, the more specific tenet (this one, for the
-Codex-facing surface) governs.
-
-A good implementation makes Codex more capable without making normal work
-feel heavy. The tests bind themselves by that constraint: apply them to
-the design as a whole, not as a per-keystroke ritual. If running them
-takes longer than the artifact deserves, the artifact is probably too
-small to need any of them — but Test 4's periodic full-surface check is
-the floor, not a ceiling.
+Per-addition tests are not enough. When the Codex-facing surface has grown
+materially, has seen substantial recent change, or makes you hesitate, ask
+whether the surface still helps Codex do the user's work or whether the
+machinery has become the customer. If it feels disproportionate, simplify before
+adding more structure.
 
 ## Development Posture
 
