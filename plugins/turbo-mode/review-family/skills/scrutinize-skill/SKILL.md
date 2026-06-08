@@ -17,9 +17,14 @@ skill mentions are available in the current surface.
 
 - Use this skill only when explicitly invoked for adversarial review of a Codex
   skill, skill directory, `SKILL.md`, `agents/openai.yaml`, behavior-shaping
-  reference, example, or proposed skill contract.
+  reference, example, or proposed skill contract. This skill wins over
+  `scrutinize` and `adversarial-review` for explicit Codex skill
+  behavior-contract review.
 - Use `scrutinize` for broad natural-language adversarial artifact critique
   when this skill was not invoked.
+- Use `adversarial-review` for explicit proposal, design, approach, or decision
+  stress tests when this skill was not invoked for skill behavior-contract
+  review.
 - Use `implementation-review` for completed code or artifacts against a
   plan/spec, and `system-design-review` for architecture or system-boundary
   review.
@@ -72,9 +77,11 @@ Compare overlap against the whole available skill set. Start with skill names
 and descriptions, then read only likely overlaps deeply enough to decide which
 skill should win, whether routing needs clarification, or whether skills should
 merge or split. Do not bulk-read unrelated skills just to appear exhaustive.
-Report the overlap coverage: all visible skill names/descriptions scanned,
-likely overlaps deep-read, and omitted or unavailable skill surfaces marked
-`unverified`.
+Report the overlap coverage and skill-set source used: session-visible skill
+descriptions, source sibling scan, installed cache scan, or runtime inventory.
+Include likely overlaps deep-read, and mark omitted or unavailable skill surfaces
+`unverified`. If the source is not runtime inventory, do not imply loaded-skill
+state.
 
 Separate proof classes:
 
@@ -124,6 +131,9 @@ Use this order:
 Lead findings with user-visible behavior: wrong amount of friction, unclear
 first move, poor handoff, generic output, missing stop condition, false proof,
 or ambiguous overlap.
+
+If a required section has no concrete finding, write `None found` and move on;
+do not fill it with generic observations.
 
 Each finding must include a compact evidence pointer: file/line, command output,
 observed behavior, or `unverified` with the exact missing check. Do not make
