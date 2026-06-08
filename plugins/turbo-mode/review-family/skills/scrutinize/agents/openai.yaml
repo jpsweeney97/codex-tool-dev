@@ -1,4 +1,4 @@
 interface:
   display_name: "Scrutinize"
   short_description: "Adversarial review with hard gates"
-  default_prompt: "Use $scrutinize to adversarially test this artifact; ask for a formal stress test when you want an explicit assumptions audit, pre-mortem, dimensional critique, and confidence boundary."
+  default_prompt: "Use $scrutinize to adversarially test this artifact, cite evidence, and state the verdict plus required changes; ask for a formal stress test when you want an explicit assumptions audit, pre-mortem, dimensional critique, and confidence boundary."
