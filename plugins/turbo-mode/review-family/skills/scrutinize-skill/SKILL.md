@@ -77,6 +77,10 @@ Compare overlap against the whole available skill set. Start with skill names
 and descriptions, then read only likely overlaps deeply enough to decide which
 skill should win, whether routing needs clarification, or whether skills should
 merge or split. Do not bulk-read unrelated skills just to appear exhaustive.
+For source-bundle reviews, default to session-visible skill descriptions plus a
+source sibling scan. Add installed cache or runtime inventory only when the user
+asks about downstream installed or loaded behavior, or when the overlap claim
+depends on that proof class.
 Report the overlap coverage and skill-set source used: session-visible skill
 descriptions, source sibling scan, installed cache scan, or runtime inventory.
 Include likely overlaps deep-read, and mark omitted or unavailable skill surfaces
