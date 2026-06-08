@@ -1,6 +1,6 @@
 ---
 name: scrutinize-skill
-description: Use when the user explicitly invokes `$scrutinize-skill` to adversarially review a Codex skill, skill directory, SKILL.md, agents/openai.yaml, skill reference, or proposed skill contract for behavior quality, user experience, instruction clarity, composability, and overlap with the available skill set. Do not use for routine skill editing, implementation, general artifact review, or completed-code review.
+description: Use when the user explicitly invokes `review-family:scrutinize-skill`, or `$scrutinize-skill` shorthand where skill mentions are available, to adversarially review a Codex skill, skill directory, SKILL.md, agents/openai.yaml, skill reference, or proposed skill contract for behavior quality, user experience, instruction clarity, composability, and overlap with the available skill set. Do not use for routine skill editing, implementation, general artifact review, or completed-code review.
 ---
 
 # Scrutinize Skill
@@ -11,8 +11,9 @@ valid.
 
 ## Review-Family Routing
 
-Explicit review-family invocation wins, including namespaced plugin forms such
-as `review-family:scrutinize-skill`.
+Explicit review-family invocation wins. The plugin-scoped form is
+`review-family:scrutinize-skill`; `$scrutinize-skill` is accepted shorthand when
+skill mentions are available in the current surface.
 
 - Use this skill only when explicitly invoked for adversarial review of a Codex
   skill, skill directory, `SKILL.md`, `agents/openai.yaml`, behavior-shaping
@@ -51,6 +52,11 @@ publishing unless the user explicitly asks for that separate work.
 
 Inspect the exact target before judging it.
 
+If the target is a file inside a skill bundle, such as `SKILL.md`,
+`agents/*.yaml`, `agents/*.md`, `references/*`, `examples/*`, or another
+behavior-shaping file, treat the containing skill directory as the target unless
+the user explicitly narrows the request to that file only.
+
 For an existing skill bundle, inspect:
 
 - `SKILL.md`
@@ -66,6 +72,9 @@ Compare overlap against the whole available skill set. Start with skill names
 and descriptions, then read only likely overlaps deeply enough to decide which
 skill should win, whether routing needs clarification, or whether skills should
 merge or split. Do not bulk-read unrelated skills just to appear exhaustive.
+Report the overlap coverage: all visible skill names/descriptions scanned,
+likely overlaps deep-read, and omitted or unavailable skill surfaces marked
+`unverified`.
 
 Separate proof classes:
 
@@ -115,6 +124,10 @@ Use this order:
 Lead findings with user-visible behavior: wrong amount of friction, unclear
 first move, poor handoff, generic output, missing stop condition, false proof,
 or ambiguous overlap.
+
+Each finding must include a compact evidence pointer: file/line, command output,
+observed behavior, or `unverified` with the exact missing check. Do not make
+location-free findings when the target is file-backed.
 
 Use `Bounded Review Scope` before `Target And Surface` when the target or skill
 set comparison is too large to inspect completely in one pass. In bounded mode,

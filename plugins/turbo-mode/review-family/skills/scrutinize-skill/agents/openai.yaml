@@ -1,7 +1,7 @@
 interface:
   display_name: "Scrutinize Skill"
   short_description: "Adversarial review for Codex skills"
-  default_prompt: "Use $scrutinize-skill to review this skill as a Codex behavior contract, including UX, composability, overlap, and proof gaps."
+  default_prompt: "Use review-family:scrutinize-skill (or $scrutinize-skill shorthand) to review this skill as a Codex behavior contract, including UX, composability, overlap, and proof gaps."
 
 policy:
   allow_implicit_invocation: false
