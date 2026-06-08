@@ -1,6 +1,6 @@
 ---
 name: scrutinize
-description: Use when the user explicitly asks for adversarial review of a plan, design, draft, argument, decision, code change, or broad artifact. Trigger on "scrutinize", "be brutal", "tear this apart", "assume this is wrong", or "reject until proven otherwise". Do not use for Codex skill targets, completed implementation-against-plan review, routine review, collaborative editing, or balanced feedback.
+description: Use when the user explicitly asks for adversarial review of a plan, design, draft, argument, decision, code change, or broad artifact. Trigger on "scrutinize", "be brutal", "tear this apart", "assume this is wrong", "reject until proven otherwise", or requests for a formal stress test. Add an explicit formal stress test when requested or when the target is high-stakes enough that hidden assumptions or quiet failure modes could materially damage the work. Do not use for Codex skill targets, completed implementation-against-plan review, routine review, collaborative editing, or balanced feedback.
 ---
 
 # Scrutinize
@@ -27,9 +27,9 @@ target belongs to one of those lanes.
   plan/spec, even when the user asks for an adversarial implementation pass.
 - Use `system-design-review` for architecture tradeoffs, boundaries, data
   authority, reliability, ownership, and next probes.
-- Use explicit-only skills only when invoked: `adversarial-review` for
-  proposal stress tests, `pragmatic-review` for execution-readiness blockers,
-  `review-reviewer` for supplied-review adjudication, and
+- Use explicit-only skills only when invoked: `pragmatic-review` for
+  execution-readiness blockers, `review-reviewer` for supplied-review
+  adjudication, and
   `review-claude-claims` for itemized pasted-claim validation.
 - Use `request-claude-pr-review` when the user wants a prompt for Claude Code,
   not a review performed by Codex.
@@ -48,13 +48,45 @@ target belongs to one of those lanes.
    use `scrutinize-skill` instead of this generic workflow. Do not ask whether
    the user wants the dedicated lane unless the target could reasonably be
    reviewed as something other than a skill behavior contract.
-3. Premise check: is this solving the right problem?
-4. `Pass 1`: contradictions, omissions, weak assumptions, practical failures.
-5. `Pass 2`: second-order effects, edge cases, hidden dependencies, ideal-condition assumptions.
-6. Apply relevant adversarial lenses internally; replace weak ones. Report
+3. Decide whether to make a formal stress test explicit. Use it when the user
+   asks for a formal stress test, assumptions audit, pre-mortem, confidence
+   check, confidence boundary, exhaustive adversarial packet, or equivalent
+   heavier review; also use it when the target is high-stakes, irreversible,
+   publication-bound, security/trust-sensitive, runtime-mutating, or
+   decision-critical enough that hidden assumptions or quiet failure modes could
+   materially damage the work.
+4. Premise check: is this solving the right problem?
+5. `Pass 1`: contradictions, omissions, weak assumptions, practical failures.
+6. `Pass 2`: second-order effects, edge cases, hidden dependencies, ideal-condition assumptions.
+7. Apply relevant adversarial lenses internally; replace weak ones. Report
    perspectives only when they materially changed findings, severity, or required
    changes.
-7. Group root causes, then verdict: `Reject`, `Major revision`, `Minor revision`, or `Defensible`.
+8. Group root causes, then verdict: `Reject`, `Major revision`, `Minor revision`, or `Defensible`.
+
+## Formal Stress Tests
+
+Ask for a formal stress test when the review needs an explicit assumptions
+audit, pre-mortem, dimensional critique, and confidence boundary.
+
+For a formal stress test, make these pieces visible:
+
+- `Assumptions Audit`: list only verdict-driving assumptions. Tag each as
+  `validated`, `plausible`, `wishful`, or `unverified`; tag evidence as
+  `observed`, `source-backed`, `inferred`, or `needs verification`; state what
+  breaks if the assumption is wrong.
+- `Pre-Mortem`: name the most likely failure path and the most damaging quiet
+  failure path. If they are the same, say so and write one.
+- `Dimensional Critique`: explicitly cover `Correctness` and `Completeness`;
+  add `Security / Trust Boundaries`, `Operational`, `Maintainability`, and
+  `Alternatives Foregone` only when relevant. Name skipped dimensions only when
+  the user expected them or when omission could change the verdict.
+- `Confidence Boundary`: use prose, not a default numeric score. State what was
+  checked, what remains unverified, and what evidence would change the verdict.
+  Use numeric confidence only when the user explicitly asks for it.
+
+For ordinary scrutiny, keep assumptions, failure narratives, dimensional
+lenses, and confidence boundaries internal unless they materially change
+findings, severity, required changes, or the verdict.
 
 ## Guardrails
 
@@ -73,3 +105,6 @@ target belongs to one of those lanes.
 Default sections: `Target And Evidence`, `Premise Check`, `Critical Failures`, `High-Risk Assumptions`, `Real-World Breakpoints`, `Hidden Dependencies`, `Patterns And Root Causes`, `Required Changes`, `Verdict`. Add `Adversarial Perspectives` only when a lens materially changed findings, severity, or required changes. Add `Bounded Review Scope` before `Target And Evidence` when bounded review mode is used and write `Verdict: Partial review only` if the requested scope was not fully inspected.
 
 Use relevant lenses: plan logistics, writing evidence, code correctness/security/failure modes/tests, strategy assumptions/incentives/tradeoffs. Read `references/review-format.md` only for complex targets, full structured reviews, or repeated severity/citation formatting.
+For a formal stress test, add explicit `Assumptions Audit`, `Pre-Mortem`,
+`Dimensional Critique`, and `Confidence Boundary` sections while preserving
+required changes and verdict.

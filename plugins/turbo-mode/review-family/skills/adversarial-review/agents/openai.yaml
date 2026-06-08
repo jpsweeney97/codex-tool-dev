@@ -1,7 +1,0 @@
-interface:
-  display_name: "Adversarial Review"
-  short_description: "Stress-test plans and decisions"
-  default_prompt: "Use $adversarial-review to stress-test this proposal for assumptions, failure modes, trust boundaries, and missed alternatives."
-
-policy:
-  allow_implicit_invocation: false

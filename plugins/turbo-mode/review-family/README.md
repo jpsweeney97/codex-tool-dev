@@ -30,7 +30,7 @@ package, hook, MCP, app, or script dependency.
 
 | Capability | Skills | Description |
 |------------|--------|-------------|
-| **Adversarial artifact review** | `scrutinize`, `adversarial-review` | Challenge plans, designs, drafts, decisions, and broad artifacts with evidence-backed findings. |
+| **Adversarial artifact review** | `scrutinize` | Challenge plans, designs, drafts, decisions, and broad artifacts with evidence-backed findings. Ask for a formal stress test when you want an explicit assumptions audit, pre-mortem, dimensional critique, and confidence boundary. |
 | **Skill behavior review** | `scrutinize-skill` | Review Codex skills as behavior contracts for execution quality, UX, composability, overlap, and proof gaps. Skill targets route here even when the user says "scrutinize". |
 | **Implementation review** | `implementation-review`, `pragmatic-review` | Review completed work against a plan, spec, diff, or execution-readiness criteria. |
 | **System design review** | `system-design-review` | Review architecture and system design artifacts for scoped design-lens gaps and missing probes. |
@@ -39,17 +39,16 @@ package, hook, MCP, app, or script dependency.
 
 ## Components
 
-### Skills (9)
+### Skills (8)
 
 | Skill | Trigger | Purpose |
 |-------|---------|---------|
-| `adversarial-review` | Explicit adversarial, hostile, or failure-mode review of a concrete artifact | Read-only, evidence-first review that hunts for real ways the target can fail. |
 | `implementation-review` | Completed implementation review against a plan, spec, PR, or known intended behavior | Compare implemented behavior to the stated contract and report ranked findings. |
 | `pragmatic-review` | Execution-readiness, plan-readiness, rollout-readiness, or "can this work in practice?" review | Stress test whether a proposal is operationally executable with clear next steps. |
 | `review-claude-claims` | Pasted Claude claims, review comments, or recommendations that need verification | Treat claims as allegations and verify them against source evidence before endorsing action. |
 | `review-reviewer` | Supplied review, critique, audit, or reviewer output that needs adjudication | Separate current truth from reviewer disposition and identify which findings are valid, stale, or unproven. |
 | `request-claude-pr-review` | Request for a Claude Code PR-review prompt or review brief | Draft a bounded prompt for Claude Code to review a GitHub pull request. |
-| `scrutinize` | "Scrutinize", "tear this apart", "be brutal", or reject-until-proven review for non-skill targets | Adversarially inspect a plan, design, argument, code change, or broad artifact without implementing fixes. |
+| `scrutinize` | "Scrutinize", "tear this apart", "be brutal", reject-until-proven review, or a formal stress test for non-skill targets | Adversarially inspect a plan, design, argument, code change, or broad artifact without implementing fixes. |
 | `scrutinize-skill` | Adversarial review of a Codex skill or proposed skill contract | Review whether the skill will guide Codex behavior well once triggered, including UX, overlap, composability, and proof gaps. |
 | `system-design-review` | Architecture or system design review of docs, verbal designs, or codebase structure | Review design tradeoffs, defaults, interfaces, operations, and next probes. |
 
@@ -71,6 +70,15 @@ Use implementation-review to check this branch against docs/plans/plan.md.
 ```text
 Scrutinize this migration plan. Assume the plan is wrong until the evidence says otherwise.
 ```
+
+### Request A Formal Stress Test
+
+```text
+Use $scrutinize to run a formal stress test of this proposal, including an assumptions audit, pre-mortem, dimensional critique, and confidence boundary.
+```
+
+`adversarial-review` has been retired as a separate skill. Use `$scrutinize` and
+ask for a formal stress test when you want the heavier review packet.
 
 ### Review A Codex Skill Contract
 

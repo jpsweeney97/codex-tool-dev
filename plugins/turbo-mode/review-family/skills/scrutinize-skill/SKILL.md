@@ -19,13 +19,10 @@ Codex skill or skill-support file, this skill also wins over generic
 
 - Use this skill for adversarial review of a Codex skill, skill directory,
   `SKILL.md`, `agents/openai.yaml`, behavior-shaping reference, example, or
-  proposed skill contract. This skill wins over `scrutinize` and
-  `adversarial-review` for Codex skill behavior-contract review.
+  proposed skill contract. This skill wins over `scrutinize` for Codex skill
+  behavior-contract review.
 - Use `scrutinize` for broad natural-language adversarial artifact critique
-  when this skill was not invoked.
-- Use `adversarial-review` for explicit proposal, design, approach, or decision
-  stress tests when this skill was not invoked for skill behavior-contract
-  review.
+  and formal stress tests when this skill was not invoked.
 - Use `implementation-review` for completed code or artifacts against a
   plan/spec, and `system-design-review` for architecture or system-boundary
   review.

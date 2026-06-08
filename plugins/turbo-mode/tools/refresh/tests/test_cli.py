@@ -293,12 +293,6 @@ for line in sys.stdin:
                 skill("handoff:search", "handoff", "1.7.0", "search"),
                 skill("handoff:summary", "handoff", "1.7.0", "summary"),
                 skill(
-                    "review-family:adversarial-review",
-                    "review-family",
-                    "0.1.0",
-                    "adversarial-review",
-                ),
-                skill(
                     "review-family:implementation-review",
                     "review-family",
                     "0.1.0",

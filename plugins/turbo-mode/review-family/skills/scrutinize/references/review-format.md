@@ -59,3 +59,21 @@ or straightforward reviews.
 ```
 
 If the user asks for a shorter answer, keep the same section order and compress the content rather than dropping sections.
+
+## Formal Stress Test Add-On
+
+Use this only when the user asks for a formal stress test or the target is
+high-stakes enough that hidden assumptions or quiet failures could materially
+damage the work.
+
+Add these sections explicitly:
+
+1. `Assumptions Audit`: verdict-driving assumptions only, with assumption and
+   evidence tags.
+2. `Pre-Mortem`: most likely failure and most damaging quiet failure.
+3. `Dimensional Critique`: explicit correctness and completeness coverage, plus
+   relevant optional dimensions.
+4. `Confidence Boundary`: prose summary of what was checked, what remains
+   unverified, and what evidence would change the verdict.
+
+Do not add a numeric confidence score unless the user asks for one.

@@ -20,9 +20,8 @@ as `review-family:implementation-review`.
 - Use this skill for completed code, generated artifacts, PRs, diffs, or commit
   ranges that claim to satisfy a plan, spec, ticket, handoff, or explicit
   requirements.
-- This skill wins over `scrutinize`, `adversarial-review`, and
-  `pragmatic-review` when the central question is whether an implementation
-  satisfies its governing requirements.
+- This skill wins over `scrutinize` and `pragmatic-review` when the central
+  question is whether an implementation satisfies its governing requirements.
 - Use `system-design-review` for architecture tradeoffs before implementation,
   `scrutinize` for broad adversarial artifact critique, and `pragmatic-review`
   only for explicit execution-readiness or proof-gate reviews.
