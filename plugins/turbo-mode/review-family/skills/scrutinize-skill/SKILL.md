@@ -1,6 +1,6 @@
 ---
 name: scrutinize-skill
-description: Use when the user explicitly invokes `review-family:scrutinize-skill`, or `$scrutinize-skill` shorthand where skill mentions are available, to adversarially review a Codex skill, skill directory, SKILL.md, agents/openai.yaml, skill reference, or proposed skill contract for behavior quality, user experience, instruction clarity, composability, and overlap with the available skill set. Do not use for routine skill editing, implementation, general artifact review, or completed-code review.
+description: Use when the target of an adversarial review is a Codex skill, skill directory, SKILL.md, agents/openai.yaml, skill reference, example, or proposed skill contract, including explicit `review-family:scrutinize-skill`, `$scrutinize-skill`, or natural-language requests such as "scrutinize this skill". Review behavior quality, user experience, instruction clarity, composability, and overlap with the available skill set. Do not use for routine skill editing, implementation, general artifact review, or completed-code review.
 ---
 
 # Scrutinize Skill
@@ -13,13 +13,14 @@ valid.
 
 Explicit review-family invocation wins. The plugin-scoped form is
 `review-family:scrutinize-skill`; `$scrutinize-skill` is accepted shorthand when
-skill mentions are available in the current surface.
+skill mentions are available in the current surface. When the review target is a
+Codex skill or skill-support file, this skill also wins over generic
+`scrutinize`, even if the user used natural-language scrutiny wording.
 
-- Use this skill only when explicitly invoked for adversarial review of a Codex
-  skill, skill directory, `SKILL.md`, `agents/openai.yaml`, behavior-shaping
-  reference, example, or proposed skill contract. This skill wins over
-  `scrutinize` and `adversarial-review` for explicit Codex skill
-  behavior-contract review.
+- Use this skill for adversarial review of a Codex skill, skill directory,
+  `SKILL.md`, `agents/openai.yaml`, behavior-shaping reference, example, or
+  proposed skill contract. This skill wins over `scrutinize` and
+  `adversarial-review` for Codex skill behavior-contract review.
 - Use `scrutinize` for broad natural-language adversarial artifact critique
   when this skill was not invoked.
 - Use `adversarial-review` for explicit proposal, design, approach, or decision

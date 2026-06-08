@@ -1,6 +1,6 @@
 ---
 name: scrutinize
-description: Use when the user explicitly asks for adversarial review of a plan, design, draft, argument, decision, code change, or artifact. Trigger on "scrutinize", "be brutal", "tear this apart", "assume this is wrong", or "reject until proven otherwise". Do not use for routine review, collaborative editing, or balanced feedback.
+description: Use when the user explicitly asks for adversarial review of a plan, design, draft, argument, decision, code change, or broad artifact. Trigger on "scrutinize", "be brutal", "tear this apart", "assume this is wrong", or "reject until proven otherwise". Do not use for Codex skill targets, completed implementation-against-plan review, routine review, collaborative editing, or balanced feedback.
 ---
 
 # Scrutinize
@@ -15,8 +15,10 @@ as `review-family:scrutinize`.
 - Use this skill for natural-language adversarial review requests such as
   "scrutinize", "be brutal", "tear this apart", "assume this is wrong", or
   "reject until proven otherwise" when no narrower explicit skill applies.
-- Use `scrutinize-skill` only when explicitly invoked for adversarial review of
-  a Codex skill as a behavior contract.
+- Use `scrutinize-skill` when the target is a Codex skill, skill directory,
+  `SKILL.md`, `agents/openai.yaml`, skill reference, example, or proposed skill
+  contract, even when the user says "scrutinize" instead of invoking
+  `scrutinize-skill`.
 - Use `implementation-review` for completed code or artifacts against a
   plan/spec, even when the user asks for an adversarial implementation pass.
 - Use `system-design-review` for architecture tradeoffs, boundaries, data
@@ -37,15 +39,11 @@ as `review-family:scrutinize`.
    sources, skipped or unread material, proof class, and whether runtime or
    current-state evidence was checked. Ask one targeted question if the target or
    evidence boundary is unclear.
-2. If the target is a Codex skill and `scrutinize-skill` was not explicitly
-   invoked, use this skill only as the natural-language fallback. Ask one routing
-   question if the user may want the dedicated skill-contract review. If
-   proceeding, inspect the bundle surface before judging: `SKILL.md`,
-   `agents/*.yaml`, and behavior-shaping references such as files linked from
-   `SKILL.md`, `references/*`, or nearby docs/config that define invocation,
-   constraints, evidence rules, examples, or output expectations. Preserve the
-   skill-review dimensions: first move, user experience, composability and
-   overlap, validation and proof classes, and handoff or closure behavior.
+2. If the target is a Codex skill, skill directory, `SKILL.md`,
+   `agents/openai.yaml`, skill reference, example, or proposed skill contract,
+   use `scrutinize-skill` instead of this generic workflow. Do not ask whether
+   the user wants the dedicated lane unless the target could reasonably be
+   reviewed as something other than a skill behavior contract.
 3. Premise check: is this solving the right problem?
 4. `Pass 1`: contradictions, omissions, weak assumptions, practical failures.
 5. `Pass 2`: second-order effects, edge cases, hidden dependencies, ideal-condition assumptions.
