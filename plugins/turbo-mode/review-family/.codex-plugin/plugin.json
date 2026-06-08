@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "Review Family",
     "shortDescription": "Evidence-first review and review-adjudication skills",
-    "longDescription": "Run bounded, evidence-first Codex reviews across implementation, architecture, skill behavior, execution-readiness, adversarial scrutiny, supplied-review and claim adjudication, and Claude PR-review prompt drafting.",
+    "longDescription": "Run bounded, evidence-first Codex reviews across implementation, architecture, skill behavior, execution-readiness, adversarial scrutiny, and supplied-review or claim adjudication.",
     "developerName": "JP",
     "category": "Productivity",
     "capabilities": [

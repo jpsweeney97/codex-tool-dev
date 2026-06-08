@@ -62,8 +62,7 @@ as `review-family:review-reviewer`.
   correct, or missing issues.
 - Use `implementation-review` for completed code against a plan/spec,
   `scrutinize` for first-pass adversarial artifact critique,
-  `system-design-review` for architecture tradeoffs, and
-  `request-claude-pr-review` for drafting a Claude PR-review prompt.
+  `system-design-review` for architecture tradeoffs.
 - If the user asks in natural language whether a review is right without
   invoking this skill, do not silently run the full packet; answer normally or
   ask whether they want `$review-reviewer`.

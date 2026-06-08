@@ -1,6 +1,0 @@
-interface:
-  display_name: "Request Claude PR Review"
-  short_description: "Draft read-only Claude Code PR review prompts"
-  default_prompt: >
-    Use $request-claude-pr-review to draft a read-only Claude Code prompt for
-    reviewing this PR against the live repo, PR head, and relevant plans.

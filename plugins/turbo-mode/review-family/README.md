@@ -35,17 +35,15 @@ package, hook, MCP, app, or script dependency.
 | **Implementation review** | `implementation-review` | Review completed work against a plan, spec, diff, or known intended behavior. |
 | **System design review** | `system-design-review` | Review architecture and system design artifacts for scoped design-lens gaps and missing probes. |
 | **Review adjudication** | `review-reviewer` | Check supplied reviews and pasted review claims against target evidence before acting on them. |
-| **Claude PR prompt drafting** | `request-claude-pr-review` | Generate a ready-to-send Claude Code PR-review prompt from current PR context. |
 
 ## Components
 
-### Skills (6)
+### Skills (5)
 
 | Skill | Trigger | Purpose |
 |-------|---------|---------|
 | `implementation-review` | Completed implementation review against a plan, spec, PR, or known intended behavior | Compare implemented behavior to the stated contract and report ranked findings. |
 | `review-reviewer` | Supplied review, critique, audit, reviewer output, or pasted claims that need checking | Separate current truth from reviewer disposition and identify which findings or claims are valid, stale, or unproven. |
-| `request-claude-pr-review` | Request for a Claude Code PR-review prompt or review brief | Draft a bounded prompt for Claude Code to review a GitHub pull request. |
 | `scrutinize` | "Scrutinize", "tear this apart", "be brutal", reject-until-proven review, formal stress test, or execution-readiness review for non-skill targets | Adversarially inspect a plan, design, argument, code change, or broad artifact without implementing fixes. |
 | `scrutinize-skill` | Adversarial review of a Codex skill or proposed skill contract | Review whether the skill will guide Codex behavior well once triggered, including UX, overlap, composability, and proof gaps. |
 | `system-design-review` | Architecture or system design review of docs, verbal designs, or codebase structure | Review design tradeoffs, defaults, interfaces, operations, and next probes. |
@@ -110,11 +108,9 @@ Use $review-reviewer to check these claims against the current repo before I act
 `$review-reviewer` and ask it to check these claims when you need itemized
 current-evidence claim validation without the broader review-adjudication packet.
 
-### Prepare A Claude PR Review Request
-
-```text
-Use request-claude-pr-review to draft a Claude Code prompt for this PR.
-```
+`request-claude-pr-review` has been retired from Review Family. It was a
+prompt-drafting workflow helper, not a Codex-performed review or adjudication
+lane. There is no active replacement inside Review Family.
 
 ## Configuration
 

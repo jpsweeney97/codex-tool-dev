@@ -28,6 +28,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `review-claude-claims` as a separate skill. Use `review-reviewer` and ask it
   to check these claims when pasted review claims need current-evidence
   validation before action.
+- `request-claude-pr-review` from Review Family. It was a prompt-drafting
+  workflow helper, not a Codex-performed review or adjudication lane.
 
 ## 0.1.0 - 2026-05-29
 

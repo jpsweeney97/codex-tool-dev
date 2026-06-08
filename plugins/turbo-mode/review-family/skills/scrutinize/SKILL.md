@@ -31,8 +31,6 @@ target belongs to one of those lanes.
   authority, reliability, ownership, and next probes.
 - Use `review-reviewer` for supplied-review adjudication and pasted-claim
   checks.
-- Use `request-claude-pr-review` when the user wants a prompt for Claude Code,
-  not a review performed by Codex.
 - If this skill is not the right review-family target, name the better skill
   and switch only when invocation rules allow it; otherwise ask one routing
   question.

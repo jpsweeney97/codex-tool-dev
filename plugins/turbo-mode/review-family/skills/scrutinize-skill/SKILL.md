@@ -27,8 +27,7 @@ Codex skill or skill-support file, this skill also wins over generic
 - Use `implementation-review` for completed code or artifacts against a
   plan/spec, and `system-design-review` for architecture or system-boundary
   review.
-- Use `review-reviewer` for supplied-review adjudication or pasted-claim checks,
-  and `request-claude-pr-review` for drafting a Claude PR-review prompt.
+- Use `review-reviewer` for supplied-review adjudication or pasted-claim checks.
 - If this skill is not the right review-family target, name the better skill
   and switch only when invocation rules allow it; otherwise ask one routing
   question.
