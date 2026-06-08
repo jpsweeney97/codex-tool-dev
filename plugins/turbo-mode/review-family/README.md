@@ -97,7 +97,7 @@ Use scrutinize-skill to review this skill as a behavior contract.
 ### Adjudicate A Pasted Review
 
 ```text
-Use review-reviewer on this review and tell me which findings are currently valid.
+Use $review-reviewer to adjudicate this review, including reliability, missed issues, and what I should act on.
 ```
 
 ### Check Pasted Claims
