@@ -305,12 +305,6 @@ for line in sys.stdin:
                     "request-claude-pr-review",
                 ),
                 skill(
-                    "review-family:review-claude-claims",
-                    "review-family",
-                    "0.1.0",
-                    "review-claude-claims",
-                ),
-                skill(
                     "review-family:review-reviewer",
                     "review-family",
                     "0.1.0",

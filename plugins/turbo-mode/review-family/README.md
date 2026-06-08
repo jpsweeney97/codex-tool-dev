@@ -34,18 +34,17 @@ package, hook, MCP, app, or script dependency.
 | **Skill behavior review** | `scrutinize-skill` | Review Codex skills as behavior contracts for execution quality, UX, composability, overlap, and proof gaps. Skill targets route here even when the user says "scrutinize". |
 | **Implementation review** | `implementation-review` | Review completed work against a plan, spec, diff, or known intended behavior. |
 | **System design review** | `system-design-review` | Review architecture and system design artifacts for scoped design-lens gaps and missing probes. |
-| **Review adjudication** | `review-reviewer`, `review-claude-claims` | Check supplied reviews and pasted Claude claims against the target evidence before acting on them. |
+| **Review adjudication** | `review-reviewer` | Check supplied reviews and pasted review claims against target evidence before acting on them. |
 | **Claude PR prompt drafting** | `request-claude-pr-review` | Generate a ready-to-send Claude Code PR-review prompt from current PR context. |
 
 ## Components
 
-### Skills (7)
+### Skills (6)
 
 | Skill | Trigger | Purpose |
 |-------|---------|---------|
 | `implementation-review` | Completed implementation review against a plan, spec, PR, or known intended behavior | Compare implemented behavior to the stated contract and report ranked findings. |
-| `review-claude-claims` | Pasted Claude claims, review comments, or recommendations that need verification | Treat claims as allegations and verify them against source evidence before endorsing action. |
-| `review-reviewer` | Supplied review, critique, audit, or reviewer output that needs adjudication | Separate current truth from reviewer disposition and identify which findings are valid, stale, or unproven. |
+| `review-reviewer` | Supplied review, critique, audit, reviewer output, or pasted claims that need checking | Separate current truth from reviewer disposition and identify which findings or claims are valid, stale, or unproven. |
 | `request-claude-pr-review` | Request for a Claude Code PR-review prompt or review brief | Draft a bounded prompt for Claude Code to review a GitHub pull request. |
 | `scrutinize` | "Scrutinize", "tear this apart", "be brutal", reject-until-proven review, formal stress test, or execution-readiness review for non-skill targets | Adversarially inspect a plan, design, argument, code change, or broad artifact without implementing fixes. |
 | `scrutinize-skill` | Adversarial review of a Codex skill or proposed skill contract | Review whether the skill will guide Codex behavior well once triggered, including UX, overlap, composability, and proof gaps. |
@@ -100,6 +99,16 @@ Use scrutinize-skill to review this skill as a behavior contract.
 ```text
 Use review-reviewer on this review and tell me which findings are currently valid.
 ```
+
+### Check Pasted Claims
+
+```text
+Use $review-reviewer to check these claims against the current repo before I act.
+```
+
+`review-claude-claims` has been retired as a separate skill. Use
+`$review-reviewer` and ask it to check these claims when you need itemized
+current-evidence claim validation without the broader review-adjudication packet.
 
 ### Prepare A Claude PR Review Request
 

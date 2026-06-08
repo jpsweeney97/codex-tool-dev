@@ -25,6 +25,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `pragmatic-review` as a separate skill. Use `scrutinize` and ask for an
   execution-readiness review when the question is whether a plan, spec, handoff,
   or rollout note is ready to implement.
+- `review-claude-claims` as a separate skill. Use `review-reviewer` and ask it
+  to check these claims when pasted review claims need current-evidence
+  validation before action.
 
 ## 0.1.0 - 2026-05-29
 

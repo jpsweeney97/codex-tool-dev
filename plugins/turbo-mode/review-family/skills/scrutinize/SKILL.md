@@ -29,8 +29,8 @@ target belongs to one of those lanes.
   plan/spec, even when the user asks for an adversarial implementation pass.
 - Use `system-design-review` for architecture tradeoffs, boundaries, data
   authority, reliability, ownership, and next probes.
-- Use `review-reviewer` for supplied-review adjudication and
-  `review-claude-claims` for itemized pasted-claim validation.
+- Use `review-reviewer` for supplied-review adjudication and pasted-claim
+  checks.
 - Use `request-claude-pr-review` when the user wants a prompt for Claude Code,
   not a review performed by Codex.
 - If this skill is not the right review-family target, name the better skill

@@ -1,7 +1,0 @@
-interface:
-  display_name: "Review Claude Claims"
-  short_description: "Verify pasted Claude review claims"
-  default_prompt: "Use $review-claude-claims to evaluate this pasted Claude review item by item against the live repo before I decide what to fix."
-
-policy:
-  allow_implicit_invocation: false

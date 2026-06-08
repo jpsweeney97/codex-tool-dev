@@ -21,15 +21,14 @@ Codex skill or skill-support file, this skill also wins over generic
   `SKILL.md`, `agents/openai.yaml`, behavior-shaping reference, example, or
   proposed skill contract. This skill wins over `scrutinize` for Codex skill
   behavior-contract review.
-- Use `scrutinize` for broad natural-language adversarial artifact critique
+- Use `scrutinize` for broad natural-language adversarial artifact critique,
   formal stress tests, and execution-readiness reviews when this skill was not
   invoked.
 - Use `implementation-review` for completed code or artifacts against a
   plan/spec, and `system-design-review` for architecture or system-boundary
   review.
-- Use `review-reviewer` for supplied-review adjudication,
-  `review-claude-claims` for itemized pasted-claim validation,
-  `request-claude-pr-review` for drafting a Claude PR-review prompt.
+- Use `review-reviewer` for supplied-review adjudication or pasted-claim checks,
+  and `request-claude-pr-review` for drafting a Claude PR-review prompt.
 - If this skill is not the right review-family target, name the better skill
   and switch only when invocation rules allow it; otherwise ask one routing
   question.

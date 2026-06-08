@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "Review Family",
     "shortDescription": "Evidence-first review and review-adjudication skills",
-    "longDescription": "Run bounded, evidence-first Codex reviews across implementation, architecture, skill behavior, execution-readiness, adversarial scrutiny, pasted claims, supplied-review adjudication, and Claude PR-review prompt drafting.",
+    "longDescription": "Run bounded, evidence-first Codex reviews across implementation, architecture, skill behavior, execution-readiness, adversarial scrutiny, supplied-review and claim adjudication, and Claude PR-review prompt drafting.",
     "developerName": "JP",
     "category": "Productivity",
     "capabilities": [
@@ -30,6 +30,7 @@
       "Run a formal stress test of this proposal",
       "Review this skill as a behavior contract",
       "Review this implementation against the spec",
+      "Check these claims against the current repo",
       "Adjudicate this review before I act"
     ],
     "websiteURL": "https://github.com/jpsweeney97/codex-tool-dev/tree/main/plugins/turbo-mode/review-family",

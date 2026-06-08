@@ -39,8 +39,7 @@ as `review-family:request-claude-pr-review`.
 - Use `implementation-review` when Codex should review completed code against a
   plan/spec directly; use `scrutinize` for broad adversarial critique;
   `system-design-review` for architecture tradeoffs; `review-reviewer` for
-  supplied-review adjudication; and `review-claude-claims` for itemized
-  pasted-claim validation.
+  supplied-review adjudication and pasted-claim checks.
 - If this skill is not the right review-family target, name the better skill
   and switch only when invocation rules allow it; otherwise ask one routing
   question.

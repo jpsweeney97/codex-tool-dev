@@ -1,7 +1,7 @@
 interface:
   display_name: "Review Reviewer"
-  short_description: "Adjudicate supplied reviews independently"
-  default_prompt: "Use $review-reviewer to independently adjudicate this review against its inferred target before I decide what to act on."
+  short_description: "Adjudicate reviews and check claims"
+  default_prompt: "Use $review-reviewer to check these claims against the current repo before I act, or to adjudicate this review against its inferred target."
 
 policy:
   allow_implicit_invocation: false

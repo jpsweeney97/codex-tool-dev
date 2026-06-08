@@ -2,13 +2,15 @@
 name: review-reviewer
 description: >
   Use only when the user explicitly invokes `$review-reviewer` to review,
-  adjudicate, or avoid rubber-stamping a supplied review, including PR review
-  feedback. Infer the original target from the review and immediate context,
-  read that target fresh, then produce independent issues, verdicts on each
-  review claim, missed issues, verification gaps, and an aggregate review
-  judgment. Do not use for first-pass artifact reviews, generic scrutiny,
-  implementation reviews, basic claim extraction, natural-language review
-  requests, or follow-up fixes.
+  adjudicate, avoid rubber-stamping a supplied review, or check pasted review
+  claims against current evidence. For full review adjudication, infer the
+  original target from the review and immediate context, read that target fresh,
+  then produce independent issues, verdicts on each review claim, missed issues,
+  verification gaps, and an aggregate review judgment. For "check these claims"
+  requests, run a Current Claim Check against the current target snapshot. Do
+  not use for first-pass artifact reviews, generic scrutiny, implementation
+  reviews, basic claim extraction without evidence checking, natural-language
+  review requests, or follow-up fixes.
 ---
 
 # Review Reviewer
@@ -21,24 +23,27 @@ as allegations to test, not as authority or as an enemy to defeat.
 - Explicit-only: use this skill only when invoked as `$review-reviewer`. Do not
   silently route natural-language requests here while `agents/openai.yaml` has
   `allow_implicit_invocation: false`.
-- Required input: the supplied review. Do not require the user to also provide a
-  target path, PR, spec, or artifact; infer the target from the review and
-  immediate conversation context.
+- Required input: the supplied review, review claims, or pasted claims. Do not
+  require the user to also provide a target path, PR, spec, or artifact; infer
+  the target from the review, claims, and immediate conversation context when
+  possible.
 - Non-trigger: ordinary critiques, first-pass reviews, implementation reviews,
   "scrutinize this", "be adversarial", "check whether this review is right"
-  without `$review-reviewer`, basic claim extraction, or implementation follow-up
-  without a supplied review to adjudicate.
-- Relationship to `$review-claude-claims`: use this skill for second-pass
-  review adjudication plus bounded independent target assessment. Use narrower
-  claim-review skills only when the user asks for itemized claim validation
-  against a current snapshot without the broader review-reviewer packet.
+  without `$review-reviewer`, basic claim extraction without evidence checking,
+  or implementation follow-up without a supplied review or claim set to
+  adjudicate.
+- Packet selection: use full review adjudication when the user asks whether a
+  supplied review was reliable, complete, overreaching, underpowered, or
+  historically correct. Use Current Claim Check when the user asks to check these
+  claims, check review claims, or validate pasted claims item by item against
+  current evidence before acting.
 - Default to read-only. You may inspect files, diffs, git metadata, PR metadata,
   docs, and run bounded non-mutating checks directly tied to the inferred
   target, a disputed claim, or a bounded independent or missed issue. Do not
   edit files, stage, commit, push, delete, install dependencies, sync state,
   create tickets, run broad test suites, or implement fixes unless the user
   explicitly widens scope after the adjudication.
-- Stop after the adjudication packet by default. Include terse dispositions and
+- Stop after the selected review packet by default. Include terse dispositions and
   next actions, but do not continue into fixes.
 
 ## Review-Family Routing
@@ -46,12 +51,15 @@ as allegations to test, not as authority or as an enemy to defeat.
 Explicit review-family invocation wins, including namespaced plugin forms such
 as `review-family:review-reviewer`.
 
-- Use this skill only when explicitly invoked to adjudicate a supplied review,
-  including PR review feedback, and to produce an independent bounded target
-  assessment plus verdicts on the review's claims.
-- Use `review-claude-claims` instead for narrower itemized claim validation
-  against a current snapshot without the broader independent assessment and
-  review-judgment packet.
+- Use this skill only when explicitly invoked to adjudicate a supplied review or
+  to check pasted review claims against target evidence.
+- Run Current Claim Check instead of the full adjudication packet when the user
+  asks to check these claims, check review claims, or validate pasted claims item
+  by item against current repo, source, PR, doc, or runtime evidence before
+  acting.
+- Run full review adjudication when the user asks whether the supplied review
+  itself was reliable, complete, overreaching, underpowered, stale, historically
+  correct, or missing issues.
 - Use `implementation-review` for completed code against a plan/spec,
   `scrutinize` for first-pass adversarial artifact critique,
   `system-design-review` for architecture tradeoffs, and
@@ -60,7 +68,7 @@ as `review-family:review-reviewer`.
   invoking this skill, do not silently run the full packet; answer normally or
   ask whether they want `$review-reviewer`.
 
-## Anti-Anchoring Workflow
+## Full Review Adjudication Workflow
 
 1. If no review text was supplied, output `missing-review`, ask for the review,
    and stop. Do not infer a review from surrounding chatter.
@@ -106,12 +114,75 @@ as `review-family:review-reviewer`.
    adjacent failure modes. Do not inspect unrelated PR files, broaden into full
    PR review, or expand beyond the inferred target unless the user asks.
 
+## Current Claim Check
+
+Use this packet when `$review-reviewer` is invoked with a request to check pasted
+claims item by item against current evidence.
+
+Current Claim Check answers: are these claims true enough to act on now? It does
+not decide whether a supplied review was historically correct, complete,
+reliable, overreaching, or underpowered.
+
+Use the current target snapshot only: current repo, branch, `HEAD`, dirty state,
+PR head or diff, named artifact, docs, tests, runtime evidence, and material
+evidence gaps. Do not recover or adjudicate an older review snapshot unless the
+user asks for full review adjudication. If a claim depends on unavailable
+historical state, classify it `Unverified` and name the recovery check.
+
+Workflow:
+
+1. Record `Current Target Snapshot`: `cwd`, repo root or non-repo status, branch,
+   `HEAD`, dirty state, PR/diff/base when applicable, named artifact, and
+   evidence gaps.
+2. Split pasted review text into discrete claims. Give each claim a stable ID
+   and preserve a short source locator or short excerpt. Break compound claims
+   apart when one part could be true and another false.
+3. For each claim, inspect the smallest relevant evidence set: code, tests,
+   docs, configs, generated artifacts, PR metadata, command output, runtime
+   behavior, or local contracts.
+4. Classify each claim as `Valid`, `Invalid`, `Partially valid`, or
+   `Unverified`. Do not upgrade a claim past `Unverified` without direct
+   evidence.
+5. Separately assign severity and disposition. Truth classification does not by
+   itself decide priority or implementation scope.
+6. End with action buckets: `Act on now`, `Do not act on`, `Needs verification`,
+   and `Deferred`.
+
+Current Claim Check classifications are current-snapshot claim labels, not
+historical review-truth verdicts. `Valid` roughly corresponds to `confirmed`,
+`Invalid` to `challenged`, and `Unverified` to `needs-verification`. Use
+`Partially valid` when a real issue exists but the claim overstates scope,
+severity, mechanism, or remedy.
+
+Classifications:
+
+- `Valid`: supported by code, tests, docs, contracts, runtime evidence, or PR
+  metadata at the current target snapshot.
+- `Invalid`: contradicted by the current implementation, tests, docs, contracts,
+  runtime evidence, PR metadata, or explicit repo policy.
+- `Partially valid`: identifies a real concern, but overstates severity,
+  misstates the mechanism, targets the wrong scope, or proposes the wrong fix.
+- `Unverified`: plausible, but available evidence is insufficient; needs a
+  targeted check before implementation.
+
+For Current Claim Check, use the same severity labels as full adjudication:
+`blocker`, `should-fix`, and `note`. Use `none` for `Invalid` claims unless a
+separate follow-up is needed.
+
+Disposition says what to do next:
+
+- `act`: address the valid claim now.
+- `narrow`: address only the true or in-scope part of a partially valid claim.
+- `reject`: do not act on this claim.
+- `verify-first`: perform the named check before accepting or rejecting it.
+- `defer`: real issue, but outside the current scope or not urgent here.
+
 ## Failure Modes
 
 - `needs-target`: target inference failed or found multiple plausible targets.
   List locator facts found and do not adjudicate evidence-dependent claims.
-- `missing-review`: no supplied review is present. Ask for the review text and
-  stop instead of inferring a review from previous discussion.
+- `missing-review`: no supplied review or claim text is present. Ask for the
+  review or claims and stop instead of inferring them from previous discussion.
 - `target-inaccessible`: the target is identifiable but inaccessible. List the
   target locator and attempted read paths or checks. Only review-internal claims
   that can be settled from the supplied review text itself may receive a truth
@@ -124,8 +195,10 @@ as `review-family:review-reviewer`.
   assessment, and lower confidence in any `Missed Issues` claim. Do not claim a
   fully fresh read.
 - If target resolution or target access fails, `Review Judgment` must be
-  `under-evidenced`. Do not call the review reliable without independent target
-  access.
+  `under-evidenced` for full review adjudication. Do not call the review reliable
+  without independent target access. For Current Claim Check, list the target
+  access failure in `Current Target Snapshot`, classify target-dependent claims
+  `Unverified`, and put them in `Needs verification`.
 
 ## Evidence Rules
 
@@ -155,7 +228,8 @@ Each claim verdict needs a compact evidence pointer: file/path and line when
 available, PR/comment/commit/diff hunk when relevant, command output summary, or
 named doc/section for non-code artifacts. If no evidence pointer can be given,
 the claim should usually be `needs-verification`, unless it is challenged
-because the cited evidence is absent or inaccessible.
+because the cited evidence is absent or inaccessible. For Current Claim Check,
+use `Unverified` instead of `needs-verification`.
 
 ## Verdicts And Dispositions
 
@@ -180,14 +254,16 @@ the disposition.
 Disposition says what to do next:
 
 - `act`: address the confirmed issue now.
+- `narrow`: address only the true or in-scope part of an overstated current
+  claim.
 - `defer`: real issue, but outside the current review scope or not urgent here.
 - `reject`: do not act on this review claim.
 - `verify-first`: perform the named check before accepting or rejecting it.
 
 Include one terse action sentence with each disposition, such as `act: patch the
 spec contradiction`, `reject: no change; review overstates the consequence`,
-`verify-first: inspect PR diff against the cited requirement`, or `defer: real
-but outside this review's scope`.
+`verify-first: inspect PR diff against the cited requirement`, `narrow: patch
+only the in-scope failure`, or `defer: real but outside this review's scope`.
 
 For independent and missed issues, use severity separately from disposition:
 
@@ -196,7 +272,7 @@ For independent and missed issues, use severity separately from disposition:
 - `should-fix`: real issue with bounded impact or meaningful maintenance risk.
 - `note`: true observation that does not require immediate action.
 
-## Output
+## Full Review Adjudication Output
 
 Use this fixed compact packet, in order:
 
@@ -233,7 +309,7 @@ For each normalized claim:
 - `Evidence`: compact evidence pointer and evidence lane.
 - `Reasoning`: why the evidence supports the verdict, including whether the
   concern is valid but overstated.
-- `Disposition`: `act`, `defer`, `reject`, or `verify-first` plus one terse
+- `Disposition`: `act`, `narrow`, `defer`, `reject`, or `verify-first` plus one terse
   action sentence.
 
 ### Missed Issues
@@ -267,3 +343,45 @@ Add a short rationale covering framing, severity calibration, and coverage.
 
 One concise next action. Do not provide a detailed implementation plan unless
 the user explicitly asks for follow-through.
+
+## Current Claim Check Output
+
+Use this packet instead of `Full Review Adjudication Output` for Current Claim
+Check:
+
+### Current Target Snapshot
+
+- `cwd`, repo root or non-repo status, branch, `HEAD`, dirty state, PR/diff/base
+  when applicable, named artifact, and evidence gaps.
+
+### Claim Check
+
+For each claim, include:
+
+- `Claim ID`: stable identifier.
+- `Source`: short source locator or short excerpt from the pasted claims.
+- `Claim`: concise restatement without changing scope.
+- `Classification`: `Valid`, `Invalid`, `Partially valid`, or `Unverified`.
+- `Severity`: `blocker`, `should-fix`, `note`, or `none`.
+- `Evidence`: file/line references, command output summary, PR metadata, runtime
+  evidence, docs/contracts, or the reason evidence is missing.
+- `Reasoning`: why the evidence supports that classification.
+- `Disposition`: `act`, `narrow`, `reject`, `verify-first`, or `defer` with one
+  terse action sentence.
+
+### Act On Now
+
+`Valid` or `Partially valid` claims with `blocker` or `should-fix` severity and
+`act` or `narrow` disposition.
+
+### Do Not Act On
+
+Claims classified `Invalid`.
+
+### Needs Verification
+
+Claims classified `Unverified`, with the specific check required.
+
+### Deferred
+
+True or partially true claims intentionally outside current scope.

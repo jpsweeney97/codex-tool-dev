@@ -21,8 +21,8 @@ as `review-family:system-design-review`.
 - Use `implementation-review` for completed code or artifacts against a
   plan/spec; use `scrutinize` for execution-readiness reviews before
   implementation.
-- Use `review-reviewer` for explicit supplied-review adjudication,
-  `review-claude-claims` for explicit itemized pasted-claim validation, and
+- Use `review-reviewer` for explicit supplied-review adjudication or pasted-claim
+  checks, and
   `request-claude-pr-review` for drafting a Claude PR-review prompt.
 - If this skill is not the right review-family target, name the better skill
   and switch only when invocation rules allow it; otherwise ask one routing
