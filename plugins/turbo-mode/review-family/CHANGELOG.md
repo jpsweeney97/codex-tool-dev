@@ -22,6 +22,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - `adversarial-review` as a separate skill. Use `scrutinize` and ask for a
   formal stress test when the heavier review packet is needed.
+- `pragmatic-review` as a separate skill. Use `scrutinize` and ask for an
+  execution-readiness review when the question is whether a plan, spec, handoff,
+  or rollout note is ready to implement.
 
 ## 0.1.0 - 2026-05-29
 

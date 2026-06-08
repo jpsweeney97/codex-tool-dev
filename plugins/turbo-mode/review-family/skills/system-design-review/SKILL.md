@@ -19,8 +19,8 @@ as `review-family:system-design-review`.
 - This skill wins over `scrutinize` when the requested lens is architecture or
   system design rather than general adversarial critique.
 - Use `implementation-review` for completed code or artifacts against a
-  plan/spec; use `pragmatic-review` only for explicit execution-readiness or
-  proof-gate reviews.
+  plan/spec; use `scrutinize` for execution-readiness reviews before
+  implementation.
 - Use `review-reviewer` for explicit supplied-review adjudication,
   `review-claude-claims` for explicit itemized pasted-claim validation, and
   `request-claude-pr-review` for drafting a Claude PR-review prompt.

@@ -26,7 +26,7 @@
       "Read"
     ],
     "defaultPrompt": [
-      "Scrutinize this plan before implementation",
+      "Run an execution-readiness review: check whether this plan is ready to execute",
       "Run a formal stress test of this proposal",
       "Review this skill as a behavior contract",
       "Review this implementation against the spec",

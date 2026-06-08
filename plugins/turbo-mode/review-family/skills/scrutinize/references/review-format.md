@@ -60,6 +60,23 @@ or straightforward reviews.
 
 If the user asks for a shorter answer, keep the same section order and compress the content rather than dropping sections.
 
+## Execution-Readiness Review
+
+Use this when the user asks whether a plan, spec, handoff, rollout note, or
+artifact is ready to build from.
+
+Replace `Verdict` with:
+
+```markdown
+### Execution Readiness Verdict
+`Ready to Execute` / `Patch Before Implementation` / `Not Executable Yet` / `Partial Review Only`
+[1-2 sentence action decision]
+```
+
+Readiness findings should name the blocker, evidence, practical impact, and
+smallest repair before implementation. Use `Partial Review Only` for bounded
+passes that cannot inspect the full readiness surface.
+
 ## Formal Stress Test Add-On
 
 Use this only when the user asks for a formal stress test or the target is
@@ -76,4 +93,6 @@ Add these sections explicitly:
 4. `Confidence Boundary`: prose summary of what was checked, what remains
    unverified, and what evidence would change the verdict.
 
-Do not add a numeric confidence score unless the user asks for one.
+Do not add a numeric confidence score unless the user asks for one. If this is
+also an execution-readiness review, keep these sections and still end with the
+execution readiness verdict.

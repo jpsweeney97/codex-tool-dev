@@ -1,6 +1,6 @@
 ---
 name: scrutinize
-description: Use when the user explicitly asks for adversarial review of a plan, design, draft, argument, decision, code change, or broad artifact. Trigger on "scrutinize", "be brutal", "tear this apart", "assume this is wrong", "reject until proven otherwise", or requests for a formal stress test. Add an explicit formal stress test when requested or when the target is high-stakes enough that hidden assumptions or quiet failure modes could materially damage the work. Do not use for Codex skill targets, completed implementation-against-plan review, routine review, collaborative editing, or balanced feedback.
+description: Use when the user explicitly asks for adversarial review of a plan, design, draft, argument, decision, code change, or broad artifact, or asks whether a plan/spec/handoff/artifact is ready to implement. Trigger on "scrutinize", "be brutal", "tear this apart", "assume this is wrong", "reject until proven otherwise", requests for a formal stress test, or requests for an execution-readiness review. Add an explicit formal stress test when requested or when the target is high-stakes enough that hidden assumptions or quiet failure modes could materially damage the work. For execution-readiness reviews, answer whether to start building by using readiness verdicts instead of normal scrutiny verdicts. Do not use for Codex skill targets, completed implementation-against-plan review, routine review, collaborative editing, or balanced feedback.
 ---
 
 # Scrutinize
@@ -18,7 +18,9 @@ target belongs to one of those lanes.
 
 - Use this skill for natural-language adversarial review requests such as
   "scrutinize", "be brutal", "tear this apart", "assume this is wrong", or
-  "reject until proven otherwise" when no narrower explicit skill applies.
+  "reject until proven otherwise", and for execution-readiness reviews that ask
+  whether a plan, spec, handoff, or artifact is ready to implement, when no
+  narrower target-type skill applies.
 - Use `scrutinize-skill` when the target is a Codex skill, skill directory,
   `SKILL.md`, `agents/openai.yaml`, skill reference, example, or proposed skill
   contract, even when the user says "scrutinize" instead of invoking
@@ -27,9 +29,7 @@ target belongs to one of those lanes.
   plan/spec, even when the user asks for an adversarial implementation pass.
 - Use `system-design-review` for architecture tradeoffs, boundaries, data
   authority, reliability, ownership, and next probes.
-- Use explicit-only skills only when invoked: `pragmatic-review` for
-  execution-readiness blockers, `review-reviewer` for supplied-review
-  adjudication, and
+- Use `review-reviewer` for supplied-review adjudication and
   `review-claude-claims` for itemized pasted-claim validation.
 - Use `request-claude-pr-review` when the user wants a prompt for Claude Code,
   not a review performed by Codex.
@@ -48,20 +48,52 @@ target belongs to one of those lanes.
    use `scrutinize-skill` instead of this generic workflow. Do not ask whether
    the user wants the dedicated lane unless the target could reasonably be
    reviewed as something other than a skill behavior contract.
-3. Decide whether to make a formal stress test explicit. Use it when the user
+3. Decide whether the user's terminal question is execution readiness. Treat it
+   as an execution-readiness review when the user asks whether the target is
+   ready to execute, ready to build from, ready to implement, ready to roll out,
+   or otherwise safe to use as implementation input.
+4. Decide whether to make a formal stress test explicit. Use it when the user
    asks for a formal stress test, assumptions audit, pre-mortem, confidence
    check, confidence boundary, exhaustive adversarial packet, or equivalent
    heavier review; also use it when the target is high-stakes, irreversible,
    publication-bound, security/trust-sensitive, runtime-mutating, or
    decision-critical enough that hidden assumptions or quiet failure modes could
    materially damage the work.
-4. Premise check: is this solving the right problem?
-5. `Pass 1`: contradictions, omissions, weak assumptions, practical failures.
-6. `Pass 2`: second-order effects, edge cases, hidden dependencies, ideal-condition assumptions.
-7. Apply relevant adversarial lenses internally; replace weak ones. Report
+5. Premise check: is this solving the right problem?
+6. `Pass 1`: contradictions, omissions, weak assumptions, practical failures.
+7. `Pass 2`: second-order effects, edge cases, hidden dependencies, ideal-condition assumptions.
+8. Apply relevant adversarial lenses internally; replace weak ones. Report
    perspectives only when they materially changed findings, severity, or required
    changes.
-8. Group root causes, then verdict: `Reject`, `Major revision`, `Minor revision`, or `Defensible`.
+9. Group root causes, then end with the verdict that matches the user's
+   terminal question: readiness verdicts for execution-readiness reviews, normal
+   scrutiny verdicts otherwise.
+
+## Execution-Readiness Reviews
+
+Ask for an execution-readiness review when the user needs to know whether a
+plan, spec, handoff, rollout note, or repo artifact is ready to build from.
+
+Use readiness criteria internally and report them when they materially affect
+the decision: bad proof, bad scope, stale authority, source/runtime mismatch,
+weak gates, missing owner, hidden dependency, and implementation-readiness
+blockers.
+
+For execution-readiness reviews, replace the normal scrutiny verdict with
+`Execution Readiness Verdict` and exactly one of:
+
+- `Ready to Execute`
+- `Patch Before Implementation`
+- `Not Executable Yet`
+- `Partial Review Only`
+
+Use `Ready to Execute` only when inspected evidence supports the required proof
+class and no material readiness blocker remains. Use `Partial Review Only` for
+bounded passes that cannot inspect the full readiness surface.
+
+If the user asks for both a formal stress test and an execution-readiness
+review, include the formal stress-test sections but still end with the
+readiness verdict.
 
 ## Formal Stress Tests
 
@@ -95,16 +127,20 @@ findings, severity, required changes, or the verdict.
 - Skill bundle scope: do not stop at `SKILL.md`; cite where main instructions, agent metadata, and material references agree or conflict. Do not bulk-review irrelevant assets, generated runs, or examples unless they affect invocation, instructions, evidence, or expected outputs. State skipped-file and materiality tradeoffs explicitly.
 - Review-only default: do not edit files, stage, commit, push, delete, sync, publish, or implement fixes during scrutiny unless the user explicitly asks for that separate action after the review.
 - Mixed critique and implementation: finish scrutiny first, stop after the verdict, and wait for explicit follow-through before changing artifacts.
-- Bounded review mode: when the target is too large to inspect completely in one pass, state the reviewed subset before findings, review the highest-risk surface first, mark omitted areas `unverified`, give the next slice needed for a complete review, and do not use `Defensible` for the full target.
+- Bounded review mode: when the target is too large to inspect completely in one pass, state the reviewed subset before findings, review the highest-risk surface first, mark omitted areas `unverified`, give the next slice needed for a complete review, and do not use `Defensible` or `Ready to Execute` for the full target.
 - Evidence: cite file/line, output, source, or observed behavior for concrete claims; label inference or uninspectable behavior as uncertainty.
 - Citation calibration: target-internal contradictions may be reported from the target alone. Any `Critical`, `High-Risk`, or final verdict that depends on an external citation must read the cited resource; otherwise downgrade the claim to `uncalibrated / citation not inspected`.
 - Do not mentally repair broken logic or pad with weak objections.
 
 ## Output
 
-Default sections: `Target And Evidence`, `Premise Check`, `Critical Failures`, `High-Risk Assumptions`, `Real-World Breakpoints`, `Hidden Dependencies`, `Patterns And Root Causes`, `Required Changes`, `Verdict`. Add `Adversarial Perspectives` only when a lens materially changed findings, severity, or required changes. Add `Bounded Review Scope` before `Target And Evidence` when bounded review mode is used and write `Verdict: Partial review only` if the requested scope was not fully inspected.
+Default sections: `Target And Evidence`, `Premise Check`, `Critical Failures`, `High-Risk Assumptions`, `Real-World Breakpoints`, `Hidden Dependencies`, `Patterns And Root Causes`, `Required Changes`, `Verdict`. Add `Adversarial Perspectives` only when a lens materially changed findings, severity, or required changes. Add `Bounded Review Scope` before `Target And Evidence` when bounded review mode is used; for bounded ordinary scrutiny, write `Verdict: Partial review only`.
+
+For an execution-readiness review, use the same section discipline but replace
+`Verdict` with `Execution Readiness Verdict`. Name readiness blockers and the
+smallest repair needed before implementation.
 
 Use relevant lenses: plan logistics, writing evidence, code correctness/security/failure modes/tests, strategy assumptions/incentives/tradeoffs. Read `references/review-format.md` only for complex targets, full structured reviews, or repeated severity/citation formatting.
 For a formal stress test, add explicit `Assumptions Audit`, `Pre-Mortem`,
 `Dimensional Critique`, and `Confidence Boundary` sections while preserving
-required changes and verdict.
+required changes and the applicable verdict.

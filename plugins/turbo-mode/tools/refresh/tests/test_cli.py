@@ -299,12 +299,6 @@ for line in sys.stdin:
                     "implementation-review",
                 ),
                 skill(
-                    "review-family:pragmatic-review",
-                    "review-family",
-                    "0.1.0",
-                    "pragmatic-review",
-                ),
-                skill(
                     "review-family:request-claude-pr-review",
                     "review-family",
                     "0.1.0",

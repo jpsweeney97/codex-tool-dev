@@ -31,7 +31,6 @@ EXPECTED_HANDOFF_SKILLS = (
 )
 EXPECTED_REVIEW_FAMILY_SKILLS = (
     "review-family:implementation-review",
-    "review-family:pragmatic-review",
     "review-family:request-claude-pr-review",
     "review-family:review-claude-claims",
     "review-family:review-reviewer",

@@ -1,7 +1,0 @@
-interface:
-  display_name: "Pragmatic Review"
-  short_description: "Find execution blockers in artifacts"
-  default_prompt: "Use $pragmatic-review to review this plan or handoff for execution blockers, false proof labels, and scope drift."
-
-policy:
-  allow_implicit_invocation: false
