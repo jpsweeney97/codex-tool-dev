@@ -33,12 +33,25 @@ as `review-family:scrutinize`.
 
 ## Workflow
 
-1. State target and scope; ask one targeted question if unclear.
-2. If the target is a skill directory, inspect the bundle surface before judging: `SKILL.md`, `agents/*.yaml`, and behavior-shaping references such as files linked from `SKILL.md`, `references/*`, or nearby docs/config that define invocation, constraints, evidence rules, examples, or output expectations.
+1. State `Target And Evidence` before judging: exact target, inspected files or
+   sources, skipped or unread material, proof class, and whether runtime or
+   current-state evidence was checked. Ask one targeted question if the target or
+   evidence boundary is unclear.
+2. If the target is a Codex skill and `scrutinize-skill` was not explicitly
+   invoked, use this skill only as the natural-language fallback. Ask one routing
+   question if the user may want the dedicated skill-contract review. If
+   proceeding, inspect the bundle surface before judging: `SKILL.md`,
+   `agents/*.yaml`, and behavior-shaping references such as files linked from
+   `SKILL.md`, `references/*`, or nearby docs/config that define invocation,
+   constraints, evidence rules, examples, or output expectations. Preserve the
+   skill-review dimensions: first move, user experience, composability and
+   overlap, validation and proof classes, and handoff or closure behavior.
 3. Premise check: is this solving the right problem?
 4. `Pass 1`: contradictions, omissions, weak assumptions, practical failures.
 5. `Pass 2`: second-order effects, edge cases, hidden dependencies, ideal-condition assumptions.
-6. Apply at least 3 relevant adversarial perspectives; replace weak ones.
+6. Apply relevant adversarial lenses internally; replace weak ones. Report
+   perspectives only when they materially changed findings, severity, or required
+   changes.
 7. Group root causes, then verdict: `Reject`, `Major revision`, `Minor revision`, or `Defensible`.
 
 ## Guardrails
@@ -55,6 +68,6 @@ as `review-family:scrutinize`.
 
 ## Output
 
-Default sections: `Premise Check`, `Critical Failures`, `High-Risk Assumptions`, `Real-World Breakpoints`, `Hidden Dependencies`, `Adversarial Perspectives`, `Patterns And Root Causes`, `Required Changes`, `Verdict`. Add `Bounded Review Scope` before `Premise Check` when bounded review mode is used and write `Verdict: Partial review only` if the requested scope was not fully inspected.
+Default sections: `Target And Evidence`, `Premise Check`, `Critical Failures`, `High-Risk Assumptions`, `Real-World Breakpoints`, `Hidden Dependencies`, `Patterns And Root Causes`, `Required Changes`, `Verdict`. Add `Adversarial Perspectives` only when a lens materially changed findings, severity, or required changes. Add `Bounded Review Scope` before `Target And Evidence` when bounded review mode is used and write `Verdict: Partial review only` if the requested scope was not fully inspected.
 
 Use relevant lenses: plan logistics, writing evidence, code correctness/security/failure modes/tests, strategy assumptions/incentives/tradeoffs. Read `references/review-format.md` only for complex targets, full structured reviews, or repeated severity/citation formatting.

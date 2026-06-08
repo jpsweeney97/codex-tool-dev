@@ -20,10 +20,17 @@ Systemic observation fields, only for pervasive patterns:
 2. Impact
 3. Correct approach
 
+Add `Adversarial Perspectives Applied` only when a lens materially changed
+finding selection, severity, or required changes. Keep lenses internal for small
+or straightforward reviews.
+
 ## Full Template
 
 ```markdown
 ## Scrutiny: [target name]
+
+### Target And Evidence
+[target, inspected sources, skipped material, proof class, runtime/current-state checks]
 
 ### Premise Check
 [right problem?]
@@ -39,9 +46,6 @@ Systemic observation fields, only for pervasive patterns:
 
 ### Hidden Dependencies Or Bottlenecks
 [externalities, coordination risks, runtime dependencies]
-
-### Adversarial Perspectives Applied
-[perspective -> exposure]
 
 ### Patterns And Root Causes
 [shared causes or independent findings]
