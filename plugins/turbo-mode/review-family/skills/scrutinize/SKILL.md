@@ -12,6 +12,10 @@ Stance: reject until evidence earns a better verdict. Review the exact target; r
 Explicit review-family invocation wins, including namespaced plugin forms such
 as `review-family:scrutinize`.
 
+That generic invocation does not override target-type handoff: use
+`scrutinize-skill`, `implementation-review`, or `system-design-review` when the
+target belongs to one of those lanes.
+
 - Use this skill for natural-language adversarial review requests such as
   "scrutinize", "be brutal", "tear this apart", "assume this is wrong", or
   "reject until proven otherwise" when no narrower explicit skill applies.
