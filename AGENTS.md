@@ -5,13 +5,23 @@ Repository-local instructions for `/Users/jp/Projects/active/codex-tool-dev`.
 ## Repository Purpose
 
 This repository is the development workspace for Codex plugins, skills, and
-supporting tools. Treat it as source-authority for the local Turbo Mode plugin
-tree, not as proof that the installed Codex runtime already matches source.
+supporting tools.
+
+Since 2026-06-09, the canonical sources for the `handoff` and `review-family`
+plugins live in `~/.agents/plugins/` (single dual-runtime source serving both
+Claude Code and Codex; see `~/.agents/AGENTS.md` "Plugin Layout And Delivery").
+`plugins/turbo-mode/{handoff,review-family}` here is a GitHub release mirror
+only: update it by copying from the canonical source at explicit publish time,
+never by editing it directly. `plugins/turbo-mode/tools/sync_personal_plugins.py`'s
+repo-to-`~/.codex/plugins` direction is obsolete (those personal copies were
+retired); adapting the tooling to mirror-from-canonical is a named follow-up.
 
 Primary source surfaces:
 
-- `plugins/turbo-mode/handoff/` - Handoff plugin source.
-- `plugins/turbo-mode/ticket/` - Ticket plugin source.
+- `plugins/turbo-mode/handoff/` - Handoff plugin release mirror
+  (canonical source: `~/.agents/plugins/handoff/`).
+- `plugins/turbo-mode/review-family/` - Review Family plugin release mirror
+  (canonical source: `~/.agents/plugins/review-family/`).
 - `plugins/turbo-mode/tools/` - migration, refresh, proof, and cache-update
   tooling for Turbo Mode plugin development.
 - `.codex/skills/` - repo-local Codex skills used while working in this repo.
