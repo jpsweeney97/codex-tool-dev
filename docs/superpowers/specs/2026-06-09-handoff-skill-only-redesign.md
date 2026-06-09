@@ -2,8 +2,8 @@
 
 ## Status
 
-Approved for implementation planning on 2026-06-09. Amended after design review
-on 2026-06-09.
+Approved for implementation planning on 2026-06-09. Amended after design
+reviews on 2026-06-09.
 
 ## Purpose
 
@@ -70,9 +70,10 @@ plugins/turbo-mode/handoff/
 ```
 
 The `agents/openai.yaml` files are part of the approved skill-only surface. They
-are metadata-only: display names, short descriptions, and default prompt text may
-help Codex discover and present the skills, but those files must not carry hidden
-behavior contracts that differ from the corresponding `SKILL.md`.
+should stay display-name-only unless a concrete UI or discovery need requires
+more metadata. If prompt text is added, it must not introduce triggers, steps,
+storage behavior, retired-command language, or any other behavior contract that
+is absent from the corresponding `SKILL.md`.
 
 Remove these active source surfaces:
 
@@ -103,13 +104,13 @@ code. The redesign is an in-place replacement, not a transitional wrapper.
 Update `.codex-plugin/plugin.json` so it describes only the remaining behavior.
 
 The description and interface text should say Handoff saves, loads, and searches
-Markdown handoffs for session continuity. Remove references to distillation,
-durable learning extraction, chain state, hooks, runtime helpers, and archived
-load behavior.
-
-Current-facing metadata must not imply that retired entry points still exist.
-`/save` is the only save path. `/quicksave`, `/summary`, and `/distill` are
-retired behavior, not wrappers or compatibility aliases.
+Markdown handoffs for session continuity. Current-facing metadata must not
+advertise distillation, durable learning extraction, chain state, hooks, runtime
+helpers, archived load behavior, or retired entry points as supported behavior.
+Short non-capability or retirement notes are allowed when they make clear that
+the behavior no longer exists. `/save` is the only save path. `/quicksave`,
+`/summary`, and `/distill` are retired behavior, not wrappers or compatibility
+aliases.
 
 The plugin may keep `Interactive`, `Read`, and `Write` capabilities because
 `save-handoff` writes files and the other skills read files.
@@ -137,10 +138,20 @@ Handoff filenames use:
 YYYY-MM-DD_HH-MM-SS_<slug>.md
 ```
 
-Writes must not silently overwrite an existing handoff. Use a deterministic
-no-overwrite rule: create the initial path when it is free; if it already exists,
-append `-2`, `-3`, and so on before `.md` until a free path is found. This is path
-selection only, not an active-writer protocol.
+Writes must not silently overwrite an existing handoff. Use this deterministic
+direct-write mechanic:
+
+1. Create `<project_root>/.codex/handoffs/` if needed.
+2. Choose the timestamp path.
+3. Write with an exclusive-create primitive, such as an `Add File` style patch or
+   file API mode that refuses to overwrite an existing path.
+4. If the path exists, append `-2`, `-3`, and so on before `.md` until a free path
+   is found.
+5. If the direct write fails for any other reason, stop and report the write
+   failure plainly.
+
+This is path selection only, not reservation, a state file, a recovery protocol,
+or an active-writer protocol.
 
 The plugin does not add gitignore rules, stage files, commit files, auto-prune
 files, or manage cross-machine continuity. Whether `.codex/handoffs/` is tracked
@@ -213,9 +224,9 @@ Every saved handoff should include both:
 
 The skill writes Markdown directly under `<project_root>/.codex/handoffs/`.
 It may use ordinary filesystem operations such as creating the handoff directory
-and writing the Markdown file. It must not call plugin helper scripts, create
-transaction state, reserve active paths, compute content hashes, or use an
-active-writer protocol.
+and writing the Markdown file with the exclusive-create mechanic above. It must
+not call plugin helper scripts, create transaction state, reserve active paths,
+compute content hashes, or use an active-writer protocol.
 
 The skill follows the storage filename and no-overwrite path selection rules.
 
@@ -261,13 +272,19 @@ read an archived or legacy path only when the user explicitly provides that path
 There is no automatic legacy search.
 
 After reading the handoff, the skill must run a live-reality check before
-treating the handoff as actionable:
+treating the handoff as actionable.
+
+Inside a git repository, run:
 
 ```bash
 git branch --show-current
 git log -1 --oneline
 git status --short --branch --untracked-files=all
 ```
+
+Outside a git repository, do not fail the load just because git state is
+unavailable. Report the current working directory and state that git state is
+unavailable because the directory is not a git repository.
 
 If the handoff names specific important files, the skill should read those live
 files before making claims that depend on them. The handoff is a resume pointer,
@@ -279,9 +296,8 @@ Recommended response shape:
 Loaded: <path>
 
 Current live state:
-- Branch: <branch>
-- HEAD: <commit>
-- Worktree: <summary>
+- CWD: <path>
+- Git: <branch/HEAD/worktree summary, or "unavailable: not a git repository">
 
 Handoff says:
 - <goal/current state>
@@ -346,7 +362,8 @@ Rewrite `README.md` around the final source behavior:
 - `/load` and `/search` are read-only.
 - Handoffs are resume pointers, not live truth.
 - The plugin does not manage git, archives, chain state, learnings, hooks,
-  validators, runtime scripts, or installed runtime state.
+  validators, runtime scripts, or installed runtime state. These may appear only
+  as a short non-capability note, not as positive or instructional behavior.
 
 `references/handoff-format.md` should be short. It should include:
 
@@ -380,21 +397,21 @@ Perform a small positive source-contract check:
 - exactly three skill directories exist: `save-handoff`, `load-handoff`, and
   `search-handoffs`
 - each surviving `SKILL.md` frontmatter parses
-- each surviving `agents/openai.yaml` parses and stays aligned with its
-  corresponding `SKILL.md`
+- each surviving `agents/openai.yaml` parses and remains display-name-only unless
+  a concrete UI or discovery need justifies more metadata
 - `save-handoff` states direct Markdown writing, project-arc plus session
-  context, and no-overwrite path selection
+  context, and exclusive-create no-overwrite path selection
 - `load-handoff` states read-only behavior, branch-aware implicit selection, and
-  live repo reality checks before action
+  git-aware or non-git live-state checks before action
 - `search-handoffs` states read-only behavior and literal `rg` search by default
 - `README.md` and `references/handoff-format.md` agree with those behavior
   boundaries
 
 Run negative checks for retired concepts in current-facing Handoff source. At
 minimum, inspect matches for these terms and remove current-facing references
-unless they are part of the short README or metadata note that explicitly says a
-retired command no longer exists. Historical documents outside the plugin source
-may still contain older descriptions.
+unless they are part of a short retired-behavior or non-capability note. The rule
+is no positive or instructional mentions of retired behavior. Historical
+documents outside the plugin source may still contain older descriptions.
 
 ```text
 distill
@@ -438,17 +455,20 @@ The source redesign is complete when:
 
 - Handoff source contains only the approved skill-only bundle shape.
 - `save-handoff` writes direct Markdown handoffs with session and project-arc
-  context, using no-overwrite path selection.
+  context, using exclusive-create no-overwrite path selection.
 - `load-handoff` is read-only, prefers current-branch handoffs for implicit
-  loads when branch metadata exists, and requires live repo reality checks before
-  acting on a handoff.
+  loads when branch metadata exists, and requires git-aware or non-git live-state
+  checks before acting on a handoff.
 - `search-handoffs` is read-only and delegates search to `rg`.
 - `distill`, `quicksave`, and `save-summary` are no longer shipped Handoff
   skills.
-- Current-facing Handoff README and metadata state that `/quicksave`,
-  `/summary`, and `/distill` were retired instead of preserving wrappers.
-- Current-facing Handoff docs and metadata no longer mention runtime code,
-  chain state, transactions, hooks, validators, or durable learning extraction.
+- Current-facing Handoff README states that `/quicksave`, `/summary`, and
+  `/distill` were retired instead of preserving wrappers; metadata must not
+  advertise them as supported behavior.
+- Current-facing Handoff docs and metadata contain no positive or instructional
+  mentions of runtime code, chain state, transactions, hooks, validators, or
+  durable learning extraction. Only short retired-behavior or non-capability
+  notes are allowed.
 - Source/shape verification passes.
 - The final status report separates source verification from installed runtime
   proof.
