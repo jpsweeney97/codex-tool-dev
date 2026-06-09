@@ -1,79 +1,66 @@
 ---
 name: save-handoff
-description: Use when user says "wrap this up", "new session", "almost out of context", "save", "next session", or "handoff"; use when stopping work with context to preserve.
+description: Use when user says "/save", "wrap this up", "new session", "almost out of context", "save", "next session", or "handoff"; use when stopping work with context to preserve.
 ---
 
-# Save
+# Save Handoff
 
-Create a comprehensive handoff at `<project_root>/.codex/handoffs/`. Use this for real session boundaries where future Codex needs decisions, file context, risks, and next steps without re-exploration.
+Create a Markdown handoff at `<project_root>/.codex/handoffs/` so a future Codex session can resume without avoidable re-exploration.
 
-Read these only when needed:
-- [handoff-contract.md](../../references/handoff-contract.md) for frontmatter, chain protocol, storage conventions.
-- [format-reference.md](../../references/format-reference.md) for required handoff sections.
-- [synthesis-guide.md](synthesis-guide.md) for the full internal synthesis prompts.
-- [skill-details.md](../../references/skill-details.md) for examples, anti-patterns, and troubleshooting.
+Use this for real session boundaries where there is useful context to preserve: decisions, changed files, current state, risks, open questions, or the next action.
 
-The plugin writes filesystem artifacts only. It does not add gitignore rules, stage files, or auto-commit files. Whether `.codex/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
+Do not use this to resume prior work; use `load-handoff`.
 
-## Use
+## What To Capture
 
-- Use for `/save`, `/save <title>`, "wrap this up", "new session", "save", or "handoff".
-- Skip trivial sessions with no decisions, changes, gotchas, or next steps unless the user explicitly wants a handoff.
-- Do not use to resume prior work; use `load-handoff`.
-- If active-writer reservation or write fails, report the helper error and STOP. Do not write the final handoff manually or fall back to `docs/handoffs/`.
+Every saved handoff should include both:
 
-## Procedure
+- session context: what happened in this session, what changed, what was decided, what is in flight
+- project-arc context: where the broader project stands, why this session matters, what prior decisions are load-bearing, and what future Codex should not forget
 
-1. Generate a fresh UUID for `session_id`.
-2. Read `synthesis-guide.md` completely. Answer every applicable synthesis prompt internally; do not show those answers in chat.
-3. Gather session context, current git branch/commit when available, and the files that should appear in frontmatter `files:`.
-4. Select sections from [format-reference.md](../../references/format-reference.md). Include all required handoff sections; use brief placeholders only when a section genuinely does not apply.
-5. Resolve plugin root before running state helpers. Set `PLUGIN_ROOT` to the plugin root, three levels above this `SKILL.md`, not the `skills/` directory. Use a literal absolute value such as `PLUGIN_ROOT="/absolute/path/to/handoff"`. The literal `python` command must resolve to Python >=3.11.
-6. Reserve the final path before writing content:
+Use `../../references/handoff-format.md` when you need the recommended frontmatter and section prompts.
 
-   ```bash
-   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-   PROJECT_NAME="$(basename "$PROJECT_ROOT")"
-   SLUG_ARGS=()
-   if [ -n "${SLUG:-}" ]; then
-     SLUG_ARGS=(--slug "$SLUG")
-   fi
-   BEGIN_OUTPUT="$(
-     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
-       begin-active-write \
-       --project-root "$PROJECT_ROOT" \
-       --project "$PROJECT_NAME" \
-       --operation save \
-       "${SLUG_ARGS[@]}" \
-       2>&1
-   )" || { printf '%s\n' "$BEGIN_OUTPUT" >&2; exit 1; }
-   OPERATION_STATE_PATH="$(printf '%s\n' "$BEGIN_OUTPUT" | python -c 'import json,sys; print(json.load(sys.stdin)["operation_state_path"])')"
-   ALLOCATED_ACTIVE_PATH="$(printf '%s\n' "$BEGIN_OUTPUT" | python -c 'import json,sys; print(json.load(sys.stdin)["allocated_active_path"])')"
-   RESUMED_FROM="$(printf '%s\n' "$BEGIN_OUTPUT" | python -c 'import json,sys; value=json.load(sys.stdin).get("resumed_from_path"); print(value or "")')"
-   ```
+## Storage
 
-7. Generate complete markdown in a temporary content file, not `ALLOCATED_ACTIVE_PATH`. Include `type: handoff`; if `RESUMED_FROM` is non-empty, include `resumed_from: "$RESUMED_FROM"`.
+Primary storage is:
 
-   ```bash
-   CONTENT_FILE="$(mktemp)"
-   # Write the complete markdown body to "$CONTENT_FILE" before committing it.
-   CONTENT_SHA256="$(python -c 'import hashlib,pathlib,sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$CONTENT_FILE")"
-   ```
+```text
+<project_root>/.codex/handoffs/
+```
 
-8. Commit the content through the active writer:
+Project root resolution:
 
-   ```bash
-   WRITE_OUTPUT="$(
-     PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/session_state.py" \
-       write-active-handoff \
-       --project-root "$PROJECT_ROOT" \
-       --operation-state-path "$OPERATION_STATE_PATH" \
-       --content-file "$CONTENT_FILE" \
-       --content-sha256 "$CONTENT_SHA256" \
-       2>&1
-   )" || { printf '%s\n' "$WRITE_OUTPUT" >&2; exit 1; }
-   ACTIVE_PATH="$(printf '%s\n' "$WRITE_OUTPUT" | python -c 'import json,sys; print(json.load(sys.stdin)["active_path"])')"
-   ```
+1. Use `git rev-parse --show-toplevel` when the current directory is inside a git repository.
+2. Otherwise use the current working directory.
 
-9. Verify the file exists under `<project_root>/.codex/handoffs/`, frontmatter parses, required fields are present, and required sections are present.
-10. Reply only with `Handoff saved: <path> - <title>`. Do not reproduce handoff content or synthesis answers in chat.
+Handoff filenames use:
+
+```text
+YYYY-MM-DD_HH-MM-SS_<slug>.md
+```
+
+Use a short lowercase slug from the requested title or session topic. Replace spaces with hyphens and omit punctuation that is awkward in filenames.
+
+## Direct Write Procedure
+
+1. Gather current context, current working directory, and git branch/commit when available.
+2. Create `<project_root>/.codex/handoffs/` if needed.
+3. Choose the timestamp path.
+4. Write the Markdown file with an exclusive-create primitive, such as an `Add File` patch or a file API opened in exclusive-create mode.
+5. If the path exists, append `-2`, `-3`, and so on before `.md` until a free path is found.
+6. If the direct write fails for any other reason, stop and report the file write failure plainly.
+7. Reply only with:
+
+```text
+Handoff saved: <absolute path>
+```
+
+Do not reproduce the full handoff in chat.
+
+## Boundaries
+
+- Do not call plugin helper scripts.
+- Do not create transaction state, active-write reservations, chain state, consumed markers, content hashes, recovery metadata, or `.session-state` files.
+- Do not fall back to `docs/handoffs/`.
+- Do not add gitignore rules, stage files, commit files, auto-prune files, or manage cross-machine continuity.
+- Whether `.codex/handoffs/` is tracked or ignored remains host-repository policy.

@@ -1,7 +1,7 @@
 {
   "name": "handoff",
-  "version": "1.7.0",
-  "description": "Session handoff, resume, search, and durable learning extraction for context continuity",
+  "version": "2.0.0",
+  "description": "Skill-only session continuity with Markdown handoffs",
   "author": {
     "name": "JP"
   },
@@ -11,14 +11,14 @@
     "session",
     "context",
     "continuity",
-    "search",
-    "learnings"
+    "markdown",
+    "search"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Handoff",
-    "shortDescription": "Save, resume, search, and distill session handoffs",
-    "longDescription": "Preserve Codex session context as structured handoffs, resume prior work, search history, and extract durable learnings across repositories.",
+    "shortDescription": "Save, load, and search Markdown handoffs",
+    "longDescription": "Save Markdown handoffs for session continuity, load handoffs as read-only resume context, and search project handoffs with plain text search.",
     "developerName": "JP",
     "category": "Productivity",
     "capabilities": [
@@ -28,7 +28,7 @@
     ],
     "defaultPrompt": [
       "Save a handoff for this session",
-      "Resume the latest handoff",
+      "Load the latest handoff",
       "Search handoffs for a decision"
     ],
     "websiteURL": "https://github.com/jpsweeney97/codex-tool-dev/tree/main/plugins/turbo-mode/handoff",

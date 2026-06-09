@@ -3,86 +3,75 @@ name: load-handoff
 description: Use when continuing from a previous session, when user runs `/load` to load the most recent handoff, or when user runs `/load <path>` for a specific handoff.
 ---
 
-# Load
+# Load Handoff
 
-Resume work from an existing Handoff artifact. Loading may archive or copy the selected handoff and writes resume state under `<project_root>/.codex/handoffs/.session-state/handoff-<project>-<resume_token>.json`.
+Load an existing Markdown handoff as strictly read-only context. The handoff is a resume pointer, not current truth.
 
-The plugin writes filesystem artifacts only. It does not add gitignore rules, stage files, or auto-commit files. Whether `.codex/handoffs/` is tracked or ignored is host-repository policy, not a plugin invariant.
-
-Handoff does not ship plugin-bundled command hooks. Run the load helper directly with the resolved plugin root.
-
-Read these only when needed:
-- [handoff-contract.md](../../references/handoff-contract.md) for frontmatter, chain protocol, and type semantics.
-- [format-reference.md](../../references/format-reference.md) for document content expectations.
-- [skill-details.md](../../references/skill-details.md) for storage details, anti-patterns, and troubleshooting.
+This skill never archives, moves, copies, edits, deletes, marks consumed, writes state, or creates recovery metadata.
 
 ## Use
 
-- Use for `/load`, `/load <path>`, "continue from where we left off", or "pick up where I stopped".
-- Do not create handoffs; use `save-handoff`, `save-summary`, or `quicksave`.
-- If no eligible handoff exists, report "No handoffs found for this project" and STOP.
-- If a provided path does not exist, report `Handoff not found at <path>` and STOP.
+- Use for `/load`, `/load <path>`, "continue from where we left off", or "pick up the latest handoff."
+- If no handoff exists, report that plainly. Suggest `/save` only if there is current context worth preserving.
+- If a provided path does not exist, report `Handoff not found at <path>` and stop.
 
-## Procedure
+## Selection
 
-1. Define project paths:
+Default search scope for implicit `/load`:
 
-   ```bash
-   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-   PROJECT_NAME="$(basename "$PROJECT_ROOT")"
-   ```
-
-2. Resolve plugin root before running helpers. Set `PLUGIN_ROOT` to the plugin root, three levels above this `SKILL.md`, not the `skills/` directory. Use a literal absolute value such as `PLUGIN_ROOT="/absolute/path/to/handoff"`. The literal `python` command must resolve to Python >=3.11.
-
-3. Run the load transaction.
-
-   For implicit `/load`:
-
-   ```bash
-   PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/load_transactions.py" \
-     load \
-     --project-root "$PROJECT_ROOT" \
-     --project "$PROJECT_NAME"
-   ```
-
-   For explicit `/load <path>`:
-
-   ```bash
-   SOURCE_PATH="/absolute/path/from-user"
-   PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/load_transactions.py" \
-     load \
-     --project-root "$PROJECT_ROOT" \
-     --project "$PROJECT_NAME" \
-     --explicit-path "$SOURCE_PATH"
-   ```
-
-   The command emits JSON with `transaction_id`, `transaction_path`, `source_path`, `archive_path`, `state_path`, and `storage_location`. If it exits non-zero, report stderr and STOP. Do not delete transaction, lock, or recovery-claim files unless the operator explicitly confirms the diagnostic repair path.
-
-4. Read handoff content from the returned `archive_path`, not from the original source. Primary active handoffs may have been moved to `<project_root>/.codex/handoffs/archive/<filename>`.
-5. Display the full handoff/checkpoint/summary content, note its type, summarize goal/current task, decisions, and next steps, then offer the first next action.
-
-## List
-
-For `/list-handoffs`, use the same setup and run:
-
-```bash
-PYTHONDONTWRITEBYTECODE=1 python "$PLUGIN_ROOT/scripts/list_handoffs.py" \
-  --project-root "$PROJECT_ROOT"
+```text
+<project_root>/.codex/handoffs/*.md
 ```
 
-If `total` is `0`, report "No handoffs found for this project" and STOP. Otherwise present a table with date, title, type, branch, storage location, and path.
+Project root resolution:
 
-## Recovery Boundaries
+1. Use `git rev-parse --show-toplevel` when the current directory is inside a git repository.
+2. Otherwise use the current working directory.
 
-- Readable pending load transactions are recovered before a new load is selected.
-- Unreadable or corrupt transaction records block `/load` with a global fail-closed diagnostic because the project field is inside the JSON payload.
-- A `recovery claim file present` diagnostic requires operator review before cleanup.
-- A `stale lock from another host` diagnostic requires operator review of lock metadata before cleanup.
-- Legacy sources are not deleted by load; reviewed legacy active handoffs are copied into primary storage and marked consumed.
+For implicit `/load`, first determine the current branch when inside a git repository. Then choose the newest handoff whose frontmatter `branch` matches the current branch when both values are available. If no branch-matching handoff exists, choose the newest handoff by filename timestamp. File modification time is an acceptable fallback if filenames do not sort usefully.
 
-## Done
+This is deterministic selection, not semantic ranking or an index.
 
-- Handoff content is displayed to the user.
-- Transaction JSON includes `archive_path`, `state_path`, and `storage_location`.
-- State file exists at `<project_root>/.codex/handoffs/.session-state/handoff-<project>-<resume_token>.json`.
-- The response names whether this is a checkpoint, summary, or handoff and offers a concrete continuation prompt.
+For explicit `/load <path>`, read exactly that path if it exists. Read an archived or legacy path only when the user explicitly provides that path. Do not automatically search legacy locations.
+
+## Live-Reality Check
+
+After reading the handoff, run a live-reality check before treating it as actionable.
+
+Inside a git repository, run:
+
+```bash
+git branch --show-current
+git log -1 --oneline
+git status --short --branch --untracked-files=all
+```
+
+Outside a git repository, do not fail the load just because git state is unavailable. Report the current working directory and state that git state is unavailable because the directory is not a git repository.
+
+If the selected handoff names a branch or commit that differs from live state, call out the mismatch before recommending action.
+
+If the handoff names specific important files, read those live files before making claims that depend on them.
+
+## Response Shape
+
+```markdown
+Loaded: <path>
+
+Current live state:
+- CWD: <path>
+- Git: <branch/HEAD/worktree summary, or "unavailable: not a git repository">
+
+Handoff says:
+- <goal/current state>
+- <key decisions>
+- <next action>
+
+Reality check:
+- <what matches>
+- <what is stale or unverified>
+
+Recommended next move:
+- <one concrete continuation>
+```
+
+Keep the response focused. Do not display the full handoff unless the user asks for the full text.
