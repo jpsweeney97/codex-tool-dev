@@ -10,6 +10,8 @@
 
 **Source spec:** `docs/superpowers/specs/2026-06-09-handoff-skill-only-redesign.md`
 
+Acceptance map: [2026-06-09-handoff-skill-only-redesign.acceptance-map.md](2026-06-09-handoff-skill-only-redesign.acceptance-map.md)
+
 ---
 
 ## Agent-Facing Design Gate Result
