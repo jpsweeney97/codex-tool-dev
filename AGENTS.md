@@ -11,10 +11,12 @@ Since 2026-06-09, the canonical sources for the `handoff` and `review-family`
 plugins live in `~/.agents/plugins/` (single dual-runtime source serving both
 Claude Code and Codex; see `~/.agents/AGENTS.md` "Plugin Layout And Delivery").
 `plugins/turbo-mode/{handoff,review-family}` here is a GitHub release mirror
-only: update it by copying from the canonical source at explicit publish time,
-never by editing it directly. `plugins/turbo-mode/tools/sync_personal_plugins.py`'s
-repo-to-`~/.codex/plugins` direction is obsolete (those personal copies were
-retired); adapting the tooling to mirror-from-canonical is a named follow-up.
+only: never edit it directly. Update it at explicit publish time with
+`plugins/turbo-mode/tools/publish_release_mirror.py` (npm aliases
+`turbo:check-release-mirror` for the non-mutating drift check,
+`turbo:publish-release-mirror` to copy canonical into the mirror). The old
+`sync_personal_plugins.py` repo-to-`~/.codex/plugins` lane was removed along
+with the retired personal copies.
 
 Primary source surfaces:
 

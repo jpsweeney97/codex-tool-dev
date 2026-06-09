@@ -4,7 +4,16 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 0.2.0 - 2026-06-09
+
+### Changed
+
+- Unified the plugin source for Claude Code and Codex: single
+  `.claude-plugin/plugin.json` manifest, canonical source at
+  `~/.agents/plugins/review-family/`, runtime-neutral skill text that names
+  both invocation token forms (`/skill` or `$skill`).
+
+## Unreleased (pre-0.2.0)
 
 ### Added
 

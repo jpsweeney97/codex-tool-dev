@@ -1,7 +1,7 @@
 {
   "name": "review-family",
-  "version": "0.1.0",
-  "description": "Evidence-first Codex review, scrutiny, and review-adjudication skills",
+  "version": "0.2.0",
+  "description": "Evidence-first review, scrutiny, and review-adjudication skills",
   "author": {
     "name": "JP"
   },
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "Review Family",
     "shortDescription": "Evidence-first review and review-adjudication skills",
-    "longDescription": "Run bounded, evidence-first Codex reviews across implementation, architecture, skill behavior, execution-readiness, adversarial scrutiny, and supplied-review or claim adjudication.",
+    "longDescription": "Run bounded, evidence-first reviews across implementation, architecture, skill behavior, execution-readiness, adversarial scrutiny, and supplied-review or claim adjudication.",
     "developerName": "JP",
     "category": "Productivity",
     "capabilities": [

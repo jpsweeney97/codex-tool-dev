@@ -1,27 +1,28 @@
 # Review Family Plugin
 
-Evidence-first Codex review, scrutiny, and review-adjudication skills for local
-development workflows.
+Evidence-first review, scrutiny, and review-adjudication skills for Claude Code
+and Codex local development workflows.
 
 This directory is the source-authority package for the Review Family plugin.
 Installed cache and runtime artifacts are separate proof surfaces and may
 diverge until an explicit cache-refresh or runtime-proof lane verifies them.
-Source edits here do not prove installed Codex behavior.
+Source edits here do not prove installed runtime behavior.
 
 ## Installation
 
-Install via the Codex plugin system:
+The canonical source lives at `~/.agents/plugins/review-family/` and is listed
+in the personal `turbo-mode` marketplace (`~/.agents/plugins/marketplace.json`).
+
+Codex installs from that marketplace (re-run the same command to refresh the
+installed copy after source edits):
 
 ```bash
-codex plugin marketplace update turbo-mode
 codex plugin add review-family@turbo-mode
 ```
 
-Or install directly from the development repo:
-
-```bash
-codex plugin install ./plugins/turbo-mode/review-family
-```
+Claude Code loads the same source in place as a skills-directory plugin via a
+symlink in `~/.claude/skills/` managed by
+`~/.agents/scripts/claude-skills-sync.sh`.
 
 No build step is required. The plugin ships skills only and has no runtime
 package, hook, MCP, app, or script dependency.
@@ -31,7 +32,7 @@ package, hook, MCP, app, or script dependency.
 | Capability | Skills | Description |
 |------------|--------|-------------|
 | **Adversarial artifact review** | `scrutinize` | Challenge plans, designs, drafts, decisions, and broad artifacts with evidence-backed findings. Ask for a formal stress test when you want an explicit assumptions audit, pre-mortem, dimensional critique, and confidence boundary; ask for an execution-readiness review when you need to know whether a plan is ready to build from. |
-| **Skill behavior review** | `scrutinize-skill` | Review Codex skills as behavior contracts for execution quality, UX, composability, overlap, and proof gaps. Skill targets route here even when the user says "scrutinize". |
+| **Skill behavior review** | `scrutinize-skill` | Review agent skills as behavior contracts for execution quality, UX, composability, overlap, and proof gaps. Skill targets route here even when the user says "scrutinize". |
 | **Implementation review** | `implementation-review` | Review completed work against a plan, spec, diff, or known intended behavior. |
 | **System design review** | `system-design-review` | Review architecture and system design artifacts for scoped design-lens gaps and missing probes. |
 | **Review adjudication** | `review-reviewer` | Check supplied reviews and pasted review claims against target evidence before acting on them. |
@@ -45,7 +46,7 @@ package, hook, MCP, app, or script dependency.
 | `implementation-review` | Completed implementation review against a plan, spec, PR, or known intended behavior | Compare implemented behavior to the stated contract and report ranked findings. |
 | `review-reviewer` | Supplied review, critique, audit, reviewer output, or pasted claims that need checking | Separate current truth from reviewer disposition and identify which findings or claims are valid, stale, or unproven. |
 | `scrutinize` | "Scrutinize", "tear this apart", "be brutal", reject-until-proven review, formal stress test, or execution-readiness review for non-skill targets | Adversarially inspect a plan, design, argument, code change, or broad artifact without implementing fixes. |
-| `scrutinize-skill` | Adversarial review of a Codex skill or proposed skill contract | Review whether the skill will guide Codex behavior well once triggered, including UX, overlap, composability, and proof gaps. |
+| `scrutinize-skill` | Adversarial review of an agent skill or proposed skill contract | Review whether the skill will guide agent behavior well once triggered, including UX, overlap, composability, and proof gaps. |
 | `system-design-review` | Architecture or system design review of docs, verbal designs, or codebase structure | Review design tradeoffs, defaults, interfaces, operations, and next probes. |
 
 The plugin is intentionally review-only. These skills may recommend repairs,
@@ -86,7 +87,7 @@ Use $scrutinize to run a formal stress test of this proposal, including an assum
 `adversarial-review` has been retired as a separate skill. Use `$scrutinize` and
 ask for a formal stress test when you want the heavier review packet.
 
-### Review A Codex Skill Contract
+### Review A Skill Contract
 
 ```text
 Use scrutinize-skill to review this skill as a behavior contract.
@@ -123,14 +124,17 @@ evidence.
 
 ## Source Authority And Runtime Proof
 
-`plugins/turbo-mode/review-family` is the development source package. Personal
-plugin copies under `~/.codex/plugins/review-family` and Codex runtime plugin
-state are downstream artifacts.
+`~/.agents/plugins/review-family/` is the canonical source. Downstream
+artifacts are the Codex install cache
+(`~/.codex/plugins/cache/turbo-mode/review-family/<version>/`, refreshed by
+`codex plugin add review-family@turbo-mode`) and the GitHub release mirror in
+`codex-tool-dev` (updated only at explicit publish time). Claude Code reads the
+canonical source in place through its skills-directory symlink, so no Claude
+copy exists.
 
-Use the Turbo Mode refresh workflow to plan and sync source into the personal
-plugin directory. Treat marketplace metadata and copied files as setup evidence
-only. To prove loaded runtime behavior, inspect the active Codex plugin and
-skills inventory after refresh and restart.
+Treat marketplace metadata and copied files as setup evidence only. To prove
+loaded runtime behavior, inspect the active runtime's plugin and skills
+inventory after refresh and restart.
 
 ## Privacy And Terms
 

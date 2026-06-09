@@ -1,7 +1,8 @@
 ---
 name: review-reviewer
 description: >
-  Use only when the user explicitly invokes `$review-reviewer` to review,
+  Use only when the user explicitly invokes `/review-reviewer` or
+  `$review-reviewer` to review,
   adjudicate, avoid rubber-stamping a supplied review, or check pasted review
   claims against current evidence. For full review adjudication, infer the
   original target from the review and immediate context, read that target fresh,
@@ -20,7 +21,8 @@ as allegations to test, not as authority or as an enemy to defeat.
 
 ## Boundaries
 
-- Explicit-only: use this skill only when invoked as `$review-reviewer`. Do not
+- Explicit-only: use this skill only when invoked as `/review-reviewer` or
+  `$review-reviewer`. Do not
   silently route natural-language requests here while `agents/openai.yaml` has
   `allow_implicit_invocation: false`.
 - Required input: the supplied review, review claims, or pasted claims. Do not
@@ -29,7 +31,8 @@ as allegations to test, not as authority or as an enemy to defeat.
   possible.
 - Non-trigger: ordinary critiques, first-pass reviews, implementation reviews,
   "scrutinize this", "be adversarial", "check whether this review is right"
-  without `$review-reviewer`, basic claim extraction without evidence checking,
+  without `/review-reviewer` or `$review-reviewer`, basic claim extraction
+  without evidence checking,
   or implementation follow-up without a supplied review or claim set to
   adjudicate.
 - Packet selection: use full review adjudication when the user asks whether a
@@ -65,7 +68,7 @@ as `review-family:review-reviewer`.
   `system-design-review` for architecture tradeoffs.
 - If the user asks in natural language whether a review is right without
   invoking this skill, do not silently run the full packet; answer normally or
-  ask whether they want `$review-reviewer`.
+  ask whether they want `/review-reviewer` or `$review-reviewer`.
 
 ## Full Review Adjudication Workflow
 
@@ -115,7 +118,8 @@ as `review-family:review-reviewer`.
 
 ## Current Claim Check
 
-Use this packet when `$review-reviewer` is invoked with a request to check pasted
+Use this packet when `/review-reviewer` or `$review-reviewer` is invoked with a
+request to check pasted
 claims item by item against current evidence.
 
 Current Claim Check answers: are these claims true enough to act on now? It does

@@ -7,7 +7,7 @@
   "scripts": {
     "build": "npm -ws run build",
     "test": "npm -ws run test",
-    "turbo:plan-personal-plugins": "PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache-personal-sync python3 plugins/turbo-mode/tools/sync_personal_plugins.py",
-    "turbo:sync-personal-plugins": "PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache-personal-sync python3 plugins/turbo-mode/tools/sync_personal_plugins.py --sync"
+    "turbo:check-release-mirror": "PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache-release-mirror python3 plugins/turbo-mode/tools/publish_release_mirror.py",
+    "turbo:publish-release-mirror": "PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/private/tmp/codex-tool-dev-pycache-release-mirror python3 plugins/turbo-mode/tools/publish_release_mirror.py --publish"
   }
 }

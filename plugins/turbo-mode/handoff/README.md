@@ -1,23 +1,24 @@
 # Handoff
 
-Handoff is a skill-only Codex plugin for session continuity. It helps Codex save, load, and search Markdown handoffs under the current project's `.codex/handoffs/` directory.
+Handoff is a skill-only plugin for session continuity in Claude Code and Codex. It helps the agent save, load, and search Markdown handoffs under the current project's `.agents/handoffs/` directory, which both runtimes share.
 
 Handoffs are resume pointers, not live truth. A future session should read the handoff, check the live repository or working directory, and then continue from what still matches reality.
 
 ## Installation
 
-Bundled in the `turbo-mode` marketplace:
+The canonical source lives at `~/.agents/plugins/handoff/` and is listed in the
+personal `turbo-mode` marketplace (`~/.agents/plugins/marketplace.json`).
+
+Codex installs from that marketplace (re-run the same command to refresh the
+installed copy after source edits):
 
 ```bash
-codex plugin marketplace update turbo-mode
-codex plugin install handoff@turbo-mode
+codex plugin add handoff@turbo-mode
 ```
 
-Or install directly from the development repo:
-
-```bash
-codex plugin install ./plugins/turbo-mode/handoff
-```
+Claude Code loads the same source in place as a skills-directory plugin via a
+symlink in `~/.claude/skills/` managed by
+`~/.agents/scripts/claude-skills-sync.sh`.
 
 ## What It Does
 
@@ -36,8 +37,12 @@ Handoff does not ship runtime modules, helper scripts, command hooks, validators
 Primary storage is:
 
 ```text
-<project_root>/.codex/handoffs/
+<project_root>/.agents/handoffs/
 ```
+
+This directory is shared by Claude Code and Codex sessions. Legacy handoffs
+under `.claude/handoffs/` and `.codex/handoffs/` remain readable by `/load`
+and `/search` but are never written to.
 
 Project root resolution:
 
@@ -52,13 +57,13 @@ YYYY-MM-DD_HH-MM-SS_<slug>.md
 
 Writes use direct path selection with no hidden state:
 
-1. Create `<project_root>/.codex/handoffs/` if needed.
+1. Create `<project_root>/.agents/handoffs/` if needed.
 2. Choose the timestamp path.
 3. Write with an exclusive-create primitive.
 4. If the path exists, append `-2`, `-3`, and so on before `.md` until a free path is found.
 5. If the direct write fails for any other reason, stop and report the write failure plainly.
 
-The plugin does not add gitignore rules, stage files, commit files, auto-prune files, or manage cross-machine continuity. Whether `.codex/handoffs/` is tracked or ignored remains host-repository policy.
+The plugin does not add gitignore rules, stage files, commit files, auto-prune files, or manage cross-machine continuity. Whether `.agents/handoffs/` is tracked or ignored remains host-repository policy.
 
 ## Handoff Format
 
@@ -95,7 +100,7 @@ Recommended body prompts:
 ## References
 ```
 
-These headings are prompts, not a schema. The quality bar is the resumption test: could future Codex continue without wasting time, repeating avoidable exploration, or trusting a stale claim?
+These headings are prompts, not a schema. The quality bar is the resumption test: could a future session continue without wasting time, repeating avoidable exploration, or trusting a stale claim?
 
 ## Boundaries
 

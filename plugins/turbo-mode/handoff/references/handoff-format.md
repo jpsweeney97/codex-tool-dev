@@ -3,8 +3,10 @@
 Handoffs are Markdown notes under:
 
 ```text
-<project_root>/.codex/handoffs/
+<project_root>/.agents/handoffs/
 ```
+
+This directory is shared by Claude Code and Codex sessions. Legacy handoffs may also exist under `.claude/handoffs/` or `.codex/handoffs/`; those remain read-only.
 
 Filenames use:
 
@@ -71,12 +73,12 @@ The Handoff source bundle was reduced to three skills and one format reference. 
 
 ## Project Arc
 
-The broader goal is to keep Handoff plain: Codex writes a useful Markdown note, later reads it as context, checks live reality, and continues.
+The broader goal is to keep Handoff plain: the agent writes a useful Markdown note, later reads it as context, checks live reality, and continues.
 
 ## Evidence Checked
 
 - `git status --short --branch --untracked-files=all`
-- `python -m json.tool plugins/turbo-mode/handoff/.codex-plugin/plugin.json`
+- `python -m json.tool plugins/handoff/.claude-plugin/plugin.json`
 - source inventory check for the approved bundle shape
 
 ## Current State
@@ -90,7 +92,7 @@ If runtime pickup matters, run a separate explicit plugin refresh and runtime in
 
 ## Resumption Test
 
-Could future Codex continue without wasting time, repeating avoidable exploration, or trusting a stale claim?
+Could a future session continue without wasting time, repeating avoidable exploration, or trusting a stale claim?
 
 ## Evidence Boundary
 

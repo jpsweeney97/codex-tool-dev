@@ -20,8 +20,12 @@ This skill never archives, moves, copies, edits, deletes, marks consumed, writes
 Default search scope for implicit `/load`:
 
 ```text
-<project_root>/.codex/handoffs/*.md
+<project_root>/.agents/handoffs/*.md
+<project_root>/.claude/handoffs/*.md   (legacy, read-only)
+<project_root>/.codex/handoffs/*.md    (legacy, read-only)
 ```
+
+`.agents/handoffs/` is the shared primary location. The legacy directories stay in the implicit scope so older handoffs remain loadable, but nothing is ever written, moved, or migrated there.
 
 Project root resolution:
 
@@ -32,7 +36,7 @@ For implicit `/load`, first determine the current branch when inside a git repos
 
 This is deterministic selection, not semantic ranking or an index.
 
-For explicit `/load <path>`, read exactly that path if it exists. Read an archived or legacy path only when the user explicitly provides that path. Do not automatically search legacy locations.
+For explicit `/load <path>`, read exactly that path if it exists. Read a path outside the default scope, such as `docs/handoffs/` or an archive directory, only when the user explicitly provides that path.
 
 ## Live-Reality Check
 

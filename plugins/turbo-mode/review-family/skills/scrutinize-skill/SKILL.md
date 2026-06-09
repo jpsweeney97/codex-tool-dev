@@ -1,25 +1,26 @@
 ---
 name: scrutinize-skill
-description: Use when the target of an adversarial review is a Codex skill, skill directory, SKILL.md, agents/openai.yaml, skill reference, example, or proposed skill contract, including explicit `review-family:scrutinize-skill`, `$scrutinize-skill`, or natural-language requests such as "scrutinize this skill". Review behavior quality, user experience, instruction clarity, composability, and overlap with the available skill set. Do not use for routine skill editing, implementation, general artifact review, or completed-code review.
+description: Use when the target of an adversarial review is an agent skill, skill directory, SKILL.md, agents/openai.yaml, skill reference, example, or proposed skill contract, including explicit `review-family:scrutinize-skill`, `/scrutinize-skill` or `$scrutinize-skill`, or natural-language requests such as "scrutinize this skill". Review behavior quality, user experience, instruction clarity, composability, and overlap with the available skill set. Do not use for routine skill editing, implementation, general artifact review, or completed-code review.
 ---
 
 # Scrutinize Skill
 
-Review a Codex skill as a behavior contract. Ask whether the skill will make
-Codex behave well after it triggers, not only whether the bundle is structurally
-valid.
+Review an agent skill as a behavior contract. Ask whether the skill will make
+the agent behave well after it triggers, not only whether the bundle is
+structurally valid.
 
 ## Review-Family Routing
 
 Explicit review-family invocation wins. The plugin-scoped form is
-`review-family:scrutinize-skill`; `$scrutinize-skill` is accepted shorthand when
-skill mentions are available in the current surface. When the review target is a
-Codex skill or skill-support file, this skill also wins over generic
-`scrutinize`, even if the user used natural-language scrutiny wording.
+`review-family:scrutinize-skill`; `/scrutinize-skill` or `$scrutinize-skill` is
+accepted shorthand when skill mentions are available in the current surface.
+When the review target is an agent skill or skill-support file, this skill also
+wins over generic `scrutinize`, even if the user used natural-language scrutiny
+wording.
 
-- Use this skill for adversarial review of a Codex skill, skill directory,
+- Use this skill for adversarial review of an agent skill, skill directory,
   `SKILL.md`, `agents/openai.yaml`, behavior-shaping reference, example, or
-  proposed skill contract. This skill wins over `scrutinize` for Codex skill
+  proposed skill contract. This skill wins over `scrutinize` for agent skill
   behavior-contract review.
 - Use `scrutinize` for broad natural-language adversarial artifact critique,
   formal stress tests, and execution-readiness reviews when this skill was not
@@ -39,7 +40,7 @@ Primary question: will the right skill behave poorly once triggered?
 Review these failure modes first:
 
 - the skill gives weak next-step guidance after triggering
-- muddled instructions make Codex improvise important behavior
+- muddled instructions make the agent improvise important behavior
 - the user experience is awkward, heavy, vague, or missing closure
 - the skill silently becomes another workflow instead of handing off
 - overlapping skills make routing unclear, duplicate, or fragmented
@@ -87,7 +88,7 @@ Separate proof classes:
 
 - `structural`: parseable frontmatter, valid YAML, expected files, references
   that exist
-- `behavioral`: realistic dry runs, examples, or reasoning that shows Codex
+- `behavioral`: realistic dry runs, examples, or reasoning that shows the agent
   will behave correctly when the skill is triggered
 - `runtime`: installed plugin or loaded skill state observed through the active
   runtime
@@ -100,8 +101,8 @@ alone.
 
 1. **Target And Surface** - Name the exact target, inspected files, missing
    surfaces, and unread material that could change the review.
-2. **Behavior Read** - Summarize in plain language what Codex is supposed to do
-   once the skill triggers.
+2. **Behavior Read** - Summarize in plain language what the agent is supposed
+   to do once the skill triggers.
 3. **Execution Quality** - Review first move, context reading, defaults, stop
    conditions, handoffs, output shape, and failure handling.
 4. **UX Review** - Review user friction, clarity, pacing, question shape, user

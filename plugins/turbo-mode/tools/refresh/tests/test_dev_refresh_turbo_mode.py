@@ -272,23 +272,22 @@ def test_run_dev_refresh_ignores_generated_residue_in_dev_manifest(
     } in summary["generated_residue_ignored"]
 
 
-def test_package_alias_points_at_personal_plugin_sync_lane() -> None:
+def test_package_alias_points_at_release_mirror_lane() -> None:
     package = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))
     scripts = package["scripts"]
 
     assert "turbo:dev-refresh" not in scripts
+    assert "turbo:plan-personal-plugins" not in scripts
+    assert "turbo:sync-personal-plugins" not in scripts
     assert (
-        "plugins/turbo-mode/tools/sync_personal_plugins.py"
-        in scripts["turbo:plan-personal-plugins"]
+        "plugins/turbo-mode/tools/publish_release_mirror.py"
+        in scripts["turbo:check-release-mirror"]
     )
-    assert "--sync" not in scripts["turbo:plan-personal-plugins"]
+    assert "--publish" not in scripts["turbo:check-release-mirror"]
     assert (
-        "plugins/turbo-mode/tools/sync_personal_plugins.py --sync"
-        in scripts["turbo:sync-personal-plugins"]
+        "plugins/turbo-mode/tools/publish_release_mirror.py --publish"
+        in scripts["turbo:publish-release-mirror"]
     )
-    assert "dev_refresh_turbo_mode.py" not in scripts["turbo:sync-personal-plugins"]
-    assert "refresh_installed_turbo_mode.py" not in scripts["turbo:sync-personal-plugins"]
-    assert "--guarded-refresh" not in scripts["turbo:sync-personal-plugins"]
 
 
 def test_dev_refresh_lane_does_not_import_planner() -> None:
