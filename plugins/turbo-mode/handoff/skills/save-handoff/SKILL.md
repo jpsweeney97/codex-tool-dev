@@ -16,9 +16,9 @@ Do not use this to resume prior work; use `load-handoff`.
 Every saved handoff should include both:
 
 - session context: what happened in this session, what changed, what was decided, what is in flight
-- project-arc context: where the broader project stands, why this session matters, what prior decisions are load-bearing, and what a future session should not forget
+- project-arc context: the session's arc delta — what this session changed about where the project stands, which decisions became load-bearing or stopped holding, and what a future session should not forget. Record the delta, not a restatement of the already-known arc or of `THROUGHLINE.md`; restated arc text becomes an echo that a later `/throughline` refresh could mistake for independent confirmation.
 
-Use `../../references/handoff-format.md` when you need the recommended frontmatter and section prompts.
+Read `../../references/handoff-format.md` before writing the file and follow its frontmatter; its section prompts stay prompts, not a schema.
 
 ## Storage
 
@@ -51,11 +51,13 @@ Use a short lowercase slug from the requested title or session topic. Replace sp
 4. Write the Markdown file with an exclusive-create primitive, such as an `Add File` patch or a file API opened in exclusive-create mode.
 5. If the path exists, append `-2`, `-3`, and so on before `.md` until a free path is found.
 6. If the direct write fails for any other reason, stop and report the file write failure plainly.
-7. Reply only with:
+7. Reply with:
 
 ```text
 Handoff saved: <absolute path>
 ```
+
+Optionally add one second line suggesting `/throughline` when `THROUGHLINE.md` is missing from the handoffs directory or clearly several handoffs behind. This is judgment, not a numeric threshold; when in doubt, omit the line. Never add more than one suggestion line.
 
 Do not reproduce the full handoff in chat.
 

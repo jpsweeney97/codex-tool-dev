@@ -61,3 +61,5 @@ done
 For a small number of matches, show the matching path, line number, and surrounding context.
 
 For many matches, show a useful handful and offer to narrow. Suggest `/load <path>` when one result looks like the right continuation artifact.
+
+Matches in `THROUGHLINE.md` are from the derived arc document, not a session handoff: do not suggest `/load <path>` for them, and treat them as derived pointers to verify in source handoffs before treating a claim as decided.

@@ -27,10 +27,11 @@ symlink in `~/.claude/skills/` managed by
 | `/save` | Writes a Markdown handoff with session context and project-arc context. |
 | `/load` | Reads a handoff as context, then checks live repository or working-directory state before recommending action. |
 | `/search` | Searches project handoffs with `rg`. Literal search is the default; regex is used only when requested. |
+| `/throughline` | Maintains `THROUGHLINE.md`, a rolling, regenerable condensation of the project's handoff pile: narrative, decisions that hold, abandoned paths, frontier. Never mutates handoffs. |
 
-Handoff does not ship runtime modules, helper scripts, command hooks, validators, transaction state, chain state, archive-on-load behavior, recovery protocols, or durable learning extraction.
+Handoff does not ship runtime modules, helper scripts, command hooks, validators, transaction state, chain state, archive-on-load behavior, or recovery protocols. The only derived document is the throughline: a rolling, regenerable arc summary that never mutates handoffs and is always rebuildable from them.
 
-`/quicksave`, `/summary`, and `/distill` are retired behavior. They are not wrappers, aliases, or compatibility entry points in this source bundle.
+`/quicksave`, `/summary`, and `/distill` are retired behavior. They are not wrappers, aliases, or compatibility entry points in this source bundle, and `/throughline` is not a revival of them — it is a new derived-arc contract.
 
 ## Storage
 
@@ -104,7 +105,7 @@ These headings are prompts, not a schema. The quality bar is the resumption test
 
 ## Boundaries
 
-- `/save` is the only write-oriented skill.
+- `/save` is the only skill that writes session handoffs. `/throughline` writes only the derived `THROUGHLINE.md` and never mutates handoffs.
 - `/load` and `/search` are read-only.
 - Loading never archives, moves, copies, edits, deletes, marks consumed, or writes recovery metadata.
 - Searching does not parse a custom schema, build an index, rank semantically, deduplicate, or mutate files.

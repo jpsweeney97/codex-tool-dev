@@ -27,6 +27,8 @@ Default search scope for implicit `/load`:
 
 `.agents/handoffs/` is the shared primary location. The legacy directories stay in the implicit scope so older handoffs remain loadable, but nothing is ever written, moved, or migrated there.
 
+`THROUGHLINE.md` in a handoffs directory is the derived arc document maintained by `/throughline` (or `$throughline`), not a session handoff. Never select it as the implicit handoff, even when file modification time would make it the newest entry.
+
 Project root resolution:
 
 1. Use `git rev-parse --show-toplevel` when the current directory is inside a git repository.
@@ -37,6 +39,8 @@ For implicit `/load`, first determine the current branch when inside a git repos
 This is deterministic selection, not semantic ranking or an index.
 
 For explicit `/load <path>`, read exactly that path if it exists. Read a path outside the default scope, such as `docs/handoffs/` or an archive directory, only when the user explicitly provides that path.
+
+If the explicit path is a `THROUGHLINE.md`, do not apply resume-pointer framing or the response shape below. Reply briefly that it is the derived arc document, not a session handoff — read it directly or refresh it with `/throughline` — and stop.
 
 ## Live-Reality Check
 
@@ -56,6 +60,12 @@ If the selected handoff names a branch or commit that differs from live state, c
 
 If the handoff names specific important files, read those live files before making claims that depend on them.
 
+## Throughline Context
+
+When `<project_root>/.agents/handoffs/THROUGHLINE.md` exists, read it in full as background arc context — its size discipline keeps a full read cheap. The throughline lives only at that primary path; check it there even when the selected handoff came from a legacy directory. Add a labeled `Throughline:` line to the response: the as-of date, plus a stale note when its `covers_through` is behind the newest source handoff filename timestamp — compared across the throughline's source set (top-level files plus `archive/` in the primary and legacy handoffs directories, never `THROUGHLINE.md` itself).
+
+Arc context only: never base the recommended next move on throughline content unless the selected handoff or live files corroborate it.
+
 ## Response Shape
 
 ```markdown
@@ -64,6 +74,8 @@ Loaded: <path>
 Current live state:
 - CWD: <path>
 - Git: <branch/HEAD/worktree summary, or "unavailable: not a git repository">
+
+Throughline: <as of <updated_at>; note staleness when covers_through is behind the newest source handoff; omit this line when no THROUGHLINE.md exists>
 
 Handoff says:
 - <goal/current state>
