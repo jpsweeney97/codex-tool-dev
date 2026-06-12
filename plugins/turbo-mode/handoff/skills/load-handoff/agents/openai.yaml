@@ -1,2 +1,4 @@
 interface:
   display_name: "Load Handoff"
+  short_description: "Load saved handoff context read-only"
+  default_prompt: "Use $load-handoff to read the latest or named project handoff, compare it with live state, and continue from current truth."

@@ -1,6 +1,6 @@
 ---
 name: load-handoff
-description: Use when continuing from a previous session, when user runs `/load` to load the most recent handoff, or when user runs `/load <path>` for a specific handoff.
+description: "Use when continuing from a previous session, when the user runs `/load`, or when the user gives `/load` with a named path to load the latest or named Markdown handoff as read-only resume context. Do not use for saving, searching, editing, archiving, deleting, or treating handoffs as current truth without a live-state check."
 ---
 
 # Load Handoff

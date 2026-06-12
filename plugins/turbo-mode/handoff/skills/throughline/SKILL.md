@@ -1,6 +1,6 @@
 ---
 name: throughline
-description: "Maintain THROUGHLINE.md, the derived rolling history of the project's handoff pile. Use when user runs `/throughline` or `$throughline`, or asks to create, refresh, or rebuild the project throughline."
+description: "Use when the user runs `/throughline` or `$throughline`, or asks to create, refresh, or rebuild the project's derived `.agents/handoffs/THROUGHLINE.md` from saved handoffs. Do not use for loading, saving, or searching individual handoffs, ad hoc Markdown synthesis, or treating the throughline as authoritative current truth."
 ---
 
 # Throughline

@@ -1,2 +1,4 @@
 interface:
   display_name: "Throughline"
+  short_description: "Refresh the derived handoff history"
+  default_prompt: "Use $throughline to create or refresh the project's derived THROUGHLINE.md from saved handoffs; treat it as context, not authority."

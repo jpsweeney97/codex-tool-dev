@@ -1,6 +1,6 @@
 ---
 name: scrutinize-skill
-description: Use when the target of an adversarial review is an agent skill, skill directory, SKILL.md, agents/openai.yaml, skill reference, example, or proposed skill contract, including explicit `review-family:scrutinize-skill`, `/scrutinize-skill` or `$scrutinize-skill`, or natural-language requests such as "scrutinize this skill". Review behavior quality, user experience, instruction clarity, composability, and overlap with the available skill set. Do not use for routine skill editing, implementation, general artifact review, or completed-code review.
+description: "Use when the target of an adversarial review is an agent skill, skill directory, SKILL.md, agents/openai.yaml, skill reference, example, or proposed skill contract, including explicit `review-family:scrutinize-skill`, `/scrutinize-skill`, `$scrutinize-skill`, or natural-language requests like `scrutinize this skill`. Do not use for routine skill editing, implementation, general artifact review, completed-code review, or non-adversarial skill UX/design work."
 ---
 
 # Scrutinize Skill

@@ -1,11 +1,6 @@
 ---
 name: implementation-review
-description: >
-  Use when reviewing completed code against a plan or spec after planned work:
-  "review my implementation", "review my work", "check this against the
-  plan/spec", or "did I miss anything". Run an adversarial, evidence-first
-  implementation review. Do NOT use for initial code writing, planning,
-  architecture discussion, or general code questions.
+description: "Use when reviewing completed code, generated artifacts, PRs, diffs, or commit ranges against a governing plan, spec, ticket, handoff, or explicit requirements. Do not use for initial code writing, planning, architecture discussion, general code questions, first-pass artifact scrutiny, or review of agent skill contracts."
 ---
 
 # Adversarial Implementation Review

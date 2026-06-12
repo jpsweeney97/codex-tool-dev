@@ -1,2 +1,4 @@
 interface:
   display_name: "Search Handoffs"
+  short_description: "Search saved handoffs for decisions"
+  default_prompt: "Use $search-handoffs to search project handoffs for a decision or context phrase without mutating files."

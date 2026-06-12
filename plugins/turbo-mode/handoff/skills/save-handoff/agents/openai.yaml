@@ -1,2 +1,4 @@
 interface:
   display_name: "Save Handoff"
+  short_description: "Save session context for continuation"
+  default_prompt: "Use $save-handoff to write a concise Markdown handoff under the project's .agents/handoffs directory for a real session boundary."

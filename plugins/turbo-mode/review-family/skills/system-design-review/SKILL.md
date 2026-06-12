@@ -1,6 +1,6 @@
 ---
 name: system-design-review
-description: "Use when reviewing architecture or system design artifacts (design docs, codebases, verbal designs) for scoped design-lens gaps, inherited defaults, tradeoffs, and next probes. Do not use for code bug review, post-mortems, debt ranking, refactor sequencing, or readiness audits."
+description: "Use when reviewing architecture or system design artifacts, including design docs, codebases, verbal designs, subsystem boundaries, runtime guarantees, data authority, trust surfaces, operational ownership, or tradeoffs. Do not use for code bug review, completed implementation review, post-mortems, debt ranking, refactor sequencing, or execution-readiness audits."
 ---
 
 # System Design Review

@@ -1,6 +1,6 @@
 ---
 name: save-handoff
-description: Use when user says "/save", "wrap this up", "new session", "almost out of context", "save", "next session", or "handoff"; use when stopping work with context to preserve.
+description: "Use when the user runs `/save` or asks to preserve useful session context for a future session, such as `wrap this up`, `new session`, `almost out of context`, `next session`, or `handoff`. Do not use for loading/resuming handoffs, ordinary file saves, final closeout/commits, publishing, or generic status summaries."
 ---
 
 # Save Handoff
@@ -48,7 +48,7 @@ Use a short lowercase slug from the requested title or session topic. Replace sp
 1. Gather current context, current working directory, and git branch/commit when available.
 2. Create `<project_root>/.agents/handoffs/` if needed.
 3. Choose the timestamp path.
-4. Write the Markdown file with an exclusive-create primitive, such as an `Add File` patch or a file API opened in exclusive-create mode.
+4. Write the Markdown file without overwriting an existing path: use an exclusive-create write when the runtime offers one, otherwise confirm the path does not exist immediately before writing.
 5. If the path exists, append `-2`, `-3`, and so on before `.md` until a free path is found.
 6. If the direct write fails for any other reason, stop and report the file write failure plainly.
 7. Reply with:

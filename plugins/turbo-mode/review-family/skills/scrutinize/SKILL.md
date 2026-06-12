@@ -1,6 +1,6 @@
 ---
 name: scrutinize
-description: Use when the user explicitly asks for adversarial review of a plan, design, draft, argument, decision, code change, or broad artifact, or asks whether a plan/spec/handoff/artifact is ready to implement. Trigger on "scrutinize", "be brutal", "tear this apart", "assume this is wrong", "reject until proven otherwise", requests for a formal stress test, or requests for an execution-readiness review. Add an explicit formal stress test when requested or when the target is high-stakes enough that hidden assumptions or quiet failure modes could materially damage the work. For execution-readiness reviews, answer whether to start building by using readiness verdicts instead of normal scrutiny verdicts. Do not use for agent skill targets, completed implementation-against-plan review, routine review, collaborative editing, or balanced feedback.
+description: "Use when the user explicitly asks for adversarial review, scrutiny, a formal stress test, or execution-readiness review of a plan, design, draft, argument, decision, code change, handoff, spec, or broad artifact. Do not use for agent skill targets, completed implementation-against-plan review, supplied-review adjudication, architecture-specific system design review, routine review, collaborative editing, or balanced feedback."
 ---
 
 # Scrutinize
