@@ -4,6 +4,21 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.3.5 - 2026-06-13
+
+### Added
+
+- `implementation-review`: two security-review disciplines folded into Attack
+  Changed Areas from the mined `security-guidance@claude-plugins-official`
+  plugin (charter pass 10). (1) Resource-cap-defeat: report resource exhaustion
+  only when a change defeats an existing size/time/count cap (wrong accumulator,
+  dead timeout, unclamped arithmetic, amplification at flush), not for volumetric
+  load alone. (2) Privilege-boundary refutation for security findings: name the
+  attacker and victim, refute when attacker equals victim on their own
+  machine/data, keep when impact reaches other users/tenants/shared infra, hold
+  off-diff sinks to a stricter bar, and never apply attacker-equals-victim to
+  SSRF/outbound sinks, data-exposure findings, or agent capability gates.
+
 ## 0.3.4 - 2026-06-13
 
 ### Added
