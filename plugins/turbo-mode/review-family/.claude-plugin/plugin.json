@@ -1,6 +1,6 @@
 {
   "name": "review-family",
-  "version": "0.3.0",
+  "version": "0.3.4",
   "description": "Evidence-first review, scrutiny, and review-adjudication skills",
   "author": {
     "name": "JP"
@@ -30,8 +30,8 @@
       "Run a formal stress test of this proposal",
       "Review this skill as a behavior contract",
       "Review this implementation against the spec",
-      "Check these claims against the current repo",
-      "Adjudicate this review before I act"
+      "Use $review-reviewer to check these claims against the current repo",
+      "Use $review-reviewer to adjudicate this review before I act"
     ],
     "websiteURL": "https://github.com/jpsweeney97/codex-tool-dev/tree/main/plugins/turbo-mode/review-family",
     "privacyPolicyURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/review-family/PRIVACY.md",

@@ -4,6 +4,17 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.3.4 - 2026-06-13
+
+### Added
+
+- `implementation-review`: false-positive exclusions in Attack Changed Areas —
+  apply the evidence burden to findings, not only to compliance. Folded from the
+  mined `code-review@claude-plugins-official` plugin (charter pass 9): do not
+  raise findings for correct code that resembles a bug, for
+  linter/typechecker/compiler/CI-catchable issues, or for repo-instruction
+  violations explicitly silenced in code.
+
 ## 0.2.0 - 2026-06-09
 
 ### Changed

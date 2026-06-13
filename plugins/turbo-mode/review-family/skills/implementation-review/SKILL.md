@@ -53,7 +53,7 @@ Read-only boundary: do not edit files, stage changes, commit, push, delete, migr
 
 Verification boundary: run only safe, relevant commands. If a useful command may mutate state outside normal test/build artifacts, ask first and list the claim that remains unverified if skipped.
 
-Higher-priority safety, destructive-action, and `.agents/AGENTS.md` root-cause-analysis checkpoints still apply; if a checkpoint blocks deeper investigation, mark the affected claim `unverified` and state which checkpoint blocked it.
+Higher-priority safety, destructive-action, and repo-instruction checkpoints still apply; if a checkpoint blocks deeper investigation, mark the affected claim `unverified` and state which checkpoint blocked it.
 
 ## Stance
 
@@ -99,9 +99,15 @@ Do not treat passing tests, naming, comments, or apparent intent as enough to ma
 
 ### 3. Attack Changed Areas
 
-For each changed area, check relevant failure modes: input validation, control flow, state/concurrency, trust boundaries, operational behavior, and consistency with existing patterns.
+For each changed area, check relevant failure modes: input validation, control flow, state/concurrency, trust boundaries, operational behavior, and consistency with existing patterns. Check error handling for suppression: empty or overly broad catches, errors logged then swallowed, and defaults or fallbacks that mask the underlying failure. Where tests changed or new behavior needs them, check test adequacy: missing negative cases and tests coupled to implementation details rather than behavior. Where comments or docstrings changed or describe changed code, check them against the code: documented behavior the logic contradicts, references left stale by the change, and TODOs the change already resolved.
 
 Record the strongest failure story checked for each area, even when it does not produce a finding.
+
+Apply the evidence burden to findings, not only to compliance: raise a finding only when code evidence shows the failure is real. Do not raise findings for:
+
+- Code that superficially resembles a bug but is correct on inspection — confirm the failure actually occurs before flagging it.
+- Issues a linter, typechecker, compiler, or CI run would catch — missing or wrong imports, type errors, formatting — unless a requirement explicitly demands them. Assume those checks run separately; do not reproduce them here.
+- Repo-instruction violations explicitly silenced in the code, such as a lint-ignore comment that names the rule.
 
 ### 4. Challenge The Plan
 
