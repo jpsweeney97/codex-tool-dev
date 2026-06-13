@@ -4,6 +4,21 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.3.6 - 2026-06-13
+
+### Changed
+
+- `implementation-review`: behavior-preserving lean pass over the accreted
+  contract. Split the two run-on paragraphs in Attack Changed Areas into
+  scannable bullet lists — the base failure modes plus the error-suppression,
+  test-adequacy, comment-accuracy, and resource-cap checks; and the security
+  attacker/victim refutation with its SSRF/data-exposure/agent-capability-gate
+  carve-outs and the off-diff stricter bar — with no obligation text changed.
+  Consolidated the two divergent per-finding field lists (Write Findings step vs
+  Output Format) to a single superset (location, finding type, severity, and the
+  rest), resolving a latent inconsistency where each list omitted a field the
+  other required. No obligations added, removed, or weakened.
+
 ## 0.3.5 - 2026-06-13
 
 ### Added

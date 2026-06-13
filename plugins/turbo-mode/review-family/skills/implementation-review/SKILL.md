@@ -99,7 +99,12 @@ Do not treat passing tests, naming, comments, or apparent intent as enough to ma
 
 ### 3. Attack Changed Areas
 
-For each changed area, check relevant failure modes: input validation, control flow, state/concurrency, trust boundaries, operational behavior, and consistency with existing patterns. Check error handling for suppression: empty or overly broad catches, errors logged then swallowed, and defaults or fallbacks that mask the underlying failure. Where tests changed or new behavior needs them, check test adequacy: missing negative cases and tests coupled to implementation details rather than behavior. Where comments or docstrings changed or describe changed code, check them against the code: documented behavior the logic contradicts, references left stale by the change, and TODOs the change already resolved. Where a change parses, decompresses, fetches, or loops over attacker-influenced input, check that size, time, or count caps still guard the actual peak allocation: report resource exhaustion only when the change defeats an existing cap — a cap on the wrong accumulator, a dead timeout, unclamped arithmetic, amplification at flush — not for volumetric load alone, where the finding is the defeated cap, not the load.
+For each changed area, check the base failure modes: input validation, control flow, state/concurrency, trust boundaries, operational behavior, and consistency with existing patterns. Then run these checks wherever the change touches them:
+
+- Error suppression: empty or overly broad catches, errors logged then swallowed, and defaults or fallbacks that mask the underlying failure.
+- Test adequacy, where tests changed or new behavior needs them: missing negative cases, and tests coupled to implementation details rather than behavior.
+- Comment and docstring accuracy, where comments or docstrings changed or describe changed code: documented behavior the logic contradicts, references left stale by the change, and TODOs the change already resolved.
+- Resource caps, where a change parses, decompresses, fetches, or loops over attacker-influenced input: check that size, time, or count caps still guard the actual peak allocation. Report resource exhaustion only when the change defeats an existing cap — a cap on the wrong accumulator, a dead timeout, unclamped arithmetic, amplification at flush — not for volumetric load alone; the finding is the defeated cap, not the load.
 
 Record the strongest failure story checked for each area, even when it does not produce a finding.
 
@@ -109,7 +114,11 @@ Apply the evidence burden to findings, not only to compliance: raise a finding o
 - Issues a linter, typechecker, compiler, or CI run would catch — missing or wrong imports, type errors, formatting — unless a requirement explicitly demands them. Assume those checks run separately; do not reproduce them here.
 - Repo-instruction violations explicitly silenced in the code, such as a lint-ignore comment that names the rule.
 
-For a security-relevant finding, name the attacker who controls the input and the victim who is harmed: refute it when the only victim is the attacker acting on their own machine or data; keep it when a legitimate user or tenant can reach other users, tenants, shared infrastructure, or server-side resources. Hold a finding whose sink sits outside the changed lines to a stricter bar: name the specific changed line that enables it, or drop it. Do not apply the attacker-equals-victim refutation to SSRF or other outbound-network sinks, to data-exposure findings, or to agent capability gates — permission hooks, command allow/denylists, workspace path jails — where the model is the attacker and the user is the victim.
+For a security-relevant finding, name the attacker who controls the input and the victim who is harmed:
+
+- Refute it when the only victim is the attacker acting on their own machine or data; keep it when a legitimate user or tenant can reach other users, tenants, shared infrastructure, or server-side resources.
+- Do not apply that attacker-equals-victim refutation to SSRF or other outbound-network sinks, to data-exposure findings, or to agent capability gates — permission hooks, command allow/denylists, workspace path jails — where the model is the attacker and the user is the victim.
+- Hold a finding whose sink sits outside the changed lines to a stricter bar: name the specific changed line that enables it, or drop it.
 
 ### 4. Challenge The Plan
 
@@ -123,7 +132,7 @@ Record commands, manual checks, probes, skipped verification, skip reasons, and 
 
 Write findings only after ledgers, failure-mode checks, plan challenge, and verification record exist.
 
-Each finding must include type (`implementation`, `plan`, or `unverified`), severity, spec expectation, observed behavior, evidence, consequence, and fix or investigation.
+Each finding records its type (`implementation`, `plan`, or `unverified`) and severity, plus the full field set defined under Output Format.
 
 ## Bounded Review Mode
 
@@ -183,7 +192,7 @@ Required sections:
 7. `Unverified Areas`
 8. `Verdict` — blocker count, verdict, highest-risk area, strongest failed attack attempt, plan gaps.
 
-Each finding must include location, finding type, spec expectation, observed behavior, evidence, consequence, and fix or investigation.
+Each finding must include location, finding type (`implementation`, `plan`, or `unverified`), severity, spec expectation, observed behavior, evidence, consequence, and fix or investigation.
 
 If using bounded review mode, add `Bounded Review Scope` before `Findings` and use `Verdict: Partial review only`.
 
