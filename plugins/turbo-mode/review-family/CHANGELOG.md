@@ -4,6 +4,18 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.3.7 - 2026-06-13
+
+### Fixed
+
+- `review-reviewer`: re-key the `Do Not Act On` output bucket on the `reject`
+  disposition instead of the `Invalid` classification alone. A `Partially valid`
+  claim dispositioned `reject` was previously homeless — not `Invalid` (so absent
+  from Do Not Act On), not `act`/`narrow` (so absent from Act On Now), not
+  `Unverified`, not `defer` — and fell through every action bucket. Keying on the
+  disposition subsumes `Invalid` (always dispositioned `reject`) and captures the
+  partially-valid rejects too.
+
 ## 0.3.6 - 2026-06-13
 
 ### Changed

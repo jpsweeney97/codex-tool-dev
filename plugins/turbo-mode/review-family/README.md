@@ -128,9 +128,9 @@ evidence.
 artifacts are the Codex install cache
 (`~/.codex/plugins/cache/turbo-mode/review-family/<version>/`, refreshed by
 `codex plugin add review-family@turbo-mode`) and the GitHub release mirror in
-`codex-tool-dev` (updated only at explicit publish time). Claude Code reads the
-canonical source in place through its skills-directory symlink, so no Claude
-copy exists.
+the separate `jpsweeney97/codex-tool-dev` GitHub repo (updated only at explicit
+publish time). Claude Code reads the canonical source in place through its
+skills-directory symlink, so no Claude copy exists.
 
 Treat marketplace metadata and copied files as setup evidence only. To prove
 loaded runtime behavior, inspect the active runtime's plugin and skills

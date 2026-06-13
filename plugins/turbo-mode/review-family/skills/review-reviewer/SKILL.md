@@ -369,7 +369,11 @@ For each claim, include:
 
 ### Do Not Act On
 
-Claims classified `Invalid`.
+Claims with a `reject` disposition: every `Invalid` claim, plus any `Partially
+valid` claim whose true part is too trivial, out of scope here, or already handled
+to be worth acting on. Key this bucket on the disposition, not the `Invalid`
+classification alone, so a partially-valid-but-rejected claim is not left out of
+every bucket.
 
 ### Needs Verification
 
