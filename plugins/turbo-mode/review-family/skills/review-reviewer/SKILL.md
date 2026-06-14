@@ -162,13 +162,10 @@ For Current Claim Check, use the same severity labels as full adjudication:
 `blocker`, `should-fix`, and `note`. Use `none` for `Invalid` claims unless a
 separate follow-up is needed.
 
-Disposition says what to do next:
-
-- `act`: address the valid claim now.
-- `narrow`: address only the true or in-scope part of a partially valid claim.
-- `reject`: do not act on this claim.
-- `verify-first`: perform the named check before accepting or rejecting it.
-- `defer`: real issue, but outside the current scope or not urgent here.
+Disposition uses the same five values defined in `Verdicts And Dispositions`
+below — `act`, `narrow`, `reject`, `verify-first`, `defer`, each with one terse
+action sentence. They mean the same thing here; read them against the Current
+Claim Check classifications (`Valid`/`Partially valid`/`Invalid`/`Unverified`).
 
 ## Failure Modes
 

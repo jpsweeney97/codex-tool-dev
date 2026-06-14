@@ -4,6 +4,40 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.3.9 - 2026-06-14
+
+### Changed
+
+- `scrutinize`: de-duplicate four cross-file drift hazards between `SKILL.md`
+  and `references/review-format.md`. The citation/severity-calibration rule, the
+  Adversarial Perspectives emit gate, the `Partial Review Only` + readiness-finding
+  shape, and the no-numeric-confidence + combined stress-test/readiness rules were
+  each maintained in both files, and several had already drifted (e.g. `High-Risk`
+  vs `High`; `Adversarial Perspectives` vs `Adversarial Perspectives Applied`).
+  Each rule is now single-homed in the always-loaded `SKILL.md` — unioning both
+  copies' scope so nothing narrows — and the conditionally-loaded reference's
+  restatements collapse to back-pointers. No behavior change: every obligation is
+  preserved (verified by a 10-skeptic adversarial preservation pass). The
+  reference's additive scaffolding (finding-field schemas, the Full Template and
+  its sole-home normal-scrutiny verdict enum, the compress-don't-drop rule, the
+  verdict fences, and the stress-test checklist) is untouched.
+
+## 0.3.8 - 2026-06-14
+
+### Changed
+
+- `scrutinize-skill`: de-Codex the `agents/openai.yaml` companion. Its
+  short_description and default_prompt named "Codex skills" / "a Codex behavior
+  contract" while the runtime-neutral `SKILL.md` (and every sibling companion)
+  reviews an "agent skill"; the companion now reads "agent skills" / "an agent
+  behavior contract" to match.
+- `review-reviewer`: de-duplicate the disposition list. The five dispositions
+  (`act`/`narrow`/`reject`/`verify-first`/`defer`) were defined near-verbatim in
+  both the Current Claim Check section and `Verdicts And Dispositions`, a drift
+  hazard. The Current Claim Check section now references the single canonical
+  definition in `Verdicts And Dispositions`; both modes and both output packets
+  are otherwise unchanged.
+
 ## 0.3.7 - 2026-06-13
 
 ### Fixed

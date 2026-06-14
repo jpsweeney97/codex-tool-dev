@@ -12,7 +12,7 @@ Discrete issue fields:
 4. Severity: `Critical`, `High`, `Medium`, or `Low`
 5. Required change
 
-Severity calibration rule: target-internal contradictions may be reported from the target alone. If a `Critical`, `High`, or verdict-driving claim depends on an external citation, read the cited resource or mark it `uncalibrated / citation not inspected`.
+Severity/citation calibration is governed by the Citation calibration rule in SKILL.md (Guardrails): target-internal contradictions may stand on the target alone, but any high-severity or verdict-driving claim that depends on an external citation must read the cited resource or be downgraded to the `uncalibrated / citation not inspected` marker. SKILL.md holds the authoritative severity/verdict trigger scope.
 
 Systemic observation fields, only for pervasive patterns:
 
@@ -20,9 +20,9 @@ Systemic observation fields, only for pervasive patterns:
 2. Impact
 3. Correct approach
 
-Add `Adversarial Perspectives Applied` only when a lens materially changed
-finding selection, severity, or required changes. Keep lenses internal for small
-or straightforward reviews.
+Emit the `Adversarial Perspectives` section only under the materiality gate in
+SKILL.md (Output and workflow step 8); that gate also covers keeping lenses
+internal for small or straightforward reviews.
 
 ## Full Template
 
@@ -73,9 +73,8 @@ Replace `Verdict` with:
 [1-2 sentence action decision]
 ```
 
-Readiness findings should name the blocker, evidence, practical impact, and
-smallest repair before implementation. Use `Partial Review Only` for bounded
-passes that cannot inspect the full readiness surface.
+Readiness-finding shape and `Partial Review Only` usage follow SKILL.md
+(Execution-Readiness Reviews and Output).
 
 ## Formal Stress Test Add-On
 
@@ -93,6 +92,5 @@ Add these sections explicitly:
 4. `Confidence Boundary`: prose summary of what was checked, what remains
    unverified, and what evidence would change the verdict.
 
-Do not add a numeric confidence score unless the user asks for one. If this is
-also an execution-readiness review, keep these sections and still end with the
-execution readiness verdict.
+Numeric-confidence policy and combined stress-test + execution-readiness
+handling follow SKILL.md (Formal Stress Tests and Execution-Readiness Reviews).

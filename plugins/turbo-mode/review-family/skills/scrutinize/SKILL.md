@@ -62,7 +62,8 @@ target belongs to one of those lanes.
 7. `Pass 2`: second-order effects, edge cases, hidden dependencies, ideal-condition assumptions.
 8. Apply relevant adversarial lenses internally; replace weak ones. Report
    perspectives only when they materially changed findings, severity, or required
-   changes.
+   changes; keep lenses internal otherwise, including for small or straightforward
+   reviews.
 9. Group root causes, then end with the verdict that matches the user's
    terminal question: readiness verdicts for execution-readiness reviews, normal
    scrutiny verdicts otherwise.
@@ -127,7 +128,7 @@ findings, severity, required changes, or the verdict.
 - Mixed critique and implementation: finish scrutiny first, stop after the verdict, and wait for explicit follow-through before changing artifacts.
 - Bounded review mode: when the target is too large to inspect completely in one pass, state the reviewed subset before findings, review the highest-risk surface first, mark omitted areas `unverified`, give the next slice needed for a complete review, and do not use `Defensible` or `Ready to Execute` for the full target.
 - Evidence: cite file/line, output, source, or observed behavior for concrete claims; label inference or uninspectable behavior as uncertainty.
-- Citation calibration: target-internal contradictions may be reported from the target alone. Any `Critical`, `High-Risk`, or final verdict that depends on an external citation must read the cited resource; otherwise downgrade the claim to `uncalibrated / citation not inspected`.
+- Citation calibration: target-internal contradictions may be reported from the target alone. Any `Critical`, `High`/`High-Risk`, or verdict-driving claim — including the final verdict — that depends on an external citation must read the cited resource; otherwise downgrade the claim to `uncalibrated / citation not inspected`.
 - Do not mentally repair broken logic or pad with weak objections.
 
 ## Output
@@ -135,8 +136,9 @@ findings, severity, required changes, or the verdict.
 Default sections: `Target And Evidence`, `Premise Check`, `Critical Failures`, `High-Risk Assumptions`, `Real-World Breakpoints`, `Hidden Dependencies`, `Patterns And Root Causes`, `Required Changes`, `Verdict`. Add `Adversarial Perspectives` only when a lens materially changed findings, severity, or required changes. Add `Bounded Review Scope` before `Target And Evidence` when bounded review mode is used; for bounded ordinary scrutiny, write `Verdict: Partial review only`.
 
 For an execution-readiness review, use the same section discipline but replace
-`Verdict` with `Execution Readiness Verdict`. Name readiness blockers and the
-smallest repair needed before implementation.
+`Verdict` with `Execution Readiness Verdict`. Name readiness blockers, the
+supporting evidence, the practical impact, and the smallest repair needed before
+implementation.
 
 Use relevant lenses: plan logistics, writing evidence, code correctness/security/failure modes/tests, strategy assumptions/incentives/tradeoffs. Read `references/review-format.md` only for complex targets, full structured reviews, or repeated severity/citation formatting.
 For a formal stress test, add explicit `Assumptions Audit`, `Pre-Mortem`,

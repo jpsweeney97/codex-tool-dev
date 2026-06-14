@@ -1,4 +1,4 @@
 interface:
   display_name: "Scrutinize Skill"
-  short_description: "Adversarial review for Codex skills"
-  default_prompt: "Use scrutinize-skill to review this skill as a Codex behavior contract, including UX, composability, overlap, and proof gaps."
+  short_description: "Adversarial review for agent skills"
+  default_prompt: "Use scrutinize-skill to review this skill as an agent behavior contract, including UX, composability, overlap, and proof gaps."
