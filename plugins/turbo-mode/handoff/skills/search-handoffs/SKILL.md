@@ -1,6 +1,6 @@
 ---
 name: search-handoffs
-description: "Use when the user asks to search saved Markdown handoffs for decisions or context, including `search handoffs`, `find in handoffs`, `what did we decide about`, or `/search` with a query. Do not use to load a handoff for continuation, save new context, refresh throughline, or treat derived matches as current truth without source verification."
+description: "Use when the user asks to search saved Markdown handoffs for decisions or context, including `search handoffs`, `find in handoffs`, `what did we decide about`, or `/search` (or `$search`) with a query. Do not use to load a handoff for continuation, save new context, refresh throughline, or treat derived matches as current truth without source verification."
 ---
 
 # Search Handoffs

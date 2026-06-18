@@ -23,7 +23,7 @@ Recommended frontmatter:
 created_at: "2026-06-09T14:30:00Z"
 type: handoff
 title: "Skill-only Handoff redesign"
-project: codex-tool-dev
+project: my-project
 branch: main
 commit: abc1234
 ---
@@ -60,7 +60,7 @@ These headings are prompts, not a schema. There is no line-count target, section
 created_at: "2026-06-09T14:30:00Z"
 type: handoff
 title: "Skill-only Handoff redesign"
-project: codex-tool-dev
+project: my-project
 branch: feature/handoff-skill-only-redesign
 commit: abc1234
 ---

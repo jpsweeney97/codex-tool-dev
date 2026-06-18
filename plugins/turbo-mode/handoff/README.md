@@ -77,7 +77,7 @@ Recommended frontmatter:
 created_at: "2026-06-09T14:30:00Z"
 type: handoff
 title: "Skill-only Handoff redesign"
-project: codex-tool-dev
+project: my-project
 branch: main
 commit: abc1234
 ---

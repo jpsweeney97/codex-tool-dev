@@ -1,6 +1,6 @@
 ---
 name: load-handoff
-description: "Use when continuing from a previous session, when the user runs `/load`, or when the user gives `/load` with a named path to load the latest or named Markdown handoff as read-only resume context. Do not use for saving, searching, editing, archiving, deleting, or treating handoffs as current truth without a live-state check."
+description: "Use when continuing from a previous session, when the user runs `/load` or `$load`, or when the user gives `/load` with a named path to load the latest or named Markdown handoff as read-only resume context. Do not use for saving, searching, editing, archiving, deleting, or treating handoffs as current truth without a live-state check."
 ---
 
 # Load Handoff
@@ -11,7 +11,7 @@ This skill never archives, moves, copies, edits, deletes, marks consumed, writes
 
 ## Use
 
-- Use for `/load`, `/load <path>`, "continue from where we left off", or "pick up the latest handoff."
+- Use for `/load` or `$load`, `/load <path>`, "continue from where we left off", or "pick up the latest handoff."
 - If no handoff exists, report that plainly. Suggest `/save` only if there is current context worth preserving.
 - If a provided path does not exist, report `Handoff not found at <path>` and stop.
 
@@ -20,9 +20,9 @@ This skill never archives, moves, copies, edits, deletes, marks consumed, writes
 Default search scope for implicit `/load`:
 
 ```text
-<project_root>/.agents/handoffs/*.md
-<project_root>/.claude/handoffs/*.md   (legacy, read-only)
-<project_root>/.codex/handoffs/*.md    (legacy, read-only)
+<project_root>/.agents/handoffs/
+<project_root>/.claude/handoffs/   (legacy, read-only)
+<project_root>/.codex/handoffs/    (legacy, read-only)
 ```
 
 `.agents/handoffs/` is the shared primary location. The legacy directories stay in the implicit scope so older handoffs remain loadable, but nothing is ever written, moved, or migrated there.
