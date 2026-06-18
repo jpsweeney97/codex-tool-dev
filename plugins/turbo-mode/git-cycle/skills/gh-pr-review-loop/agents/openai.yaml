@@ -1,0 +1,7 @@
+interface:
+  display_name: "GH PR Review Loop"
+  short_description: "Run an end-to-end PR review response"
+  default_prompt: "Use $gh-pr-review-loop to handle this PR's unresolved review threads end to end."
+
+policy:
+  allow_implicit_invocation: false

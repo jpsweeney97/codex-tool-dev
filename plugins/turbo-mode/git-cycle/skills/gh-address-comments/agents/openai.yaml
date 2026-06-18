@@ -1,0 +1,4 @@
+interface:
+  display_name: "GH Address Comments"
+  short_description: "Address PR review comments without publish authority"
+  default_prompt: "Use $gh-address-comments to verify and fix this PR's review comments locally, stopping at a local commit before any push, thread resolution, or re-review."

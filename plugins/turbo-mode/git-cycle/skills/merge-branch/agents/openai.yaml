@@ -1,0 +1,4 @@
+interface:
+  display_name: "Merge Branch"
+  short_description: "Land a local branch safely"
+  default_prompt: "Use $merge-branch to commit relevant changes, merge the current branch locally, and clean up the source branch only if approved."

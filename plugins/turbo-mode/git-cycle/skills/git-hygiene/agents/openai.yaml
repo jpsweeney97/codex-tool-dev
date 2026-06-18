@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Hygiene"
+  short_description: "Audit and clean repository state"
+  default_prompt: "Use $git-hygiene to audit this repository state and propose safe cleanup lanes before making changes."

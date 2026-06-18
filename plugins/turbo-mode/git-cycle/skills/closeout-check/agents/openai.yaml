@@ -1,0 +1,4 @@
+interface:
+  display_name: "Closeout Check"
+  short_description: "Verify completion and make the final local commit"
+  default_prompt: "Use $closeout-check to verify whether local work is done and, in closeout mode, create the final local commit when all checks pass."

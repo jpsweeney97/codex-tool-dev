@@ -1,0 +1,42 @@
+{
+  "name": "git-cycle",
+  "version": "1.0.1",
+  "description": "Coherent local-to-shared git lifecycle: hygiene, closeout, landing, worktree exit, and PR review response",
+  "author": {
+    "name": "JP"
+  },
+  "license": "MIT",
+  "keywords": [
+    "git",
+    "github",
+    "lifecycle",
+    "merge",
+    "worktree",
+    "pull-request"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Git Cycle",
+    "shortDescription": "Get local work safely from a dirty tree to merged-and-shared",
+    "longDescription": "A coherent git/VCS lifecycle family: clean and shape local state, confirm work is done and commit it, land a branch locally, address and publish PR review, and exit a worktree safely. Shared safety conventions (protected branches, in-progress-operation markers, fast-forward landing) are kept inline in each skill and guarded against drift.",
+    "developerName": "JP",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Audit and clean up this repo's local git state",
+      "Is this work done? Close it out with a final commit",
+      "Land this branch into main locally",
+      "Address the review comments on this PR",
+      "Exit this worktree now that the work has landed"
+    ],
+    "websiteURL": "https://github.com/jpsweeney97/codex-tool-dev/tree/main/plugins/turbo-mode/git-cycle",
+    "privacyPolicyURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/git-cycle/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/git-cycle/TERMS.md",
+    "brandColor": "#059669",
+    "screenshots": []
+  }
+}
