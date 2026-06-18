@@ -45,6 +45,18 @@ Review these failure modes first:
 - the skill silently becomes another workflow instead of handing off
 - overlapping skills make routing unclear, duplicate, or fragmented
 - validation claims prove structure while implying behavior
+- a judgment skill is so over-ruled — fixed output shapes, exhaustive rules,
+  sections filled to feel done — that the agent performs the contract instead
+  of thinking
+- a judgment skill provokes nothing — no forcing function, no counter-pressure —
+  so it adds nothing over the bare agent, or provokes too weakly — a forcing
+  function present but dulled, hedged, or softened (an adversarial posture
+  reframed as collaborative) so it no longer creates real counter-pressure (the
+  *provoke* half of the bar, failed by absence or by dilution rather than by
+  over-ruling)
+- a trust skill is so rigidly ruled it does the wrong thing in an unforeseen
+  case (a crude gate dead-ending legitimate work), or reimplements machinery
+  copied from siblings instead of sharing it
 
 Out of scope: routine skill editing, implementation, source sync, installed
 runtime proof, broad plugin audits, completed-code review, and marketplace
@@ -103,8 +115,28 @@ alone.
    surfaces, and unread material that could change the review.
 2. **Behavior Read** - Summarize in plain language what the agent is supposed
    to do once the skill triggers.
-3. **Execution Quality** - Review first move, context reading, defaults, stop
-   conditions, handoffs, output shape, and failure handling.
+3. **Bar And Execution Quality** - First classify the target's bar. A part is
+   judgment if its value is the agent thinking better than it would alone (a
+   sharper critique, recommendation, or diagnosis); trust if its value is
+   reliably carrying a task so the user stops supervising it (landing a branch,
+   closing out, executing a plan step by step) or returning a correct, grounded,
+   faithfully-transformed result the user can stop double-checking (a correct doc
+   lookup, a lossless reformat). When in doubt, ask what breaks if
+   the part is removed — lost thinking (judgment) or lost reliability (trust). For
+   mixed skills, classify each part the same way (see `agent-facing-design`, Two
+   Kinds of Skill, for the fuller treatment). Review each part against its bar.
+   Trust parts: first move, context reading, defaults, stop conditions, handoffs,
+   output shape, failure handling, and whether machinery is single-sourced rather
+   than copied. Judgment parts: whether structure protects and provokes thinking —
+   treat a mandated output shape, exhaustive rule list, or fixed-section
+   conformance as a defect, not a requirement. Do not raise trust-shape
+   expectations against judgment parts as findings. Equally, do not go toothless:
+   a judgment part that provokes nothing (no forcing function, no counter-pressure),
+   provokes too weakly (a forcing function present but dulled, hedged, or softened
+   — an adversarial posture reframed as collaborative — so it no longer creates
+   real counter-pressure), or whose structure strangles thinking is a real finding
+   to raise. Stopping over-flagging conformance is the goal; going lenient on
+   judgment is the opposite failure, not success.
 4. **UX Review** - Review user friction, clarity, pacing, question shape, user
    effort, challenge level, and closure.
 5. **Composability And Overlap** - Identify overlapping skills and classify each
@@ -133,6 +165,21 @@ Lead findings with user-visible behavior: wrong amount of friction, unclear
 first move, poor handoff, generic output, missing stop condition, false proof,
 or ambiguous overlap.
 
+A finding's severity follows the bar. On a judgment part, internal-conformance
+divergence drops or downgrades, but a thinking or provoke-side defect — structure
+that strangles thinking, a part that provokes nothing (no forcing function, no
+counter-pressure), or a forcing function dulled, hedged, or softened until it no
+longer creates real counter-pressure — keeps or escalates, exactly as a trust
+defect would. On a
+trust part, duplication, drift, or overreach keeps or escalates. Delivery hygiene
+(invocation tokens, naming, budget, parseability) is uniform — judged the same for
+both. Dropping conformance noise is the goal; going toothless on a real judgment
+defect is the opposite failure, not leniency rewarded as success.
+
+These judgment failure modes are examples, not a checklist to complete. Do not add
+a bar-keyed required step, fixed section, or score to this review — that is itself
+the over-ruling the lens exists to prevent, and it applies to this rubric too.
+
 If a required section has no concrete finding, write `None found` and move on;
 do not fill it with generic observations.
 
@@ -142,14 +189,14 @@ location-free findings when the target is file-backed.
 
 Use `Bounded Review Scope` before `Target And Surface` when the target or skill
 set comparison is too large to inspect completely in one pass. In bounded mode,
-state the reviewed subset, mark omitted surfaces `unverified`, name the next
-slice needed, and do not use `Defensible` for the full target.
+state the reviewed subset before findings, review the highest-risk surface first,
+mark omitted areas `unverified`, give the next slice needed for a complete review,
+and do not issue a full-clearance verdict for the full target (do not use
+`Defensible`).
 
 ## Guardrails
 
-- Stay read-only. Do not edit files, stage, commit, push, delete, sync,
-  publish, install, refresh plugin caches, or mutate runtime state unless the
-  user explicitly asks for that separate action after the review.
+- Stay read-only: do not edit files, stage, commit, push, delete, sync, publish, or implement fixes unless the user explicitly asks for that separate action after the review; the same gate covers installing, refreshing plugin caches, and mutating runtime state.
 - Do not mentally repair weak instructions. Review the behavior contract that
   exists, not the one the author probably intended.
 - Do not pad with generic writing advice. Every finding must identify a concrete

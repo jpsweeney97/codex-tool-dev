@@ -20,6 +20,9 @@ as `review-family:implementation-review`.
 - Use `system-design-review` for architecture tradeoffs before implementation
   and `scrutinize` for broad adversarial artifact critique or
   execution-readiness reviews before implementation.
+- Use `scrutinize-skill` when the target is an agent skill, skill directory,
+  `SKILL.md`, `agents/openai.yaml`, skill reference, example, or proposed skill
+  contract.
 - Use `review-reviewer` for explicit supplied-review adjudication or pasted-claim
   checks.
 - If this skill is not the right review-family target, name the better skill
@@ -49,7 +52,7 @@ If scope is missing, use the first available authority in this order:
 
 Treat unchanged files as context unless the selected authority includes them. Do not use an author summary as the scope authority when a PR, diff, commit range, or explicit path is available. If no scope authority exists, stop and ask for the review target.
 
-Read-only boundary: do not edit files, stage changes, commit, push, delete, migrate data, deploy, or run destructive commands unless the user explicitly asks for that separate action.
+Read-only boundary: do not edit files, stage, commit, push, delete, sync, publish, or implement fixes unless the user explicitly asks for that separate action; the same gate covers migrating data, deploying, and running destructive commands.
 
 Verification boundary: run only safe, relevant commands. If a useful command may mutate state outside normal test/build artifacts, ask first and list the claim that remains unverified if skipped.
 
@@ -136,15 +139,7 @@ Each finding records its type (`implementation`, `plan`, or `unverified`) and se
 
 ## Bounded Review Mode
 
-Use bounded review mode when the spec, diff, or runtime surface is too large for one complete pass.
-
-In bounded mode:
-
-1. State the reviewed subset before findings.
-2. Review the highest-risk requirements and changed areas first.
-3. Mark omitted requirements, files, flows, and runtime checks as `unverified`.
-4. Do not return `Ship` or a zero-findings verdict.
-5. Give the next slice required for a complete verdict.
+Use bounded review mode when the spec, diff, or runtime surface is too large for one complete pass. In bounded mode, state the reviewed subset before findings, review the highest-risk surface first, mark omitted areas `unverified`, give the next slice needed for a complete review, and do not issue a full-clearance verdict for the full target (do not return `Ship` or a zero-findings verdict; here the omitted areas include requirements, files, flows, and runtime checks).
 
 Bounded mode is not a shortcut to ignore inconvenient scope.
 

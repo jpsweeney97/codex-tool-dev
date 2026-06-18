@@ -103,7 +103,7 @@ For a formal stress test, make these pieces visible:
 
 - `Assumptions Audit`: list only verdict-driving assumptions. Tag each as
   `validated`, `plausible`, `wishful`, or `unverified`; tag evidence as
-  `observed`, `source-backed`, `inferred`, or `needs verification`; state what
+  `observed`, `source-backed`, `inferred`, or `unverified`; state what
   breaks if the assumption is wrong.
 - `Pre-Mortem`: name the most likely failure path and the most damaging quiet
   failure path. If they are the same, say so and write one.
@@ -124,9 +124,9 @@ findings, severity, required changes, or the verdict.
 - Multiple artifacts: choose or split by named target.
 - Incomplete target: review existing material and treat gaps as risks.
 - Skill bundle scope: do not stop at `SKILL.md`; cite where main instructions, agent metadata, and material references agree or conflict. Do not bulk-review irrelevant assets, generated runs, or examples unless they affect invocation, instructions, evidence, or expected outputs. State skipped-file and materiality tradeoffs explicitly.
-- Review-only default: do not edit files, stage, commit, push, delete, sync, publish, or implement fixes during scrutiny unless the user explicitly asks for that separate action after the review.
+- Review-only default: do not edit files, stage, commit, push, delete, sync, publish, or implement fixes unless the user explicitly asks for that separate action after the review.
 - Mixed critique and implementation: finish scrutiny first, stop after the verdict, and wait for explicit follow-through before changing artifacts.
-- Bounded review mode: when the target is too large to inspect completely in one pass, state the reviewed subset before findings, review the highest-risk surface first, mark omitted areas `unverified`, give the next slice needed for a complete review, and do not use `Defensible` or `Ready to Execute` for the full target.
+- Bounded review mode: when the target is too large to inspect completely in one pass, state the reviewed subset before findings, review the highest-risk surface first, mark omitted areas `unverified`, give the next slice needed for a complete review, and do not issue a full-clearance verdict for the full target (do not use `Defensible` or `Ready to Execute`).
 - Evidence: cite file/line, output, source, or observed behavior for concrete claims; label inference or uninspectable behavior as uncertainty.
 - Citation calibration: target-internal contradictions may be reported from the target alone. Any `Critical`, `High`/`High-Risk`, or verdict-driving claim — including the final verdict — that depends on an external citation must read the cited resource; otherwise downgrade the claim to `uncalibrated / citation not inspected`.
 - Do not mentally repair broken logic or pad with weak objections.

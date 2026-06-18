@@ -32,10 +32,7 @@ as allegations to test, not as authority or as an enemy to defeat.
   current evidence before acting.
 - Default to read-only. You may inspect files, diffs, git metadata, PR metadata,
   docs, and run bounded non-mutating checks directly tied to the inferred
-  target, a disputed claim, or a bounded independent or missed issue. Do not
-  edit files, stage, commit, push, delete, install dependencies, sync state,
-  create tickets, run broad test suites, or implement fixes unless the user
-  explicitly widens scope after the adjudication.
+  target, a disputed claim, or a bounded independent or missed issue; do not edit files, stage, commit, push, delete, sync, publish, or implement fixes unless the user explicitly asks for that separate action; the same gate covers installing dependencies, creating tickets, and running broad test suites.
 - Stop after the selected review packet by default. Include terse dispositions and
   next actions, but do not continue into fixes.
 
@@ -55,7 +52,8 @@ as `review-family:review-reviewer`.
   correct, or missing issues.
 - Use `implementation-review` for completed code against a plan/spec,
   `scrutinize` for first-pass adversarial artifact critique,
-  `system-design-review` for architecture tradeoffs.
+  `system-design-review` for architecture tradeoffs, and `scrutinize-skill` for
+  agent skill, `SKILL.md`, or skill-contract targets.
 - If the user asks in natural language whether a review is right without
   invoking this skill, do not silently run the full packet; answer normally or
   ask whether they want `/review-reviewer` or `$review-reviewer`.
@@ -84,7 +82,7 @@ as `review-family:review-reviewer`.
    and the current PR head for disposition. If the original review snapshot is
    unavailable after available non-mutating recovery checks, historical truth
    claims cannot be `confirmed` or `challenged` from current state alone; mark
-   them `needs-verification` and limit any current-state finding to disposition.
+   them `unverified` and limit any current-state finding to disposition.
    Minimum PR recovery checks: review/comment URL or ID, review timestamp, cited
    commit SHA, PR head/base refs at review time, diff hunk or outdated-thread
    metadata, branch names, and local git history or PR metadata when available.
@@ -142,10 +140,8 @@ Workflow:
    and `Deferred`.
 
 Current Claim Check classifications are current-snapshot claim labels, not
-historical review-truth verdicts. `Valid` roughly corresponds to `confirmed`,
-`Invalid` to `challenged`, and `Unverified` to `needs-verification`. Use
-`Partially valid` when a real issue exists but the claim overstates scope,
-severity, mechanism, or remedy.
+historical review-truth verdicts. Use `Partially valid` when a real issue
+exists but the claim overstates scope, severity, mechanism, or remedy.
 
 Classifications:
 
@@ -177,7 +173,7 @@ Claim Check classifications (`Valid`/`Partially valid`/`Invalid`/`Unverified`).
   target locator and attempted read paths or checks. Only review-internal claims
   that can be settled from the supplied review text itself may receive a truth
   verdict. Target-dependent truth claims backed only by reviewer quotations stay
-  `needs-verification`; the quote can identify the claim, but it is not artifact
+  `unverified`; the quote can identify the claim, but it is not artifact
   evidence.
 - `anchoring breach`: normal locator exposure is not a breach. If you evaluated,
   summarized, ranked, or adjudicated substantive review claims before reading
@@ -204,7 +200,7 @@ Authority order:
 
 - For truth verdicts on PR review claims, prefer the original review snapshot
   when recoverable. If it is not recoverable, historical truth claims are
-  `needs-verification`; current state may only support a current disposition.
+  `unverified`; current state may only support a current disposition.
 - For disposition, prefer current PR head or current target state.
 - Then use governing specs and docs, then local code/tests/runtime evidence,
   then reviewer quotations as lowest authority unless independently verified.
@@ -217,9 +213,9 @@ Authority order:
 Each claim verdict needs a compact evidence pointer: file/path and line when
 available, PR/comment/commit/diff hunk when relevant, command output summary, or
 named doc/section for non-code artifacts. If no evidence pointer can be given,
-the claim should usually be `needs-verification`, unless it is challenged
+the claim should usually be `unverified`, unless it is challenged
 because the cited evidence is absent or inaccessible. For Current Claim Check,
-use `Unverified` instead of `needs-verification`.
+use its `Unverified` classification.
 
 ## Verdicts And Dispositions
 
@@ -231,14 +227,14 @@ boundary, usually the original review snapshot for PR comments:
 - `challenged`: the core fact is wrong, the severity is materially inflated, the
   recommendation does not follow at the truth boundary, or the cited evidence is
   absent or contradicted.
-- `needs-verification`: available evidence cannot settle the claim; name the
+- `unverified`: available evidence cannot settle the claim; name the
   exact check or artifact access that would.
 
 Staleness is not itself a truth verdict. If a claim was true at the review
 snapshot but no longer applies at current head, keep the truth verdict
 `confirmed` and use disposition such as `reject` or `defer` with a stale/current
 note. If the review snapshot is unavailable and only current state is known, use
-`needs-verification` for historical truth and let current evidence inform only
+`unverified` for historical truth and let current evidence inform only
 the disposition.
 
 Disposition says what to do next:
@@ -295,7 +291,7 @@ For each normalized claim:
 - `Target`: target ID or target name.
 - `Source`: short pointer to the original review item, avoiding long quotes.
 - `Claim`: concise paraphrase without changing scope.
-- `Truth Verdict`: `confirmed`, `challenged`, or `needs-verification`.
+- `Truth Verdict`: `confirmed`, `challenged`, or `unverified`.
 - `Evidence`: compact evidence pointer and evidence lane.
 - `Reasoning`: why the evidence supports the verdict, including whether the
   concern is valid but overstated.

@@ -21,6 +21,9 @@ as `review-family:system-design-review`.
 - Use `implementation-review` for completed code or artifacts against a
   plan/spec; use `scrutinize` for execution-readiness reviews before
   implementation.
+- Use `scrutinize-skill` when the target is an agent skill, skill directory,
+  `SKILL.md`, `agents/openai.yaml`, skill reference, example, or proposed skill
+  contract.
 - Use `review-reviewer` for explicit supplied-review adjudication or pasted-claim
   checks.
 - If this skill is not the right review-family target, name the better skill
@@ -42,9 +45,7 @@ In scope: decision quality, boundaries, runtime guarantees, data authority, evol
 
 Use exactly one scope. If mixed scopes would change the review, ask one scope question and stop. If adjacent work is mixed in, do architecture first and state the handoff.
 
-Default to read-only: do not edit files, create audit artifacts, stage, commit,
-push, sync, publish, or implement fixes unless the user explicitly asks for
-that separate action.
+Default to read-only: do not edit files, stage, commit, push, delete, sync, publish, or implement fixes unless the user explicitly asks for that separate action; this also covers creating audit artifacts.
 
 ## Screening Rules
 
