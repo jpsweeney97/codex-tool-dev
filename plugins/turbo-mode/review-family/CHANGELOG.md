@@ -4,6 +4,19 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.3.12 - 2026-06-21
+
+### Added
+
+- `implementation-review` now reads back an `acceptance-map` artifact as a first-class
+  governing spec: the precondition spec-source list names "acceptance map", and the
+  Requirements Ledger treats each acceptance check as a ready-made requirement (carry its
+  check ID; treat its `Passes when` clause as the satisfaction criterion). Closes the
+  one-directional wiring gap — `acceptance-map` already named `implementation-review` as its
+  downstream verifier; the consumer now recognizes the producer's artifact. Self-guarding
+  ("when the spec is an acceptance-map artifact"), no new ledger machinery, no dependency on
+  `acceptance-map` being installed.
+
 ## 0.3.11 - 2026-06-18
 
 ### Changed

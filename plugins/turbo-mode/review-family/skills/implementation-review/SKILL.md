@@ -34,7 +34,7 @@ as `review-family:implementation-review`.
 Requires:
 
 - `Spec / plan`: intended behavior, requirements, and constraints.
-  - Check: identify the exact source path, ticket, PR description, commit note, handoff, or user-provided text. If only the implementation or an implementation summary is available, the spec is missing.
+  - Check: identify the exact source path, ticket, PR description, commit note, handoff, acceptance map, or user-provided text. If only the implementation or an implementation summary is available, the spec is missing.
 - `Implementation`: code or artifacts that claim to satisfy the spec.
   - Check: identify the exact PR, commit range, diff, changed files, generated artifacts, or explicit paths under review, and confirm they are readable.
 - `Scope boundary`: changed files, PR diff, commit range, or explicit target.
@@ -75,7 +75,7 @@ Follow the steps in order. Do not jump to the verdict.
 
 Create two inventories:
 
-- `Requirements ledger`: every explicit requirement from the plan or spec.
+- `Requirements ledger`: every explicit requirement from the plan or spec. When the spec is an `acceptance-map` artifact, each acceptance check is a ready-made requirement — carry its check ID into the ledger and treat its `Passes when` clause as the satisfaction criterion.
 - `Changed-area ledger`: every changed file, function, class, endpoint, command, or user flow.
 
 For each requirement, record an ID, spec source, status, code evidence, and falsification attempt. Use only `satisfied`, `violated`, `unverified`, or `not-applicable`. Mark `not-applicable` only when the requirement is truly outside scope, and explain why.
