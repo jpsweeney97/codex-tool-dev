@@ -4,6 +4,19 @@ All notable changes to the Git Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.1.0 - 2026-06-20
+
+### Added
+
+- `pr-description`: new skill authoring a reviewer-oriented PR title and body from the branch diff, the
+  governing intent (ticket/plan/spec), and the **real** verification record (`closeout-check`'s
+  Verification Run / Proof Boundary, or actual command output), opening or updating the PR only on
+  explicit authority. Fills the family's SHIP-lane gap — nothing previously authored a PR body or opened
+  a PR (`gh-pr-review-loop` responds to an *existing* PR; `merge-branch` is the no-PR path). The
+  "how-verified" content is sourced from the real record, never fabricated. Default stops at the draft;
+  publishing via `gh pr create`/`gh pr edit` is gated behind explicit authorization, matching the
+  family's address-locally vs publish split.
+
 ## 1.0.1 - 2026-06-17
 
 ### Changed
