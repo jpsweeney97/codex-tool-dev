@@ -68,3 +68,5 @@ Otherwise continue. For sparse but still useful evidence, label the review `redu
 Select 6-10 lenses; 4-6 is enough for narrow interfaces or sparse input. Do not narrate every lens. Use the reference for decision states, finding caps, tension rules, and the output contract.
 
 If no material findings surface, say so directly. End with 2-4 sharp questions, not a verdict, unless requested. Save to `docs/audits/YYYY-MM-DD-<target-slug>.md` only when explicitly asked; if the workspace already uses `docs/audits/`, suggest that path instead of writing it.
+
+When a material design finding or an in-scope decision-quality concern should become a tracked issue rather than a probe or chat answer, name `/triage` or `$triage` as the lane to file it — one issue per finding — and stop; this review stays read-only and does not open issues itself.

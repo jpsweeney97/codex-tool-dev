@@ -144,3 +144,5 @@ Use relevant lenses: plan logistics, writing evidence, code correctness/security
 For a formal stress test, add explicit `Assumptions Audit`, `Pre-Mortem`,
 `Dimensional Critique`, and `Confidence Boundary` sections while preserving
 required changes and the applicable verdict.
+
+When `Required Changes` or `Execution Readiness Verdict` blockers should become tracked issues rather than a chat-only review, name `/triage` or `$triage` as the lane to file them — one issue per finding, classified there — and stop; scrutinize stays review-only and does not open issues itself.

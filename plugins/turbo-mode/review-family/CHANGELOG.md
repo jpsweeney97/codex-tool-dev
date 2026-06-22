@@ -4,6 +4,28 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.3.13 - 2026-06-21
+
+### Added
+
+- The three plugin reviewers (`implementation-review`, `scrutinize`,
+  `system-design-review`) gain a findings→`triage` tail pointer, completing the
+  family-wide set begun in the local-skill build (`tech-debt-scan`, `baseline`).
+  Closes the Era-12 capability-growth review finding #5 connective-tissue gap —
+  reviewers emitted findings/verdicts that died in chat with no tracker handoff.
+  Each pointer names the trigger (a finding or verdict worth tracking rather than
+  only living in the review), names the lane as `/triage` or `$triage`
+  (dual-runtime tokens, one issue per finding classified there), and reaffirms the
+  reviewer's own read-only/stop boundary — it does not open issues itself. Routes
+  to `triage` (creates and classifies one issue per finding), not `to-issues`
+  (which slices a plan/PRD, the wrong shape for ad-hoc review findings). The
+  pointer does not change that reviewers stop — they are already read-only; it
+  changes the default path when the user then asks to track findings, routing
+  through triage's AI-disclaimer + maintainer-approval gate rather than ad-hoc
+  tracker mutation. Lightweight name-the-lane pointer only (no "export findings"
+  machinery); additive prose that leaves the canonized read-only and
+  bounded-review cores byte-identical.
+
 ## 0.3.12 - 2026-06-21
 
 ### Added

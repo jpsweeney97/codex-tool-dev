@@ -193,6 +193,8 @@ If using bounded review mode, add `Bounded Review Scope` before `Findings` and u
 
 Read [examples](examples/review-findings.md) only when you need a concrete findings-first template or examples of strong and weak findings.
 
+When a `note`, `should-fix`, or `blocker` finding should become a tracked issue rather than only living in this review, name `/triage` or `$triage` as the lane to file it — one issue per finding, classified there — and stop; implementation-review stays read-only and does not open issues itself.
+
 ## Evidence Gate
 
 Do not issue a final verdict until every item passes:
