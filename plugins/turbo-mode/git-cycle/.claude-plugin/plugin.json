@@ -1,7 +1,7 @@
 {
   "name": "git-cycle",
-  "version": "1.1.0",
-  "description": "Coherent local-to-shared git lifecycle: hygiene, closeout, landing, worktree exit, PR-body authoring, and PR review response",
+  "version": "1.2.0",
+  "description": "Coherent local-to-shared git lifecycle: hygiene, closeout, landing, release cutting, worktree exit, PR-body authoring, and PR review response",
   "author": {
     "name": "JP"
   },
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "Git Cycle",
     "shortDescription": "Get local work safely from a dirty tree to merged-and-shared",
-    "longDescription": "A coherent git/VCS lifecycle family: clean and shape local state, confirm work is done and commit it, land a branch locally, author a reviewer-oriented pull-request body, address and publish PR review, and exit a worktree safely. Shared safety conventions (protected branches, in-progress-operation markers, fast-forward landing) are kept inline in each skill and guarded against drift.",
+    "longDescription": "A coherent git/VCS lifecycle family: clean and shape local state, confirm work is done and commit it, land a branch locally, cut a release by bumping the manifest version and changelog in lockstep, author a reviewer-oriented pull-request body, address and publish PR review, and exit a worktree safely. Shared safety conventions (protected branches, in-progress-operation markers, fast-forward landing) are kept inline in each skill and guarded against drift.",
     "developerName": "JP",
     "category": "Productivity",
     "capabilities": [
@@ -30,6 +30,7 @@
       "Audit and clean up this repo's local git state",
       "Is this work done? Close it out with a final commit",
       "Land this branch into main locally",
+      "Cut the release: bump the version and changelog for what landed",
       "Write the PR description for this branch",
       "Address the review comments on this PR",
       "Exit this worktree now that the work has landed"

@@ -4,6 +4,21 @@ All notable changes to the Git Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.2.0 - 2026-06-23
+
+### Added
+
+- `release-cut`: new skill that cuts a release for one versioned unit. It derives the next semver from the
+  **real landed change class** — reading the diff for an under-tagged breaking change rather than trusting
+  `feat:`/`fix:` commit labels — bumps the authoritative manifest (`plugin.json` / `package.json` /
+  `pyproject.toml` / `Cargo.toml`, **never a git tag**), and writes a dated Keep-a-Changelog section keyed
+  to the same version in lockstep. It **stages** the bump and stops: the commit that lands the work carries
+  it, and the outward publish train (cache republish, mirror, push) is named but fired only on explicit
+  authority. Fills the SHIP-lane gap `pr-description` deliberately carved out (version/changelog/release
+  notes route here). Mixed skill — the change-class call is the judgment; the manifest↔CHANGELOG lockstep,
+  presence-ordered manifest resolution, and multi-unit guard are mechanical, reported read-only by the
+  bundled `release-cut-facts.sh` (the script reports facts; the agent decides).
+
 ## 1.1.0 - 2026-06-20
 
 ### Added
