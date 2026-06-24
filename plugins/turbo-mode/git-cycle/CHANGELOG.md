@@ -4,6 +4,12 @@ All notable changes to the Git Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.2.1 - 2026-06-24
+
+### Changed
+
+- `release-cut`: the change-class step now asks **two** ordered forcing questions instead of one. The original question guards only the major boundary (an under-tagged breaking change hidden by a `fix:` label); a second question now guards the minor↔patch boundary — "does this let a user do something they could not do before, or does it only document/normalize/fix an existing capability?" — defaulting docs-of-existing-behavior edits to patch. Closes a gap where changes that *look* additive (e.g. adding already-supported invocation tokens to a description) were over-bumped to minor. Validated before/after on five real plugin releases (×{Opus,Haiku}×3 trials): the targeted over-bump case rose from 67%→100% correct and an ambiguous additive-prose case from 17%→100%, while two genuine-new-skill guard cases held at 100% (no over-correction).
+
 ## 1.2.0 - 2026-06-23
 
 ### Added

@@ -7,11 +7,14 @@ description: "Use when cutting a release for a versioned unit: derive the next s
 
 Cut the release artifacts for one versioned unit from what **actually landed**: the next version and a dated changelog entry, derived from the real change set, staged into the working tree and stopped before anything outward. Once one judgment is made, the rest is mechanical.
 
-**The judgment is the change class, and you read it from the diff — not the commit labels.** The next version follows from whether what landed is breaking, a feature, or a fix/chore. The failure that matters is shipping an under-tagged breaking change as a patch because a `fix:` commit hid it. So the single forcing question is:
+**The judgment is the change class, and you read it from the diff — not the commit labels.** The next version follows from whether what landed is breaking, a feature, or a fix/chore. Two failures matter, one at each boundary: shipping an under-tagged **breaking** change as a patch because a `fix:` commit hid it, and over-bumping a **fix to a minor** because a change that only documents or normalizes an existing capability *looks* additive. So read the diff and answer two forcing questions, in order:
 
-> Read the landed diff, not the commit subjects: is there a breaking change here that no commit labelled `feat`/`fix` announced? If you cannot rule one out, the bump is **major**. And for every changelog line and the version itself — can I point to the landed change it comes from?
+> 1. **Break? (major ↔ rest)** Is there a breaking change here that no commit labelled `feat`/`fix` announced? If you cannot rule one out, the bump is **major**.
+> 2. **Feature, or just documenting one? (minor ↔ patch)** Does this let a user *do something they could not do before* — a new capability, command, flag, or skill? Or does it only **document, normalize, rename-for-consistency, fix, or restate** something that already worked? A genuinely new ability is **minor**; adding tokens, aliases, examples, or wording that describes behavior the unit *already had* is **patch**. When the diff only edits descriptions/docs of existing behavior, default to **patch**.
+>
+> And for every changelog line and the version itself — can I point to the landed change it comes from?
 
-Everything downstream of that answer is mechanical, sourced from facts, never invented.
+Everything downstream of these two answers is mechanical, sourced from facts, never invented.
 
 ## 1. Scope one release unit, and gather the facts
 
@@ -29,13 +32,13 @@ The version source is the **manifest, never a git tag**. A repo can have zero ta
 
 ## 2. Decide the next version from the change class
 
-Read the real landed diff for this unit's paths and answer the forcing question. Then apply semver to the current manifest version:
+Read the real landed diff for this unit's paths and answer both forcing questions. Then apply semver to the current manifest version:
 
 - breaking change → **major**
 - new backward-compatible capability → **minor**
 - fix or chore only → **patch**
 
-The bump is your reasoned decision, not a tool's output and not a commit-type lookup. State the one-line reason, including the explicit breaking-change check.
+The bump is your reasoned decision, not a tool's output and not a commit-type lookup. State the one-line reason, including both the breaking-change check and the feature-vs-documentation check.
 
 ## 3. Write the manifest and CHANGELOG in lockstep
 
