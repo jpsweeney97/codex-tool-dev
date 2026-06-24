@@ -1,31 +1,22 @@
 # Review Family Plugin
 
-Evidence-first review, scrutiny, and review-adjudication skills for Claude Code
-and Codex local development workflows.
+Evidence-first review, scrutiny, and review-adjudication skills for Claude Code and Codex local development workflows.
 
-This directory is the source-authority package for the Review Family plugin.
-Installed cache and runtime artifacts are separate proof surfaces and may
-diverge until an explicit cache-refresh or runtime-proof lane verifies them.
-Source edits here do not prove installed runtime behavior.
+This directory is the source-authority package for the Review Family plugin. Installed cache and runtime artifacts are separate proof surfaces and may diverge until an explicit cache-refresh or runtime-proof lane verifies them. Source edits here do not prove installed runtime behavior.
 
 ## Installation
 
-The canonical source lives at `~/.agents/plugins/review-family/` and is listed
-in the personal `turbo-mode` marketplace (`~/.agents/plugins/marketplace.json`).
+The canonical source lives at `~/.agents/plugins/review-family/` and is listed in the personal `turbo-mode` marketplace (`~/.agents/plugins/marketplace.json`).
 
-Codex installs from that marketplace (re-run the same command to refresh the
-installed copy after source edits):
+Codex installs from that marketplace (re-run the same command to refresh the installed copy after source edits):
 
 ```bash
 codex plugin add review-family@turbo-mode
 ```
 
-Claude Code loads the same source in place as a skills-directory plugin via a
-symlink in `~/.claude/skills/` managed by
-`~/.agents/scripts/claude-skills-sync.sh`.
+Claude Code loads the same source in place as a skills-directory plugin via a symlink in `~/.claude/skills/` managed by `~/.agents/scripts/claude-skills-sync.sh`.
 
-No build step is required. The plugin ships skills only and has no runtime
-package, hook, MCP, app, or script dependency.
+No build step is required. The plugin ships skills only and has no runtime package, hook, MCP, app, or script dependency.
 
 ## What It Does
 
@@ -49,10 +40,7 @@ package, hook, MCP, app, or script dependency.
 | `scrutinize-skill` | Adversarial review of an agent skill or proposed skill contract | Review whether the skill will guide agent behavior well once triggered, including UX, overlap, composability, and proof gaps. |
 | `system-design-review` | Architecture or system design review of docs, verbal designs, or codebase structure | Review design tradeoffs, defaults, interfaces, operations, and next probes. |
 
-The plugin is intentionally review-only. These skills may recommend repairs,
-verification, or escalation, but they do not edit files, stage changes, commit,
-sync, publish, or run cleanup unless the user explicitly widens the task after
-the review.
+The plugin is intentionally review-only. These skills may recommend repairs, verification, or escalation, but they do not edit files, stage changes, commit, sync, publish, or run cleanup unless the user explicitly widens the task after the review.
 
 ## Usage Patterns
 
@@ -74,9 +62,7 @@ Scrutinize this migration plan. Assume the plan is wrong until the evidence says
 Use $scrutinize for an execution-readiness review of this handoff. Tell me whether it is ready to execute.
 ```
 
-`pragmatic-review` has been retired as a separate skill. Use `$scrutinize` and
-ask for an execution-readiness review when you need to know whether a plan,
-spec, handoff, or rollout note is ready to implement.
+`pragmatic-review` has been retired as a separate skill. Use `$scrutinize` and ask for an execution-readiness review when you need to know whether a plan, spec, handoff, or rollout note is ready to implement.
 
 ### Request A Formal Stress Test
 
@@ -84,8 +70,7 @@ spec, handoff, or rollout note is ready to implement.
 Use $scrutinize to run a formal stress test of this proposal, including an assumptions audit, pre-mortem, dimensional critique, and confidence boundary.
 ```
 
-`adversarial-review` has been retired as a separate skill. Use `$scrutinize` and
-ask for a formal stress test when you want the heavier review packet.
+`adversarial-review` has been retired as a separate skill. Use `$scrutinize` and ask for a formal stress test when you want the heavier review packet.
 
 ### Review A Skill Contract
 
@@ -105,36 +90,21 @@ Use $review-reviewer to adjudicate this review, including reliability, missed is
 Use $review-reviewer to check these claims against the current repo before I act.
 ```
 
-`review-claude-claims` has been retired as a separate skill. Use
-`$review-reviewer` and ask it to check these claims when you need itemized
-current-evidence claim validation without the broader review-adjudication packet.
+`review-claude-claims` has been retired as a separate skill. Use `$review-reviewer` and ask it to check these claims when you need itemized current-evidence claim validation without the broader review-adjudication packet.
 
-`request-claude-pr-review` has been retired from Review Family. It was a
-prompt-drafting workflow helper, not a Codex-performed review or adjudication
-lane. There is no active replacement inside Review Family.
+`request-claude-pr-review` has been retired from Review Family. It was a prompt-drafting workflow helper, not a Codex-performed review or adjudication lane. There is no active replacement inside Review Family.
 
 ## Configuration
 
 No configuration is required.
 
-Review Family does not ship hooks, scripts, runtime services, or persistent
-storage. Skills inspect the user-provided target, local files, git state, GitHub
-state, or referenced artifacts only when the active request calls for that
-evidence.
+Review Family does not ship hooks, scripts, runtime services, or persistent storage. Skills inspect the user-provided target, local files, git state, GitHub state, or referenced artifacts only when the active request calls for that evidence.
 
 ## Source Authority And Runtime Proof
 
-`~/.agents/plugins/review-family/` is the canonical source. Downstream
-artifacts are the Codex install cache
-(`~/.codex/plugins/cache/turbo-mode/review-family/<version>/`, refreshed by
-`codex plugin add review-family@turbo-mode`) and the GitHub release mirror in
-the separate `jpsweeney97/codex-tool-dev` GitHub repo (updated only at explicit
-publish time). Claude Code reads the canonical source in place through its
-skills-directory symlink, so no Claude copy exists.
+`~/.agents/plugins/review-family/` is the canonical source. Downstream artifacts are the Codex install cache (`~/.codex/plugins/cache/turbo-mode/review-family/<version>/`, refreshed by `codex plugin add review-family@turbo-mode`) and the GitHub release mirror in the separate `jpsweeney97/codex-tool-dev` GitHub repo (updated only at explicit publish time). Claude Code reads the canonical source in place through its skills-directory symlink, so no Claude copy exists.
 
-Treat marketplace metadata and copied files as setup evidence only. To prove
-loaded runtime behavior, inspect the active runtime's plugin and skills
-inventory after refresh and restart.
+Treat marketplace metadata and copied files as setup evidence only. To prove loaded runtime behavior, inspect the active runtime's plugin and skills inventory after refresh and restart.
 
 ## Privacy And Terms
 

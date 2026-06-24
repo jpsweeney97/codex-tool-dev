@@ -13,15 +13,7 @@ Read [`references/git-hygiene-reference.md`](references/git-hygiene-reference.md
 
 - One repository at a time; submodules are read-only.
 - If scope, file classification, or branch safety is ambiguous, no-op and ask.
-- Never commit onto the default branch or a protected branch. The default branch
-  is always protected; resolve the *protected* set repo-defined first, where
-  "repo-defined" means the configured `branchProtection` policy — not the mere
-  existence of a default branch. Treat repo-defined protected branches first; if
-  the repo defines none, treat `main`, `master`, `develop`, and `release/*` as
-  protected. Before any `commit-shaping` or `commit-only` commit, create a working
-  branch (`chore/`, `fix/`, or `feature/`) when the checked-out branch is the
-  default branch or is protected under that resolution; reuse the branch and
-  default branch already captured in preflight.
+- Never commit onto the default branch or a protected branch. The default branch is always protected; resolve the *protected* set repo-defined first, where "repo-defined" means the configured `branchProtection` policy — not the mere existence of a default branch. Treat repo-defined protected branches first; if the repo defines none, treat `main`, `master`, `develop`, and `release/*` as protected. Before any `commit-shaping` or `commit-only` commit, create a working branch (`chore/`, `fix/`, or `feature/`) when the checked-out branch is the default branch or is protected under that resolution; reuse the branch and default branch already captured in preflight.
 - Never skip preview, even when the user says "just do it."
 - Never use `rm` or `git clean -fd`; use `trash` only after explicit approval.
 - Never delete protected files from batch approval alone.
@@ -67,9 +59,6 @@ Before previews and final lane reports, include `Decision Summary`:
 - `Destructive and blocked`: trash or local branch deletion waiting on final confirmation.
 - `Recommended next command`: the smallest next mode or command to run.
 
-`Decision Summary` is not approval. Continue to require lane-by-lane approvals,
-per-file decisions for `ask` files, and explicit per-file confirmation for
-protected deletion.
+`Decision Summary` is not approval. Continue to require lane-by-lane approvals, per-file decisions for `ask` files, and explicit per-file confirmation for protected deletion.
 
-End with mode or partial status, cleanup branch or `none`, lane results,
-intentional dirty state, and recommended next step.
+End with mode or partial status, cleanup branch or `none`, lane results, intentional dirty state, and recommended next step.

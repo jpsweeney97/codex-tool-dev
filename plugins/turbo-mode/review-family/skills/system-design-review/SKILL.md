@@ -9,26 +9,14 @@ Ask: **"Was this a conscious decision, or an inherited default?"** Stay at archi
 
 ## Review-Family Routing
 
-Explicit review-family invocation wins, including namespaced plugin forms such
-as `review-family:system-design-review`.
+Explicit review-family invocation wins, including namespaced plugin forms such as `review-family:system-design-review`.
 
-- Use this skill for architecture and system design artifacts: design docs,
-  codebases, verbal designs, subsystem/interface boundaries, runtime guarantees,
-  data authority, trust surfaces, operational ownership, tradeoffs, and next
-  probes.
-- This skill wins over `scrutinize` when the requested lens is architecture or
-  system design rather than general adversarial critique.
-- Use `implementation-review` for completed code or artifacts against a
-  plan/spec; use `scrutinize` for execution-readiness reviews before
-  implementation.
-- Use `scrutinize-skill` when the target is an agent skill, skill directory,
-  `SKILL.md`, `agents/openai.yaml`, skill reference, example, or proposed skill
-  contract.
-- Use `review-reviewer` for explicit supplied-review adjudication or pasted-claim
-  checks.
-- If this skill is not the right review-family target, name the better skill
-  and switch only when invocation rules allow it; otherwise ask one routing
-  question.
+- Use this skill for architecture and system design artifacts: design docs, codebases, verbal designs, subsystem/interface boundaries, runtime guarantees, data authority, trust surfaces, operational ownership, tradeoffs, and next probes.
+- This skill wins over `scrutinize` when the requested lens is architecture or system design rather than general adversarial critique.
+- Use `implementation-review` for completed code or artifacts against a plan/spec; use `scrutinize` for execution-readiness reviews before implementation.
+- Use `scrutinize-skill` when the target is an agent skill, skill directory, `SKILL.md`, `agents/openai.yaml`, skill reference, example, or proposed skill contract.
+- Use `review-reviewer` for explicit supplied-review adjudication or pasted-claim checks.
+- If this skill is not the right review-family target, name the better skill and switch only when invocation rules allow it; otherwise ask one routing question.
 
 ## Workflow
 

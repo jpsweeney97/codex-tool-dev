@@ -29,11 +29,7 @@ git branch -vv
 git worktree list --porcelain
 ```
 
-A `[gone]` upstream in `git branch -vv` marks a branch whose remote was
-deleted — a deletion candidate for the `local-branch-delete` lane, never merge
-proof. The marker surfaces only after remote-tracking refs are pruned; in
-audit, pair it with the `remote prune --dry-run` preview to catch candidates
-the marker has not reached yet.
+A `[gone]` upstream in `git branch -vv` marks a branch whose remote was deleted — a deletion candidate for the `local-branch-delete` lane, never merge proof. The marker surfaces only after remote-tracking refs are pruned; in audit, pair it with the `remote prune --dry-run` preview to catch candidates the marker has not reached yet.
 
 Safe execution:
 
@@ -92,9 +88,7 @@ Lane: config-learning
     + ignorePatterns: ["*.pyc"]
 ```
 
-Decision Summary is a readable index, not consent. Shorten the preview under
-time pressure, but still show every lane with pending decisions and collect
-approvals lane by lane.
+Decision Summary is a readable index, not consent. Shorten the preview under time pressure, but still show every lane with pending decisions and collect approvals lane by lane.
 
 ## Final Report Shape
 

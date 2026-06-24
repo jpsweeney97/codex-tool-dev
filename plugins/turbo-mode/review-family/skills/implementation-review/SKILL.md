@@ -9,25 +9,14 @@ Review completed work against a plan or spec by trying to prove it wrong. Act as
 
 ## Review-Family Routing
 
-Explicit review-family invocation wins, including namespaced plugin forms such
-as `review-family:implementation-review`.
+Explicit review-family invocation wins, including namespaced plugin forms such as `review-family:implementation-review`.
 
-- Use this skill for completed code, generated artifacts, PRs, diffs, or commit
-  ranges that claim to satisfy a plan, spec, ticket, handoff, or explicit
-  requirements.
-- This skill wins over `scrutinize` when the central question is whether an
-  implementation satisfies its governing requirements.
-- Use `system-design-review` for architecture tradeoffs before implementation
-  and `scrutinize` for broad adversarial artifact critique or
-  execution-readiness reviews before implementation.
-- Use `scrutinize-skill` when the target is an agent skill, skill directory,
-  `SKILL.md`, `agents/openai.yaml`, skill reference, example, or proposed skill
-  contract.
-- Use `review-reviewer` for explicit supplied-review adjudication or pasted-claim
-  checks.
-- If this skill is not the right review-family target, name the better skill
-  and switch only when invocation rules allow it; otherwise ask one routing
-  question.
+- Use this skill for completed code, generated artifacts, PRs, diffs, or commit ranges that claim to satisfy a plan, spec, ticket, handoff, or explicit requirements.
+- This skill wins over `scrutinize` when the central question is whether an implementation satisfies its governing requirements.
+- Use `system-design-review` for architecture tradeoffs before implementation and `scrutinize` for broad adversarial artifact critique or execution-readiness reviews before implementation.
+- Use `scrutinize-skill` when the target is an agent skill, skill directory, `SKILL.md`, `agents/openai.yaml`, skill reference, example, or proposed skill contract.
+- Use `review-reviewer` for explicit supplied-review adjudication or pasted-claim checks.
+- If this skill is not the right review-family target, name the better skill and switch only when invocation rules allow it; otherwise ask one routing question.
 
 ## Preconditions And Boundaries
 

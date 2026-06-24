@@ -20,9 +20,7 @@ Systemic observation fields, only for pervasive patterns:
 2. Impact
 3. Correct approach
 
-Emit the `Adversarial Perspectives` section only under the materiality gate in
-SKILL.md (Output and workflow step 8); that gate also covers keeping lenses
-internal for small or straightforward reviews.
+Emit the `Adversarial Perspectives` section only under the materiality gate in SKILL.md (Output and workflow step 8); that gate also covers keeping lenses internal for small or straightforward reviews.
 
 ## Full Template
 
@@ -62,8 +60,7 @@ If the user asks for a shorter answer, keep the same section order and compress 
 
 ## Execution-Readiness Review
 
-Use this when the user asks whether a plan, spec, handoff, rollout note, or
-artifact is ready to build from.
+Use this when the user asks whether a plan, spec, handoff, rollout note, or artifact is ready to build from.
 
 Replace `Verdict` with:
 
@@ -73,24 +70,17 @@ Replace `Verdict` with:
 [1-2 sentence action decision]
 ```
 
-Readiness-finding shape and `Partial Review Only` usage follow SKILL.md
-(Execution-Readiness Reviews and Output).
+Readiness-finding shape and `Partial Review Only` usage follow SKILL.md (Execution-Readiness Reviews and Output).
 
 ## Formal Stress Test Add-On
 
-Use this only when the user asks for a formal stress test or the target is
-high-stakes enough that hidden assumptions or quiet failures could materially
-damage the work.
+Use this only when the user asks for a formal stress test or the target is high-stakes enough that hidden assumptions or quiet failures could materially damage the work.
 
 Add these sections explicitly:
 
-1. `Assumptions Audit`: verdict-driving assumptions only, with assumption and
-   evidence tags.
+1. `Assumptions Audit`: verdict-driving assumptions only, with assumption and evidence tags.
 2. `Pre-Mortem`: most likely failure and most damaging quiet failure.
-3. `Dimensional Critique`: explicit correctness and completeness coverage, plus
-   relevant optional dimensions.
-4. `Confidence Boundary`: prose summary of what was checked, what remains
-   unverified, and what evidence would change the verdict.
+3. `Dimensional Critique`: explicit correctness and completeness coverage, plus relevant optional dimensions.
+4. `Confidence Boundary`: prose summary of what was checked, what remains unverified, and what evidence would change the verdict.
 
-Numeric-confidence policy and combined stress-test + execution-readiness
-handling follow SKILL.md (Formal Stress Tests and Execution-Readiness Reviews).
+Numeric-confidence policy and combined stress-test + execution-readiness handling follow SKILL.md (Formal Stress Tests and Execution-Readiness Reviews).

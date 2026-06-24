@@ -9,15 +9,11 @@ Safe worktree exit with verification. Prevents data loss from manual cleanup.
 
 ## Removing a Worktree
 
-The baseline removal path is native `git worktree`, which works in every runtime. The Claude Code
-`ExitWorktree` built-in is an **optimization layered on top** — prefer it when it is available, but the
-native path below is the contract and must carry every guard.
+The baseline removal path is native `git worktree`, which works in every runtime. The Claude Code `ExitWorktree` built-in is an **optimization layered on top** — prefer it when it is available, but the native path below is the contract and must carry every guard.
 
 ### Native baseline (all runtimes)
 
-Run removal from the **main repo directory**, never from inside the worktree — running `git worktree
-remove` from inside the worktree invalidates the shell CWD and every later command fails with "Path
-does not exist."
+Run removal from the **main repo directory**, never from inside the worktree — running `git worktree remove` from inside the worktree invalidates the shell CWD and every later command fails with "Path does not exist."
 
 ```bash
 # 0. Resolve <main-repo-path>. From inside a worktree, `git rev-parse --show-toplevel`
@@ -30,30 +26,18 @@ git -C <main-repo-path> worktree remove <worktree-path>
 git -C <main-repo-path> branch -d <branch-name>
 ```
 
-Reuse the `<main-repo-path>` resolved in step 0 for every `git -C` command. The `-C` flag is what makes
-this CWD-safe — it never enters the worktree. This native path is the only acceptable removal mechanism
-when `ExitWorktree` is unavailable or was a no-op.
+Reuse the `<main-repo-path>` resolved in step 0 for every `git -C` command. The `-C` flag is what makes this CWD-safe — it never enters the worktree. This native path is the only acceptable removal mechanism when `ExitWorktree` is unavailable or was a no-op.
 
 ### ExitWorktree optimization (Claude Code only)
 
-When the Claude Code `ExitWorktree` built-in is available (deferred — fetch its schema via `ToolSearch`
-before first use), prefer it: it removes the worktree and restores the session to the original working
-directory (the directory before `EnterWorktree`) in a single atomic operation, so you are never
-stranded in a deleted path.
+When the Claude Code `ExitWorktree` built-in is available (deferred — fetch its schema via `ToolSearch` before first use), prefer it: it removes the worktree and restores the session to the original working directory (the directory before `EnterWorktree`) in a single atomic operation, so you are never stranded in a deleted path.
 
 - `action` (required): `"remove"` (delete worktree + branch) or `"keep"` (leave both intact).
-- `discard_changes` (optional, default false): with `action: "remove"`, forces removal even with
-  uncommitted files or unmerged commits. The tool refuses without this flag if the worktree has
-  unsaved state.
+- `discard_changes` (optional, default false): with `action: "remove"`, forces removal even with uncommitted files or unmerged commits. The tool refuses without this flag if the worktree has unsaved state.
 
-**Scope:** `ExitWorktree` only operates on a worktree that `EnterWorktree` created in the *current*
-session. For a worktree created manually (`git worktree add`), in a previous session, or via
-`claude --worktree`, it is a guaranteed **no-op** ("no worktree session is active") — calling it is
-harmless, but then fall back to the native baseline above, run from the main repo directory.
+**Scope:** `ExitWorktree` only operates on a worktree that `EnterWorktree` created in the *current* session. For a worktree created manually (`git worktree add`), in a previous session, or via `claude --worktree`, it is a guaranteed **no-op** ("no worktree session is active") — calling it is harmless, but then fall back to the native baseline above, run from the main repo directory.
 
-**Branch cleanup:** `ExitWorktree` may not delete the branch (notably with `discard_changes: true`).
-After it returns, verify with `git branch --list '<branch-pattern>'`; if the branch survives, delete it
-with `git branch -d <branch-name>`.
+**Branch cleanup:** `ExitWorktree` may not delete the branch (notably with `discard_changes: true`). After it returns, verify with `git branch --list '<branch-pattern>'`; if the branch survives, delete it with `git branch -d <branch-name>`.
 
 ## Why This Skill Exists
 
@@ -157,7 +141,7 @@ git remote get-url origin 2>/dev/null
   git log origin/main..main --oneline
   ```
 
-  Three cases:
+Three cases:
   - **Local main behind origin:** Pull needed. Run from the main repo (not the worktree): `git -C <main-repo-path> pull origin main`
   - **Local main ahead of origin:** Local commits exist that aren't pushed. This is fine — just note it.
   - **Diverged:** Local main has commits not on origin AND origin has commits not on local. Use `git -C <main-repo-path> pull --rebase origin main` to replay local commits on top of origin.
@@ -185,14 +169,9 @@ If the Claude Code `ExitWorktree` tool is available, prefer it:
 ExitWorktree(action: "remove")
 ```
 
-If it reports uncommitted files or unmerged commits, go back to the checklist — do NOT retry with
-`discard_changes: true` unless the user explicitly says to discard, or the worktree directory is
-already gone (broken state from a prior attempt).
+If it reports uncommitted files or unmerged commits, go back to the checklist — do NOT retry with `discard_changes: true` unless the user explicitly says to discard, or the worktree directory is already gone (broken state from a prior attempt).
 
-If `ExitWorktree` is unavailable (any non-Claude-Code runtime) or returns the no-op "no worktree
-session is active", use the native baseline from "Removing a Worktree": resolve `<main-repo-path>`
-porcelain-first, then `git -C <main-repo-path> worktree remove <worktree-path>` and
-`git -C <main-repo-path> branch -d <branch-name>`. Never `cd` into the worktree to remove it.
+If `ExitWorktree` is unavailable (any non-Claude-Code runtime) or returns the no-op "no worktree session is active", use the native baseline from "Removing a Worktree": resolve `<main-repo-path>` porcelain-first, then `git -C <main-repo-path> worktree remove <worktree-path>` and `git -C <main-repo-path> branch -d <branch-name>`. Never `cd` into the worktree to remove it.
 
 **3. Verify and clean up:**
 

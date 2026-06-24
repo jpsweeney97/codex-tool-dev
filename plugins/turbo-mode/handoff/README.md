@@ -6,19 +6,15 @@ Handoffs are resume pointers, not live truth. A future session should read the h
 
 ## Installation
 
-The canonical source lives at `~/.agents/plugins/handoff/` and is listed in the
-personal `turbo-mode` marketplace (`~/.agents/plugins/marketplace.json`).
+The canonical source lives at `~/.agents/plugins/handoff/` and is listed in the personal `turbo-mode` marketplace (`~/.agents/plugins/marketplace.json`).
 
-Codex installs from that marketplace (re-run the same command to refresh the
-installed copy after source edits):
+Codex installs from that marketplace (re-run the same command to refresh the installed copy after source edits):
 
 ```bash
 codex plugin add handoff@turbo-mode
 ```
 
-Claude Code loads the same source in place as a skills-directory plugin via a
-symlink in `~/.claude/skills/` managed by
-`~/.agents/scripts/claude-skills-sync.sh`.
+Claude Code loads the same source in place as a skills-directory plugin via a symlink in `~/.claude/skills/` managed by `~/.agents/scripts/claude-skills-sync.sh`.
 
 ## What It Does
 
@@ -41,9 +37,7 @@ Primary storage is:
 <project_root>/.agents/handoffs/
 ```
 
-This directory is shared by Claude Code and Codex sessions. Legacy handoffs
-under `.claude/handoffs/` and `.codex/handoffs/` remain readable by `/load`
-and `/search` but are never written to.
+This directory is shared by Claude Code and Codex sessions. Legacy handoffs under `.claude/handoffs/` and `.codex/handoffs/` remain readable by `/load` and `/search` but are never written to.
 
 Project root resolution:
 
