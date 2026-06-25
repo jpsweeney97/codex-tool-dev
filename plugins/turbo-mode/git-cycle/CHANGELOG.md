@@ -4,6 +4,12 @@ All notable changes to the Git Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.3.0 - 2026-06-25
+
+### Added
+
+- `closeout-check`: its change-caused repair step (Blocking Failures) now delegates a multi-failure fix→re-run loop to the new `keep-green` skill, which carries bounded anti-thrash stop conditions (retry cap, same-failure and oscillation detection, escalation of cause-unknown failures to `diagnose`) that closeout-check's previously-unbounded repair loop lacked. closeout-check still owns the done-verdict and the single final commit; `keep-green` makes neither, so the work-product boundary is unchanged. `keep-green` is a new dual-runtime skill in `skills/` (not part of this plugin); this entry records only the closeout-check delegation pointer.
+
 ## 1.2.2 - 2026-06-25
 
 ### Fixed

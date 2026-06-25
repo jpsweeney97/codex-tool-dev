@@ -84,6 +84,8 @@ Any failing focused verification or repo-standard quick check blocks the final c
 
 If the failure is caused by the original work, fix it in closeout mode, rerun the relevant checks, and continue only after they pass.
 
+When that repair becomes a multi-failure fix→re-run loop at risk of thrashing, delegate it to `keep-green`, which carries bounded anti-thrash stop conditions (retry cap, same-failure and oscillation detection, and escalation of cause-unknown failures to `diagnose`) that this repair step does not; resume closeout once it reports green. `keep-green` makes no commit and no done-verdict, so the closeout verdict and final commit remain this skill's.
+
 If the failure appears pre-existing or unrelated, do not commit the original work with a known failing standard check. Address it only when all of these are true:
 
 - the failure blocks a repo-standard quick check
