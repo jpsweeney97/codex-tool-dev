@@ -80,6 +80,14 @@ git merge-base --is-ancestor <target-branch> <source-branch>
 
 If this fails, stop and explain that a non-fast-forward merge or rebase decision is needed.
 
+Then check the target is not behind its existing upstream, so the fast-forward does not stack the source's commits onto a stale base. Landing onto a base that is behind its remote makes local `<target-branch>` diverge from its upstream, which only surfaces later as a non-fast-forward push and a painful reconciliation:
+
+```bash
+git rev-list --count <target-branch>..<target-branch>@{u}
+```
+
+This reads the remote-tracking ref already on disk: it runs no `git fetch` and changes no refs. It therefore reflects only the last fetch, so a tracking ref that is itself stale can read `0`; this check catches a base known to be behind, not one that has moved on the remote since the last fetch. If the count is greater than `0`, the local target is behind its upstream by that many commits — stop and report it, for example "`<target-branch>` is N commit(s) behind `<target-branch>@{u}`; landing now would stack onto a stale base that diverges from the remote." Let the user decide how to refresh the base (typically a `git pull --ff-only` on the target, or an explicit instruction to land anyway) — do not fetch, pull, or update the base yourself. If the command exits non-zero (no upstream configured, the remote-tracking ref is absent, or the target is a purely local branch), note in one line that the base-freshness check was skipped because `<target-branch>` has no usable upstream tracking ref, and continue — this is a skip, not a stop.
+
 ### 3. Commit Relevant Changes
 
 If the worktree has staged, unstaged, or untracked changes:

@@ -4,6 +4,12 @@ All notable changes to the Git Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.2.2 - 2026-06-25
+
+### Fixed
+
+- `merge-branch`: Step 2 now checks whether the target/base branch is behind its existing upstream before landing, closing a gap where the skill stacked the source's commits onto a stale base (local `<target>` then silently diverges from its remote, surfacing later as a non-fast-forward push). A context-free cross-model evaluation found the skill's "do not fetch" posture suppressed the base-freshness check a bare model performs (10/10 stale-base landings with the skill loaded vs 0/10 without). The fix is one read-only command — `git rev-list --count <target>..<target>@{u}` — that reads the on-disk remote-tracking ref only: it runs no `git fetch` and changes no refs, so the deliberate remote-free, no-push contract (and the existing lines forbidding fetch) is preserved unchanged. A behind-count stops for the user's decision (never auto-fetch/pull/update); no upstream or an absent tracking ref is a one-line skip, not a stop. Known limit, disclosed in-skill: the count reflects the last fetch, so it catches a base known to be behind an already-fetched ref, not one that has moved on the remote since — closing that fully would require the network fetch this contract forbids.
+
 ## 1.2.1 - 2026-06-24
 
 ### Changed
