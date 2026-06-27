@@ -4,6 +4,14 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.4.0 - 2026-06-26
+
+### Added
+
+- `implementation-review` gains five surface-triggered review lenses folded inline into the existing Step-3 attack list (the resource-cap bullet is the template), each a terse "where the change touches X" conditional that deepens the review where a diff touches that surface and stays silent otherwise: performance (N+1 / unbounded fetch / super-linear work under ordinary load, fenced against the resource-cap exhaustion check), SQL and data access (injection as structure-not-bound-value plus query/migration footguns; deepens the trust-boundary base mode and routes injection into the existing attacker/victim test), concurrency (diff-introduced races / deadlocks / lost updates; deepens the state/concurrency base mode and hands static whole-codebase shared-state audits to `tech-debt-scan`), and accessibility (accessible name / keyboard operability / text alternatives / state-beyond-color on changed UI). Decided fold-over-standalone (zero new routing surface; rides the skill's existing fire-rate) and inline-over-reference-menu (a five-file dispatch menu was designed and rejected as over-machinery that manufactures a did-I-load-the-right-lens failure the inline form lacks). Routing metadata (`description`, `agents/openai.yaml`) deliberately unchanged.
+- `implementation-review` gains a supply-chain provenance check for agent-authored diffs that introduce a new external dependency. It is grounded in provenance ("should this dependency belong?"), not resolution ("does it resolve?") — the latter is correctly left to CI and stays excluded — because a typosquatted or hallucinated package resolves cleanly once declared while its install-time code runs before any test. It defaults to silence for a spec-justified or already-used dependency, otherwise raises a non-blocking `note` routed to `/triage` for human supply-chain confirmation (never a malice claim from unfamiliarity, never a verdict-gating `unverified`), and where a safe read-only probe is cheap (registry age/downloads, edit-distance to a well-known name) cites it and lets the evidence set the severity via the existing model-as-attacker case. The line-106 resolution exclusion is unchanged but for a cross-reference distinguishing "does it resolve" (excluded) from "does it belong" (this check).
+- `implementation-review` gains two guards against the lenses becoming a coverage ceiling: a "clean ≠ discharged" clause stating the lenses never replace the open hunt for the bespoke / business-logic / auth bug, and a Red Flag for running the lenses, finding nothing, and shipping without the open base-failure-mode attack. The Evidence Gate is unchanged — no per-lens checkbox, because the lenses are an honest depth pull, not a gate-enforced floor.
+
 ## 0.3.13 - 2026-06-21
 
 ### Added
