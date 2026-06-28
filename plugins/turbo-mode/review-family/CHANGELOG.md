@@ -4,6 +4,12 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.4.1 - 2026-06-28
+
+### Added
+
+- `scrutinize` gains a `steelman` handoff from its reject stance: when scrutiny rejects a contested *position, decision, or argument* (not a code or plan defect) that the user may still want to weigh, it now names `steelman` (or `$steelman`) as the advocacy counterpart that builds the strongest honest case *for* the rejected position. Closes the one-sided reference flagged as upgrade #12 in the 2026-06-26 capability-growth review — `steelman` already named `scrutinize` as its inverse (attack vs build), but `scrutinize` never pointed back. Additive prose only; it reinforces (does not change) scrutinize's attack-and-never-advocate boundary and read-only stop, and leaves the canonized read-only and bounded-review cores byte-identical.
+
 ## 0.4.0 - 2026-06-26
 
 ### Added
