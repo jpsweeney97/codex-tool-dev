@@ -60,6 +60,8 @@ Higher-priority safety, destructive-action, and repo-instruction checkpoints sti
 
 Follow the steps in order. Do not jump to the verdict.
 
+Before building the ledgers, size and shape the target: an oversized or bundled diff may call for Bounded Review Mode or a `Split required` verdict (below) rather than a full pass.
+
 ### 1. Build Ledgers
 
 Create two inventories:
@@ -94,7 +96,7 @@ Do not treat passing tests, naming, comments, or apparent intent as enough to ma
 For each changed area, check the base failure modes: input validation, control flow, state/concurrency, trust boundaries, operational behavior, and consistency with existing patterns. Then run these checks wherever the change touches them:
 
 - Error suppression: empty or overly broad catches, errors logged then swallowed, and defaults or fallbacks that mask the underlying failure.
-- Test adequacy, where tests changed or new behavior needs them: missing negative cases, and tests coupled to implementation details rather than behavior.
+- Test adequacy, where tests changed or new behavior needs them: missing negative cases, and tests coupled to implementation details rather than behavior. Judge adequacy by mutation rather than coverage: pick a plausible break in the changed logic that would change observable behavior — flip a boundary (`<`→`<=`), negate or drop a condition, alter a constant, return early, no-op a side effect — and ask whether some test would go red on it. A mutation that survives every test means the suite pins the code's presence, not its behavior, however high the line coverage; name the specific surviving mutation as the missing test.
 - Comment and docstring accuracy, where comments or docstrings changed or describe changed code: documented behavior the logic contradicts, references left stale by the change, and TODOs the change already resolved.
 - Resource caps, where a change parses, decompresses, fetches, or loops over attacker-influenced input: check that size, time, or count caps still guard the actual peak allocation. Report resource exhaustion only when the change defeats an existing cap — a cap on the wrong accumulator, a dead timeout, unclamped arithmetic, amplification at flush — not for volumetric load alone; the finding is the defeated cap, not the load.
 - Performance, where the change adds a query, network, or filesystem call inside a per-row loop, an unbounded fetch or materialization, or super-linear work on input that grows with load: name the input that makes it scale and the legitimate load that degrades it. Distinct from resource caps above — that is an attacker-defeated cap (exhaustion); this is a regression under ordinary load, so file a hit under one, not both. Raise it only when the path shows the cost is real, not for speculative micro-optimization.
@@ -137,6 +139,8 @@ Each finding records its type (`implementation`, `plan`, or `unverified`) and se
 
 Use bounded review mode when the spec, diff, or runtime surface is too large for one complete pass. In bounded mode, state the reviewed subset before findings, review the highest-risk surface first, mark omitted areas `unverified`, give the next slice needed for a complete review, and do not issue a full-clearance verdict for the full target (do not return `Ship` or a zero-findings verdict; here the omitted areas include requirements, files, flows, and runtime checks).
 
+When a target is too large for one pass, judge *why* before choosing the verdict. A coherent change that is merely large — reviewable in slices that each clear on their own — gets the highest-risk slice now and a `Partial review only` verdict naming the next slice. Reserve a `Split required` verdict (see Verdict Taxonomy) for a target that bundles genuinely independent concerns whose interleaving defeats reliable review as a unit — a diff mixing a refactor, a behavior change, and a migration, or one large only because several separable changes shipped together. Then decline full clearance and name the concrete seams that divide it into independently-reviewable units, each cut along a real boundary of concern, requirement, risk surface, or dependency layer — not an arbitrary size or file slice of one cohesive change. This judges shape, not a line count: a uniform codemod, a rename, or one cohesive feature is a single reviewable unit however large and stays `Partial review only`. Name seams only when you can find real ones; a too-large change you cannot cut along distinct concerns stays `Partial review only`.
+
 Bounded mode is not a shortcut to ignore inconvenient scope.
 
 ## Evidence And Severity
@@ -164,9 +168,10 @@ Use only these verdicts:
 
 - `Blocked`: at least one `blocker`; any material requirement is `violated`; any material requirement is `unverified` in a full review; destructive, security, data-loss, migration, release, or cross-user behavior lacks required evidence; or the evidence gate failed.
 - `Partial review only`: bounded review mode was used; the requested scope was not fully inspected; omitted requirements, changed areas, runtime checks, or dependencies remain; or the review was stopped by a higher-priority checkpoint.
+- `Split required`: the change bundles genuinely independent concerns whose interleaving defeats reliable review as a unit, and you named concrete split seams cut along real boundaries — concern, requirement, risk surface, or dependency layer — not size slices of one cohesive change. Distinct from `Partial review only` — that is a coherent target inspected incompletely this pass (the next slice continues the same review); `Split required` is a mis-shaped target where no clearance verdict is trustworthy until the author restructures it (split along the named seams, then re-review). Use only when you can name the seams; a merely-large but cohesive change stays `Partial review only`.
 - `Ship`: zero blockers; no material requirement is `violated` or `unverified`; the evidence gate and zero-findings gate pass; the strongest realistic counterexamples were attempted and documented; and verification gaps are either non-material or explicitly accepted as residual risk.
 
-If more than one verdict could apply, choose the first matching verdict in this order: `Blocked`, `Partial review only`, `Ship`.
+If more than one verdict could apply, choose the first matching verdict in this order: `Blocked`, `Split required`, `Partial review only`, `Ship`.
 
 ## Output Format
 
@@ -181,11 +186,11 @@ Required sections:
 5. `Changed-Area Ledger` — ID, area, linked requirements, failure modes, evidence, residual risk.
 6. `Verification Performed / Not Performed`
 7. `Unverified Areas`
-8. `Verdict` — blocker count, verdict, highest-risk area, strongest failed attack attempt, plan gaps.
+8. `Verdict` — blocker count, verdict, highest-risk area, strongest failed attack attempt, plan gaps. When the verdict is `Split required`, list the named split seams.
 
 Each finding must include location, finding type (`implementation`, `plan`, or `unverified`), severity, spec expectation, observed behavior, evidence, consequence, and fix or investigation.
 
-If using bounded review mode, add `Bounded Review Scope` before `Findings` and use `Verdict: Partial review only`.
+If using bounded review mode, add `Bounded Review Scope` before `Findings` and use `Verdict: Partial review only` — or `Verdict: Split required` when the target is mis-shaped for review and you named the split seams.
 
 Read [examples](examples/review-findings.md) only when you need a concrete findings-first template or examples of strong and weak findings.
 
@@ -207,7 +212,7 @@ Do not issue a final verdict until every item passes:
 - [ ] Use only `blocker`, `should-fix`, or `note` severity
 - [ ] State the blocker count, even if zero
 
-Apply this additional gate before returning `Ship` or a zero-findings review:
+Apply this additional gate before returning `Ship` or a zero-findings full-clearance review — not a bounded `Partial review only` or `Split required` verdict, which carry the bounded-mode discipline instead:
 
 - [ ] No material requirement is `violated`
 - [ ] No material requirement is `unverified`
