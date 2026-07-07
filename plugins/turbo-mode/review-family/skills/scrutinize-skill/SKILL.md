@@ -32,6 +32,7 @@ Review these failure modes first:
 - a judgment skill is so over-ruled — fixed output shapes, exhaustive rules, sections filled to feel done — that the agent performs the contract instead of thinking
 - a judgment skill provokes nothing — no forcing function, no counter-pressure — so it adds nothing over the bare agent, or provokes too weakly — a forcing function present but dulled, hedged, or softened (an adversarial posture reframed as collaborative) so it no longer creates real counter-pressure (the *provoke* half of the bar, failed by absence or by dilution rather than by over-ruling)
 - a trust skill is so rigidly ruled it does the wrong thing in an unforeseen case (a crude gate dead-ending legitimate work), or reimplements machinery copied from siblings instead of sharing it
+- the skill performs an epistemology its method cannot deliver — measurement, discovery, or verification claims that a single pass or a single judge cannot produce, restraints dressed up as a method — a class this review can detect but not adjudicate: raise it and route to `methodology-check` — the cheap text-and-census methodology adjudicator, which escalates to the fire-tested `methodology-critique` when how the skill fires in real transcripts is the crux — rather than clearing the premise
 
 Out of scope: routine skill editing, implementation, source sync, installed runtime proof, broad plugin audits, completed-code review, and marketplace publishing unless the user explicitly asks for that separate work.
 
@@ -55,7 +56,8 @@ Compare overlap against the whole available skill set. Start with skill names an
 Separate proof classes:
 
 - `structural`: parseable frontmatter, valid YAML, expected files, references that exist
-- `behavioral`: realistic dry runs, examples, or reasoning that shows the agent will behave correctly when the skill is triggered
+- `behavioral`: realistic dry runs, observed transcripts, or worked examples that show the agent behaving correctly when the skill is triggered
+- `reasoned`: a prediction argued from the contract text alone — legitimate evidence and the review's most common kind, but simulation, not observation; never file it as `behavioral`, and when a reasoned claim drives the verdict, name the cheapest check that would settle it (a dry run, a blind proxy, a smoke test)
 - `runtime`: installed plugin or loaded skill state observed through the active runtime
 
 Do not claim runtime installation, activation, hook behavior, marketplace sync, or loaded-skill state from source files, cache files, or marketplace metadata alone.
@@ -68,7 +70,7 @@ Do not claim runtime installation, activation, hook behavior, marketplace sync, 
 4. **UX Review** - Review user friction, clarity, pacing, question shape, user effort, challenge level, and closure.
 5. **Composability And Overlap** - Identify overlapping skills and classify each material overlap as `target wins`, `other skill wins`, `routing clarification needed`, `merge candidate`, `split candidate`, or `no material overlap`.
 6. **Validation And Proof** - Separate structural checks from behavior proof and name any false-confidence claims.
-7. **Verdict** - Use `Reject`, `Major revision`, `Minor revision`, or `Defensible`.
+7. **Verdict** - Use `Reject`, `Major revision`, `Minor revision`, or `Defensible`. The verdict grades the behavior contract as written — execution altitude. It does not certify that the skill's underlying method or premise is true: a contract can execute cleanly on a false premise, and structure can pass the provoke test while claiming knowledge the method cannot produce. When the premise itself is the doubt, raise it as a finding and route to `methodology-check` (which escalates to `methodology-critique` when the crux is behavioral); do not clear it from a contract pass.
 
 ## Output
 
@@ -85,13 +87,15 @@ Use this order:
 
 Lead findings with user-visible behavior: wrong amount of friction, unclear first move, poor handoff, generic output, missing stop condition, false proof, or ambiguous overlap.
 
-A finding's severity follows the bar. On a judgment part, internal-conformance divergence drops or downgrades, but a thinking or provoke-side defect — structure that strangles thinking, a part that provokes nothing (no forcing function, no counter-pressure), or a forcing function dulled, hedged, or softened until it no longer creates real counter-pressure — keeps or escalates, exactly as a trust defect would. On a trust part, duplication, drift, or overreach keeps or escalates. Delivery hygiene (invocation tokens, naming, budget, parseability) is uniform — judged the same for both. Dropping conformance noise is the goal; going toothless on a real judgment defect is the opposite failure, not leniency rewarded as success.
+A finding's severity follows the bar. On a judgment part, internal-conformance divergence drops or downgrades, but a thinking or provoke-side defect — structure that strangles thinking, a part that provokes nothing (no forcing function, no counter-pressure), or a forcing function dulled, hedged, or softened until it no longer creates real counter-pressure — keeps or escalates, exactly as a trust defect would. On a trust part, duplication, drift, or overreach keeps or escalates. Severity also weighs the reviewed skill's blast radius: the same defect is graver in a contract that wields mutating or irreversible effects than in one whose output stays read-only. Delivery hygiene (invocation tokens, naming, budget, parseability) is uniform — judged the same for both. Dropping conformance noise is the goal; going toothless on a real judgment defect is the opposite failure, not leniency rewarded as success.
 
 These judgment failure modes are examples, not a checklist to complete. Do not add a bar-keyed required step, fixed section, or score to this review — that is itself the over-ruling the lens exists to prevent, and it applies to this rubric too.
 
 If a required section has no concrete finding, write `None found` and move on; do not fill it with generic observations.
 
 Each finding must include a compact evidence pointer: file/line, command output, observed behavior, or `unverified` with the exact missing check. Do not make location-free findings when the target is file-backed.
+
+Findings are argued hypotheses until something independent of the arguing tests them; the recorded failures run both directions — raw findings over-claim under independent verification, and a review re-refuting its own finding has killed a real defect. Re-arguing, for a finding or against it, is not verification. Present `Required Changes` as what the findings warrant if they hold, and when one finding carries the verdict, prefer the cheapest disconfirming check over more argument.
 
 Use `Bounded Review Scope` before `Target And Surface` when the target or skill set comparison is too large to inspect completely in one pass. In bounded mode, state the reviewed subset before findings, review the highest-risk surface first, mark omitted areas `unverified`, give the next slice needed for a complete review, and do not issue a full-clearance verdict for the full target (do not use `Defensible`).
 

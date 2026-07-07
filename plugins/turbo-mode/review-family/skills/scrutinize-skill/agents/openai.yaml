@@ -1,4 +1,4 @@
 interface:
   display_name: "Scrutinize Skill"
   short_description: "Adversarial review for agent skills"
-  default_prompt: "Use scrutinize-skill to review this skill as an agent behavior contract, including the judgment-vs-trust bar (per part for mixed skills), UX, composability, overlap, and proof gaps."
+  default_prompt: "Use scrutinize-skill to review this skill as an agent behavior contract, including the judgment-vs-trust bar (per part for mixed skills), UX, composability, overlap, evidence grades, and proof gaps. The verdict clears the contract as written, not the truth of the skill's underlying method."
