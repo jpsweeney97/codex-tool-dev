@@ -4,6 +4,12 @@ All notable changes to the Git Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.4.0 - 2026-07-09
+
+### Added
+
+- `resolve-conflicts`: new skill owning the faithful resolution of an in-progress merge/rebase/cherry-pick/revert conflict and finishing the operation — a lane no sibling held (`merge-branch` is fast-forward-only and stops the moment a conflict appears, `exiting-worktrees` refuses to resolve conflicts inside a worktree, `git-hygiene` aborts on any in-progress operation, `keep-green` covers lint/test-green after a change with no conflict surface). Admitted as third-party material (mattpocock upstream) re-authored through the house transform (charter case-(d)): it reconstructs each side's intent before resolving — preventing a mechanically-resolved conflict that compiles yet silently drops one side's behavior or invents a third — keeps the protected-branch floor in the finish step, and treats `--abort` as a deliberate abandon rather than a blanket never-rule. Reciprocal routing edges added into `merge-branch` and `exiting-worktrees`; the new file joins the `check-protected-set.sh` drift canary. Behavior forward-tested (Sonnet 5) against a constructed real conflict where the discriminating rule (a loyalty discount) was protected only by its commit message: both sides' intent preserved, nothing invented, finished as a clean merge commit.
+
 ## 1.3.0 - 2026-06-25
 
 ### Added

@@ -22,7 +22,7 @@ Branch deletion is a separate cleanup step. Treat "merge and clean up", "delete 
 - The user asks to push, publish, open a PR, merge a PR, or update a remote.
 - The user asks only for status, review, audit, branch cleanup, or git hygiene.
 - The current branch is the target branch, a protected branch, or detached HEAD.
-- A rebase, merge, cherry-pick, revert, or bisect is in progress.
+- A rebase, merge, cherry-pick, revert, or bisect is in progress. To resolve conflicts from an in-progress merge or rebase and finish it, use `resolve-conflicts`.
 - The merge target is unclear after the preflight checks.
 - Pending changes include unrelated or ambiguous user work.
 - The source branch is checked out in another worktree.
@@ -128,7 +128,7 @@ git merge --ff-only <source-branch>
 
 If `git switch <target-branch>` fails (for example, the target is checked out in another worktree), stop before merging: any commit you made in Step 3 is safe and intact on the source branch — it is simply not yet landed. Report that and the unblock needed.
 
-If the fast-forward merge fails, stop. Report that the branch was not merged and name the next decision: rebase the source, perform an explicit merge commit, or abort the local landing. As above, the Step 3 commit remains intact on the source branch; nothing is lost.
+If the fast-forward merge fails, stop. Report that the branch was not merged and name the next decision: rebase the source, perform an explicit merge commit, or abort the local landing. If you take the rebase or explicit-merge path and it conflicts, `resolve-conflicts` owns resolving the conflict and finishing the operation. As above, the Step 3 commit remains intact on the source branch; nothing is lost.
 
 Once the merge succeeds, confirm the source's commits actually landed on the target — while the source ref still exists, before any cleanup:
 

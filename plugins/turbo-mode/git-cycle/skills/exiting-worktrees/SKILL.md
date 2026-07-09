@@ -118,7 +118,7 @@ git -C <main-repo-path> log --oneline -3
 
 If step 1 does not show the intended target, stop: the main repo has a different branch checked out, so this merge would silently land on the wrong branch. Settle which branch should receive the work before merging.
 
-If the `--ff-only` merge fails (the branch is not a fast-forward of the target), stop and report — do NOT retry with a plain `git -C <main-repo-path> merge`. A failed `--ff-only` changes nothing (clean tree, no merge in progress), so there is nothing to abort; decide the next step from the main repo — rebase the branch onto the target, or make an explicit merge there. Never do this from inside the worktree — you cannot check out the target branch there.
+If the `--ff-only` merge fails (the branch is not a fast-forward of the target), stop and report — do NOT retry with a plain `git -C <main-repo-path> merge`. A failed `--ff-only` changes nothing (clean tree, no merge in progress), so there is nothing to abort; decide the next step from the main repo — rebase the branch onto the target, or make an explicit merge there. Never do this from inside the worktree — you cannot check out the target branch there. If that rebase or explicit merge conflicts, `resolve-conflicts` owns resolving it and finishing (from the main repo).
 
 After this `--ff-only` merge succeeds into the verified target, `ExitWorktree(action: "remove", discard_changes: true)` is safe — the "discarded" commit is already on the target. The tool reports discarding because the worktree branch's commit is no longer exclusive to it, not because work is lost.
 

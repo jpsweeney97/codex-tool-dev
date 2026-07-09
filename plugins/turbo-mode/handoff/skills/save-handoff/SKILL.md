@@ -18,6 +18,8 @@ Every saved handoff should include both:
 - session context: what happened in this session, what changed, what was decided, what is in flight
 - project-arc context: the session's arc delta — what this session changed about where the project stands, which decisions became load-bearing or stopped holding, and what a future session should not forget. Record the delta, not a restatement of the already-known arc or of `THROUGHLINE.md`; restated arc text becomes an echo that a later `/throughline` refresh could mistake for independent confirmation.
 
+Redact secrets before writing: never transcribe API keys, passwords, tokens, connection strings, or personally identifiable information into the handoff — reference them by name or location instead. Handoffs land in `.agents/handoffs/` and may be committed under host-repository policy, so a secret written here can leak.
+
 Read `../../references/handoff-format.md` before writing the file and follow its frontmatter; its section prompts stay prompts, not a schema.
 
 ## Storage

@@ -55,7 +55,7 @@ Ordering: compare by the parsed timestamp portion of the basename, never raw str
 
 - Preserve branch and project qualifiers from handoff frontmatter: a decision made on a side branch is recorded as branch-scoped unless it demonstrably governs the project. Only truly project-level settled choices belong under "Decisions That Hold".
 - Weigh concrete session and evidence sections over broad "Project Arc" restatements: handoffs saved after the throughline exists may echo the throughline itself, and an echo is not independent confirmation.
-- Keep the document short enough to load alongside a handoff without dominating context. Size discipline is judgment, not a validator.
+- Size budget: keep the document under ~32KB (~8k tokens) — load-handoff reads it in full every session, so every byte here is a recurring per-session cost. When a refresh would exceed the budget, compress oldest-first: pre-frontier eras collapse to era-cluster summaries (their detail already lives in the source handoffs — losing it here loses nothing), while "Decisions That Hold" and the frontier keep the most detail. Settled do-not entries keep their one-line decision plus pointer, not their full rationale. What to compress and how is judgment; the budget itself is not.
 
 ## Boundaries
 

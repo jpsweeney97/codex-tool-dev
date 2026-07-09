@@ -44,7 +44,7 @@ These headings are prompts, not a schema.
 
 ## Size
 
-Short enough to load alongside a handoff without dominating context. This is prose guidance, not a validator.
+Under ~32KB (~8k tokens): load-handoff reads the document in full every session, so size is a recurring per-session cost. Over budget, compress oldest-first — pre-frontier eras to era-cluster summaries, settled do-nots to decision-plus-pointer — keeping "Decisions That Hold" and the frontier richest. The budget number is fixed; what to compress is judgment, and no validator enforces it.
 
 ## Evidence Boundary
 
