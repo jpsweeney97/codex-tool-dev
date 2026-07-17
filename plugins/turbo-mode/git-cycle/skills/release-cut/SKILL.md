@@ -61,13 +61,13 @@ In scope: choosing the next version from the landed change class, and writing th
 
 Out of scope — route instead:
 
-- deciding whether the work is **done** or making the final commit → `closeout-check`, which produces the record of what landed that this skill versions. The load-bearing fence: **cutting a release is not deciding readiness.**
+- deciding whether the work is **done** or making the final commit → `closeout-check`; **cutting a release is not deciding readiness.**
 - landing or merging a branch → `merge-branch`.
-- authoring a PR title and body → `pr-description`, which deliberately leaves version/changelog/release-notes to this skill.
+- authoring a PR title and body → `pr-description`.
 - shaping commits or cleaning local state → `git-hygiene`.
 - the outward acts — push, tag, open/merge a PR, republish the runtime cache, copy into a mirror → gated and explicit; never by default.
 
-This skill does not own a git tag (the manifest is authoritative), a marketplace manifest's version (it has none), or any republish/mirror step. It is not a release-readiness scorer — there is no go/no-go gauge; the one judgment is the bump magnitude.
+This skill does not own a git tag (the manifest is authoritative), a marketplace manifest's version, or any republish/mirror step. It is not a release-readiness scorer: the one judgment is the bump magnitude.
 
 ## Output
 

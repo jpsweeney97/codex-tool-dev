@@ -1,6 +1,6 @@
 ---
 name: exiting-worktrees
-description: "Use when the user explicitly asks to exit, remove, or clean up a worktree after work has landed, or confirms cleanup after a merged PR or branch. Uses native `git worktree` removal (with Claude Code's ExitWorktree as an optimization when available), landed-work verification, and user confirmation before removal. Do not use for ordinary git hygiene, branch cleanup alone, manual worktree experiments, or unlanded work."
+description: "Use when the user explicitly asks to exit, remove, or clean up a worktree after work has landed, or confirms cleanup after a merged PR or branch. Uses native `git worktree` removal (with Claude Code's ExitWorktree as an optimization when available), landed-work verification, and user confirmation before removal. Do not use for ordinary git hygiene, branch cleanup alone, manual worktree experiments, unlanded work, or persistent locked satellite worktrees (parked skill workspaces — `worktree-task-cycle` where available)."
 ---
 
 # Exiting Worktrees
@@ -26,7 +26,7 @@ git -C <main-repo-path> worktree remove <worktree-path>
 git -C <main-repo-path> branch -d <branch-name>
 ```
 
-Reuse the `<main-repo-path>` resolved in step 0 for every `git -C` command. The `-C` flag is what makes this CWD-safe — it never enters the worktree. This native path is the only acceptable removal mechanism when `ExitWorktree` is unavailable or was a no-op.
+Reuse the `<main-repo-path>` resolved in step 0 for every `git -C` command. This native path is the only acceptable removal mechanism when `ExitWorktree` is unavailable or was a no-op.
 
 ### ExitWorktree optimization (Claude Code only)
 
@@ -37,11 +37,7 @@ When the Claude Code `ExitWorktree` built-in is available (deferred — fetch it
 
 **Scope:** `ExitWorktree` only operates on a worktree that `EnterWorktree` created in the *current* session. For a worktree created manually (`git worktree add`), in a previous session, or via `claude --worktree`, it is a guaranteed **no-op** ("no worktree session is active") — calling it is harmless, but then fall back to the native baseline above, run from the main repo directory.
 
-**Branch cleanup:** `ExitWorktree` may not delete the branch (notably with `discard_changes: true`). After it returns, verify with `git branch --list '<branch-pattern>'`; if the branch survives, delete it with `git branch -d <branch-name>`.
-
-## Why This Skill Exists
-
-`ExitWorktree` handles the mechanical removal, but it doesn't know whether your work is safe to delete. This skill ensures you've verified everything landed before calling it — uncommitted changes checked, PR confirmed merged, local main synced.
+**Branch cleanup:** `ExitWorktree` may not delete the branch (notably with `discard_changes: true`); Exit Procedure step 3 verifies this and deletes any survivor.
 
 ## Pre-Exit Checklist
 
@@ -51,9 +47,12 @@ Run these checks in order. Stop and resolve any that fail.
 
 ```bash
 git worktree list
+git worktree list --porcelain   # shows lock state and the lock reason
 ```
 
 If only one entry (the main repo), you're not in a worktree — nothing to exit.
+
+If the porcelain listing shows the worktree as `locked` with a parked-skill-workspace reason, stop: it is a permanent satellite, parked between tasks — not removed through this skill. Route to `worktree-task-cycle` where available; satellite retirement happens only on the user's explicit instruction through the owning repo's procedure.
 
 ### 2. Check for uncommitted changes
 
@@ -171,7 +170,7 @@ ExitWorktree(action: "remove")
 
 If it reports uncommitted files or unmerged commits, go back to the checklist — do NOT retry with `discard_changes: true` unless the user explicitly says to discard, or the worktree directory is already gone (broken state from a prior attempt).
 
-If `ExitWorktree` is unavailable (any non-Claude-Code runtime) or returns the no-op "no worktree session is active", use the native baseline from "Removing a Worktree": resolve `<main-repo-path>` porcelain-first, then `git -C <main-repo-path> worktree remove <worktree-path>` and `git -C <main-repo-path> branch -d <branch-name>`. Never `cd` into the worktree to remove it.
+If `ExitWorktree` is unavailable (any non-Claude-Code runtime) or returns the no-op "no worktree session is active", run the native baseline from "Removing a Worktree" — from the main repo, never from inside the worktree.
 
 **3. Verify and clean up:**
 
@@ -181,7 +180,7 @@ git log --oneline -3
 git branch --list '<branch-pattern>'
 ```
 
-Confirm the worktree is gone and main shows the expected history. If the branch survived (common with `discard_changes: true`), delete it: `git branch -d <branch-name>`.
+Confirm the worktree is gone and main shows the expected history. If the branch survived (common with `discard_changes: true`), delete it: `git branch -d <branch-name>`; after a squash merge `-d` will refuse — use the rule in "Branch Deletion After Squash Merge".
 
 ## Prohibited Actions
 
@@ -197,7 +196,7 @@ Confirm the worktree is gone and main shows the expected history. If the branch 
 
 `ExitWorktree` handles branch deletion automatically. But if branch cleanup falls through (e.g., `ExitWorktree` was a no-op for a manually-created worktree, or `action: "keep"` was used), you may need to delete the branch manually.
 
-**First, make sure the worktree is already removed.** A branch checked out in a live worktree cannot be deleted — both `git branch -d` and `-D` fail with "cannot delete branch '<x>' used by worktree at '<path>'". When `ExitWorktree` was a no-op (manual worktree), the worktree and its checked-out branch are still in place, so remove the worktree first via the native baseline in "Removing a Worktree" (`git -C <main-repo-path> worktree remove <worktree-path>`), *then* delete the branch.
+**First, make sure the worktree is already removed.** A branch checked out in a live worktree cannot be deleted — both `git branch -d` and `-D` fail with "cannot delete branch '<x>' used by worktree at '<path>'". This is the usual state after an `ExitWorktree` no-op (see Scope): remove the worktree via the native baseline first, *then* delete the branch.
 
 After a squash merge, `git branch -d` fails because git doesn't recognize the squash commit as merging the branch (the SHAs differ). This is the one case where `-D` is acceptable:
 
@@ -210,17 +209,14 @@ Do NOT use `-D` without first confirming the merge via `gh pr list`. The PR conf
 
 ## Edge Cases
 
+Situations the checklist and procedure sections already own (squash-merged "unmerged" branches, diverged main, not-yet-landed work, surviving branches) are handled there; this table carries only the cases with no owning step.
+
 | Situation | Action |
 |-----------|--------|
-| PR squash-merged, branch shows "unmerged" | Expected. Verify via `gh pr list --state merged`, then proceed. |
-| Local main diverged from origin | `git pull --rebase origin main` in main repo before exiting. |
 | Worktree directory already gone (broken state) | `ExitWorktree(action: "remove", discard_changes: true)` — handles orphaned metadata. |
 | Multiple worktrees exist | Only exit the one being discussed. Don't touch others. |
-| User wants to keep the worktree | `ExitWorktree(action: "keep")` — directory and branch remain. |
 | Remote branch already deleted by PR merge | Normal — GitHub deletes the remote branch on merge. Local branch cleanup still needed. |
-| Worktree created in a previous session or manually | `ExitWorktree` is a no-op here — it only removes current-session `EnterWorktree` worktrees. Safe to call (it reports "no worktree session is active"); then use the `git -C <main-repo> worktree remove` fallback (see "Removing a Worktree"). |
-| Work needs merging but main is checked out elsewhere | Follow Pre-Exit Checklist step 4 ("work needs merging now") — it verifies the target and merges `--ff-only` from the main repo (never resolve merge conflicts inside the worktree) — then `ExitWorktree(action: "remove", discard_changes: true)`. |
-| Branch survives after `ExitWorktree` | Common with `discard_changes: true`. Follow Exit Procedure step 3: verify with `git branch --list`, then `git branch -d <branch>` (after a squash merge, use the `-D` rule in "Branch Deletion After Squash Merge"). |
+| Worktree created in a previous session or manually | `ExitWorktree` no-ops (current-session `EnterWorktree` worktrees only — see Scope); use the native baseline. |
 
 ## Integration
 

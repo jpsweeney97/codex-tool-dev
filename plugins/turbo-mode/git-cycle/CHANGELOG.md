@@ -4,6 +4,65 @@ All notable changes to the Git Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.5.4 - 2026-07-17
+
+### Fixed
+
+- README skill inventory reconciled with the live plugin: the arc list said "Seven skills" and omitted `resolve-conflicts`, `worktree-task-cycle`, and `release-cut`; it now says ten and describes all of them. Docs-only — no skill body changed. Drift surfaced by a sealed-probe finding in the 2026-07-17 cross-model methodology adjudication and host-verified against the frozen corpus before repair.
+
+## 1.5.3 - 2026-07-17
+
+### Fixed
+
+- `worktree-task-cycle` helper: lease-root symlink fail-open (JP's 2026-07-17 second Gate-B readiness review; pinned by regression tests proven red against the extracted 1.5.2 helper before the fix). `discover`'s 1.5.2 store-integrity gate proved `skill-worktree/` and `skill-worktree/validations/` are real non-symlink directories but never `skill-worktree/leases/`; its later `leases.is_dir()` followed a planted symlink, so a live symlink at the lease root let a normal `lease-acquire` create the lease directory and `owner.json` outside the git state store while printing `RESULT: ok` (exit 0), and a dangling lease-root symlink refused with the untruthful classification "no skill-worktree store". `topo.leases` now joins the same `discover`-time non-symlink invariant, closing the owned state chain: every state-root component — `skill-worktree/`, `leases/`, and `validations/` — must be a real directory under the resolved git common dir, enforced before any mutation on every verb, with the planted symlink preserved as evidence and the outside target left unchanged (live) or uncreated (dangling); the refusal message now names lease and record state. Two regression pins (live + dangling) assert the gate's own phrases rather than a bare "symlink" substring — pytest embeds the test name in the store path it prints, so a substring assert would self-satisfy; the guard-excision mutant is killed by both pins, and the ordinary real-lease-root control is the existing acquire/release test. Lease acquisition/release logic, record handling, and state routing are byte-untouched: the diff touches only the shared `discover` invariant.
+
+## 1.5.2 - 2026-07-17
+
+### Fixed
+
+- `worktree-task-cycle` helper: validation-record symlink fail-open (JP's 2026-07-17 Gate-B readiness review; each defect pinned by a regression test proven red against the extracted 1.5.1 helper before the fix):
+  - a symlink at a validation-record path — dangling or live — now classifies as `symlink` (lstat-based, never followed) and every consumer fails closed: `record-validation` refuses before mutation with the symlink and its target preserved as evidence (1.5.1 classified a dangling symlink as absent and wrote the record through it, creating a file outside the validation store while printing `RESULT: ok`; a live symlink to a valid same-branch record was superseded through the link, rewriting the aliased outside target); `land` refuses (`READY-INVALID`) instead of authorizing an integration off an aliased record; `delete-branch` refuses before the branch mutation, leaving branch, link, and target untouched for user adjudication.
+  - `record-validation`'s existing-record dispatch is restructured default-deny: only a readable matching record (supersede) or true absence proceeds to the write; any other status refuses with the status named truthfully.
+  - the record write opens with `O_NOFOLLOW`, enforcing the no-symlink rule at the write itself rather than only at the pre-check. Deliberate side effect: any `open()` failure at the record path (not only a raced-in link) now refuses with the reason labeled (exit 2) instead of tracebacking (exit 1); nothing is written on any failure path.
+  - a hardlinked record (link count > 1) refuses before the write: the `O_TRUNC` supersede would rewrite the shared inode's bytes reachable outside the store, and `O_NOFOLLOW` cannot detect hardlinks. Read paths deliberately still classify a hardlinked record `ok` — shared-inode bytes are genuine store content, so a read cannot be aliased into lying; disclosed as a ridden design question.
+  - a non-regular file (FIFO, socket, directory) at a record path classifies `unreadable` and refuses instead of blocking at open — 1.5.1 hung indefinitely on a planted FIFO, worst under `land` where the hang held the integration lease.
+  - `discover` proves the store chain — `skill-worktree/` and `skill-worktree/validations/` — is real, non-symlink directories under the resolved git common dir before any verb proceeds (previously a symlinked validations root or store parent aliased every record path outside the store). Lease machinery is otherwise byte-untouched; the leases directory's own symlink handling is a disclosed open item.
+
+## 1.5.1 - 2026-07-17
+
+### Fixed
+
+- `worktree-task-cycle` helper repairs from the 2026-07-17 execution-fidelity review (four contract violations plus one recovery-routing defect; each pinned by a regression test proven red against the 1.5.0 helper before the fix):
+  - `land` can no longer report `RESULT: ok` while the integration lease remains: a cleanup failure — or a lease dir still present after cleanup — exits nonzero with the landed-but-unreleased state labeled (the ff-only merge that already completed is reported truthfully, never re-claimed as clean success).
+  - `record-validation` refuses an unreadable existing record (exit 2) instead of overwriting it; the unreadable bytes are preserved as adjudication evidence.
+  - `inspect` now enforces the `--base` pin the skill body already promised: a `--base` that does not match the primary checkout's live branch refuses instead of classifying satellite state (previously the same parked satellite read `PARKED` with the correct base and `PARKED-ORPHAN` with a wrong one, both exit 0).
+  - `land`'s integration-lease SELF re-entry requires the full scope match — satellite, branch, **and purpose**; a same-session lease with a different purpose refuses as DIFFERENT scope instead of admitting the merge.
+  - `inspect` maps an active task branch under a foreign or unverifiable lease to `STATE: LEASE-ORPHANED` (owner adjudication first), placed ahead of the containment split: it covers both the uncontained case (previously `COMMITTED-UNLANDED`, whose recovery route began with a lease-acquire guaranteed to refuse) and the contained crash-between-land-and-park case (previously `LANDED-UNPARKED`/`CONTAINED-UNPARKED`, whose park route was equally guaranteed to refuse).
+
+## 1.5.0 - 2026-07-17
+
+### Added
+
+- `worktree-task-cycle`: durable owner of the persistent-satellite task lifecycle (per `docs/specs/2026-07-16-skill-worktree-system.md` in the source repo) — activate a fresh task branch from the verified integration branch in a parked, locked satellite worktree; bind validation to the exact tip SHA; land fast-forward through the primary checkout; re-park with proofs; classify interrupted states from git facts. All guard machinery is single-sourced in the skill's `scripts/worktree_cycle.py` (stdlib-only Python): guarded verbs `inspect`, `lease-acquire`, `lease-release`, `activate`, `record-validation`, `land`, `park`, `delete-branch`; session-scoped cooperative leases with staged-atomic acquisition; ff-only merge of the validated SHA; fail-closed labeled output; destructive recovery is never auto-chosen.
+
+### Changed
+
+- `merge-branch`: routing boundary added — a source branch cut in a persistent, locked satellite worktree belongs to `worktree-task-cycle` where available (new Do-Not-Use bullet plus one sentence at the step-2 target-checked-out-elsewhere stop).
+- `exiting-worktrees`: routing boundary plus protective floor — a `locked` worktree with a parked-skill-workspace reason is never removed through this skill; description Do-not-use extended and a Pre-Exit Checklist step-1 stop added.
+- Plugin manifest description, longDescription, and defaultPrompt name the new satellite-lifecycle capability.
+
+## 1.4.2 - 2026-07-13
+
+### Changed
+
+- Conciseness campaign (2026-07-13 audit dispositions), obligation-preserving refactor. `exiting-worktrees`: each twice-stated edge case single-homed (no-op tool contract in Scope, native commands in the baseline section, branch survival at Exit Procedure step 3, one CWD rationale statement); Edge Cases table pruned 9 → 4 rows with an ownership note, every deleted row's command surviving at its named owning step (2,274 → 2,105 body words; no reference offload — duplication, not payload, was the driver). `gh-address-comments`: the never-push/resolve/re-review invariant single-homed in Boundaries with binding-site pointers. `pr-description` and `release-cut`: Boundaries compressed to one redirect line per sibling; `release-cut` keeps the cutting-is-not-deciding-readiness authority line. No trigger or protected-set changes; frontmatter untouched; `check-protected-set.sh` green. Publish deferred until explicitly authorized; the Codex cache stays at 1.4.1 (`--check` NOT-INSTALLED remains the expected state).
+
+## 1.4.1 - 2026-07-12
+
+### Removed
+
+- `exiting-worktrees`: removed the "Why This Skill Exists" rationale section from the skill body; the Pre-Exit Checklist carries the same obligations operationally. No behavior change.
+
 ## 1.4.0 - 2026-07-09
 
 ### Added

@@ -47,14 +47,14 @@ In scope: authoring a PR title and body from the diff, the intent, and the real 
 
 Out of scope — route instead:
 
-- responding to **existing** review comments on an open PR → `gh-address-comments` (local, no publish) or `gh-pr-review-loop` (`/gh-pr-review-loop` or `$gh-pr-review-loop`, the full publish lifecycle). This skill writes the body; those handle the review that follows.
-- landing a branch **without** a PR → `merge-branch`. Use this skill when you want a PR.
-- deciding whether the work is **done** and committing it → `closeout-check`, which also produces the verification record this skill consumes.
-- deriving a version bump, changelog, or release notes → `release-cut`; this skill writes the PR body, not the release.
-- authoring a tracker issue or PRD → `to-issues` / `to-prd` when available — a different artifact for a different reader.
-- reviewing a completed change against its spec → `review-family:implementation-review` when available, which *consumes* a PR description as an input it does not write.
+- responding to **existing** review comments on an open PR → `gh-address-comments` (local, no publish) or `gh-pr-review-loop` (`/gh-pr-review-loop` or `$gh-pr-review-loop`, the full publish lifecycle).
+- landing a branch **without** a PR → `merge-branch`.
+- deciding whether the work is **done** and committing it → `closeout-check`, whose verification record this skill consumes.
+- deriving a version bump, changelog, or release notes → `release-cut`.
+- authoring a tracker issue or PRD → `to-issues` / `to-prd` when available.
+- reviewing a completed change against its spec → `review-family:implementation-review` when available.
 
-The branch, commit, and push lifecycle stays with the normal git discipline (`merge-branch`, `closeout-check`, and the `gh-*` skills); publish nothing beyond the authorized PR open or update unless explicitly asked.
+The branch, commit, and push lifecycle stays with the normal git discipline; publish nothing beyond the authorized PR open or update unless explicitly asked.
 
 ## Output
 

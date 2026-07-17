@@ -26,6 +26,7 @@ Branch deletion is a separate cleanup step. Treat "merge and clean up", "delete 
 - The merge target is unclear after the preflight checks.
 - Pending changes include unrelated or ambiguous user work.
 - The source branch is checked out in another worktree.
+- The source branch was cut in a persistent, locked satellite worktree (a parked skill workspace). Where `worktree-task-cycle` is available, that lifecycle — including its landing — belongs to it.
 
 ## Procedure
 
@@ -70,7 +71,7 @@ If multiple candidates remain, ask the user which branch to merge into. Do not d
 
 Before merging, verify the target branch exists locally. If it does not, stop and report the missing branch rather than fetching or creating it unless the user explicitly asked for that.
 
-Also confirm the target branch is not checked out in another worktree (inspect the `git worktree list --porcelain` output from preflight). If it is, `git switch <target-branch>` in Step 4 will fail — stop now and report that the target is checked out elsewhere. Checking this before Step 3 means you do not commit work to the source branch only to discover you cannot land it.
+Also confirm the target branch is not checked out in another worktree (inspect the `git worktree list --porcelain` output from preflight). If it is, `git switch <target-branch>` in Step 4 will fail — stop now and report that the target is checked out elsewhere. Checking this before Step 3 means you do not commit work to the source branch only to discover you cannot land it. If the target is held by the repo's primary checkout and the source branch lives in a persistent, locked satellite worktree, this is the satellite lifecycle, not this fast path — route to `worktree-task-cycle` where available.
 
 For this fast path, require the target to be an ancestor of the source branch:
 

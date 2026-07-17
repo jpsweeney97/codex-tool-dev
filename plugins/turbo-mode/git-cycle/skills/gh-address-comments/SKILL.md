@@ -5,7 +5,7 @@ description: "Use when addressing review comments on a GitHub PR without authori
 
 # GH Address Comments
 
-Address review comments on an open GitHub PR without publish authority. Verify each thread against evidence, classify it, fix real issues locally, and draft evidence-backed replies — then stop at one local commit. This skill never pushes, resolves threads, or requests re-review; that authority belongs to `gh-pr-review-loop`.
+Address review comments on an open GitHub PR without publish authority. Verify each thread against evidence, classify it, fix real issues locally, and draft evidence-backed replies — then stop at one local commit; publish authority belongs to `gh-pr-review-loop`.
 
 ## Boundaries
 
@@ -80,7 +80,7 @@ When verification passes and no checkpoint applies:
 
 No-code-change path: when every thread classifies as `incorrect`, `already-addressed`, or strongly evidenced `not-reproducible`, skip the commit. The dispositions and drafted replies are the deliverable.
 
-To publish — push the commit, post the replies, resolve threads, and request re-review — hand off to `gh-pr-review-loop` (`/gh-pr-review-loop` or `$gh-pr-review-loop`), which owns that lifecycle.
+To publish — push the commit, post the replies, resolve threads, and request re-review — hand off to `gh-pr-review-loop` (invocation under Boundaries), which owns that lifecycle.
 
 ## Checkpoints
 
