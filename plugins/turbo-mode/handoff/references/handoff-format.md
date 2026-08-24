@@ -14,6 +14,10 @@ Filenames use:
 YYYY-MM-DD_HH-MM-SS_<slug>.md
 ```
 
+## Archiving
+
+Old handoffs may be moved by hand into `<handoffs-dir>/archive/` — flat, one named level; deeper nesting (for example `archive/2026/`) is invisible to `/throughline` and to the load staleness check. Archived handoffs stay searchable, remain throughline source material, and are loadable by explicit path. Archive rather than delete: deleting a source handoff also drops its condensed history from the next throughline rebuild. No skill performs the move.
+
 ## Frontmatter
 
 Recommended frontmatter:

@@ -23,7 +23,7 @@ One document per project:
 
 Project root resolution:
 
-1. Use `git rev-parse --show-toplevel` when the current directory is inside a git repository.
+1. Use the main working tree of the repository when the current directory is inside a git repository: the first path listed by `git worktree list`. This equals `git rev-parse --show-toplevel` except inside a linked worktree, where the main tree is used so all worktrees of one repository share one handoff location. If the first listed entry is a bare repository, use `git rev-parse --show-toplevel` instead.
 2. Otherwise use the current working directory.
 
 Frontmatter and section prompts live in `../../references/throughline-format.md`. The frontmatter coverage pair — `covers_through` (basename of the newest source handoff folded in) and `sources_folded` (total count of source files folded) — is the only machinery. It is a high-water mark of what was folded, not proof of complete coverage, and never truth: when it conflicts with the listed source set or live reality, rebuild rather than trust it.
@@ -47,7 +47,7 @@ Ordering: compare by the parsed timestamp portion of the basename, never raw str
 ## Refresh Behavior
 
 - **First run** (no `THROUGHLINE.md`): read the full source set, synthesize, write the document — creating `<project_root>/.agents/handoffs/` first if it does not exist (a legacy-only pile has sources but no primary directory). If the source set is empty, report plainly that no handoffs exist and write nothing.
-- **Subsequent runs**: read the existing document, then list the full source set — listing is cheap; reading is the cost. Check for drift: if the count of source files at or below `covers_through` does not match `sources_folded`, older files have appeared or vanished below the water line (restored archive, copied legacy handoffs, branch switch) — fall back to a full rebuild. Otherwise read only source handoffs newer than `covers_through`, then rewrite the whole document, folding in new material and compressing older material as needed. Rewrite, not append — that is what keeps the document concise forever.
+- **Subsequent runs**: read the existing document, then list the full source set — listing is cheap; reading is the cost. Check for drift: if the count of source files at or below `covers_through` does not match `sources_folded`, older files have appeared or vanished below the water line (restored archive, copied legacy handoffs, branch switch, deleted sources) — fall back to a full rebuild. When the count went down, sources have vanished and the rebuilt document will no longer represent their condensed history — the only remaining record if they were deleted rather than moved. Never absorb that silently: report the count delta with the drift line in the Reply section. Otherwise read only source handoffs newer than `covers_through`, then rewrite the whole document, folding in new material and compressing older material as needed. Rewrite, not append — that is what keeps the document concise forever.
 - **Recovery**: coverage frontmatter missing or malformed, document inconsistent with reality, or user asks for a rebuild → re-read the full source set and regenerate.
 - **Coverage honesty**: advance `covers_through` and `sources_folded` only over handoffs actually read in full. If the source set cannot be fully read (size, unreadable files), either fold a bounded batch or stop and report the blocked rebuild. A bounded batch folds the oldest unfolded sources first, so the coverage pair stays a true claim about everything at or below the water line. Never claim coverage past what was read.
 
@@ -70,10 +70,16 @@ Ordering: compare by the parsed timestamp portion of the basename, never raw str
 Throughline updated: <absolute path> (folded N handoffs, covers through <newest folded handoff>)
 ```
 
+When the rebuild was triggered by a source count that went down, append one drift line:
+
+```text
+Drift: sources below covers_through went from <old count> to <new count>; vanished sources are no longer represented.
+```
+
 For a bounded-batch fold, use the partial wording instead — never the normal reply:
 
 ```text
-Throughline updated (partial): <absolute path> — N of M sources folded; run /throughline again to continue
+Throughline updated (partial): <absolute path> — N of M sources folded; run /throughline (or $throughline) again to continue
 ```
 
 If creating the primary directory or writing `THROUGHLINE.md` fails, stop and report the write failure plainly; never use either updated reply for a write that did not complete.

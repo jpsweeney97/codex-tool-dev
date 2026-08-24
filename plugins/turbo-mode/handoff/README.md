@@ -20,10 +20,10 @@ Claude Code loads the same source in place as a skills-directory plugin via a sy
 
 | Skill | Purpose |
 | --- | --- |
-| `/save` | Writes a Markdown handoff with session context and project-arc context. |
-| `/load` | Reads a handoff as context, then checks live repository or working-directory state before recommending action. |
-| `/search` | Searches project handoffs with `rg`. Literal search is the default; regex is used only when requested. |
-| `/throughline` | Maintains `THROUGHLINE.md`, a rolling, regenerable condensation of the project's handoff pile: narrative, decisions that hold, abandoned paths, frontier. Never mutates handoffs. |
+| `/save` (`$save`) | Writes a Markdown handoff with session context and project-arc context. |
+| `/load` (`$load`) | Reads a handoff as context, then checks live repository or working-directory state before recommending action. |
+| `/search` (`$search`) | Searches project handoffs with `rg`. Literal search is the default; regex is used only when requested. |
+| `/throughline` (`$throughline`) | Maintains `THROUGHLINE.md`, a rolling, regenerable condensation of the project's handoff pile: narrative, decisions that hold, abandoned paths, frontier. Never mutates handoffs. |
 
 Handoff does not ship runtime modules, helper scripts, command hooks, validators, transaction state, chain state, archive-on-load behavior, or recovery protocols. The only derived document is the throughline: a rolling, regenerable arc summary that never mutates handoffs and is always rebuildable from them.
 
@@ -37,11 +37,11 @@ Primary storage is:
 <project_root>/.agents/handoffs/
 ```
 
-This directory is shared by Claude Code and Codex sessions. Legacy handoffs under `.claude/handoffs/` and `.codex/handoffs/` remain readable by `/load` and `/search` but are never written to.
+This directory is shared by Claude Code and Codex sessions. Legacy handoffs under `.claude/handoffs/` and `.codex/handoffs/` remain readable by `/load` and `/search`, are folded by `/throughline` as source material, and are never written to.
 
 Project root resolution:
 
-1. Use `git rev-parse --show-toplevel` when the current directory is inside a git repository.
+1. Use the main working tree of the repository when the current directory is inside a git repository: the first path listed by `git worktree list`. This equals `git rev-parse --show-toplevel` except inside a linked worktree, where the main tree is used so all worktrees of one repository share one handoff location. If the first listed entry is a bare repository, use `git rev-parse --show-toplevel` instead.
 2. Otherwise use the current working directory.
 
 Handoff filenames use:
@@ -54,11 +54,13 @@ Writes use direct path selection with no hidden state:
 
 1. Create `<project_root>/.agents/handoffs/` if needed.
 2. Choose the timestamp path.
-3. Write with an exclusive-create primitive.
+3. Write with an exclusive-create primitive when the runtime offers one; otherwise confirm the path does not exist immediately before writing.
 4. If the path exists, append `-2`, `-3`, and so on before `.md` until a free path is found.
 5. If the direct write fails for any other reason, stop and report the write failure plainly.
 
 The plugin does not add gitignore rules, stage files, commit files, auto-prune files, or manage cross-machine continuity. Whether `.agents/handoffs/` is tracked or ignored remains host-repository policy.
+
+Users may manually move old handoffs into `<project_root>/.agents/handoffs/archive/` to relieve a large pile — flat, one named level. Archived handoffs stay searchable, remain `/throughline` source material, and are loadable by explicit path. See `references/handoff-format.md`. No skill performs the move.
 
 ## Handoff Format
 

@@ -12,7 +12,7 @@ This skill never archives, moves, copies, edits, deletes, marks consumed, writes
 ## Use
 
 - Use for `/load` or `$load`, `/load <path>`, "continue from where we left off", or "pick up the latest handoff."
-- If no handoff exists, report that plainly. Suggest `/save` only if there is current context worth preserving.
+- If no handoff exists, report that plainly. Suggest `/save` (or `$save`) only if there is current context worth preserving.
 - If a provided path does not exist, report `Handoff not found at <path>` and stop.
 
 ## Selection
@@ -31,10 +31,14 @@ Default search scope for implicit `/load`:
 
 Project root resolution:
 
-1. Use `git rev-parse --show-toplevel` when the current directory is inside a git repository.
+1. Use the main working tree of the repository when the current directory is inside a git repository: the first path listed by `git worktree list`. This equals `git rev-parse --show-toplevel` except inside a linked worktree, where the main tree is used so all worktrees of one repository share one handoff location. If the first listed entry is a bare repository, use `git rev-parse --show-toplevel` instead.
 2. Otherwise use the current working directory.
 
-For implicit `/load`, first determine the current branch when inside a git repository. Then choose the newest handoff whose frontmatter `branch` matches the current branch when both values are available. If no branch-matching handoff exists, choose the newest handoff by filename timestamp. File modification time is an acceptable fallback if filenames do not sort usefully.
+For implicit `/load`, first determine the current branch when inside a git repository. Then choose the newest handoff whose frontmatter `branch` matches the current branch when both values are available. If no branch-matching handoff exists, choose the newest handoff overall.
+
+Newest means comparing the parsed timestamp portion of the basename, never raw string order; candidates are `YYYY-MM-DD_*`-shaped `.md` files. Among timestamp-tied names, prefer the highest collision suffix (`-2`, `-3` — written last), then file modification time. File modification time is also the fallback when filenames do not carry a usable timestamp.
+
+When the branch-matched selection is not the newest handoff overall, name the newer non-matching handoff and its branch in the `Reality check` section so the user can redirect with `/load <path>`.
 
 This is deterministic selection, not semantic ranking or an index.
 

@@ -1,6 +1,6 @@
 {
   "name": "handoff",
-  "version": "3.2.2",
+  "version": "3.3.0",
   "description": "Skill-only session continuity with Markdown handoffs",
   "author": {
     "name": "JP"

@@ -1,6 +1,6 @@
 ---
 name: save-handoff
-description: "Use when the user runs `/save` or `$save`, or asks to preserve useful session context for a future session, such as `wrap this up`, `new session`, `almost out of context`, `next session`, or `handoff`. Do not use for loading/resuming handoffs, ordinary file saves, final closeout/commits, publishing, or generic status summaries."
+description: "Use when the user runs `/save` or `$save`, or asks to preserve useful session context for a future session, such as `wrap up this session`, `new session`, `almost out of context`, `next session`, or `handoff`. Do not use for loading/resuming handoffs, ordinary file saves, final closeout/commits, publishing, or generic status summaries."
 ---
 
 # Save Handoff
@@ -34,7 +34,7 @@ This directory is shared by Claude Code and Codex sessions, so either runtime ca
 
 Project root resolution:
 
-1. Use `git rev-parse --show-toplevel` when the current directory is inside a git repository.
+1. Use the main working tree of the repository when the current directory is inside a git repository: the first path listed by `git worktree list`. This equals `git rev-parse --show-toplevel` except inside a linked worktree, where the main tree is used so all worktrees of one repository share one handoff location. If the first listed entry is a bare repository, use `git rev-parse --show-toplevel` instead.
 2. Otherwise use the current working directory.
 
 Handoff filenames use:
@@ -44,6 +44,8 @@ YYYY-MM-DD_HH-MM-SS_<slug>.md
 ```
 
 Use a short lowercase slug from the requested title or session topic. Replace spaces with hyphens and omit punctuation that is awkward in filenames.
+
+Users may manually move old handoffs into `<project_root>/.agents/handoffs/archive/` — flat, one named level — to relieve a large pile (see `../../references/handoff-format.md`). This skill never moves files.
 
 ## Direct Write Procedure
 
@@ -59,7 +61,7 @@ Use a short lowercase slug from the requested title or session topic. Replace sp
 Handoff saved: <absolute path>
 ```
 
-Optionally add one second line suggesting `/throughline` when `THROUGHLINE.md` is missing from the handoffs directory or clearly several handoffs behind. This is judgment, not a numeric threshold; when in doubt, omit the line. Never add more than one suggestion line.
+Optionally add one second line suggesting `/throughline` (or `$throughline`) when `THROUGHLINE.md` is missing from the handoffs directory or clearly several handoffs behind. This is judgment, not a numeric threshold; when in doubt, omit the line. Never add more than one suggestion line.
 
 Do not reproduce the full handoff in chat.
 
@@ -68,6 +70,6 @@ Do not reproduce the full handoff in chat.
 - Do not call plugin helper scripts.
 - Do not create transaction state, active-write reservations, chain state, consumed markers, content hashes, recovery metadata, or `.session-state` files.
 - Do not fall back to `docs/handoffs/`.
-- Do not write to the legacy `.claude/handoffs/` or `.codex/handoffs/` directories; those are read-only legacy locations for `load-handoff` and `search-handoffs`.
+- Do not write to the legacy `.claude/handoffs/` or `.codex/handoffs/` directories; those are read-only legacy locations, read by `load-handoff`, `search-handoffs`, and `throughline` (as source material).
 - Do not add gitignore rules, stage files, commit files, auto-prune files, or manage cross-machine continuity.
 - Whether `.agents/handoffs/` is tracked or ignored remains host-repository policy.
