@@ -4,6 +4,12 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.13.0 - 2026-08-27
+
+### Changed
+
+- `implementation-review` resolves its bounded-mode blocker conflict (gap review 2026-08-26, finding 2; decision D2, option 1 — qualify the severity, keep the precedence). The `blocker` severity is qualified: a requirement unverified only because bounded review mode omitted it from the reviewed subset carries `unverified` status (in the ledger and `Unverified Areas`), not a `blocker` finding — closing the route by which the unqualified clause manufactured blockers from omissions and reached `Blocked` around the verdict enum's deliberate "in a full review" qualification. The precedence line gains the carve-out — a `blocker` found in the reviewed slice of a bounded pass renders `Blocked`, scoped to the slice, and is never hidden behind an incomplete-pass label — and the Output Format bounded line and the bounded-mode section now defer to the precedence order instead of mandating `Partial review only` unconditionally, mirroring 0.12.0's D1 form in `scrutinize`. `examples/review-findings.md`'s Bounded Review Shape re-teaches both branches: omission-only renders blocker count 0 / `Partial review only` (it previously taught blocker count 1 under `Partial review only`, a state the precedence order forbids); a genuine in-slice blocker renders `Blocked` scoped to the slice. Minor, not patch: the verdict contract changed behavior. Forward-tested with two fresh `claude -p` trials against the new text: an in-slice blocker rendered `Blocked` scoped to the slice with the omissions explicitly not counted as blockers; an omission-only pass rendered `Partial review only` with blocker count 0.
+
 ## 0.12.0 - 2026-08-27
 
 ### Changed

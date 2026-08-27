@@ -139,7 +139,7 @@ Each finding records its type (`implementation`, `plan`, or `unverified`) and se
 
 Use bounded review mode when the spec, diff, or runtime surface is too large for one complete pass. In bounded mode, state the reviewed subset before findings, review the highest-risk surface first, mark omitted areas `unverified`, give the next slice needed for a complete review, and do not issue a full-clearance verdict for the full target (do not return `Ship` or a zero-findings verdict; here the omitted areas include requirements, files, flows, and runtime checks).
 
-When a target is too large for one pass, judge *why* before choosing the verdict. A coherent change that is merely large — reviewable in slices that each clear on their own — gets the highest-risk slice now and a `Partial review only` verdict naming the next slice. Reserve a `Split required` verdict (see Verdict Taxonomy) for a target that bundles genuinely independent concerns whose interleaving defeats reliable review as a unit — a diff mixing a refactor, a behavior change, and a migration, or one large only because several separable changes shipped together. Then decline full clearance and name the concrete seams that divide it into independently-reviewable units, each cut along a real boundary of concern, requirement, risk surface, or dependency layer — not an arbitrary size or file slice of one cohesive change. This judges shape, not a line count: a uniform codemod, a rename, or one cohesive feature is a single reviewable unit however large and stays `Partial review only`. Name seams only when you can find real ones; a too-large change you cannot cut along distinct concerns stays `Partial review only`.
+When a target is too large for one pass, judge *why* before choosing the verdict. A coherent change that is merely large — reviewable in slices that each clear on their own — gets the highest-risk slice now and a `Partial review only` verdict naming the next slice. Reserve a `Split required` verdict (see Verdict Taxonomy) for a target that bundles genuinely independent concerns whose interleaving defeats reliable review as a unit — a diff mixing a refactor, a behavior change, and a migration, or one large only because several separable changes shipped together. Then decline full clearance and name the concrete seams that divide it into independently-reviewable units, each cut along a real boundary of concern, requirement, risk surface, or dependency layer — not an arbitrary size or file slice of one cohesive change. This judges shape, not a line count: a uniform codemod, a rename, or one cohesive feature is a single reviewable unit however large and stays `Partial review only`. Name seams only when you can find real ones; a too-large change you cannot cut along distinct concerns stays `Partial review only`. Verdict choice in bounded mode follows the precedence order under Verdict Taxonomy.
 
 Bounded mode is not a shortcut to ignore inconvenient scope.
 
@@ -156,7 +156,7 @@ Never use intent, comments, naming, test existence, prior trust, or similar code
 
 Use only these severities:
 
-- `blocker`: violates a material requirement, creates security/data-loss/runtime failure, or leaves a material requirement unverified.
+- `blocker`: violates a material requirement, creates security/data-loss/runtime failure, or leaves a material requirement unverified — except a requirement unverified only because bounded review mode omitted it from the reviewed subset, which carries `unverified` status (in the ledger and `Unverified Areas`), not a `blocker` finding.
 - `should-fix`: violates a requirement or important plan constraint with bounded blast radius.
 - `note`: non-blocking issue that does not change the verdict but should be tracked.
 
@@ -171,7 +171,7 @@ Use only these verdicts:
 - `Split required`: the change bundles genuinely independent concerns whose interleaving defeats reliable review as a unit, and you named concrete split seams cut along real boundaries — concern, requirement, risk surface, or dependency layer — not size slices of one cohesive change. Distinct from `Partial review only` — that is a coherent target inspected incompletely this pass (the next slice continues the same review); `Split required` is a mis-shaped target where no clearance verdict is trustworthy until the author restructures it (split along the named seams, then re-review). Use only when you can name the seams; a merely-large but cohesive change stays `Partial review only`.
 - `Ship`: zero blockers; no material requirement is `violated` or `unverified`; the evidence gate and zero-findings gate pass; the strongest realistic counterexamples were attempted and documented; and verification gaps are either non-material or explicitly accepted as residual risk.
 
-If more than one verdict could apply, choose the first matching verdict in this order: `Blocked`, `Split required`, `Partial review only`, `Ship`.
+If more than one verdict could apply, choose the first matching verdict in this order: `Blocked`, `Split required`, `Partial review only`, `Ship` — a `blocker` found in the reviewed slice of a bounded pass renders `Blocked`, scoped to the slice, and is never hidden behind an incomplete-pass label.
 
 ## Output Format
 
@@ -190,7 +190,7 @@ Required sections:
 
 Each finding must include location, finding type (`implementation`, `plan`, or `unverified`), severity, spec expectation, observed behavior, evidence, consequence, and fix or investigation.
 
-If using bounded review mode, add `Bounded Review Scope` before `Findings` and use `Verdict: Partial review only` — or `Verdict: Split required` when the target is mis-shaped for review and you named the split seams.
+If using bounded review mode, add `Bounded Review Scope` before `Findings` and choose the verdict by the precedence order — `Verdict: Partial review only` unless an in-slice `blocker` renders `Blocked`, scoped to the reviewed slice, or the target is mis-shaped for review and you named the split seams (`Verdict: Split required`).
 
 Read [examples](examples/review-findings.md) only when you need a concrete findings-first template or examples of strong and weak findings.
 

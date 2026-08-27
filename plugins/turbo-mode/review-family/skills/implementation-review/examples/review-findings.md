@@ -25,23 +25,38 @@ Strong findings connect requirement, code, falsification, and consequence.
 
 ## Bounded Review Shape
 
+An omitted requirement carries `unverified` status, not a `blocker` finding: omission is what bounded mode means, and `Partial review only` already withholds clearance for it.
+
 ```markdown
 ### Bounded Review Scope
-Reviewed authentication requirements R1-R4 only.
+Reviewed authentication requirements R1-R4 only. Billing callbacks (plan steps 8-10) were not inspected.
 
 ### Findings
-1. [blocker] Billing callback requirements remain unverified
-   - Location: `billing/callbacks.py`
-   - Finding type: unverified
-   - Spec expectation: Billing plan steps 8-10 require idempotent callbacks.
-   - Observed behavior: This pass did not inspect billing callbacks.
-   - Evidence: Scope omitted `billing/callbacks.py`.
-   - Consequence: No ship verdict is justified for the full implementation.
-   - Fix: Review billing callbacks next.
+No findings (in the reviewed slice)
+
+### Requirements Ledger
+| ID | Requirement | Status | Spec source | Code evidence | Falsification attempt |
+|----|-------------|--------|-------------|---------------|-----------------------|
+| R8 | Billing callbacks are idempotent | unverified | Billing plan steps 8-10 | not inspected — outside the reviewed subset | none this pass |
+
+### Verdict
+- Blocker count: 0
+- Verdict: Partial review only
+- Next slice: billing callbacks (`billing/callbacks.py`)
+```
+
+A genuine in-slice `blocker` is the opposite case — precedence renders `Blocked`, scoped to the slice, never hidden behind the incomplete-pass label:
+
+```markdown
+### Bounded Review Scope
+Reviewed authentication requirements R1-R4 only. Billing callbacks (plan steps 8-10) were not inspected.
+
+### Findings
+1. [blocker] Expired tokens remain valid at the boundary (fields as in Finding Shape above)
 
 ### Verdict
 - Blocker count: 1
-- Verdict: Partial review only
+- Verdict: Blocked — scoped to the reviewed slice; billing callbacks remain `unverified`
 ```
 
 ## Split Required Shape
