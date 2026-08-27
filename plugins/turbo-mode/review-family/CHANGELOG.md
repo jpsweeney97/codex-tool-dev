@@ -4,6 +4,12 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.15.0 - 2026-08-27
+
+### Changed
+
+- `implementation-review` governs the re-reviews it mandates (gap review 2026-08-26, finding 5; decision D4, the report's lean). A new `Re-Review` section names the second passes the verdicts themselves create — `Blocked` → fix → second pass, `Split required` → restructure → re-review per split unit, or any requested second look — and fixes the cross-pass discipline: a re-review is a fresh evidence pass over the live artifact, not an audit of the fix description; claimed fixes are verified against the artifact and its diff; prior findings and ledger rows are hypotheses to re-earn, and a `satisfied` row carried forward keeps its status only after its code evidence is re-verified against the live artifact, reverting to `unverified` when the evidence no longer holds — closing the hole where a fix commit moves or invalidates the lines a pass-1 row cites while the spec-derived ledger looks complete either way; the pass hunts defects the fix introduced and credits what held. Evidence Gate item 2 defers to the section for carried-forward rows instead of restating it. Scoped per the report: no `scrutinize-skill` change (0.9.0's route to `behavior-smoke-test` stands) and no `system-design-review` change. Minor, not patch: the review contract changed behavior. Forward-tested with three fresh `claude -p` trials against the new text: a stale carried row whose cited lines a "tidy" fix commit had moved and broken was re-earned against the live artifact and flipped to `violated` (`Blocked`, blocker count 1); a clean-carry control kept `satisfied` only after re-earning it with a live evidence pointer (blocker count 0); the first control run's fixture carried an unintended defect, which the trial reviewer correctly caught by the same rule before the repaired fixture re-ran.
+
 ## 0.14.0 - 2026-08-27
 
 ### Changed

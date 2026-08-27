@@ -173,6 +173,14 @@ Use only these verdicts:
 
 If more than one verdict could apply, choose the first matching verdict in this order: `Blocked`, `Split required`, `Partial review only`, `Ship` — a `blocker` found in the reviewed slice of a bounded pass renders `Blocked`, scoped to the slice, and is never hidden behind an incomplete-pass label.
 
+## Re-Review
+
+The verdicts above create second passes — `Blocked` → fix → second pass, `Split required` → restructure → re-review per split unit — and a requested second look after fixes is the same shape. A re-review is a fresh evidence pass over the live artifact, not an audit of the fix description.
+
+- Verify claimed fixes against the live artifact and its diff, never against the description of them.
+- Treat prior findings and prior ledger rows as hypotheses to re-earn, not conclusions to defend. A `satisfied` row carried forward from an earlier pass keeps its status only after its code evidence is re-verified against the live artifact: a fix can move or invalidate the lines the row cites, and a spec-derived ledger looks complete either way. A carried-forward row whose evidence no longer holds reverts to `unverified` until re-earned.
+- Hunt for defects the fix introduced, not only compliance with the earlier findings; credit exactly what held.
+
 ## Output Format
 
 Return findings first, then evidence.
@@ -201,7 +209,7 @@ When a `note`, `should-fix`, or `blocker` finding should become a tracked issue 
 Do not issue a final verdict until every item passes. Each item names the section that owns it; the owning section's full rule governs:
 
 - [ ] Ledgers complete per step 1: every explicit requirement listed with a status, every changed file or flow accounted for
-- [ ] Every `satisfied` status carries the spec-plus-code evidence step 2's burden of proof demands
+- [ ] Every `satisfied` status carries the spec-plus-code evidence step 2's burden of proof demands — carried-forward rows re-earned against the live artifact per Re-Review
 - [ ] Every changed area records a falsification attempt — step 3's strongest failure story
 - [ ] Verification performed and not performed recorded per step 5
 - [ ] Every hidden dependency or unexecuted runtime assumption marked `unverified`
