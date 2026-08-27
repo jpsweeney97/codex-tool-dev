@@ -4,6 +4,14 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.12.0 - 2026-08-27
+
+### Changed
+
+- `scrutinize` resolves its bounded ordinary verdict (gap review 2026-08-26, finding 1; decision D1, option 1 — mirror `implementation-review`). `Partial review only` joins the ordinary enum at last, with its definition (bounded review mode was used: the reviewed subset was judged, the full target was not) and a precedence order — `Reject`, `Major revision`, `Partial review only`, `Minor revision`, `Defensible` — so a disqualifying finding in the reviewed slice renders its verdict, scoped to the slice, and is never hidden behind an incomplete-pass label; the readiness enum gains the matching precedence order (`Not Executable Yet`, `Patch Before Implementation`, `Partial Review Only`, `Ready to Execute`); the Output line's unconditional "write `Verdict: Partial review only`" becomes the carve-out form, and the bounded-mode guardrail points at the precedence orders instead of resolving the question a third way. This closes the suppression path where a Critical in-slice finding was relabeled as an incomplete pass — the review's 8/8 live trials showed the old text ordered exactly that. `references/review-format.md`'s verdict fence carries the fifth token. Minor, not patch: the verdict contract changed behavior. Forward-tested with two fresh `claude -p` trials against the new text: Critical-in-slice rendered `Reject` scoped to the slice; a Low-only bounded pass rendered `Partial review only`.
+- `scrutinize-skill` states the `Defensible` scope-and-expiry gloss inline (finding 6): a clearance verdict claims serious search was exhausted without a disqualifying find — it does not certify soundness, and it expires when the artifact changes. The skills load independently, so the definition must travel with the enum; previously only `scrutinize` carried it. `implementation-review`'s `Ship` stays exempt per refutation 11 — its target is snapshot-identified by construction.
+- `check-review-family.sh` (repo-side canary, not shipped in the plugin) gains a third CANON block asserting the shared expiry gloss across the two `Defensible` skills, and a within-skill check that every `###` heading `review-format.md`'s templates emit is declared in `scrutinize`'s `SKILL.md` — the drift class 0.11.1 repaired by hand. Verdict enums themselves stay per-skill by design and are not canonised; both new detectors were negative-tested (doctored gloss and bogus heading each fail the check).
+
 ## 0.11.1 - 2026-08-27
 
 ### Fixed

@@ -52,11 +52,11 @@ Emit the `Adversarial Perspectives` section only under the materiality gate in S
 [minimum bar before this is credible]
 
 ### Verdict
-`Reject` / `Major revision` / `Minor revision` / `Defensible`
+`Reject` / `Major revision` / `Minor revision` / `Defensible` / `Partial review only`
 [1-2 sentence synthesis]
 ```
 
-The verdict enum and severity scale restate the authoritative inline definition in SKILL.md (Workflow), which also governs verdict scope and the scoping-gloss form.
+The verdict enum and severity scale restate the authoritative inline definition in SKILL.md (Workflow), which also governs verdict precedence, verdict scope, and the scoping-gloss form.
 
 If the user asks for a shorter answer, keep the same section order and compress the content rather than dropping sections.
 
