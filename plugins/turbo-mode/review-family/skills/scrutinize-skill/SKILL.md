@@ -9,13 +9,12 @@ Review an agent skill as a behavior contract. Ask whether the skill will make th
 
 ## Review-Family Routing
 
-Explicit review-family invocation wins. The plugin-scoped form is `review-family:scrutinize-skill`; `/scrutinize-skill` or `$scrutinize-skill` is accepted shorthand when skill mentions are available in the current surface. When the review target is an agent skill or skill-support file, this skill also wins over generic `scrutinize`, even if the user used natural-language scrutiny wording.
+Explicit review-family invocation wins (`review-family:scrutinize-skill`; `/scrutinize-skill` or `$scrutinize-skill` where skill mentions are available). When the review target is an agent skill or skill-support file — a skill directory, `SKILL.md`, `agents/openai.yaml`, behavior-shaping reference, example, or proposed skill contract — this skill also wins over generic `scrutinize`, even under natural-language scrutiny wording.
 
-- Use this skill for adversarial review of an agent skill, skill directory, `SKILL.md`, `agents/openai.yaml`, behavior-shaping reference, example, or proposed skill contract. This skill wins over `scrutinize` for agent skill behavior-contract review.
-- Use `scrutinize` for broad natural-language adversarial artifact critique, formal stress tests, and execution-readiness reviews when this skill was not invoked.
-- Use `implementation-review` for completed code or artifacts against a plan/spec, and `system-design-review` for architecture or system-boundary review.
-- Use `review-reviewer` for supplied-review adjudication or pasted-claim checks.
-- If this skill is not the right review-family target, name the better skill and switch only when invocation rules allow it; otherwise ask one routing question.
+- Broad adversarial artifact critique, formal stress tests, or execution-readiness reviews where this skill was not invoked → `scrutinize`.
+- Completed code or artifacts against a plan/spec → `implementation-review`; architecture or system-boundary review → `system-design-review`.
+- Supplied-review adjudication or pasted-claim checks → `review-reviewer`.
+- Otherwise-wrong lane: name the better skill; if invocation rules bar switching, ask one routing question.
 
 ## Scope
 
@@ -96,6 +95,8 @@ If a required section has no concrete finding, write `None found` and move on; d
 Each finding must include a compact evidence pointer: file/line, command output, observed behavior, or `unverified` with the exact missing check. Do not make location-free findings when the target is file-backed.
 
 Findings are argued hypotheses until something independent of the arguing tests them; the recorded failures run both directions — raw findings over-claim under independent verification, and a review re-refuting its own finding has killed a real defect. Re-arguing, for a finding or against it, is not verification. Present `Required Changes` as what the findings warrant if they hold, and when one finding carries the verdict, prefer the cheapest disconfirming check over more argument.
+
+When the review's required changes have been applied and the open claim becomes "the changed contract is now followed," proving that is `behavior-smoke-test`'s job (`/behavior-smoke-test` or `$behavior-smoke-test` where available), not a re-review.
 
 Use `Bounded Review Scope` before `Target And Surface` when the target or skill set comparison is too large to inspect completely in one pass. In bounded mode, state the reviewed subset before findings, review the highest-risk surface first, mark omitted areas `unverified`, give the next slice needed for a complete review, and do not issue a full-clearance verdict for the full target (do not use `Defensible`).
 

@@ -4,6 +4,40 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.11.1 - 2026-08-27
+
+### Fixed
+
+- Documentation and metadata repairs from the 0.11.0 gap review (`docs/reviews/2026-08-26-review-family-gap-review.md` — five review dimensions over all twenty surfaces, one refute-default adversarial verifier per finding, 14 confirmed of 28). No skill behavior contract changed: both CANON cores, all five frontmatter descriptions, every verdict vocabulary, and `plugin.json`'s starter list are deliberately untouched. Four items. (1) README's `review-reviewer` Trigger cell now leads with the explicit-only invocation gate it was the sole surface omitting (finding 7); the Description cell at `:29` is left alone, because it makes no firing claim. (2) `PRIVACY.md` and `TERMS.md` de-Codexed at exactly the four defective mentions, with `plugins/git-cycle` as the neutral wording model (finding 8); `PRIVACY` para 1 and `TERMS` para 1 stay verbatim, because only Codex has a versioned install cache and neutralizing those would assert a falsehood. (3) `scrutinize`'s `references/review-format.md` Full Template now emits the nine section names `SKILL.md:80` declares, with the dropped scope moved into each bracketed gloss (finding 10) — single-sourcing hygiene against dual-maintenance staleness, not a routing fix, since nothing string-matches these headings. (4) `scrutinize-skill`'s `agents/openai.yaml` starter prompt gains its `$` token, the sole outlier among all 34 `default_prompt` values across the repo, and README's usage examples at `:50` and `:78` likewise (finding 11); `plugin.json`'s starter list is untouched, because four of its six entries are bare by design and only `review-reviewer`'s two carry a token — tracking that it is explicit-only and unreachable by natural language.
+
+### Removed
+
+- Four stray `.DS_Store` files from the source tree (plugin root, `skills/`, `skills/scrutinize/`, `skills/system-design-review/`). They were gitignored and untracked, so git history is unaffected, but `codex plugin add` had copied them into the install cache; this release's republish clears them from it.
+
+## 0.11.0 - 2026-07-18
+
+### Added
+
+- `review-reviewer` gains ownership of its own success, briefed by the methodology-and-philosophy critique at `docs/reviews/2026-07-18-review-reviewer-methodology-critique.md` (the arc's fourteenth hold, sixteenth treatment, on its second-largest corpus — ~150 fires across 145 sessions, seven venues, both runtimes; the critique found the stance, the three-lane evidence discipline, the packet, and the explicit-only boundary earning their keep, and the defect one meta-level up: the Review Judgment's knowledge-claim outruns its method, the packet authors its own authorization, and the discipline's observed boundary failures were unnamed). Six repairs, honesty and naming, no new machinery: (1) the Review Judgment scoped as a fact about this adjudication's bounded search at this snapshot — it expires when the target or review moves, and `reliable` does not certify that nothing was missed — with the label-follows-findings rule (a confirmed materially missed issue or a wrong load-bearing claim caps the review at `partially reliable`); (2) the packet owns its own fallibility — the adjudication is a single-pass argued judgment, and Missed Issues are bounded-hunt results, not exhaustive clearance; (3) Recommended Next Step written as the executable work order the record shows it becomes — carrying the Verification Gaps that gate action, with the honest no-action null blessed; (4) self-authorship named in the anchoring vocabulary — the fires' own invented disclosure ("the conflict runs deeper than anchoring") given residence, with declared extra skepticism on Missed-Issues absence claims; (5) the loop-momentum packet obligation — a token-present round in a multi-round adjudication loop still owes the selected packet, and skipping it deliberately must be said aloud; (6) the fires' convergent snapshot-coincidence check blessed as the commit-pinned non-PR default, canonical backticked-lowercase judgment labels, and empty Current Claim Check buckets stated rather than omitted. The frontmatter description, both CANON cores (read-only core byte-identical, `check-review-family.sh` green), packet order, verdict vocabularies, two-packet split, explicit-only boundary, and `agents/openai.yaml` are all deliberately unchanged. Validated by the structural ladder plus seven blind Sonnet proxy probes (one per changed instrument, plus the bucket rule): 7/7 quoted-clause passes — uptake evidence only; the expiry clause remains untested by proxy.
+
+## 0.10.0 - 2026-07-16
+
+### Added
+
+- `scrutinize` gains a continued-investment handoff on re-scrutiny: when a valid re-scrutiny finding opens a new structural repair class, mainly polices machinery earlier repairs added, or would change the target's category, the re-scrutiny paragraph now names `recheck-investment` (where available) as the next move before prescribing another hardening cycle — this review keeps owning whether the finding is real; that check owns only whether continued investment needs renewed human authorization. One sentence appended to the re-scrutiny paragraph; both CANON cores, routing frontmatter, verdict vocabulary, and every other organ unchanged. The seam is slice 2 of the `recheck-investment` caller integrations (the skill born from the cross-model slim-control retirement, that repo's ADR-0034), landed alongside the sibling `plan-panel-loop` seam and behavior-proven by a blind five-fixture proxy suite (machinery-policing re-scrutiny routes; an ordinary unfixed defect does not). This release is the authorized publish: the Codex cache moves 0.9.0 → 0.10.0, folding in 0.9.1's deferred conciseness campaign and clearing the standing expected `DRIFT`.
+
+## 0.9.1 - 2026-07-13
+
+### Changed
+
+- Conciseness campaign (2026-07-13 audit dispositions), obligation-preserving refactor. `implementation-review`: the nine surface-lens protocols move to `references/review-lenses.md` behind a mandatory load trigger at the attack step, leaving a one-line-per-lens index; Evidence Gate items now name and reference their owning sections instead of restating them, and the Ship gate points to Verdict Taxonomy for the `Ship` conditions (body 3,368 → 2,752 words). All five skills compress Review-Family Routing to a wins-statement plus one-line redirects (766 → 490 words family-wide; each deleted bullet's unique scope carried into its surviving home — `review-reviewer`'s packet-selection rule single-homed in Boundaries, gaining "stale"); `scrutinize`'s steelman handoff tightened. No trigger, verdict-vocabulary, CANON-core, or proof-discipline changes; frontmatter untouched; `check-review-family.sh` green. Publish deferred until explicitly authorized; the Codex cache stays at 0.9.0 and `codex-plugins-sync.sh --check` reporting DRIFT is the expected state.
+
+## 0.9.0 - 2026-07-12
+
+### Added
+
+- `scrutinize-skill` gains a post-review handoff exit: when a review's required changes have been applied and the open claim becomes "the changed contract is now followed," the Output section now routes proving that to `behavior-smoke-test` (`/behavior-smoke-test` or `$behavior-smoke-test` where available) instead of a re-review. One paragraph in the Output section, seeded as part of the skill-use composition data layer (design: `docs/plans/2026-07-11-skill-use-contract-design.md`, §2); both CANON cores, routing frontmatter, verdict vocabulary, and every other organ unchanged. Class-B publish (Codex republish, mirror) deferred until explicitly authorized; until then the Codex cache stays at 0.8.0 and `codex-plugins-sync.sh --check` reporting `NOT-INSTALLED: review-family@0.9.0` is the expected state.
+
 ## 0.8.0 - 2026-07-07
 
 ### Changed

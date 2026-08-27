@@ -13,19 +13,16 @@ Adjudicate another review without rubber-stamping it. Treat the supplied review 
 - Explicit-only: use this skill only when invoked as `/review-reviewer` or `$review-reviewer`. Do not silently route natural-language requests here while `agents/openai.yaml` has `allow_implicit_invocation: false`.
 - Required input: the supplied review, review claims, or pasted claims. Do not require the user to also provide a target path, PR, spec, or artifact; infer the target from the review, claims, and immediate conversation context when possible.
 - Non-trigger: ordinary critiques, first-pass reviews, implementation reviews, "scrutinize this", "be adversarial", "check whether this review is right" without `/review-reviewer` or `$review-reviewer`, basic claim extraction without evidence checking, or implementation follow-up without a supplied review or claim set to adjudicate.
-- Packet selection: use full review adjudication when the user asks whether a supplied review was reliable, complete, overreaching, underpowered, or historically correct. Use Current Claim Check when the user asks to check these claims, check review claims, or validate pasted claims item by item against current evidence before acting.
+- Packet selection: use full review adjudication when the user asks whether a supplied review was reliable, complete, overreaching, underpowered, stale, or historically correct. Use Current Claim Check when the user asks to check these claims, check review claims, or validate pasted claims item by item against current evidence before acting.
 - Default to read-only. You may inspect files, diffs, git metadata, PR metadata, docs, and run bounded non-mutating checks directly tied to the inferred target, a disputed claim, or a bounded independent or missed issue; do not edit files, stage, commit, push, delete, sync, publish, or implement fixes unless the user explicitly asks for that separate action; the same gate covers installing dependencies, creating tickets, and running broad test suites.
-- Stop after the selected review packet by default. Include terse dispositions and next actions, but do not continue into fixes.
+- Stop after the selected review packet by default. Include terse dispositions and next actions, but do not continue into fixes. In multi-round adjudication loops, a token-present round still owes the selected packet; skipping it deliberately must be said aloud, never silently merged into patching.
 
 ## Review-Family Routing
 
-Explicit review-family invocation wins, including namespaced plugin forms such as `review-family:review-reviewer`.
+Explicit review-family invocation wins, including namespaced plugin forms such as `review-family:review-reviewer`; this skill runs only when explicitly invoked, and Boundaries owns the explicit-only rule and packet selection.
 
-- Use this skill only when explicitly invoked to adjudicate a supplied review or to check pasted review claims against target evidence.
-- Run Current Claim Check instead of the full adjudication packet when the user asks to check these claims, check review claims, or validate pasted claims item by item against current repo, source, PR, doc, or runtime evidence before acting.
-- Run full review adjudication when the user asks whether the supplied review itself was reliable, complete, overreaching, underpowered, stale, historically correct, or missing issues.
-- Use `implementation-review` for completed code against a plan/spec, `scrutinize` for first-pass adversarial artifact critique, `system-design-review` for architecture tradeoffs, and `scrutinize-skill` for agent skill, `SKILL.md`, or skill-contract targets.
-- If the user asks in natural language whether a review is right without invoking this skill, do not silently run the full packet; answer normally or ask whether they want `/review-reviewer` or `$review-reviewer`.
+- Completed code against a plan/spec → `implementation-review`; first-pass adversarial artifact critique → `scrutinize`; architecture tradeoffs → `system-design-review`; agent skill or skill-contract target → `scrutinize-skill`.
+- A natural-language "is this review right?" without the invocation → do not silently run the full packet; answer normally or ask whether they want `/review-reviewer` or `$review-reviewer`.
 
 ## Full Review Adjudication Workflow
 
@@ -33,7 +30,7 @@ Explicit review-family invocation wins, including namespaced plugin forms such a
 2. Run a target-resolution prepass over the supplied review. Record locator facts only: file paths, PR numbers, review or comment URLs, branch names, commit SHAs, doc titles, issue IDs, quoted headings, artifact names, or explicit target descriptions. Put those locator facts in `Target Provenance` before writing any claim assessment. This is an anchoring mitigation, not a pristine blind read: the review has been seen, so independence must be shown through target-first evidence and recorded sequencing.
 3. Use immediate conversation context, attached files, current repo/branch, and explicitly mentioned PRs or paths only as locator evidence. If more than one plausible target remains, output `needs-target` rather than guessing.
 4. Resolve and read the inferred target fresh. For PR reviews, bounded context fetches are allowed when the review points to a PR, review, or comment: relevant PR metadata, diff hunks, review comments, thread resolution state, and commit SHAs needed for provenance. Do not broaden into full CI triage, full PR review, or implementation.
-5. Record target provenance, including multiple targets when present. For PRs, use a dual boundary when recoverable: the review snapshot for truth verdicts and the current PR head for disposition. If the original review snapshot is unavailable after available non-mutating recovery checks, historical truth claims cannot be `confirmed` or `challenged` from current state alone; mark them `unverified` and limit any current-state finding to disposition. Minimum PR recovery checks: review/comment URL or ID, review timestamp, cited commit SHA, PR head/base refs at review time, diff hunk or outdated-thread metadata, branch names, and local git history or PR metadata when available. Record which checks were attempted.
+5. Record target provenance, including multiple targets when present. For PRs, use a dual boundary when recoverable: the review snapshot for truth verdicts and the current PR head for disposition. If the original review snapshot is unavailable after available non-mutating recovery checks, historical truth claims cannot be `confirmed` or `challenged` from current state alone; mark them `unverified` and limit any current-state finding to disposition. Minimum PR recovery checks: review/comment URL or ID, review timestamp, cited commit SHA, PR head/base refs at review time, diff hunk or outdated-thread metadata, branch names, and local git history or PR metadata when available. Record which checks were attempted. For commit-pinned non-PR targets, verify and state that the review snapshot and the current snapshot coincide — so truth and disposition share one boundary — before issuing verdicts.
 6. Set a bounded review scope before the independent assessment. If the target is broad, inspect only the resolved target surface, locator-touched files or hunks, governing requirement sections, and directly adjacent failure modes. State the bound in `Target Provenance` and do not imply a complete target or PR review unless the inspected scope actually supports that.
 7. Form and write the independent assessment before adjudicating the review. Include independent issues or state `no independent issues found`, plus the basis read.
 8. Return to the review. Normalize compound review items into the smallest meaningful factual, severity, or remedy claims. Preserve the parent review item and assign stable IDs such as `R1`, `R1.a`, and `R1.b`.
@@ -74,7 +71,7 @@ Disposition uses the same five values defined in `Verdicts And Dispositions` bel
 - `needs-target`: target inference failed or found multiple plausible targets. List locator facts found and do not adjudicate evidence-dependent claims.
 - `missing-review`: no supplied review or claim text is present. Ask for the review or claims and stop instead of inferring them from previous discussion.
 - `target-inaccessible`: the target is identifiable but inaccessible. List the target locator and attempted read paths or checks. Only review-internal claims that can be settled from the supplied review text itself may receive a truth verdict. Target-dependent truth claims backed only by reviewer quotations stay `unverified`; the quote can identify the claim, but it is not artifact evidence.
-- `anchoring breach`: normal locator exposure is not a breach. If you evaluated, summarized, ranked, or adjudicated substantive review claims before reading the target, disclose this in `Target Provenance`, still perform the independent assessment, and lower confidence in any `Missed Issues` claim. Do not claim a fully fresh read.
+- `anchoring breach`: normal locator exposure is not a breach. If you evaluated, summarized, ranked, or adjudicated substantive review claims before reading the target, disclose this in `Target Provenance`, still perform the independent assessment, and lower confidence in any `Missed Issues` claim. Do not claim a fully fresh read. When the adjudicator authored the target or the review — this session or otherwise — the conflict runs deeper than anchoring: disclose the authorship, treat `Missed Issues` absence claims with declared extra skepticism, and rest independence on target-first re-derivation, probes, and external authority.
 - If target resolution or target access fails, `Review Judgment` must be `under-evidenced` for full review adjudication. Do not call the review reliable without independent target access. For Current Claim Check, list the target access failure in `Current Target Snapshot`, classify target-dependent claims `Unverified`, and put them in `Needs verification`.
 
 ## Evidence Rules
@@ -153,7 +150,7 @@ For each normalized claim:
 
 ### Missed Issues
 
-High-signal issues the supplied review missed, bounded to the inferred target(s) and inspected evidence lanes. Include evidence pointers, severity, and disposition. If none, say so.
+High-signal issues the supplied review missed, bounded to the inferred target(s) and inspected evidence lanes. Include evidence pointers, severity, and disposition. If none, say so. The adjudication is itself a single-pass argued judgment; Missed Issues are bounded-hunt results, not exhaustive clearance.
 
 ### Verification Gaps
 
@@ -161,7 +158,7 @@ Claims, evidence lanes, target snapshots, or authority docs that could not be se
 
 ### Review Judgment
 
-Use one label:
+Use one label, rendered exactly as written here — backticked lowercase:
 
 - `reliable`: mostly correct, well-calibrated, and materially complete for the inspected target and evidence lanes.
 - `partially reliable`: useful but mixed, incomplete, stale in places, or unevenly calibrated.
@@ -169,15 +166,15 @@ Use one label:
 - `underpowered`: misses important risks, lacks evidence, or avoids necessary verification.
 - `under-evidenced`: target resolution or access failed, or the evidence base is too thin for a reliability judgment.
 
-Add a short rationale covering framing, severity calibration, and coverage.
+Add a short rationale covering framing, severity calibration, and coverage. The judgment is a fact about this adjudication's bounded search at this snapshot, not a durable property of the review: it expires when the target or the review moves, and `reliable` does not certify that nothing was missed. The label follows the findings: a review with a confirmed materially missed issue or a wrong load-bearing claim is at most `partially reliable`.
 
 ### Recommended Next Step
 
-One concise next action. Do not provide a detailed implementation plan unless the user explicitly asks for follow-through.
+One concise next action, written as the executable work order it tends to become: the user often runs this line verbatim, so carry any Verification Gaps that must close before acting, and when no action is warranted say so plainly — `Do not patch based on this review now` is a legitimate recommendation. Do not provide a detailed implementation plan unless the user explicitly asks for follow-through.
 
 ## Current Claim Check Output
 
-Use this packet instead of `Full Review Adjudication Output` for Current Claim Check:
+Use this packet instead of `Full Review Adjudication Output` for Current Claim Check. State an empty action bucket as empty rather than omitting it (especially `Deferred`), and do not add buckets beyond the four below:
 
 ### Current Target Snapshot
 

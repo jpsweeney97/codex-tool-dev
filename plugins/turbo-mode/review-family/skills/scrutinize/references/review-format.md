@@ -39,17 +39,17 @@ Emit the `Adversarial Perspectives` section only under the materiality gate in S
 ### High-Risk Assumptions
 [validated, weak, or missing assumptions]
 
-### Real-World Breakpoints And Edge Cases
-[where this fails outside ideal conditions]
+### Real-World Breakpoints
+[where this fails outside ideal conditions, including edge cases]
 
-### Hidden Dependencies Or Bottlenecks
-[externalities, coordination risks, runtime dependencies]
+### Hidden Dependencies
+[externalities, coordination risks, runtime dependencies, bottlenecks]
 
 ### Patterns And Root Causes
 [shared causes or independent findings]
 
-### Required Changes Before This Is Credible
-[minimum bar]
+### Required Changes
+[minimum bar before this is credible]
 
 ### Verdict
 `Reject` / `Major revision` / `Minor revision` / `Defensible`

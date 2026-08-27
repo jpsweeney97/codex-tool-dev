@@ -35,7 +35,7 @@ No build step is required. The plugin ships skills only and has no runtime packa
 | Skill | Trigger | Purpose |
 |-------|---------|---------|
 | `implementation-review` | Completed implementation review against a plan, spec, PR, or known intended behavior | Compare implemented behavior to the stated contract and report ranked findings. |
-| `review-reviewer` | Supplied review, critique, audit, reviewer output, or pasted claims that need checking | Separate current truth from reviewer disposition and identify which findings or claims are valid, stale, or unproven. |
+| `review-reviewer` | Explicit `/review-reviewer` or `$review-reviewer` only — supplied review, critique, audit, reviewer output, or pasted claims that need checking | Separate current truth from reviewer disposition and identify which findings or claims are valid, stale, or unproven. |
 | `scrutinize` | "Scrutinize", "tear this apart", "be brutal", reject-until-proven review, formal stress test, or execution-readiness review for non-skill targets | Adversarially inspect a plan, design, argument, code change, or broad artifact without implementing fixes. |
 | `scrutinize-skill` | Adversarial review of an agent skill or proposed skill contract | Review whether the skill will guide agent behavior well once triggered, including UX, overlap, composability, and proof gaps. |
 | `system-design-review` | Architecture or system design review of docs, verbal designs, or codebase structure | Review design tradeoffs, defaults, interfaces, operations, and next probes. |
@@ -47,7 +47,7 @@ The plugin is intentionally review-only. These skills may recommend repairs, ver
 ### Review A Completed Implementation
 
 ```text
-Use implementation-review to check this branch against docs/plans/plan.md.
+Use $implementation-review to check this branch against docs/plans/plan.md.
 ```
 
 ### Challenge A Plan Before Work Starts
@@ -75,7 +75,7 @@ Use $scrutinize to run a formal stress test of this proposal, including an assum
 ### Review A Skill Contract
 
 ```text
-Use scrutinize-skill to review this skill as a behavior contract.
+Use $scrutinize-skill to review this skill as a behavior contract.
 ```
 
 ### Adjudicate A Pasted Review

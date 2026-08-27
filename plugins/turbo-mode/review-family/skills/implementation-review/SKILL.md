@@ -9,14 +9,12 @@ Review completed work against a plan or spec by trying to prove it wrong. Act as
 
 ## Review-Family Routing
 
-Explicit review-family invocation wins, including namespaced plugin forms such as `review-family:implementation-review`.
+Explicit review-family invocation (including namespaced forms such as `review-family:implementation-review`) wins. This skill wins — including over `scrutinize` — when the central question is whether completed code, generated artifacts, a PR, diff, or commit range satisfies its governing plan, spec, ticket, handoff, or explicit requirements:
 
-- Use this skill for completed code, generated artifacts, PRs, diffs, or commit ranges that claim to satisfy a plan, spec, ticket, handoff, or explicit requirements.
-- This skill wins over `scrutinize` when the central question is whether an implementation satisfies its governing requirements.
-- Use `system-design-review` for architecture tradeoffs before implementation and `scrutinize` for broad adversarial artifact critique or execution-readiness reviews before implementation.
-- Use `scrutinize-skill` when the target is an agent skill, skill directory, `SKILL.md`, `agents/openai.yaml`, skill reference, example, or proposed skill contract.
-- Use `review-reviewer` for explicit supplied-review adjudication or pasted-claim checks.
-- If this skill is not the right review-family target, name the better skill and switch only when invocation rules allow it; otherwise ask one routing question.
+- Architecture tradeoffs before implementation → `system-design-review`; broad adversarial critique or execution-readiness review before implementation → `scrutinize`.
+- Agent skill or skill-support target → `scrutinize-skill`.
+- Supplied-review adjudication or pasted-claim checks → `review-reviewer`.
+- Otherwise-wrong lane: name the better skill; if invocation rules bar switching, ask one routing question.
 
 ## Preconditions And Boundaries
 
@@ -93,21 +91,23 @@ Do not treat passing tests, naming, comments, or apparent intent as enough to ma
 
 ### 3. Attack Changed Areas
 
-For each changed area, check the base failure modes: input validation, control flow, state/concurrency, trust boundaries, operational behavior, and consistency with existing patterns. Then run these checks wherever the change touches them:
+For each changed area, check the base failure modes: input validation, control flow, state/concurrency, trust boundaries, operational behavior, and consistency with existing patterns.
 
-- Error suppression: empty or overly broad catches, errors logged then swallowed, and defaults or fallbacks that mask the underlying failure.
-- Test adequacy, where tests changed or new behavior needs them: missing negative cases, and tests coupled to implementation details rather than behavior. Judge adequacy by mutation rather than coverage: pick a plausible break in the changed logic that would change observable behavior — flip a boundary (`<`→`<=`), negate or drop a condition, alter a constant, return early, no-op a side effect — and ask whether some test would go red on it. A mutation that survives every test means the suite pins the code's presence, not its behavior, however high the line coverage; name the specific surviving mutation as the missing test.
-- Comment and docstring accuracy, where comments or docstrings changed or describe changed code: documented behavior the logic contradicts, references left stale by the change, and TODOs the change already resolved.
-- Resource caps, where a change parses, decompresses, fetches, or loops over attacker-influenced input: check that size, time, or count caps still guard the actual peak allocation. Report resource exhaustion only when the change defeats an existing cap — a cap on the wrong accumulator, a dead timeout, unclamped arithmetic, amplification at flush — not for volumetric load alone; the finding is the defeated cap, not the load.
-- Performance, where the change adds a query, network, or filesystem call inside a per-row loop, an unbounded fetch or materialization, or super-linear work on input that grows with load: name the input that makes it scale and the legitimate load that degrades it. Distinct from resource caps above — that is an attacker-defeated cap (exhaustion); this is a regression under ordinary load, so file a hit under one, not both. Raise it only when the path shows the cost is real, not for speculative micro-optimization.
-- SQL and data access, where the change builds or alters a query, ORM call, raw SQL, or schema migration: can attacker-influenced input reach the query as structure rather than a bound value (string-built fragments, interpolated identifiers, an ORM raw escape hatch)? does a new query sit in a per-row loop, or a migration lock a live table or commit partial writes on a mid-sequence error? A confirmed injection carries into the attacker/victim test below. This deepens the trust-boundary base mode; it is not a standing query-tuning audit.
-- Concurrency, where the change introduces or alters shared mutable state, a lock, async coordination, or a check-then-act sequence: can two interleavings corrupt state, act twice, deadlock, or drop an update — a non-atomic read-modify-write, an unheld or out-of-order lock, an invariant released across an `await`? Attack only the concurrency the diff introduces or disturbs; a standing shared-state audit with no diff is `tech-debt-scan`'s. This deepens the state/concurrency base mode.
-- Accessibility, where the change adds or alters rendered UI — markup, components, templates, interactive controls, focus, images, or color: do changed interactive elements carry an accessible name and keyboard operability, does non-text content carry a text alternative, and is state conveyed by more than color alone? Scope to the changed markup, not the unchanged page. Severity follows a stated accessibility requirement; absent one, an impactful barrier is `should-fix` at most.
-- Supply-chain provenance, where an agent-authored diff introduces a new external dependency — a package import or manifest/lockfile entry not already used in the repo (authorship is read off the request, the commit or PR author, or the governing handoff already recorded in scope; if unknown, run the cheap check anyway and state the assumption): the linter/CI exclusion below covers whether a dependency *resolves*, not whether it *belongs* — a typosquatted or hallucinated package resolves cleanly once declared, and its install-time code runs before any test. Stay silent for a dependency the spec calls for or the repo already uses. Otherwise raise a non-blocking `note` routed to `/triage` or `$triage` for human supply-chain confirmation — never a malice claim from unfamiliarity, never a verdict-gating `unverified`. Where a safe read-only probe is cheap (the registry's metadata API for the package's age and download count; edit-distance to a well-known package name), cite it and let the evidence set the severity: a new, low-reputation dependency whose name is a near-miss of a popular one — or diff-internal evidence of the package actually intended — is the model-as-attacker case below. Defer entirely where a supply-chain scanner is known to run in CI.
+Then run the surface lenses wherever the change touches their surfaces. Read [references/review-lenses.md](references/review-lenses.md) at this step, before running any lens — it carries each lens's full protocol, boundaries, and refutation guards; this index only names the lenses and their trigger surfaces:
+
+- `Error suppression`: empty or broad catches, swallowed errors, failure-masking defaults or fallbacks.
+- `Test adequacy`: tests changed or new behavior needs them — judged by a surviving mutation, not coverage.
+- `Comment and docstring accuracy`: comments or docstrings changed or describe changed code.
+- `Resource caps`: the change parses, decompresses, fetches, or loops over attacker-influenced input.
+- `Performance`: the change adds per-row I/O, an unbounded fetch or materialization, or super-linear work under ordinary load.
+- `SQL and data access`: the change builds or alters a query, ORM call, raw SQL, or schema migration.
+- `Concurrency`: the change introduces or alters shared mutable state, locks, async coordination, or check-then-act.
+- `Accessibility`: the change adds or alters rendered UI.
+- `Supply-chain provenance`: an agent-authored diff introduces a new external dependency.
 
 Record the strongest failure story checked for each area, even when it does not produce a finding.
 
-The surface lenses above add depth on the surfaces they name; they never replace the base failure-mode pass or the open hunt for the bespoke, business-logic, or auth-specific bug. A clean sweep of every triggered lens does not discharge a changed area — the strongest failure story for it may be one no lens names.
+The surface lenses add depth on the surfaces they name; they never replace the base failure-mode pass or the open hunt for the bespoke, business-logic, or auth-specific bug. A clean sweep of every triggered lens does not discharge a changed area — the strongest failure story for it may be one no lens names.
 
 Apply the evidence burden to findings, not only to compliance: raise a finding only when code evidence shows the failure is real. Do not raise findings for:
 
@@ -198,25 +198,18 @@ When a `note`, `should-fix`, or `blocker` finding should become a tracked issue 
 
 ## Evidence Gate
 
-Do not issue a final verdict until every item passes:
+Do not issue a final verdict until every item passes. Each item names the section that owns it; the owning section's full rule governs:
 
-- [ ] List every explicit requirement from the spec or plan in the Requirements Ledger
-- [ ] Account for every changed file or changed flow in the Changed-Area Ledger
-- [ ] Record a status for every requirement
-- [ ] Cite spec evidence and code evidence for every `satisfied` requirement
-- [ ] Record at least one falsification attempt for every changed area
-- [ ] Record verification performed and verification not performed
-- [ ] Mark every hidden dependency or unexecuted runtime assumption as `unverified`
-- [ ] Tie every implementation finding to a requirement or failure mode
-- [ ] Tie every plan finding to an ambiguity, unsafe instruction, or incomplete requirement
-- [ ] Use only `blocker`, `should-fix`, or `note` severity
-- [ ] State the blocker count, even if zero
+- [ ] Ledgers complete per step 1: every explicit requirement listed with a status, every changed file or flow accounted for
+- [ ] Every `satisfied` status carries the spec-plus-code evidence step 2's burden of proof demands
+- [ ] Every changed area records a falsification attempt — step 3's strongest failure story
+- [ ] Verification performed and not performed recorded per step 5
+- [ ] Every hidden dependency or unexecuted runtime assumption marked `unverified`
+- [ ] Every finding tied to its source: implementation findings to a requirement or failure mode, plan findings to a step-4 ambiguity, unsafe instruction, or incomplete requirement
+- [ ] Severity and blocker-count discipline hold per Evidence And Severity and Output Format: the three severities only, blocker count stated even if zero
 
-Apply this additional gate before returning `Ship` or a zero-findings full-clearance review — not a bounded `Partial review only` or `Split required` verdict, which carry the bounded-mode discipline instead:
+Apply this additional gate before returning `Ship` or a zero-findings full-clearance review — not a bounded `Partial review only` or `Split required` verdict, which carry the bounded-mode discipline instead. The `Ship` conditions themselves live in Verdict Taxonomy; verify them there, plus one check of the review prose itself:
 
-- [ ] No material requirement is `violated`
-- [ ] No material requirement is `unverified`
-- [ ] The strongest realistic counterexamples were attempted and documented
 - [ ] The review contains no reassurance language such as `looks good`, `seems fine`, or `probably correct`
 
 If any gate item fails, continue reviewing. Do not soften the verdict to compensate.

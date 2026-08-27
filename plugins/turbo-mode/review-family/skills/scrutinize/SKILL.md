@@ -9,16 +9,13 @@ Stance: reject until evidence earns a better verdict. Review the exact target; r
 
 ## Review-Family Routing
 
-Explicit review-family invocation wins, including namespaced plugin forms such as `review-family:scrutinize`.
+Explicit review-family invocation (including namespaced forms such as `review-family:scrutinize`) wins, but a generic invocation does not override target-type handoff to `scrutinize-skill`, `implementation-review`, or `system-design-review`. This skill wins natural-language adversarial requests — "scrutinize", "be brutal", "tear this apart", "reject until proven otherwise" — and execution-readiness reviews, when no narrower target-type lane applies:
 
-That generic invocation does not override target-type handoff: use `scrutinize-skill`, `implementation-review`, or `system-design-review` when the target belongs to one of those lanes.
-
-- Use this skill for natural-language adversarial review requests such as "scrutinize", "be brutal", "tear this apart", "assume this is wrong", or "reject until proven otherwise", and for execution-readiness reviews that ask whether a plan, spec, handoff, or artifact is ready to implement, when no narrower target-type skill applies.
-- Use `scrutinize-skill` when the target is an agent skill, skill directory, `SKILL.md`, `agents/openai.yaml`, skill reference, example, or proposed skill contract, even when the user says "scrutinize" instead of invoking `scrutinize-skill`.
-- Use `implementation-review` for completed code or artifacts against a plan/spec, even when the user asks for an adversarial implementation pass.
-- Use `system-design-review` for architecture tradeoffs, boundaries, data authority, reliability, ownership, and next probes.
-- Use `review-reviewer` for supplied-review adjudication and pasted-claim checks.
-- If this skill is not the right review-family target, name the better skill and switch only when invocation rules allow it; otherwise ask one routing question.
+- Agent skill or skill-support target → `scrutinize-skill`, even when the user said "scrutinize" (target shapes listed in the Workflow).
+- Completed code or artifact against a plan/spec → `implementation-review`, even for an adversarial implementation pass.
+- Architecture or system-design lens → `system-design-review`.
+- Supplied-review adjudication or pasted-claim checks → `review-reviewer`.
+- Otherwise-wrong lane: name the better skill; if invocation rules bar switching, ask one routing question.
 
 ## Workflow
 
@@ -34,7 +31,7 @@ That generic invocation does not override target-type handoff: use `scrutinize-s
 
 Normal scrutiny verdicts are exactly one of `Reject`, `Major revision`, `Minor revision`, or `Defensible`, with severity labels `Critical`, `High`, `Medium`, or `Low`; a canonical token may carry a scoping gloss ("Defensible, not yet optimal"). A verdict reports this pass's search, not a certified property of the artifact: `Defensible` and `Ready to Execute` claim serious search was exhausted without a disqualifying find — they do not certify soundness, and they expire when the artifact changes. When the target survives scrutiny, say why it survives, then focus on residual risks and failure scenarios; note strengths briefly only after exhausting serious attempts to find weaknesses. When the reviewer rather than the user chose the register — readiness vocabulary, a formal stress test, or declining one on a trigger-matching target — say so in a clause.
 
-On re-scrutiny of a revised target: re-read the live artifact fresh; verify claimed fixes against the artifact and its diff, never the description of them; treat prior findings as hypotheses to re-earn, not conclusions to defend; hunt for new defects, not only compliance with your own required changes; and credit exactly what held.
+On re-scrutiny of a revised target: re-read the live artifact fresh; verify claimed fixes against the artifact and its diff, never the description of them; treat prior findings as hypotheses to re-earn, not conclusions to defend; hunt for new defects, not only compliance with your own required changes; and credit exactly what held. When a valid re-scrutiny finding opens a new structural repair class, mainly polices machinery earlier repairs added, or would change the target's category, name `recheck-investment` (where available) as the next move before prescribing another hardening cycle: this review owns whether the finding is real; that check owns only whether continued investment needs renewed human authorization.
 
 ## Execution-Readiness Reviews
 
@@ -88,4 +85,4 @@ Use relevant lenses: plan logistics, writing evidence, code correctness/security
 
 When `Required Changes` or `Execution Readiness Verdict` blockers should become tracked issues rather than a chat-only review, name `/triage` or `$triage` as the lane to file them — one issue per finding, classified there — and stop; scrutinize stays review-only and does not open issues itself.
 
-When scrutiny rejects a *position, decision, or argument* — a contested stance, not a code or plan defect — that the user may still want to weigh, name `steelman` or `$steelman` as the advocacy counterpart: it builds the strongest honest case *for* the rejected position so the user can judge it before discarding. scrutinize attacks and never advocates, so it hands the case-building off rather than softening its own verdict.
+When scrutiny rejects a *position, decision, or argument* — a contested stance, not a code or plan defect — name `steelman` or `$steelman` to build the strongest honest case for it before the user discards it; scrutinize attacks and never advocates.
