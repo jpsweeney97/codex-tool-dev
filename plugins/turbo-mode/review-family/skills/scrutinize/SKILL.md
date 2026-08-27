@@ -1,6 +1,6 @@
 ---
 name: scrutinize
-description: "Use when the user explicitly asks for adversarial review, scrutiny, a formal stress test, or execution-readiness review of a plan, design, draft, argument, decision, code change, handoff, spec, or broad artifact. Do not use for agent skill targets, completed implementation-against-plan review, supplied-review adjudication, architecture-specific system design review, routine review, collaborative editing, or balanced feedback."
+description: "Use when the user explicitly asks for adversarial review, scrutiny, a formal stress test, or a pragmatic or execution-readiness review of a plan, design, draft, argument, decision, code change, handoff, spec, or broad artifact. Do not use for agent skill targets, completed implementation-against-plan review, supplied-review adjudication, architecture-specific system design review, routine review, collaborative editing, or balanced feedback."
 ---
 
 # Scrutinize

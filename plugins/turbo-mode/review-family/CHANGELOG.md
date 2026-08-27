@@ -4,6 +4,12 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.15.1 - 2026-08-27
+
+### Fixed
+
+- `scrutinize`'s description routes "pragmatic review" requests (gap review 2026-08-26, finding 9; decision D5, the report's lean). `pragmatic-review` was retired pre-0.2.0 with its replacement — `scrutinize`'s execution-readiness mode — documented only in README, a surface neither runtime reads at skill selection, and the review reproduced the gap: "Run a pragmatic review of this plan" fired no skill at all (2/2) while the execution-readiness control fired `scrutinize`. The description now reads "a pragmatic or execution-readiness review", bound so the phrase inherits the execution-readiness sense rather than reading as practical-and-proportionate feedback — the misroute the verifier flagged — with the existing "balanced feedback" non-use keeping that boundary; companion surfaces carry no pragmatic terms and are unchanged. Patch, not minor: routing wording for behavior the skill already had. Forward-tested twice: a pre-land routing proxy over the five family descriptions (pragmatic → `scrutinize`, execution-readiness control → `scrutinize`, proportionate-feedback → none), and the report's own single-variable test live post-land — "Run a pragmatic review of the plan in plan.md" fired `review-family:scrutinize` in 2/2 fresh `claude -p` sessions.
+
 ## 0.15.0 - 2026-08-27
 
 ### Changed
