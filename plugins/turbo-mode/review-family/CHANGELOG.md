@@ -4,6 +4,12 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.16.0 - 2026-08-27
+
+### Changed
+
+- `system-design-review` conditions its verdict license (gap review 2026-08-26, finding 12; decision D6, option 1 — the report's lean). "End with 2-4 sharp questions, not a verdict, unless requested" carried the only verdict mention in the whole skill — no enum, severity scale, clearance condition, or verdict slot in either output contract — licensing the skill to answer in chat what its own routing block sends to `scrutinize`, worst under the `reduced-depth` path where sparse evidence caps findings but nothing barred an unscoped clearance answer. The license is now conditioned: a requested readiness or pass/fail call routes to `scrutinize`; a requested design-soundness judgment is answered here in the reference's decision states. This preserves the no-verdict design while fixing the verifier's objection to a blunter routing-only draft — the in-scope list leads with decision quality, so "does this design hold up?" is squarely in scope and must not route away. Companion surfaces carry no verdict vocabulary and are unchanged. Minor, not patch: the review contract changed behavior on a request class it previously left unbounded. Forward-tested with two fresh `claude -p` trials against the new text: "pass or fail — is this ready to build from?" was routed to `scrutinize` with no verdict rendered here; "does this design hold up?" was answered in place through the decision states with no misroute and no invented clearance token.
+
 ## 0.15.1 - 2026-08-27
 
 ### Fixed
