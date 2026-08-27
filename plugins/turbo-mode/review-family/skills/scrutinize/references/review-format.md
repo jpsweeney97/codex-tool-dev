@@ -28,7 +28,7 @@ Emit the `Adversarial Perspectives` section only under the materiality gate in S
 ## Scrutiny: [target name]
 
 ### Target And Evidence
-[target, inspected sources, skipped material, proof class, runtime/current-state checks]
+[target and the anchor the verdict binds to (commit/version/date, or none determinable), inspected sources, skipped material, proof class, runtime/current-state checks]
 
 ### Premise Check
 [right problem?]

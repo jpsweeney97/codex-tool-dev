@@ -4,6 +4,13 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.14.0 - 2026-08-27
+
+### Changed
+
+- `scrutinize` and `scrutinize-skill` anchor their verdict expiry (gap review 2026-08-26, finding 4; decision D3). `Target And Evidence` and `Target And Surface` now require the anchor the verdict binds to — commit, version, or date, stated explicitly when none is determinable — the datum by which a later reader can tell whether the artifact has changed since a clearance verdict that "expires when the artifact changes" was rendered; previously the expiry was declared with no datum by which anyone could judge it. `scrutinize-skill` is included beyond the report's D3 lean because 0.12.0 canonised the same expiry gloss into it, creating the same anchorless-expiry defect there. `references/review-format.md`'s Target And Evidence template placeholder is aligned. Minor, not patch: the verdict contract changed behavior.
+- `review-reviewer` step 5 closes its unpinned non-PR hole (finding 4, second half): for a review naming no commit, version, or date, attempt snapshot recovery from available non-mutating evidence — git history, document version markers, and any anchor the review itself records — and if the snapshot stays unrecoverable, defer to the snapshot-unavailable rule in `Verdicts And Dispositions` (historical truth claims stay `unverified`; current evidence informs only the disposition) instead of leaving the case to inference. Forward-tested with two fresh `claude -p` trials against the new text: a git-target scrutiny recorded the commit anchor unprompted and a pasted memo stated none determinable; an unpinned non-PR claim rendered `unverified` with a current-state-only disposition.
+
 ## 0.13.0 - 2026-08-27
 
 ### Changed
