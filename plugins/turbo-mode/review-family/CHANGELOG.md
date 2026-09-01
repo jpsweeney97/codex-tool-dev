@@ -4,6 +4,12 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.17.0 - 2026-09-01
+
+### Changed
+
+- `implementation-review`'s surface lenses absorb the mining pass-2 fold set (skill-repo mining pass 2, 2026-09-01; work-order Stage E1). `references/review-lenses.md` gains two lenses and three extensions, each donor-verified and narrowed against first-party decisions: a retry-safety/idempotency lens (key derived from the intent, never regenerated per attempt; a reused key with a different body fails loudly; retention outlives the longest re-delivery path) that cross-references the Concurrency lens's check-then-act case for atomicity instead of restating it; an orphaned-code lens (a replaced path's now-unreferenced route, config key, component, or constant, reported as a non-blocking `note` routed to `/triage`) scoped to objects a linter cannot see, so `SKILL.md`'s linter/CI exclusion stands — that exclusion's parenthetical now names the boundary from its side too; Accessibility gains focus management (visible indicator, focus order matching visual order, no keyboard trap, modal trap-and-return) and the contrast numbers (4.5:1 normal text, 3:1 large text and UI components); Performance gains cache-key correctness (key includes every input the response varies on; nothing cached whose staleness is a correctness bug); SQL and data access gains index plan-evidence (plan captured before and re-checked after; estimated-versus-actual row count within an order of magnitude; revert an index that did not change the plan). Minor, not patch: new lens capability. Forward-tested with two fresh `claude -p` trials against the new text: a viewer-less cache key was rendered `Blocked` with the cross-user data story as the blocker, and a replace-an-endpoint fixture surfaced the stranded legacy constant and handler while explicitly excluding a planted unused import "by rule, not by judgment" — the lint exclusion the orphan lens is narrowed to preserve.
+
 ## 0.16.0 - 2026-08-27
 
 ### Changed

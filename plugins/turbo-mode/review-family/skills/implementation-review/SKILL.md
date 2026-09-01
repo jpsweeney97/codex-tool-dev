@@ -112,7 +112,7 @@ The surface lenses add depth on the surfaces they name; they never replace the b
 Apply the evidence burden to findings, not only to compliance: raise a finding only when code evidence shows the failure is real. Do not raise findings for:
 
 - Code that superficially resembles a bug but is correct on inspection — confirm the failure actually occurs before flagging it.
-- Issues a linter, typechecker, compiler, or CI run would catch — missing or wrong imports, type errors, formatting — unless a requirement explicitly demands them. Assume those checks run separately; do not reproduce them here. (Whether a *new, agent-introduced* dependency belongs at all — distinct from whether it resolves — is the supply-chain provenance check above, not this exclusion.)
+- Issues a linter, typechecker, compiler, or CI run would catch — missing or wrong imports, type errors, formatting — unless a requirement explicitly demands them. Assume those checks run separately; do not reproduce them here. (Whether a *new, agent-introduced* dependency belongs at all — distinct from whether it resolves — is the supply-chain provenance check above, not this exclusion. A replaced code path's now-unreferenced route, config key, component, or constant — objects lint cannot see — is the orphaned-code lens, likewise not this exclusion.)
 - Repo-instruction violations explicitly silenced in the code, such as a lint-ignore comment that names the rule.
 
 For a security-relevant finding, name the attacker who controls the input and the victim who is harmed:
