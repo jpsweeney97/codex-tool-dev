@@ -1,10 +1,11 @@
 # Git Cycle
 
-Get local work safely from a dirty working tree to merged-and-shared. Ten skills covering one arc:
+Get local work safely from a dirty working tree to merged-and-shared. Eleven skills covering one arc:
 
 - `git-hygiene` — audit and clean local git state; shape commits by concern; prune branches.
 - `closeout-check` — decide whether work is truly done and create the final local commit.
 - `merge-branch` — fast-forward-land a completed branch into a verified target, locally.
+- `land` — on the user's explicit instruction to land, push, or ship, run the whole post-endorsement ritual as one authorized sequence: commit what is in scope, merge or push, save a handoff, refresh the throughline; any constituent skill's stop is the answer.
 - `resolve-conflicts` — faithfully resolve the conflicts an in-progress merge, rebase, cherry-pick, or revert has left, then finish the operation.
 - `exiting-worktrees` — verify work landed, then remove the worktree safely (native `git worktree`, with Claude Code's `ExitWorktree` as an optimization).
 - `worktree-task-cycle` — work a task through its full lifecycle in a persistent, locked satellite worktree, including landing into the primary checkout.

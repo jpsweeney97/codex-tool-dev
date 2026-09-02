@@ -15,7 +15,9 @@ One task through one persistent satellite: activate a fresh branch from the veri
 
 ## The helper
 
-All guard machinery is single-sourced in `scripts/worktree_cycle.py` in this skill's own directory — invoke it by its full installed path. It prints labeled lines (`FACT:` / `PROOF:` / `POLICY:` / `STATE:` / `REFUSE:`, closing `RESULT: ok|refused`); branch on those, not on prose. Exit 0 = verb completed with all proofs green; exit 2 = refusal with the reason labeled; exit 1 = unexpected error. Do not re-implement or approximate any guard in shell; if the helper refuses, the refusal is the answer — never improvise around it.
+All guard machinery is single-sourced in `scripts/worktree_cycle.py` in this skill's own directory — invoke it by its full installed path. It prints labeled lines (`FACT:` / `PROOF:` / `POLICY:` / `STATE:` / `REFUSE:`, closing `RESULT: ok|refused`); branch on those, not on prose. `inspect` additionally emits three pinned machine facts for the repo-owned fleet controller: `FACT: lock=canonical|noncanonical|absent`, `FACT: lease=absent|self|foreign|unreadable|scope-mismatch`, and `FACT: lease-purpose=none|task|fleet|unknown`. Exit 0 = verb completed with all proofs green; exit 2 = refusal with the reason labeled; exit 1 = unexpected error. Do not re-implement or approximate any guard in shell; if the helper refuses, the refusal is the answer — never improvise around it.
+
+The helper also owns `fleet-lease-acquire` and `fleet-lease-release`, the identity-scoped serialization primitives used by a repository's fleet controller. They write and verify the same lease store without exposing `owner.json` to the caller; release refuses and retains the lease unless the identity is provably healthy, decommissioned, or bare. They do not create, repair, retire, or otherwise mutate a worktree, so the creation/retirement routing boundary below is unchanged.
 
 ## Attended, top-level sessions only
 

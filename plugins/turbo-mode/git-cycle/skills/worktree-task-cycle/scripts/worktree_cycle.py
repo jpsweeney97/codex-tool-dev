@@ -12,6 +12,14 @@ Output contract (the calling agent branches on labeled lines, not prose):
 proofs green; 2 = refusal or hard stop (labeled reason on stdout); 1 =
 unexpected error.
 
+`inspect` also emits pinned machine facts for fleet callers:
+`FACT: lock=canonical|noncanonical|absent`,
+`FACT: lease=absent|self|foreign|unreadable|scope-mismatch`, and
+`FACT: lease-purpose=none|task|fleet|unknown`. The helper-owned
+`fleet-lease-acquire` / `fleet-lease-release` verbs serialize repo-owned fleet
+mutations without teaching callers the owner-record schema; release succeeds
+only from a verified healthy, decommissioned, or bare terminal.
+
 This script never performs: breaking a foreign lease, `branch -D`,
 `worktree remove`, any force flag, push/publish, orphan adoption or
 discard. It prints facts and refuses; user-authorized destructive
@@ -25,6 +33,7 @@ import json
 import os
 import re
 import socket
+import stat
 import subprocess
 import sys
 import uuid
@@ -333,6 +342,14 @@ class TreeState:
         return "report-and-record: " + ", ".join(sorted(self.reported_ignored)[:20])
 
 
+@dataclass(frozen=True)
+class InspectResult:
+    """One helper-owned lifecycle classification and any hard-stop reason."""
+
+    state: str
+    refusal: Optional[str] = None
+
+
 def classify_tree(sat: Path) -> TreeState:
     status = git_must("status", "--porcelain", cwd=sat, what="status probe")
     porcelain = [line for line in status.splitlines() if line]
@@ -451,7 +468,11 @@ def owner_summary(owner: "Optional[dict]") -> str:
 
 
 def owner_payload(
-    session: str, runtime: str, purpose: str, worktree: str, branch: str
+    session: str,
+    runtime: str,
+    purpose: str,
+    worktree: str,
+    branch: Optional[str],
 ) -> dict:
     pid = os.getpid()
     ps = subprocess.run(
@@ -472,6 +493,47 @@ def owner_payload(
     }
 
 
+def validate_fleet_identity(identity: str) -> None:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", identity):
+        refuse(
+            "fleet identity must be one safe path segment containing only letters, "
+            f"digits, dot, underscore, or hyphen. Got: {identity!r:.100}"
+        )
+
+
+def absolute_without_final_resolution(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def path_kind(path: Path) -> str:
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        return "absent"
+    if stat.S_ISLNK(mode):
+        return "symlink"
+    if stat.S_ISDIR(mode):
+        return "directory"
+    return "other"
+
+
+def fleet_fingerprint(topo: Topology, identity: str, expected_path: Path) -> dict:
+    matches = [wt for wt in topo.worktrees[1:] if wt.path.name == identity]
+    return {
+        "path_kind": path_kind(expected_path),
+        "registered_paths": [str(wt.path) for wt in matches],
+        "lock": [
+            {
+                "path": str(wt.path),
+                "locked": wt.locked,
+                "reason": wt.lock_reason,
+                "head": wt.head or None,
+            }
+            for wt in matches
+        ],
+    }
+
+
 def classify_owner(owner: dict, session: str, runtime: str) -> str:
     if owner.get("session_id") == session and owner.get("runtime") == runtime:
         return "SELF"
@@ -479,7 +541,7 @@ def classify_owner(owner: dict, session: str, runtime: str) -> str:
 
 
 def scope_matches(
-    owner: dict, *, worktree: str, branch: str, purpose: Optional[str]
+    owner: dict, *, worktree: str, branch: Optional[str], purpose: Optional[str]
 ) -> bool:
     if owner.get("worktree") != worktree or owner.get("branch") != branch:
         return False
@@ -550,6 +612,10 @@ def require_self_wt_lease(
     if classify_owner(owner, session, runtime) != "SELF":
         refuse(
             f"worktree lease for {identity!r} is FOREIGN: {owner_summary(owner)}; fail closed"
+        )
+    if isinstance(owner.get("purpose"), str) and owner["purpose"].startswith("fleet:"):
+        refuse(
+            f"worktree lease for {identity!r} is fleet-purposed; task verbs never consume or release it"
         )
     if owner.get("worktree") != identity or owner.get("branch") != branch:
         refuse(
@@ -657,7 +723,14 @@ def upstream_read(topo: Topology, base: str) -> None:
 # ---------------------------------------------------------------- verbs
 
 
-def cmd_inspect(args: argparse.Namespace) -> int:
+def _inspect(args: argparse.Namespace, *, emit_state: bool = True) -> InspectResult:
+    """Emit current facts and return the canonical helper lifecycle state."""
+
+    def result(state: str, refusal: Optional[str] = None) -> InspectResult:
+        if emit_state:
+            say("STATE", state)
+        return InspectResult(state, refusal)
+
     topo = discover(Path(args.anchor))
     base: str = args.base
     pin_base(topo, base)
@@ -708,14 +781,21 @@ def cmd_inspect(args: argparse.Namespace) -> int:
                     f"ORPHAN validation record {record.name}: branch {data['branch']!r} no longer "
                     "exists (cleanup via delete-branch's guarded absent-branch path)"
                 )
-        say("STATE", "PRIMARY")
-        return finish_ok()
+        return result("PRIMARY")
 
     sat = target.path
     identity = sat.name
     fact(
         f"satellite {identity!r} at {sat} locked={target.locked} reason={target.lock_reason!r}"
     )
+    lock_class = (
+        "absent"
+        if not target.locked
+        else "canonical"
+        if target.lock_reason == CANONICAL_LOCK_REASON
+        else "noncanonical"
+    )
+    fact(f"lock={lock_class}")
     if not target.locked or target.lock_reason != CANONICAL_LOCK_REASON:
         policy(
             "lock is missing or non-canonical; mutating verbs will refuse this worktree"
@@ -744,7 +824,17 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     lease = lease_dir_for(topo, identity)
     lease_status, owner = read_owner(lease)
     lease_class = "absent"
+    lease_token = "absent"
+    lease_purpose = "none"
     if lease_status != "absent":
+        purpose_value = owner.get("purpose") if owner is not None else None
+        lease_purpose = (
+            "fleet"
+            if isinstance(purpose_value, str) and purpose_value.startswith("fleet:")
+            else "task"
+            if isinstance(purpose_value, str) and purpose_value
+            else "unknown"
+        )
         if ident is not None and owner is not None:
             lease_class = classify_owner(owner, ident[0], ident[1])
             if lease_class == "SELF" and branch is not None:
@@ -754,9 +844,23 @@ def cmd_inspect(args: argparse.Namespace) -> int:
                     lease_class = "SELF-SCOPE-MISMATCH"
         else:
             lease_class = f"present ({lease_status})"
+        if lease_status != "ok" or owner is None:
+            lease_token = "unreadable"
+        elif ident is None or classify_owner(owner, ident[0], ident[1]) == "FOREIGN":
+            lease_token = "foreign"
+        elif (
+            owner.get("worktree") != identity
+            or (branch is not None and owner.get("branch") != branch)
+            or (lease_purpose == "fleet" and owner.get("branch") is not None)
+        ):
+            lease_token = "scope-mismatch"
+        else:
+            lease_token = "self"
         fact(f"lease wt-{identity}.lease: {lease_class} — {owner_summary(owner)}")
     else:
         fact(f"lease wt-{identity}.lease: absent")
+    fact(f"lease={lease_token}")
+    fact(f"lease-purpose={lease_purpose}")
 
     rec_status: str = "absent"
     rec: Optional[dict] = None
@@ -774,29 +878,28 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         )
 
     if markers:
-        say("STATE", "ACTIVE-CONFLICT")
-        return finish_ok()
+        return result("ACTIVE-CONFLICT")
     if branch is None:
         if not tree.clean:
-            refuse(
+            return result(
+                "UNMAPPABLE",
                 "detached with a dirty tree maps to no lifecycle state; hard stop — "
                 "surface the facts above to the user",
-                state="UNMAPPABLE",
             )
         if not contained:
-            say("STATE", "PARKED-ORPHAN")
+            inspection = result("PARKED-ORPHAN")
             policy(
                 f"surface `git log {base}..HEAD` to the user; adopt / rescue ref / explicit discard are user calls"
             )
-            return finish_ok()
+            return inspection
         if lease_status != "absent" and lease_class != "SELF":
-            say("STATE", "LEASE-ORPHANED")
+            inspection = result("LEASE-ORPHANED")
             policy(
                 "lease present but not verified SELF (foreign, unreadable, or owner "
                 "unknown without session identity); surface the owner facts — only the "
                 "user may authorize the break"
             )
-            return finish_ok()
+            return inspection
         for record in sorted(topo.validations.glob("*.json")):
             status, data = load_record(record)
             if status != "ok" or data is None:
@@ -809,29 +912,28 @@ def cmd_inspect(args: argparse.Namespace) -> int:
                 cwd=topo.primary.path,
             )
             if code == 0 and is_ancestor(data["branch"], base, cwd=topo.primary.path):
-                say("STATE", "PARKED-UNDELETED")
+                inspection = result("PARKED-UNDELETED")
                 fact(f"merged task branch still exists: {data['branch']!r}")
-                return finish_ok()
-        say("STATE", "PARKED")
-        return finish_ok()
+                return inspection
+        return result("PARKED")
 
     if not tree.clean:
-        say("STATE", "IN-FLIGHT")
+        inspection = result("IN-FLIGHT")
         policy(
             "uncommitted work present; never route a dirty tree to park or delete — adjudicate with the user"
         )
-        return finish_ok()
+        return inspection
     if lease_status != "absent" and lease_class not in ("SELF", "SELF-SCOPE-MISMATCH"):
         # ahead of the containment split: every route out of an active branch
         # needs the worktree lease, so a lease this session cannot verify as its
         # own is the dominant fact — owner adjudication comes first
-        say("STATE", "LEASE-ORPHANED")
+        inspection = result("LEASE-ORPHANED")
         policy(
             "lease present but not verified SELF (foreign, unreadable, or owner "
             "unknown without session identity); surface the owner facts — only the "
             "user may authorize the break"
         )
-        return finish_ok()
+        return inspection
     if contained:
         rec_proves = (
             rec_status == "ok"
@@ -841,16 +943,16 @@ def cmd_inspect(args: argparse.Namespace) -> int:
             and is_ancestor(str(rec.get("validated_tip")), base, cwd=sat)
         )
         if rec_proves:
-            say("STATE", "LANDED-UNPARKED")
+            return result("LANDED-UNPARKED")
         else:
-            say("STATE", "CONTAINED-UNPARKED")
+            inspection = result("CONTAINED-UNPARKED")
             policy(
                 "provenance unproven: the branch is contained in the base but no matching "
                 "validation record proves a landing — it may be freshly activated or landed "
                 "with its record gone; both are loss-free to park + `-d`, but state the "
                 "ambiguity to the user before parking"
             )
-        return finish_ok()
+            return inspection
     rec_valid = (
         rec_status == "ok"
         and rec is not None
@@ -858,13 +960,18 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         and rec.get("validated_tip") == sha
     )
     if not rec_valid:
-        say("STATE", "READY-INVALID")
-        return finish_ok()
+        return result("READY-INVALID")
     if lease_class == "SELF":
-        say("STATE", "READY")
-        return finish_ok()
-    say("STATE", "COMMITTED-UNLANDED")
+        return result("READY")
+    inspection = result("COMMITTED-UNLANDED")
     fact(f"lease state at interruption: {lease_class}")
+    return inspection
+
+
+def cmd_inspect(args: argparse.Namespace) -> int:
+    inspection = _inspect(args)
+    if inspection.refusal is not None:
+        refuse(inspection.refusal)
     return finish_ok()
 
 
@@ -885,6 +992,142 @@ def cmd_lease_acquire(args: argparse.Namespace) -> int:
     return finish_ok()
 
 
+def cmd_fleet_lease_acquire(args: argparse.Namespace) -> int:
+    session, runtime = session_identity()
+    topo = discover(Path(args.anchor))
+    anchor = find_worktree(topo, Path(args.anchor))
+    if anchor is None or anchor.path != topo.primary.path:
+        refuse("fleet lease verbs must be anchored at the primary checkout")
+    identity = args.identity
+    validate_fleet_identity(identity)
+    purpose = args.purpose
+    if not purpose.startswith("fleet:") or purpose == "fleet:":
+        refuse(
+            f"fleet lease purpose must start with 'fleet:' and name an operation. Got: {purpose!r:.100}"
+        )
+    expected_path = absolute_without_final_resolution(Path(args.path))
+    lease = lease_dir_for(topo, identity)
+    existing_status, existing_owner = read_owner(lease)
+    if (
+        existing_status == "ok"
+        and existing_owner is not None
+        and classify_owner(existing_owner, session, runtime) == "SELF"
+        and scope_matches(
+            existing_owner,
+            worktree=identity,
+            branch=None,
+            purpose=purpose,
+        )
+        and existing_owner.get("expected_path") != str(expected_path)
+    ):
+        refuse(
+            "fleet lease is held by this session but with a DIFFERENT scope: "
+            f"expected-path {existing_owner.get('expected_path')!r} != {str(expected_path)!r}"
+        )
+    payload = owner_payload(session, runtime, purpose, identity, None)
+    payload["expected_path"] = str(expected_path)
+    payload["fingerprint"] = fleet_fingerprint(topo, identity, expected_path)
+    outcome = acquire_lease(
+        topo,
+        lease,
+        payload,
+        session,
+        runtime,
+        purpose_in_scope=True,
+    )
+    fact(
+        f"fleet lease for {identity!r}: {outcome} "
+        f"(purpose {purpose!r}, expected path {str(expected_path)!r})"
+    )
+    return finish_ok()
+
+
+def cmd_fleet_lease_release(args: argparse.Namespace) -> int:
+    session, runtime = session_identity()
+    topo = discover(Path(args.anchor))
+    anchor = find_worktree(topo, Path(args.anchor))
+    if anchor is None or anchor.path != topo.primary.path:
+        refuse("fleet lease verbs must be anchored at the primary checkout")
+    identity = args.identity
+    validate_fleet_identity(identity)
+    expected_path = absolute_without_final_resolution(Path(args.path))
+    lease = lease_dir_for(topo, identity)
+    status, owner = read_owner(lease)
+    if status == "absent":
+        refuse(f"no fleet lease exists for {identity!r}; nothing to release")
+    if status != "ok" or owner is None:
+        refuse(
+            f"fleet lease for {identity!r} has unreadable ownership; fail closed — "
+            "user-authorized break only"
+        )
+    if classify_owner(owner, session, runtime) != "SELF":
+        refuse(
+            f"fleet lease for {identity!r} is FOREIGN: {owner_summary(owner)}; fail closed"
+        )
+    purpose = owner.get("purpose")
+    if not isinstance(purpose, str) or not purpose.startswith("fleet:"):
+        refuse(f"lease for {identity!r} is not fleet-purposed: {owner_summary(owner)}")
+    if owner.get("worktree") != identity or owner.get("branch") is not None:
+        refuse(f"fleet lease scope mismatch for {identity!r}: {owner_summary(owner)}")
+    if owner.get("expected_path") != str(expected_path):
+        refuse(
+            f"fleet lease expected-path mismatch: owner has {owner.get('expected_path')!r}, "
+            f"request has {str(expected_path)!r}"
+        )
+    original = owner.get("fingerprint")
+    if not isinstance(original, dict):
+        refuse(f"fleet lease for {identity!r} has no readable acquisition fingerprint")
+
+    current = fleet_fingerprint(topo, identity, expected_path)
+    registered = [wt for wt in topo.worktrees[1:] if wt.path.name == identity]
+    kind = current["path_kind"]
+    terminal: Optional[str] = None
+    if not registered and kind == "absent":
+        started_bare = (
+            original.get("path_kind") == "absent"
+            and original.get("registered_paths") == []
+        )
+        terminal = "bare" if started_bare else "decommissioned"
+    elif len(registered) == 1 and kind == "directory":
+        wt = registered[0]
+        if (
+            wt.path == expected_path.resolve()
+            and wt.locked
+            and wt.lock_reason == CANONICAL_LOCK_REASON
+        ):
+            if topo.primary.branch is None:
+                refuse(
+                    "primary checkout is detached; cannot prove a healthy fleet terminal"
+                )
+            inspection = _inspect(
+                argparse.Namespace(
+                    anchor=str(expected_path),
+                    base=topo.primary.branch,
+                ),
+                emit_state=False,
+            )
+            if inspection.state != "PARKED" or inspection.refusal is not None:
+                refuse(
+                    f"fleet lease release refused: helper state {inspection.state} is not "
+                    "PARKED; lease retained for recovery",
+                    state="FLEET-OP",
+                )
+            terminal = "healthy"
+    if terminal is None:
+        fact(
+            f"fleet release live state for {identity!r}: path_kind={kind!r} "
+            f"registered_paths={current['registered_paths']!r}"
+        )
+        refuse(
+            "fleet lease release requires a stable healthy, decommissioned, or bare "
+            "terminal; lease retained for recovery",
+            state="FLEET-OP",
+        )
+    trash(lease)
+    fact(f"fleet lease for {identity!r} released; terminal={terminal}")
+    return finish_ok()
+
+
 def cmd_lease_release(args: argparse.Namespace) -> int:
     session, runtime = session_identity()
     topo = discover(Path(args.sat_path))
@@ -902,6 +1145,10 @@ def cmd_lease_release(args: argparse.Namespace) -> int:
     if classify_owner(owner, session, runtime) != "SELF":
         refuse(
             f"worktree lease for {identity!r} is FOREIGN: {owner_summary(owner)}; fail closed"
+        )
+    if isinstance(owner.get("purpose"), str) and owner["purpose"].startswith("fleet:"):
+        refuse(
+            f"worktree lease for {identity!r} is fleet-purposed; task lease-release cannot release it"
         )
     branch, _ = head_state(wt.path)
     if branch is not None:
@@ -1279,6 +1526,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--branch", required=True)
     p.add_argument("--purpose", required=True)
+    p = sub.add_parser("fleet-lease-acquire")
+    p.set_defaults(func=cmd_fleet_lease_acquire)
+    p.add_argument("anchor", help="primary checkout path")
+    p.add_argument("--identity", required=True)
+    p.add_argument("--path", required=True, help="expected satellite path")
+    p.add_argument("--purpose", required=True)
+    p = sub.add_parser("fleet-lease-release")
+    p.set_defaults(func=cmd_fleet_lease_release)
+    p.add_argument("anchor", help="primary checkout path")
+    p.add_argument("--identity", required=True)
+    p.add_argument("--path", required=True, help="expected satellite path")
     add("lease-release", cmd_lease_release, anchor_help="satellite path")
     p = add("activate", cmd_activate, anchor_help="satellite path")
     p.add_argument("--branch", required=True)

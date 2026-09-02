@@ -4,6 +4,28 @@ All notable changes to the Git Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.7.0 - 2026-09-02
+
+### Added
+
+- `land`: the one-authorization post-endorsement ritual (commit what is in scope, merge or push, save a handoff, refresh the throughline; any constituent's hard stop is surfaced as that skill stated it) joins the plugin from its standalone home at `skills/land/`, where it was admitted on 2026-07-26 as an irreversible-effect skill. Skill body byte-unchanged in the move; on Claude its token becomes `/git-cycle:land`, on Codex `$land` keeps working. The protected-set drift check (`scripts/check-protected-set.sh` in the source repo) is repointed to the new path. Packaged per `docs/plans/2026-09-02-plugin-bundle-candidates.md`: `land` references seven of the ten existing skills and completes the arc the plugin describes ("to merged-and-shared"). Minor, not patch: the plugin delivers a skill it did not deliver before; no existing plugin skill changed, so nothing breaks.
+
+## 1.6.0 - 2026-07-17
+
+### Added
+
+- `worktree-task-cycle` helper: pinned `inspect` tokens for lock class, lease ownership class, and lease purpose, plus `fleet-lease-acquire` / `fleet-lease-release` primitives for repo-owned fleet controllers. Fleet leases protect identity space even when a satellite is absent or damaged, keep the owner-record schema inside the helper, fingerprint acquisition state for recovery reporting, and release only from a verified healthy, decommissioned, or bare terminal; ambiguous outcomes retain the lease as the recovery signal.
+
+### Changed
+
+- `worktree-task-cycle` helper: `inspect` and healthy fleet-lease release now share one lifecycle classifier. A checkout that satisfies the four basic parking facts but carries an operation marker, recovery state, dirty tree, or undeleted landed branch cannot be accepted as the healthy terminal; release requires the helper's exact `STATE: PARKED` classification.
+
+## 1.5.5 - 2026-07-17
+
+### Changed
+
+- `release-cut`: landing a cut is now treated as publish intent where the versioned unit's runtime serves or auto-syncs landed source (local-marketplace plugins: Claude serves landed source live; the Codex app-server syncs a landed bump to its cache unprompted — probe evidence in `docs/agents/codex-plugin-list-cache-sync-2026-07-17.md`). New step-4 guidance: land a cut only at publish intent; when an open gate must hold publication, land the work without the cut and cut the release as a follow-up at grant time. The publish-train bullet carries the matching local-republish carve-out. Adopted per the 2026-07-17 version-bump-at-publish-intent amendment in `docs/agents/contract-decisions.md`.
+
 ## 1.5.4 - 2026-07-17
 
 ### Fixed
