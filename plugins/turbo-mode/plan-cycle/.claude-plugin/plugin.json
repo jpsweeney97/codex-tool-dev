@@ -1,0 +1,47 @@
+{
+  "name": "plan-cycle",
+  "version": "1.0.0",
+  "description": "From settled spec to executed work: PRD and issue publication, acceptance-check mapping, executor-ready implementation plans, plan and issue execution, tracker triage, plan queues, and mid-arc spec-drift reconciliation",
+  "author": {
+    "name": "JP"
+  },
+  "license": "MIT",
+  "keywords": [
+    "planning",
+    "prd",
+    "issues",
+    "triage",
+    "acceptance",
+    "execution",
+    "spec"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Plan Cycle",
+    "shortDescription": "Turn a settled spec into published issues, executor-ready plans, and executed work",
+    "longDescription": "Nine skills covering one arc from settled intent to executed work. to-prd turns the current conversation and repo context into a PRD and publishes it to the project issue tracker. to-issues slices an existing plan, spec, or PRD into independently grabbable implementation issues and publishes them. acceptance-map turns a settled PRD, plan, issue, or design into a durable map of observable acceptance checks before implementation. implementation-planning writes an ordered plan an executor with no codebase context could follow exactly. execute-plan works that plan task by task. implement-issue works one agent-ready tracker issue per invocation, blockers verified first. triage creates, classifies, verifies, and moves issues through the tracker workflow. plan-queue sweeps a repo for its highest-leverage work, ranks it as a filename-tracked queue of executor-ready plans, and burns it down on authorization. spec-drift-reconcile surfaces what went stale when intent changed mid-arc and drives the fix through the owning skills.",
+    "developerName": "JP",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Turn this conversation into a PRD and publish it to the tracker",
+      "Slice this plan into implementation issues",
+      "Map the acceptance checks for this settled spec",
+      "Write the implementation plan for this design",
+      "Execute this plan task by task",
+      "Implement the next ready issue",
+      "Triage the open issues",
+      "Build a plan queue for this repo",
+      "The spec changed; find what is stale and reconcile it"
+    ],
+    "websiteURL": "https://github.com/jpsweeney97/codex-tool-dev/tree/main/plugins/turbo-mode/plan-cycle",
+    "privacyPolicyURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/plan-cycle/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/plan-cycle/TERMS.md",
+    "brandColor": "#0EA5E9",
+    "screenshots": []
+  }
+}

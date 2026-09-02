@@ -1,0 +1,4 @@
+interface:
+  display_name: "Acceptance Map"
+  short_description: "Map source intent into durable acceptance checks"
+  default_prompt: "Use $acceptance-map to turn the source artifact into a committed Markdown acceptance map for implementation and review."
