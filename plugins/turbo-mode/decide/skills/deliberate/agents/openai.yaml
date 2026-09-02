@@ -1,0 +1,7 @@
+interface:
+  display_name: "Deliberate"
+  short_description: "One-invocation autonomous deliberation pipeline"
+  default_prompt: "Run a complete autonomous deliberation on: <decision frame>. Optional: candidates and field mode, constraints at price, values, evidence and its authorization, survivor budget — or a pasted re-run capsule with directives."
+
+policy:
+  allow_implicit_invocation: false

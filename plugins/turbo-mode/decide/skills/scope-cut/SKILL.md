@@ -1,0 +1,33 @@
+---
+name: scope-cut
+description: "Use when an already-shaped scope is too big to ship under a binding constraint (deadline, risk, or capacity) and must be cut to a defensible minimal slice — 'this is too much, what do we cut?', 'help me descope', 'smallest defensible version', 'MVP this'. Partitions one scope into keep/defer/cut and preserves every cut item with a re-entry condition. Not for picking one option among rivals (`making-recommendations`), critiquing a design draft for overbuilding (`working-slice-review`), widening the option field (`ideate`), or slicing an already-agreed plan into tracker issues (`to-issues`)."
+---
+
+# Scope Cut
+
+Take an already-shaped scope that is too big for its constraint and cut it down to a defensible minimal slice — keeping what the goal cannot survive without, and deferring the rest without dropping it. Invocation: `/scope-cut` or `$scope-cut`.
+
+scope-cut does not rank rival options, critique a design, or widen anything — it partitions a single chosen scope into keep / defer / cut against a binding constraint, and hands back the kept slice plus a ledger of everything it removes. Its debiasing engine is naming the constraint *first*: an explicit budget — a deadline, a risk ceiling, a capacity limit — turns "what do we cut?" from a vibes call into a measurable one, and forces the cut that "let's just keep all of it" quietly refuses.
+
+## The moves — a rhythm, not a fill-in template
+
+1. **Pin the binding constraint — first, explicitly, before any cutting.** Name the real budget that forces a smaller scope: a deadline, a risk ceiling, a capacity or headcount limit, a complexity bound. If *nothing* actually forces the scope down, scope-cut is the wrong lane — the scope may not need cutting, or the real ask is ranking (`making-recommendations`), widening (`ideate`), or sequencing supplied work (`next-steps`). If the scope is still an unshaped idea rather than an enumerable set, it is not ready to cut — shape it first (`design-exploration`). If the *goal* the scope serves is too muddy to say what "defensible" would mean, hand to `outcome-shaping`. The constraint is the yardstick every later cut is measured against; leave it unnamed and the cuts are guesses.
+2. **Enumerate the scope as discrete items.** List the pieces actually in scope — features, tickets, requirements, components — as separable units. If they do not separate cleanly, the cut cannot be made cleanly either; say so and name the coupling rather than pretending a clean line exists.
+3. **Classify each item against goal + constraint — a judgment, not a form to fill.** Sort each item into the partition the product names — **keep / defer / cut** — by asking what the goal actually requires under this constraint. A **must** is *keep*: the slice is incoherent or worthless without it. A **should** has real value but the goal stands without it, so it is *keep* only if the budget still admits it once the musts are in, and otherwise joins the removed set. Everything removed is either **defer** (a concrete re-entry condition exists) or **cut** (no planned return). The labels are a prompt, not the work — the work is the honest call on what the goal requires, and resisting the pull to mark everything *must*. If everything reads *must*, the constraint has not really been applied — go back and apply it. If it still does after an honest pass, the scope may be genuinely irreducible under this constraint: say so, render no forced cut, and route the constraint decision (relax it, move the deadline, shrink the goal) back to the human rather than mislabeling a real must to manufacture a slice.
+4. **Check the kept slice is coherent and actually fits the budget — a slice, not a stump.** The kept set has to stand on its own: shippable, testable, not a half-wired fragment that silently depends on a removed item to function. If a *keep* needs a *defer* to work, one of them is misclassified — fix it. Then measure the slice back against the constraint from move 1: if even the minimal coherent slice still busts the budget, do not hand it back as the answer — surface that no defensible slice fits and route the constraint decision to the human (as in move 3). A minimal slice that does not work, or that still overruns the budget it was cut to meet, is not defensible — the mirror failure of cutting too little.
+5. **Build the deferred-not-dropped ledger — the discipline a bare cut loses.** Every removed item — *defer* and *cut* alike — lands on the ledger; none vanish silently. Each carries a **re-entry condition**, the observable that says "pull this back in": a deferral names a concrete trigger (a date, a freed constraint, a shipped dependency); a cut names at least the coarse one ("only if the constraint materially lifts"). Route the whole ledger to `/triage` (or `$triage`), one item per finding, by reference — never re-minting tracker machinery. An inline list — each item with its re-entry condition — is the explicitly weaker fallback when no tracker is reachable. This ledger is what separates descoping from quietly dropping work on the floor.
+
+## The close — no build verdict, no certificate
+
+Stop once the slice is coherent and every cut item is on the ledger. Then:
+
+- **Render no build/no-build verdict.** scope-cut decides what belongs in the minimal slice, not whether to commit to it — that commitment is the human's, or a downstream `making-recommendations` / `deploy-plan` call. The deliverable is the kept slice plus the deferred ledger. Chat-first: both are delivered in the response — no artifact beyond the routed `/triage` items by default.
+- **Close with one honest line naming what the slice gives up** — the capability or guarantee, anchored to the original scope's *own* stated goals, that the user will notice is missing. Never certify the cut as safe or complete: a slice that looks whole relative to a line you drew is blindest exactly where you drew it. The honest signal is the named tradeoff, not "nothing important was lost."
+
+## When not to scope-cut
+
+- Nothing actually forces the scope smaller → maybe nothing needs cutting; otherwise rank options (`making-recommendations`), widen (`ideate`), or sequence supplied work (`next-steps`).
+- The artifact is a design *draft* and the real question is "is this overbuilt before a first feedback loop?" → `working-slice-review` (read-only learning critique, not a constraint-driven cut).
+- The scope is an unshaped idea, not an enumerable set → shape it first (`design-exploration`).
+- The scope is already cut and agreed, and you want it as trackable issues (`to-issues`) or as an ordered plan with gates and critical path (`next-steps`).
+- The goal itself is too muddy to say what "defensible" means → `outcome-shaping`.

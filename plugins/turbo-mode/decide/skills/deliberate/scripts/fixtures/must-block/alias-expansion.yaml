@@ -1,0 +1,4 @@
+# must block: anchors and aliases rejected before expansion
+base: &bomb
+  a: [1, 2, 3]
+copy: *bomb

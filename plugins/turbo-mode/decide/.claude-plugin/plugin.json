@@ -1,0 +1,45 @@
+{
+  "name": "decide",
+  "version": "1.0.0",
+  "description": "From a still-muddy want to a defensible choice: outcome shaping, wide option generation, option development to comparable depth, honest recommendations, design exploration to an approved design, one-invocation autonomous deliberation, and scope cutting under a binding constraint",
+  "author": {
+    "name": "JP"
+  },
+  "license": "MIT",
+  "keywords": [
+    "decision",
+    "options",
+    "recommendation",
+    "design",
+    "ideation",
+    "deliberation",
+    "scope"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Decide",
+    "shortDescription": "Shape a want, widen the field, develop the options, and choose honestly",
+    "longDescription": "Seven skills covering one arc from a still-muddy want to a defensible choice. outcome-shaping helps the user build a want they can stand behind through an interview-style shaping conversation, typed by why they cannot say it yet and load-tested with priced trades. ideate widens a clear-enough prompt into a deliberately un-ranked field of genuinely different options and stops before any ranking. option-shaping develops a fixed field of sketch-level options to comparable resolution without ranking or choosing. making-recommendations chooses among serious, comparable options like an honest advisor: filters, dominance, genuine trades compared in words, the runner-up's strongest case, and the priced values question when the ranking turns on it. design-exploration shapes a clear-enough outcome into compared approaches and an approved design before any implementation lane takes over. deliberate runs Generate, Prune, Shape, Recommend, and Contest autonomously in one explicit invocation and returns a close plus a re-run capsule. scope-cut partitions an already-shaped scope into keep, defer, and cut under a binding constraint, preserving every removed item with a re-entry condition.",
+    "developerName": "JP",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Help me work out what I actually want here before we choose a next move",
+      "Brainstorm a wide field of genuinely different options for this",
+      "Develop these fixed options to comparable depth without ranking them",
+      "Recommend between these options and give me the case against your pick",
+      "Explore the design approaches for this and settle one before we implement",
+      "Use $deliberate to run a complete autonomous deliberation on this decision frame",
+      "This scope is too big for the deadline; cut it to a defensible slice"
+    ],
+    "websiteURL": "https://github.com/jpsweeney97/codex-tool-dev/tree/main/plugins/turbo-mode/decide",
+    "privacyPolicyURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/decide/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/decide/TERMS.md",
+    "brandColor": "#D97706",
+    "screenshots": []
+  }
+}

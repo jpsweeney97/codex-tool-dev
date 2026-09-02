@@ -1,0 +1,14 @@
+# must block: unknown keys rejected, never ignored
+schema: deliberate-envelope/v1
+stage: generate
+status: completed
+artifacts:
+  field:
+    - wording: "Option A — file sync over Syncthing"
+      provenance: user-seed
+  fixed-points-line: nothing varied
+retrievals: none
+encounters: none
+pins: none
+model: unknown
+extra-key: rejected

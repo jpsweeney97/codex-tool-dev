@@ -1,0 +1,4 @@
+interface:
+  display_name: "Outcome Shaping"
+  short_description: "Build a want you can stand behind: typed mud, priced trades, your words as the test"
+  default_prompt: "Use $outcome-shaping to help me work out what I actually want here — shape it with me before we choose a next move."

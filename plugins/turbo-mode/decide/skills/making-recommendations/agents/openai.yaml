@@ -1,0 +1,4 @@
+interface:
+  display_name: "Making Recommendations"
+  short_description: "Choose among serious, comparable options"
+  default_prompt: "Use $making-recommendations to choose among serious, comparable options like an honest advisor: stop for the option-shaping lane if the field is materially uneven, then register the lean, filter on hard constraints, check dominance, compare in words instead of invented scores, pose the priced values question when the ranking turns on it, give the runner-up its strongest case, and match depth to how reversible the decision is."

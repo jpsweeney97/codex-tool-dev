@@ -1,0 +1,4 @@
+interface:
+  display_name: "Option Shaping"
+  short_description: "Develop sketch options to comparable depth"
+  default_prompt: "Use $option-shaping to develop these fixed options to comparable depth without ranking or choosing among them."
