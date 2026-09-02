@@ -1,0 +1,41 @@
+{
+  "name": "relay",
+  "version": "1.0.0",
+  "description": "Hand-carried transport between sessions and models: paste packets with inbound adjudication, sha-stamped packet files for sessions sharing a filesystem, and durable one-way commission prompts",
+  "author": {
+    "name": "JP"
+  },
+  "license": "MIT",
+  "keywords": [
+    "relay",
+    "session",
+    "packet",
+    "commission",
+    "cross-model",
+    "transport"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Relay",
+    "shortDescription": "Carry work between sessions and models by hand without losing anything on the trip",
+    "longDescription": "Three skills for the case where a human carries work between a session here and a session elsewhere. courier composes self-contained paste packets for a far side that cannot read this disk and adjudicates its replies against local evidence before composing the next leg. relay-by-reference stages each leg of a multi-leg exchange between sessions that share this filesystem as a sha-stamped packet file, so only a pointer line travels. stage-prompt writes a dated, self-contained commission prompt into ~/prompts and commits it for a fresh session to execute one-way.",
+    "developerName": "JP",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Give me a paste packet for Codex with this review request",
+      "Here is the other side's reply; adjudicate it and compose the next leg",
+      "Relay this checkpoint to the adjudication seat",
+      "Stage this as a commission prompt for a fresh session in another repo"
+    ],
+    "websiteURL": "https://github.com/jpsweeney97/codex-tool-dev/tree/main/plugins/turbo-mode/relay",
+    "privacyPolicyURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/relay/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/relay/TERMS.md",
+    "brandColor": "#7C3AED",
+    "screenshots": []
+  }
+}
