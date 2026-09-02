@@ -4,6 +4,12 @@ All notable changes to the Decide plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.2.0 - 2026-09-02
+
+### Changed
+
+- `decision-record`'s mutation boundary now names the one append it allows: where the repo's own ADR convention carries dated amendment or addendum sections on older records, a dated section pointing at the new record may be added to an older record where that convention places such sections; the existing text is never edited, and without such a convention the cross-reference stays in the new record's prose. The status bullet it qualifies names the same allowance, and the README's Writes row does too. Before this, "match the repo's existing ADR convention" and "a settled record's body is never rewritten" conflicted in any repo with that convention; the 2026-09-02 behavior trial (`docs/smoke-tests/2026-09-02_decision-record-first-real-fire.md` in the source repo, stage 2b) watched a fresh agent choose the convention and disclose the choice with no rule to cite, and the fold was tested against the same scenario before landing (stage 3 there). Minor, not patch: the skill may now append to an older record, which it could not do before. Deliberately not changed, parked with a reopen trigger in the source repo's `docs/agents/skill-lifecycle-notes.md`: the call between a new record that replaces an older one it restates (supersede) and one that narrows it (cross-reference).
+
 ## 1.1.0 - 2026-09-02
 
 ### Added
