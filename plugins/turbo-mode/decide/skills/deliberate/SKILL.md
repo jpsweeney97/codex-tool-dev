@@ -1,97 +1,89 @@
 ---
 name: deliberate
-description: "Run one complete autonomous deliberation: generate options, prune on a contestable ledger, shape survivors, recommend honestly, contest the exclusions. Returns a close plus a re-run capsule. To develop one approved design collaboratively, use `design-exploration` instead; when serious, comparable options already exist and you only want the choice, use `making-recommendations` directly. Give the decision frame; optionally candidates with field mode, constraints at price, values, evidence with its authorization, and a survivor budget — or paste a prior capsule with directives."
-disable-model-invocation: true
-argument-hint: "[decision frame; candidates + field mode?; constraints at price?; values?; evidence + authorization?; survivor budget?; or: pasted capsule + re-run directives]"
+description: "Use when the user wants one decision deliberated end to end without steering each step: widen the options, cut the field with recorded reasons, develop the survivors, recommend honestly, then check the cuts against the recommendation — 'think this whole decision through for me', 'run a full deliberation on X'. Not for picking among options that are already comparable (`making-recommendations`), one phase steered by hand (`ideate`, `option-shaping`), a still-muddy goal (`outcome-shaping`), or settling a design (`design-exploration`)."
+argument-hint: "[the decision, in a sentence or a file; optionally your candidates, hard constraints, and your lean]"
 ---
 
 # Deliberate
 
-One explicit invocation (`/deliberate` or `$deliberate`) runs **Generate → Prune → Shape → Recommend → Contest** in packet-isolated stages and returns a close plus a recovery capsule. It asks no mid-run decision question; host permission prompts are outside this promise. **Complete every judgment the run can honestly own, never manufacture a winner.** All four `making-recommendations` close shapes are successful completions.
+Run the decide plugin's forward chain on one decision in five stages without stopping to ask: **Generate → Prune → Shape → Recommend → Contest**. The user gets a recommendation in `making-recommendations`' own close, a ledger of every option that was cut and why, and a one-line check of those cuts against the recommendation's reasoning. Invocation: `/deliberate` or `$deliberate`, or a plain request for the whole run.
 
-## Mandatory reloads
+The principle that governs every stage: **complete every judgment the run can honestly own, and never manufacture a winner.** All four `making-recommendations` close shapes (clear call, conditional call, check first, your call) are successful completions.
 
-This spine is intentionally incomplete without its references. Before setup and preflight, read `references/schemas.md`, `references/stage-packets.md`, and `references/capsule.md`. Re-read `references/stage-packets.md` before **every** stage dispatch; also re-read `references/methods.md` before Prune and Contest, and the live constituent contract before Generate, Shape, and Recommend. Re-read `references/capsule.md` before every terminal, capsule construction, and re-run preflight. These reads are mandatory even when the files were read earlier in the run.
+## What the user brings
 
-`references/contract-data.yaml` is canonical for the matrix, brief template, schemas, validation data, terminals, and writer ownership; it wins over authored renderings. `scripts/deliberate-validate.py` loads it for all mechanical operations. Orchestrator judgment never replaces the helper.
+A decision question, in a sentence or a file. Optionally: candidates they already have, constraints they are sure of, what they value, files to read, and their current lean. Everything absent defaults: the field is widened even when candidates are given, about four survivors are kept, and evidence is what the user supplied plus what is already in the working context.
 
-After compaction, re-derive the fixed store locator, verify its echo, and rebuild exact packets and capsules from the store under freshly read references. Never use summarized memory for a compared value. No capsule is displayable until store-backed validation accepts it.
+Plain-language steering the run honors: "don't add options" skips Generate and starts at Prune; "keep six" changes the survivor count; "you may research" allows web lookups in every stage.
 
-## Invocation contract and echo
+If the decision question cannot be stated from what the user gave, ask one question before the run starts. If the goal itself is muddy, name `outcome-shaping` instead of running. Once the run starts it asks nothing; host permission prompts are outside that promise.
 
-The invocation carries the following fields; `references/capsule.md` owns their re-run transitions and `references/schemas.md` owns their bounds and shapes.
+## Setup, shown before the first dispatch
 
-- **Decision frame** — mandatory; indiscernible → ask once before the run starts (pre-run, not mid-run).
-- **Field mode** — `seed-and-widen` by default, or `closed-to-widening`, which skips Generate; candidates require an explicit or echoed mode, and a closed echo says Prune may still narrow the field.
-- **Confirmed constraints**, each at its price. Unconfirmed constraints demote to soft preferences that never gate alone.
-- **Stated values**, **soft preferences**, and **stakes context** (optional) — values are pre-answered exchange rates; soft preferences are context, never gates; absent stakes stay absent and Recommend reads the door.
-- **Evidence inputs** kept separate from **evidence authorization**. Supplied inputs and named paths may be inspected by default; additional sources, web research, and probes require echoed authorization. Only read-only inspection, research, and explicitly non-mutating probes can be authorized; side-effecting checks return as `check first`.
-- **Survivor budget** — default 4; a provisional capacity budget, explicitly not a claim about correct comparison width.
-- **Inline-degradation permission** (optional) — covers isolation only, never mechanical validation.
-- **Re-run payload** (optional): a pasted prior capsule plus directives — directive-free only when the capsule records an unfinished run.
+Create a fresh run directory under the runtime's scratch or temp root (Claude Code's scratchpad; `mktemp -d` elsewhere) and write `00-setup.md` with: the decision question; the user's candidates, marked as theirs; each hard constraint the user confirmed, with what it costs; stated values; the evidence stages may read and whether research is allowed; the survivor count; and the user's visible lean, if any. Mark anything inferred rather than told `inferred`.
 
-The contract echo labels every material field `user-supplied`, `inferred`, `default`, or `absent`. Visible setup, correctable by live interruption where the session supports it, otherwise by re-run — no universal interrupt promise. Every re-run echo also surfaces each active record-cited retrieval with its source and retrieval time (excluded-fact freshness is user-owned by disclosure).
+Show the setup to the user in a few lines and start the run in the same turn. The user can interrupt to correct it; the run does not wait. Between stages, give one line naming the stage starting and what it received as counts, not content.
 
-Declared bounds are immutable v1 constants from `references/contract-data.yaml`. Every echo and capsule must carry that exact canonical map; an invocation, pasted capsule, echo override, or re-run directive that differs is `invalid invocation` before store creation.
+## The five stages
 
-Apply every preflight refusal and normalization rule in the mandatory references. Reject with `invalid invocation: <reason>` and echo only any invalid field mode or budget, invalid or unsupported capsule, missing directives for a completed capsule, unclassifiable directive, bound breach, or pasted emergency receipt. An unfinished capsule is an implicit resume request. Invocation from a detectable cron job, hook, scheduled task, or another skill exits `unsupported invocation context`.
+Each stage runs as a fresh agent with its own context, dispatched with a brief the orchestrator composes from `00-setup.md` and the previous stage's output file. The fresh context is what keeps the user's lean, and each stage's reasoning, out of the stages that must not see them. Where the runtime cannot dispatch a fresh agent, run the stages in this context in order, still writing every file, and say in the close that the stages were not isolated.
 
-Before spending, verify the helper — the entrypoint and every imported production module — with `shasum -a 256` and run its fixtures if untested this session. A helper that cannot verify or execute is `capability unavailable`; missing fresh-agent isolation is the same exit unless inline degradation was authorized. Create the run-state store only after all other preflight checks pass; failure before its first durable write is `store unavailable`.
+Every brief tells the stage agent: which sibling skill to read and follow (`../ideate/SKILL.md`, `../option-shaping/SKILL.md`, or `../making-recommendations/SKILL.md`, next to this skill's directory) or carries the method text below; to quote option wordings exactly as given; to change nothing outside its own output file; and to write its result to the named file, which overrides the sibling skill's chat-first default, then reply with two lines. The orchestrator reads the file, not the reply, before composing the next brief.
 
-Setup has one authored source: a `deliberate-setup/v1` document carrying every echo field except derived `soft-prefs`, the candidate set without authority notes, and normalized soft-preference entries. A neutral entry uses `candidate: absent`, an `authority-note` of `absent`, and one or more candidate-free `criteria`; a candidate-attached entry names one exact candidate, carries the complete attached language only in its span-grounded `authority-note`, and carries only separable candidate-neutral `criteria` (possibly none). Ambiguity becomes `absent`, never invented lean. The setup carrier uses YAML `|-` block scalars for every free-prose value — initial wording, frame, constraints and prices, values, stakes, evidence prose, candidate wordings and attached candidate keys, criteria, authority-note text and span, and both composition-provenance spans — even when a value currently appears colon-free; schema names, provenance enums, booleans, numbers, `absent`, and `none` stay typed scalars. In particular, never emit a plain scalar such as `invocation-span: Field mode: seed-and-widen`; the first colon-bearing phrase would make the one allowed setup attempt unparsable. `init-setup` derives both echo and decomposition from that source and writes them in order; never author or write either artifact separately. It canonicalizes candidate wordings and the soft-preference entries naming them — whitespace runs, newlines included, collapse to one space — and rejects post-normalization duplicates; the stored canonical bytes are the identity every later surface compares against exactly, so a block-scalar soft-wrap in an authored candidate never survives into wording identity. If `init-setup` returns nonzero, stop setup immediately — do not attempt pins or any later helper call. The store independently refuses pins until decomposition exists. Display the derived echo and decomposition, then pin the full constituent set, evidence and manifests, in-packet bytes, and method identity. Mandatory references own the shapes and read set.
+| Stage → file | Runs | Brief contains | Brief withholds |
+| --- | --- | --- | --- |
+| Generate → `01-field.md` | `ideate` | question, constraints, values, evidence; the user's candidates as seeds to keep as written | the lean |
+| Prune → `02-prune.md` | the Prune method below | the field with the user's candidates marked; question, constraints at their price, values, survivor count | the lean; Generate's reasoning |
+| Shape → `03-shaped.md` | `option-shaping` | the survivors in field order, exact wordings; question, constraints, values, evidence; a statement that the user invoked `deliberate` and delegated candidate selection to the run | the lean; the cut records |
+| Recommend → `04-close.md` | `making-recommendations` | the shaped comparison surface; question, constraints, values, evidence; the user's visible lean, named as such; an instruction to append a cut record (shape below) for any survivor it sets aside by filter or dominance | the cut records from Prune; Prune's and Shape's reasoning |
+| Contest → `05-contest.md` | the Contest method below | the close, every cut record from Prune and Recommend, the shaped surface, the setup including the lean | nothing further |
 
-## The authority model
+Recommend receives the lean because its own contract registers the user's lean and attacks it. The earlier stages do not, because a stage that knows the favorite widens, cuts, and develops toward it.
 
-> The invocation delegates stage transitions and field changes under the echo. It does not authorize invented constraints or value weights, evidence beyond scope, side effects, or silent collision resolution. Missing authority survives into an honest exit or close.
+If a stage returns one of its sibling skill's honest exits or handoffs instead of its artifact (`ideate` handing to `outcome-shaping`; `option-shaping` returning `field collision unresolved`; `making-recommendations` exiting `options not comparable` or `no basis yet`, or handing to another skill), the run ends there as that exit. Report it, name the skill it points to, and stop. Do not enter that skill and do not ask a mid-run question.
 
-Only supplied or directly evidenced confirmations become price-confirmed constraints; inferred constraints and values stay soft. The ledger separates **permission to decide from authorship**: equivalence, dominance, and predicate satisfaction remain agent judgments and are recorded as such.
+## Prune
 
-## Run shape
+You narrow the field decisively, with a recorded reason for every cut, and never with scores or invented weights. You do not know which candidate the user favors; your cuts must be defensible without knowing.
 
-Five moves, all five packet-isolated in fresh, non-forked stage agents — Contest included, mandatory on every Contest-eligible branch. Stages receive ambient instructions and can read the filesystem; "blind" is not claimed. The isolation rule throughout: **hide previous-stage judgments, never decision-controlling user authority.**
+Cuts you may make regardless of the survivor count:
 
-1. **Generate** executes live `ideate`, returning an un-ranked field and untouched-fixed-points line; supplied seeds are collapse-exempt.
-2. **Prune** executes the deliberate-owned method: decisive cuts without scores or invented weights, returning an order-preserving survivor subsequence, complete exclusion records, and any disclosed budget overflow.
-3. **Shape** executes live `option-shaping` on frozen survivors under the authorized-composition seam; it records confirmed-constraint consequences without cutting and exits on identity-blocking collision.
-4. **Recommend** executes live `making-recommendations` on the comparison surface and complete authority packet; it owns filters, honest exits, and a disposition record for every new exclusion.
-5. **Contest** executes the deliberate-owned detection-only method against the close or close-less `terminal-claim`; a visible user preference on an excluded candidate is always a live challenge.
+- An option fails a confirmed hard constraint. Say which constraint and how.
+- Two options would succeed or fail for the same reason. Name that reason and keep one; when one of the pair is the user's candidate, keep the user's wording and cut the generated one.
+- One option is at least as good as another on everything that matters and better on something, at the depth you can actually see.
 
-**Orchestrator obligations, every stage:**
+Cuts to reach the survivor count come after those. Each is a low-confidence cut of a candidate whose seriousness you could not resolve at sketch depth; say exactly that in the record, never that the option was "not serious". If you cannot reach the count without deciding a trade between the user's values that they have not priced, do not invent the weight: keep the extra survivors, say which trade blocked the cut, and carry them forward. If that leaves more than about twice the count, the run ends with `survivor count cannot be met without an unstated value trade`, and the records are the output.
 
-- Apply the dedicated fail-fast helper-call boundary from `references/stage-packets.md` to every store mutation. A nonzero helper result prevents every later store-mutating helper on that branch; receipt rendering and cleanup never reopen the store write sequence.
-- Render every complete matrix brief from stored values with `render-brief`, record its identifier, and dispatch its bytes unaltered. Never hand-assemble or override an off-column refusal. Store the canonical `terminal-claim` before a close-less eligible Contest render.
-- Accept only `validate-envelope --accept` output. A validated `failed: pin mismatch — constituent:<path>` becomes `constituent drift`; `evidence:<path>` becomes `evidence drift`; `method:<path>` becomes `method drift`. Every other failed envelope, timeout, or malformed packet is `stage failed: <stage>`.
-- Verify constituent, evidence, and method pins before every stage and before each owned-reference or helper use; verify the validator and its imported production modules with the platform hasher. A drifted validator or module takes the emergency-receipt branch.
-- In a Git worktree, compare net Git-visible state before and after every stage. Unauthorized mutation is `containment violation`: stop with a dirty-state receipt, never restore or adopt silently. This proves only net Git-visible change.
-- Preserve the session model where supported. Record each effective model at its provenance: a value not drawn from introspected ground truth is `self-reported: <value>` or `unknown`, never bare fact, and disagreeing ambient sources are recorded as the disagreement, never resolved by picking one. Report transitions and counts without hidden judgments.
+Rules that hold throughout: keep survivors in field order; never cut below two unless confirmed constraints leave fewer, and if they leave none the run ends with `no option survives the confirmed constraints`; a candidate the user supplied dies only by a recorded cut, never by collapse or omission.
 
-**Global exit rule:** any constituent honest exit not explicitly transformed by this contract terminates the run as that exit; the orchestrator names the next lane, never asks a mid-run permission question, never silently enters that lane, and records the terminal canonically as `constituent exit at <stage>: <the named exit>` — capsule-bearing only at Shape and Recommend; an exit at Generate is echo-only. Muddy goal at Generate → `outcome-shaping`, echo only.
+Write `02-prune.md` as the survivor list in exact wordings, then one record per cut:
 
-**Operational failure rule:** a typed failure capsule preserves only validated artifacts and restarts at the earliest invalid one. Helper or store-read failure gets a non-resumable receipt. If Contest fails, the underlying semantic terminal and pre-Contest claim stand while `exclusion-check` becomes `exclusion check unavailable`; no exclusion-stability claim is made. Store terminals are `store unavailable`, `store failed: write`, and `store failed: read` as defined in the capsule reference.
+```text
+Option:         <exact original wording>
+Cut:            <constraint | same reason | dominated | survivor count>, <fact-established | judgment call>
+Reason:
+Strongest case: <for keeping it, written before the cut>
+Revive if:
+```
 
-## Composition seams
+## Contest
 
-Only seams rendered from `contract-data.yaml` bind: questions and handoffs become packet-contained gaps or exits; Generate protects seeds; Shape receives evidenced composition provenance and freezes the field; Recommend registers leans before surface and consequences, stays within evidence authority, adds no unshaped comparison candidate, and records every exclusion. Otherwise obey the live constituent; uncovered conflict becomes its honest exit.
+You test the run's cuts against the recommendation's actual reasoning. Detection only: you identify, and never adjudicate, revive, or recommend.
+
+Find every recorded cut the close makes live: a cut whose reason the close also leans on; a `Revive if` condition the close's own reasoning satisfies or nearly satisfies; a cut whose reason the comparison surface undermines. An excluded option the user visibly preferred is always a live challenge. If the close names only one serious option, test whether any cut's reason being wrong would restore a rival. Never hold an excluded option's lack of development against it; it was never developed, and depth asymmetry is not evidence. When any live challenge exists, name the one most worth contesting.
+
+Write `05-contest.md` as exactly one line:
+
+- `Exclusion check: no live recorded challenge found`
+- `Exclusion check: live recorded challenges — <X, Y>; most worth contesting: <one>`
+- `Exclusion check: not applicable — no cuts recorded`
 
 ## Close
 
-After reloading the capsule reference, follow its total branch table and close order: **exclusion check → recommendation or honest exit → one terminated `deliberate-capsule/v1` document**. Emit only existing artifacts. For a capsule-bearing terminal, assemble and compact enough to fix the carrier, record proof inputs and terminal state in separate fail-fast helper calls, then run `validate-capsule --store --accept` in its own call; the proof recorder realpath-compares the submitted store locator with the live store and persists the helper-owned canonical root. The first nonzero helper result ends all later helper invocations for that run, including a corrected or diagnostic second validation probe; only contract-selected receipt rendering and cleanup may follow without invoking the helper. Receipt/echo-only terminals refuse validation, while `store failed: write` still requires comparison without a new write. The final content field is the recorded proof boundary. If chat compaction still cannot meet `capsule-bytes`, emit the non-resumable bound receipt and wait; an explicitly requested file capsule keeps the underlying semantic terminal and validates under `capsule-file-bytes`. `trash` the store only after the recovery carrier exists; disclose retirement failure.
+Deliver in this order: the Recommend stage's close, as written; the cut ledger as a compact table (option, cut, revive if); the exclusion-check line; the run directory path; and one line: "To re-run, tell me which cut to revive, which constraint to change, or which survivor to develop further, and I will restart from the stage that changes." A re-run edits the affected file and runs the stages after it; the earlier files stand.
 
-## Re-runs
+Say plainly what the run did not do: it did not verify facts the stages marked as assumptions, and it did not develop the excluded options.
 
-Restart at the earliest invalid input or artifact under `references/capsule.md`. `import-capsule` validates typed restart state and writes a reserved restart plan; only imported stage artifacts before its earliest-stage frontier remain available, stage artifacts at or after it stay unavailable until a new accepted envelope supplies them, and no envelope is synthesized. Re-resolve identities live, supply the current pins to import, and pass any additional classified source-drift frontier explicitly. New directive texts enter with a typed manifest binding each text to its applied actions — orphan text and orphan actions refuse before the store is staged. Revival marks provenance and rejoins at its original position in a reused field; no-argument `--accept-seed` accepts only canonical stored wording. A field-mode change supplies its explicit base when landing closed. Preserve field-order origin and transition insertion provenance. Prior judgments enter only named packets.
+## Boundaries
 
-## Helper
-
-```bash
-V=scripts/deliberate-validate.py; M=scripts/_deliberate_shared.py; D=references/contract-data.yaml   # paths relative to this skill directory
-shasum -a 256 $V $M
-uv run --script $V fixtures --data $D
-uv run --script $V identity --data $D [--as-evidence | --as-in-packet] <path>...
-```
-
-The store-mutating forms are `init-setup`, `write-item`, `render-brief`, `validate-envelope --accept`, `record-proof-inputs`, `record-terminal`, `validate-capsule --accept`, and `import-capsule`. Run exactly one in each shell or tool call, beginning that call with `set -euo pipefail`; never paste a mutation sequence as one script. Inspect every helper result before invoking the helper again, and after the first nonzero result do not invoke any helper command again during that run, including non-mutating validation. Use command `--help` and the mandatory references for complete syntax, including dedicated setup initialization, the remaining store writes, and storeless ingest validation. The store root is the fixed `deliberate-run-live/` directly under the runtime's ambient session-scoped temporary root. No detectable root → `store unavailable`. Exit codes: 0 pass, 1 validation failure, 2 refusal, 4 store read loss.
-
-## v1 boundaries
-
-Read-only toward user-visible state throughout; no auto-revival loop; no persistence beyond the run by default (the store is retired to the user's local Trash at close — no live store survives the run, and byte destruction is never claimed); chat-first — the capsule is written to a file only on request; never fired from cron, hooks, or another skill.
+Read-only toward user-visible state: stage agents write only their own output file, and nothing under the working tree changes. If context is compacted mid-run, the files are the record; re-read them rather than reconstruct from memory. Not for cron, hooks, or another skill's dispatch: the run is long and needs a human who will read the close.

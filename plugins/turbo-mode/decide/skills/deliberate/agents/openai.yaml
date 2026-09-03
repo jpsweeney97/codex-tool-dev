@@ -1,7 +1,4 @@
 interface:
   display_name: "Deliberate"
-  short_description: "One-invocation autonomous deliberation pipeline"
-  default_prompt: "Run a complete autonomous deliberation on: <decision frame>. Optional: candidates and field mode, constraints at price, values, evidence and its authorization, survivor budget — or a pasted re-run capsule with directives."
-
-policy:
-  allow_implicit_invocation: false
+  short_description: "One decision, deliberated end to end: widen, cut with reasons, develop, recommend, contest"
+  default_prompt: "Deliberate this decision end to end: <the decision>. My candidates, hard constraints, and lean, if any: <...>"

@@ -1,2 +1,0 @@
-# must block: custom tag rejected before construction
-payload: !!python/object/apply:os.system ["echo pwned"]
