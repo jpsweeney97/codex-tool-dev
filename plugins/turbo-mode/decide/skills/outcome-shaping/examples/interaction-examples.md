@@ -79,6 +79,17 @@ User: "I want cutting a release to be so boring I'd do it on a Friday."
 
 That sentence — theirs, not yours — is the settled shape, and it goes into the capsule verbatim.
 
+When the restatement adds something the read never held, the new part is unpriced. User: "I want releases boring enough for a Friday — and I want a new hire to be able to run one without me."
+
+```markdown
+The Friday part is what we priced. "Without me" is new — that's a runbook and
+onboarding on top of the release work. Still worth it if it adds a week? If
+yes, both go into the capsule as settled; if not, the new part rides along
+marked unpriced.
+```
+
+Price the new part once; do not let a restatement carry unpriced content downstream as settled.
+
 ## Dissolution (success)
 
 ```markdown
@@ -95,11 +106,13 @@ User, immediately after a hard trade question: "You know what, this is fine, jus
 
 ```markdown
 Happy to — noting once that we're stopping at exactly the spot where it got
-uncomfortable: whether craft-joy or the March date wins. If you want the
-recommendation anyway, I'll make it. Which way?
+uncomfortable: whether craft-joy or the March date wins. That's the trade we
+never priced, so my answer is the question, not a pick: if the rewrite costs
+March and most of April, still worth it? My lean is ship in March and rewrite
+after — and it's a lean, yours to overrule.
 ```
 
-Name it once, gently, then comply.
+Name it once, gently, then comply — in place, as the priced values question with a labeled lean, never a pick. Routing an unpriced collision to `making-recommendations` only gets it bounced back.
 
 ## Anti-Patterns
 

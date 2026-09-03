@@ -33,7 +33,7 @@ Each skill writes only where its own contract says:
 
 | Skill | Writes |
 | --- | --- |
-| `outcome-shaping` | Nothing. Chat-only; a file, ticket, or durable artifact only when the user explicitly asks. |
+| `outcome-shaping` | Nothing by default. Chat-only; a shaping brief (the capsule) only when the user explicitly asks, placed per repo convention and left uncommitted; a ticket or other durable artifact likewise only on an explicit ask. |
 | `ideate` | Nothing. The un-ranked field is delivered in the response. |
 | `option-shaping` | Nothing. The comparison surface is delivered in the response. |
 | `making-recommendations` | Nothing. The close is delivered in the response. |

@@ -4,6 +4,23 @@ All notable changes to the Decide plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.3.0 - 2026-09-03
+
+The fix batch from the 2026-09-03 gap review of `outcome-shaping` (`docs/reviews/2026-09-03-outcome-shaping-gap-review.md` in the source repo, every verdict in its companion `-verdicts.json`): 21 raw findings, 16 after dedup, 6 confirmed and all reproduced by blind proxy or by grep, 10 refuted. Three of the fixes were JP's decisions among options the record keeps. Every behavior fix was forward-tested against the patched text with the verifiers' own proxy prompts before landing: the re-price rule on Codex twice (the runtime where it failed), the flight case, the compaction case, and the option-shaping route on Sonnet. Minor, not patch: the lane gains an exit and an in-lane answer it could not give before; nothing is removed, and the calendar change narrows a permission rather than an interface.
+
+### Added
+
+- `outcome-shaping` gains the Exits row it was missing between `making-recommendations` and `ideate`: two or more options named but still sketch-level or uneven route to `option-shaping`, with the user asked to fix the candidate set first, since concretes the lane offered for reaction are the agent's probes, not the user's field. The lane could put such a field on the table itself and had nowhere to send it except a lane whose own contract bounces it; a blind run handed off to `making-recommendations` while noting the options were still one-line sketches. (F1)
+
+### Changed
+
+- `outcome-shaping` settle test: a restatement that carries content the read never held has added an unpriced part to the shape, and the lane prices it once before treating the restatement as settled, or carries it in the capsule marked unpriced. Before this, an own-words restatement that added content satisfied the settle conjunction while the new content bypassed the priced-trade invariant; reproduced twice on Codex, where the capsule then re-attributed the earlier price to the new content. The Own-Words Close example now shows the re-price. (F13)
+- `outcome-shaping` flight case: when the user quits a hard trade and asks for a recommendation anyway, the lane answers in place as the priced values question with a lean labeled as a lean, never a pick, naming the skipped trade in the same turn. Core Behavior, Restraints, and the Flight Named Once example previously disagreed about what complying meant, and the example produced an unguarded settled pick in a blind run. Chosen over an unconditional hand-off to `making-recommendations`, whose field-readiness stop would bounce an unpriced collision straight back. (F4, JP's decision)
+- `outcome-shaping` Core Behavior carries a compaction rule: when working from a summary rather than the user's actual sentences, say so, re-confirm the settled shape in their words before any capsule, and mark anything unsourceable as compression. Without it a post-compaction agent asserted "you confirmed this in your own words" over a summarizer's paraphrase and once fabricated a quoted attribution. First compaction clause in a conversational judgment skill in the source library; the rule sits in Core Behavior so skill-body truncation after compaction cannot drop it. (F10)
+- `outcome-shaping`'s calendar witness is conditioned on the user pointing at it; the repo and the last three decisions stay unconditional witnesses. The prior grant authorized reading a personal calendar the user never named, which PRIVACY's read disclosure did not cover; a blind agent given a calendar tool treated the unprompted search as a normal in-lane move. (F15, JP's decision)
+- `outcome-shaping` says what a user-requested brief is: the capsule, placed per repo convention with one path question if none is clear, left uncommitted for the user, matching `design-exploration`'s artifact rule. README's Writes row says the same. (F2, JP's decision)
+- PRIVACY and TERMS disclose `outcome-shaping`'s on-request brief, so PRIVACY's "nothing else on disk" is true by the plugin's own contracts again, and both notices name the dated amendment section `decision-record` may add to an older record it narrows, which 1.2.0 introduced without updating either notice. PRIVACY's off-machine sentence no longer carries a path count to maintain. (F2)
+
 ## 1.2.0 - 2026-09-02
 
 ### Changed

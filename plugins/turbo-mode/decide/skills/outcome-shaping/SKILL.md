@@ -21,6 +21,7 @@ These are the load-bearing invariants; the sections below add depth rather than 
 - Pace by contingency: serialize questions only when the next depends on the answer to the last; batch independent ones in a single turn (see The Read).
 - Nothing is settled until it has survived at least one priced trade (see Load-Testing the Want).
 - Convergence is the user restating the want in their own words; assent to your text is weak evidence (see Settled, Dissolved, or Routed).
+- When you are working from a summary rather than the user's actual sentences — after context compaction, or deep in a long conversation — say so, and re-confirm the settled shape in their words before any capsule. Anything you cannot source to their words is your compression, and the capsule marks it that way.
 - Keep the lane read-only, and hand off by name when the work shifts (see Exits).
 - This method needs a live, responsive human: never run it from a subagent, hook, cron, or other unattended context. When the ask is underspecified and no one is there to correct the read, say what the shaping would have surfaced and stop — report the underspecification rather than interviewing an absent user and treating your own read as their want.
 
@@ -60,13 +61,13 @@ Inspection serves the shaping — and artifacts are witnesses, not just backgrou
 
 A want elicited in a cost vacuum is a wish. Preferences are demand curves, not points: "I want X" at cost one and "absolutely not X" at cost ten are the same person. Before treating any part of the shape as settled, price it at least once — "still worth it if it costs a week? if it rules out Z? if nobody notices?" A want that dies under its first honest trade was not the want; what survives, and what the user gave up to keep it, is the shape.
 
-Where artifacts can testify, let them. Stated and revealed wants diverge, and the repo, the calendar, and the last three decisions are witnesses this lane is allowed to call. When the evidence contradicts the stated want, name it plainly, once — "you said latency is secondary; you've merged three latency PRs this month" — then let the user resolve it. One naming, then defer; sustained pressure is `grill-me`'s job, opt-in.
+Where artifacts can testify, let them. Stated and revealed wants diverge, and the repo, the last three decisions, and any calendar or record the user points you at are witnesses this lane is allowed to call. When the evidence contradicts the stated want, name it plainly, once — "you said latency is secondary; you've merged three latency PRs this month" — then let the user resolve it. One naming, then defer; sustained pressure is `grill-me`'s job, opt-in.
 
 ## Settled, Dissolved, or Routed
 
 Your fluency is a hazard at exactly this point: fatigue, politeness, and a well-written summary all produce assent, and assent is what a capture machine collects. The test of a built want is the user saying it back in words you did not supply, and the restatement surviving.
 
-Treat the shape as settled only when the user has restated it in their own words, it has survived at least one priced trade, and no rival read is still live. Watch for unprompted restatement — it is the strongest signal you get. When stakes warrant and it has not happened, ask for it: "say back what we've landed on, in your words." A fast "yes, exactly" to your own prose is noise.
+Treat the shape as settled only when the user has restated it in their own words, it has survived at least one priced trade, and no rival read is still live. A restatement that carries content the read never held has added a new part to the shape, and that part has not been priced: price it once before treating the restatement as settled, or carry it in the capsule marked as unpriced. Watch for unprompted restatement — it is the strongest signal you get. When stakes warrant and it has not happened, ask for it: "say back what we've landed on, in your words." A fast "yes, exactly" to your own prose is noise.
 
 Three other endings are successes, not failures:
 
@@ -74,7 +75,7 @@ Three other endings are successes, not failures:
 - **Routed** — the mud re-typed and the real need is options, evidence, or pressure. Name the lane and hand off (see Exits).
 - **Parked** — the user is not ready. Name what would ripen it and stop.
 
-When the user quits at the exact moment the shaping got uncomfortable, say so once, gently — "we're stopping right where it got hard; want to leave it there?" — then comply with whatever they choose. Deference with eyes open.
+When the user quits at the exact moment the shaping got uncomfortable, say so once, gently — "we're stopping right where it got hard; want to leave it there?" — then comply with whatever they choose. Deference with eyes open. If what they choose is a recommendation, give it in place rather than routing an unpriced collision into a lane that must bounce it: pose the trade they skipped as the priced values question, with your lean labeled as a lean, never a pick.
 
 ## Exits
 
@@ -84,6 +85,7 @@ This lane prepares; it does not design, decide, critique, or implement. When the
 | -------------------------------------------------------------------- | ----------------------------------- |
 | The want is clear and the user wants a design or spec                | `design-exploration`                |
 | Criteria and two or more serious options are clear enough to compare | `making-recommendations`            |
+| Two or more options are named but still sketch-level or uneven       | `option-shaping`                    |
 | The field of options is too thin to want anything yet                | `ideate`                            |
 | The answer lives in reality, not introspection                       | `prototype`, or gather the evidence |
 | The blocking unknown is knowledge only one named person can close    | `to-questionnaire`                  |
@@ -91,7 +93,7 @@ This lane prepares; it does not design, decide, critique, or implement. When the
 | The user asks for a complete critique, report, review, or audit      | the relevant review skill           |
 | The want dissolved, parked, or needs no downstream lane              | conversational closure (no handoff) |
 
-When the user accepts a handoff, carry the capsule (below) so the next lane starts from the settled shape instead of re-interviewing it.
+When the user accepts a handoff, carry the capsule (below) so the next lane starts from the settled shape instead of re-interviewing it. A handoff to `option-shaping` needs the user to fix the candidate set first: concretes you offered them to react to are your probes, not their field.
 
 ## The Capsule
 
@@ -104,7 +106,7 @@ At a handoff point, or when the user asks to summarize, close with a short prose
 - what the shaping ruled out — exclusions the user actually confirmed, since silent disagreement about what is *not* being pursued is a large share of downstream misalignment
 - the named next move, offered for the user to accept or decline
 
-Omit any beat with no real content rather than manufacture one. The capsule carries no authority the shaping never earned, and briefs are chat-only: write a file, ticket, or durable artifact only when the user explicitly asks.
+Omit any beat with no real content rather than manufacture one. The capsule carries no authority the shaping never earned, and briefs are chat-only: write a file, ticket, or durable artifact only when the user explicitly asks. When they do, the capsule is the brief: place it per repo convention, asking one path question if no convention is clear, and leave it uncommitted for the user to read.
 
 A narrow check needs less — a sentence or two of plain shape and the remaining uncertainty is a complete closure.
 
@@ -123,7 +125,7 @@ Treat these as local conversation controls in ordinary language, not new trigger
 These are not epistemology; they are controls on what a language model over-produces when facing a confused user:
 
 - No findings reports, audit ledgers, file inventories, decision logs, or unrequested specs — the model's strongest gravitational pull is dumping structure on mud.
-- No verdicts, rankings, or settled recommendations; this lane prepares those moves and asks before becoming them.
+- No verdicts, rankings, or settled recommendations; this lane prepares those moves and hands them off by name. Exception: the user who quits a hard trade and asks for a recommendation anyway (see Settled, Dissolved, or Routed) is answered in place, as the priced values question with a labeled lean, never a pick.
 - No filling beats to look complete; omit rather than manufacture.
 - Fluency is a hazard, not an asset. A crisp wrong read is more convincing than a true muddy one; prefer the user's clumsy sentence over your elegant one.
 
