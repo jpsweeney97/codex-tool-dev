@@ -4,6 +4,16 @@ All notable changes to the Decide plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.1.0 - 2026-09-03
+
+### Added
+
+- `deliberate` honors a model name as plain-language steering ("use Sonnet for the stages" sets the stage model), and the setup shown before the first dispatch names the model the stages will run on.
+
+### Changed
+
+- On Claude Code, `deliberate` dispatches every stage agent with `model: opus` unless the user names a model; on another runtime it uses that runtime's subagent model setting. Before, stages inherited the session model, so a run from a Fable session put five long dispatches on Fable. Minor, not patch: a steering phrase the run did not honor before, and a changed default the user sees in the setup and can override.
+
 ## 2.0.0 - 2026-09-03
 
 ### Changed

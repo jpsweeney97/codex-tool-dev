@@ -14,19 +14,19 @@ The principle that governs every stage: **complete every judgment the run can ho
 
 A decision question, in a sentence or a file. Optionally: candidates they already have, constraints they are sure of, what they value, files to read, and their current lean. Everything absent defaults: the field is widened even when candidates are given, about four survivors are kept, and evidence is what the user supplied plus what is already in the working context.
 
-Plain-language steering the run honors: "don't add options" skips Generate and starts at Prune; "keep six" changes the survivor count; "you may research" allows web lookups in every stage.
+Plain-language steering the run honors: "don't add options" skips Generate and starts at Prune; "keep six" changes the survivor count; "you may research" allows web lookups in every stage; a model name ("use Sonnet for the stages") sets the stage model.
 
 If the decision question cannot be stated from what the user gave, ask one question before the run starts. If the goal itself is muddy, name `outcome-shaping` instead of running. Once the run starts it asks nothing; host permission prompts are outside that promise.
 
 ## Setup, shown before the first dispatch
 
-Create a fresh run directory under the runtime's scratch or temp root (Claude Code's scratchpad; `mktemp -d` elsewhere) and write `00-setup.md` with: the decision question; the user's candidates, marked as theirs; each hard constraint the user confirmed, with what it costs; stated values; the evidence stages may read and whether research is allowed; the survivor count; and the user's visible lean, if any. Mark anything inferred rather than told `inferred`.
+Create a fresh run directory under the runtime's scratch or temp root (Claude Code's scratchpad; `mktemp -d` elsewhere) and write `00-setup.md` with: the decision question; the user's candidates, marked as theirs; each hard constraint the user confirmed, with what it costs; stated values; the evidence stages may read and whether research is allowed; the survivor count; the model the stages will run on; and the user's visible lean, if any. Mark anything inferred rather than told `inferred`.
 
 Show the setup to the user in a few lines and start the run in the same turn. The user can interrupt to correct it; the run does not wait. Between stages, give one line naming the stage starting and what it received as counts, not content.
 
 ## The five stages
 
-Each stage runs as a fresh agent with its own context, dispatched with a brief the orchestrator composes from `00-setup.md` and the previous stage's output file. The fresh context is what keeps the user's lean, and each stage's reasoning, out of the stages that must not see them. Where the runtime cannot dispatch a fresh agent, run the stages in this context in order, still writing every file, and say in the close that the stages were not isolated.
+Each stage runs as a fresh agent with its own context, dispatched with a brief the orchestrator composes from `00-setup.md` and the previous stage's output file. On Claude Code, pass `model: opus` on every stage dispatch unless the user names a model; on another runtime, use its subagent model setting. Opus is the default because a run is five long dispatches. The fresh context is what keeps the user's lean, and each stage's reasoning, out of the stages that must not see them. Where the runtime cannot dispatch a fresh agent, run the stages in this context in order, still writing every file, and say in the close that the stages were not isolated.
 
 Every brief tells the stage agent: which sibling skill to read and follow (`../ideate/SKILL.md`, `../option-shaping/SKILL.md`, or `../making-recommendations/SKILL.md`, next to this skill's directory) or carries the method text below; to quote option wordings exactly as given; to change nothing outside its own output file; and to write its result to the named file, which overrides the sibling skill's chat-first default, then reply with two lines. The orchestrator reads the file, not the reply, before composing the next brief.
 
