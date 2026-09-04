@@ -35,10 +35,12 @@ Every brief tells the stage agent: which sibling skill to read and follow (`../i
 | Generate → `01-field.md` | `ideate` | question, constraints, values, evidence; the user's candidates as seeds to keep as written | the lean |
 | Prune → `02-prune.md` | the Prune method below | the field with the user's candidates marked; question, constraints at their price, values, survivor count | the lean; Generate's reasoning |
 | Shape → `03-shaped.md` | `option-shaping` | the survivors in field order, exact wordings; question, constraints, values, evidence; a statement that the user invoked `deliberate` and delegated candidate selection to the run | the lean; the cut records |
-| Recommend → `04-close.md` | `making-recommendations` | the shaped comparison surface; question, constraints, values, evidence; the user's visible lean, named as such; an instruction to append a cut record (shape below) for any survivor it sets aside by filter or dominance | the cut records from Prune; Prune's and Shape's reasoning |
+| Recommend → `04-close.md` | `making-recommendations` | the shaped comparison surface; question, constraints, values, evidence; the user's visible lean, named as such; an instruction to append a cut record (shape below) for any survivor it sets aside by filter or dominance, and to name as added any option it adds | the cut records from Prune; Prune's and Shape's reasoning |
 | Contest → `05-contest.md` | the Contest method below | the close, every cut record from Prune and Recommend, the shaped surface, the setup including the lean | nothing further |
 
 Recommend receives the lean because its own contract registers the user's lean and attacks it. The earlier stages do not, because a stage that knows the favorite widens, cuts, and develops toward it.
+
+`Recommend` follows the live `making-recommendations` contract, which may add an option to the shaped field. Its brief tells it to name each addition as added in `04-close.md`. Contest decides whether an added option is substantively the same as a Prune cut and, when it is, names that cut as a live challenge in the existing one-line form.
 
 If a stage returns one of its sibling skill's honest exits or handoffs instead of its artifact (`ideate` handing to `outcome-shaping`; `option-shaping` returning `field collision unresolved`; `making-recommendations` exiting `options not comparable` or `no basis yet`, or handing to another skill), the run ends there as that exit. Report it, name the skill it points to, and stop. Do not enter that skill and do not ask a mid-run question.
 
@@ -70,7 +72,7 @@ Revive if:
 
 You test the run's cuts against the recommendation's actual reasoning. Detection only: you identify, and never adjudicate, revive, or recommend.
 
-Find every recorded cut the close makes live: a cut whose reason the close also leans on; a `Revive if` condition the close's own reasoning satisfies or nearly satisfies; a cut whose reason the comparison surface undermines. An excluded option the user visibly preferred is always a live challenge. If the close names only one serious option, test whether any cut's reason being wrong would restore a rival. Never hold an excluded option's lack of development against it; it was never developed, and depth asymmetry is not evidence. When any live challenge exists, name the one most worth contesting.
+Find every recorded cut the close makes live: a cut whose reason the close also leans on; a `Revive if` condition the close's own reasoning satisfies or nearly satisfies; a cut whose reason the comparison surface undermines. An excluded option the user visibly preferred is always a live challenge. A cut remains live when the close adopts the option's substance under another wording: the challenge is to the recorded cut, not to the recommendation, so name the cut in the existing positive form. Contest decides whether the added option and cut option are substantively the same; a merely related alternative is not the same option. If the close names only one serious option, test whether any cut's reason being wrong would restore a rival. Never hold an excluded option's lack of development against it; it was never developed, and depth asymmetry is not evidence. When any live challenge exists, name the one most worth contesting.
 
 Write `05-contest.md` as exactly one line:
 

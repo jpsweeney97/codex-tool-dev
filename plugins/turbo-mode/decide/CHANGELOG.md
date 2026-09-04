@@ -4,6 +4,13 @@ All notable changes to the Decide plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.2.0 - 2026-09-03
+
+### Changed
+
+- `deliberate`'s Contest method says what to do when the close adopts a cut option's substance under another wording: the cut stays live, the challenge is to the recorded cut rather than to the recommendation, and Contest names the cut in the existing positive line form; Contest decides whether the added option and the cut option are substantively the same. Before, the method left that case unstated, and a Contest agent read "live challenge" as "still excluded": a run whose Recommend stage re-added a wrongly cut winner under its own field rule delivered a cut ledger saying the option was cut on a constraint, a close recommending the same change, and an exclusion-check line silent about it (`docs/plans/2026-09-03-t2-known-answer-check/case-06/` in the source repo). The 2.0 rebuild dropped the 1.x rule that kept an active cut from reappearing at Recommend; the method now says what Contest does when that happens. The three line forms and the delivered ledger are unchanged.
+- `deliberate` states the Recommend handoff in its own text: Recommend follows the live `making-recommendations` contract, which may add an option to the shaped field; its brief tells it to name each addition as added in `04-close.md`; Contest checks additions against the Prune cuts. Minor, not patch: the run's delivered output changes (a cut the close adopted is now named in the exclusion check), and Recommend's brief carries an instruction it did not carry before. Deliberated cross-model on 2026-09-03 (`~/.synapsis/runs/2026-09-03-contest-recovered-cut/`); no certificate was earned, and the repair text itself was never refused. Prune's `fact-established` labeling on a cut that rests on a reading it cannot make is a separate defect, tracked as issue #21 in the source repo.
+
 ## 2.1.0 - 2026-09-03
 
 ### Added
