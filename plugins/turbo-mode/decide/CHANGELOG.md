@@ -4,6 +4,12 @@ All notable changes to the Decide plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.2.1 - 2026-09-03
+
+### Fixed
+
+- `deliberate`'s Prune method defines the second label on a cut record: `fact-established` only when the cut's stated reason settles it without interpretation and only a changed constraint or a new fact could revive it; when the record's own `Revive if` names a different reading of the same facts, including one Prune says it cannot make, the cut is `judgment call`. Before, the record template offered the two labels and defined neither, and a Prune agent labeled a constraint cut `fact-established` while its own reason said the deciding question was a legal reading it could not make; the evidence later established the opposite reading, and the cut option was the run's winner (`docs/plans/2026-09-03-t2-known-answer-check/case-06/02-prune.md` in the source repo; issue #21 there). The label matters because the close delivers the cut ledger as a compact table of option, cut, and revive-if, so the label is the only evidence-status signal that reaches the user. Patch, not minor: no new capability; the label now matches what the record's own reason and revive condition disclose. It does not make Prune see a reading it does not see: forward-tested on the case-06 field, two Opus runs on this text, one labeled the cut `judgment call` with the reading in its `Revive if`, the other disclosed no reading and kept `fact-established`, consistent with its own record (`docs/smoke-tests/2026-09-03_deliberate-2.2.1-prune-label-forward-test.md` in the source repo).
+
 ## 2.2.0 - 2026-09-03
 
 ### Changed

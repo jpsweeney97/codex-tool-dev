@@ -58,7 +58,7 @@ Cuts to reach the survivor count come after those. Each is a low-confidence cut 
 
 Rules that hold throughout: keep survivors in field order; never cut below two unless confirmed constraints leave fewer, and if they leave none the run ends with `no option survives the confirmed constraints`; a candidate the user supplied dies only by a recorded cut, never by collapse or omission.
 
-Write `02-prune.md` as the survivor list in exact wordings, then one record per cut:
+Write `02-prune.md` as the survivor list in exact wordings, then one record per cut. Label a cut `fact-established` only when its stated reason settles it without interpretation and only a changed constraint or a new fact could revive it; when your `Revive if` names a different reading of the same facts, including one you say you cannot make, the cut is `judgment call`.
 
 ```text
 Option:         <exact original wording>
