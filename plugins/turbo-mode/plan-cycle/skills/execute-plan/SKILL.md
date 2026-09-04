@@ -32,8 +32,8 @@ Follow each task's steps exactly, run every verification as written, and treat t
 
 ## Pace And Stops
 
-Execute continuously; do not pause between tasks to ask whether to continue. Stop only for: a blocker you cannot resolve, repeated verification failure, a plan gap or ambiguity that genuinely prevents progress, or completion. Ask rather than guess. When resuming after an interruption, re-verify the last task's actual state before re-running it: a non-idempotent step — a migration applied, a message sent, a record inserted — double-applies silently if redone, so resume from verified state, not from where the plan says you were.
+Execute continuously; do not pause between tasks to ask whether to continue. Stop only for: a blocker you cannot resolve, repeated verification failure, a plan gap or ambiguity that genuinely prevents progress, or completion. Ask rather than guess. At each task boundary, after its verification passes, commit with a message naming the task unless the plan's own steps already commit or the user or repo says otherwise; in subagent mode, the coordinator makes that commit after both reviews pass. That commit is the checkpoint a resumed session reads. When resuming after an interruption, re-verify the last task's actual state before re-running it: a non-idempotent step — a migration applied, a message sent, a record inserted — double-applies silently if redone, so resume from verified state, not from where the plan says you were.
 
 ## Completion
 
-Report tasks completed, verification evidence, and any divergences from the plan. Closing out, merging, and PR creation belong to `closeout-check`, `merge-branch`, or the PR lane — name the next move and stop.
+Report tasks completed, verification evidence, and any divergences from the plan. Where available, closing out, merging, and PR creation belong to `closeout-check`, `merge-branch`, or the repository's PR lane. If the needed lane is unavailable, report the proof boundary and stop before landing.

@@ -1,6 +1,6 @@
 {
   "name": "plan-cycle",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "From settled spec to executed work: PRD and issue publication, acceptance-check mapping, executor-ready implementation plans, plan and issue execution, tracker triage, plan queues, and mid-arc spec-drift reconciliation",
   "author": {
     "name": "JP"

@@ -7,7 +7,7 @@ description: "Use when the user wants to create, classify, verify, or move issue
 
 Move issues on the project issue tracker through a small state machine of triage roles.
 
-If this repo treats external pull requests as a request surface (see the issue-tracker config), triage covers them too: **a PR is an issue with attached code** — same roles, same states, same machine, with a few deltas marked "for a PR" below. Resolve a bare `#42` to an issue or PR per the tracker config.
+If this repo treats external pull requests as a request surface (see the issue-tracker config), triage covers them too: **a PR is an issue with attached code** — same roles, same states, same machine, with a few deltas marked "for a PR" below. If the config says nothing about pull requests, treat them as out of scope and resolve a bare `#42` as an issue.
 
 Every comment or issue posted to the issue tracker during triage **must** start with this disclaimer:
 
@@ -33,15 +33,15 @@ Five **state** roles:
 
 - `needs-triage` — maintainer needs to evaluate
 - `needs-info` — waiting on reporter for more information
-- `ready-for-agent` — fully specified, ready for an AFK agent; `implement-issue` is the pickup lane
+- `ready-for-agent` — fully specified, ready for an AFK agent; `implement-issue` is the pickup lane for issues and triaged PRs
 - `ready-for-human` — needs human implementation
 - `wontfix` — will not be actioned
 
 For a PR, the same states read against the attached code: `ready-for-agent` means a brief is attached and an agent should take the next step on the diff; `ready-for-human` means it's ready for a human to merge.
 
-Every triaged issue should carry exactly one category role and one state role. If state roles conflict, flag it and ask the maintainer before doing anything else.
+Every triaged issue should carry exactly one category role and one state role. A category without a state, a state without a category, or more than one role of either kind is malformed; surface it for correction before ordinary triage, and wait for approval before changing labels.
 
-These are canonical role names — the actual label strings used in the issue tracker may differ. The mapping should have been provided to you. If it is missing, use `/setup-matt-pocock-skills` or `$setup-matt-pocock-skills` when that skill is available; otherwise ask the smallest setup question needed before mutating issue state.
+These are canonical role names — the actual label strings used in the issue tracker may differ. The mapping should have been provided to you. If it is missing, ask the user to run `/setup-matt-pocock-skills` where that user-invoked skill is available; otherwise ask the smallest setup question needed before mutating issue state.
 
 State transitions: an unlabeled issue normally goes to `needs-triage` first; from there it moves to `needs-info`, `ready-for-agent`, `ready-for-human`, or `wontfix`. `needs-info` returns to `needs-triage` once the reporter replies. The maintainer can override at any time — flag transitions that look unusual and ask before proceeding.
 
@@ -56,11 +56,12 @@ The maintainer invokes `/triage` (or `$triage` on Codex) and describes what they
 
 ## Show what needs attention
 
-Query the issue tracker and present three buckets, oldest first:
+Query the issue tracker and present four buckets, oldest first:
 
 1. **Unlabeled** — never triaged.
 2. **`needs-triage`** — evaluation in progress.
 3. **`needs-info` with reporter activity since the last triage notes** — needs re-evaluation.
+4. **Malformed roles** — a category without a state, a state without a category, or more than one category or state; fix these before ordinary triage.
 
 When PRs are in scope, include external PRs in these buckets and tag each line `[PR]` or `[issue]`. Discovery surfaces only *external* PRs (the tracker config defines who counts as external) — a collaborator's in-flight PR is not triage work. This filter is discovery-only; an explicitly named PR is always triaged regardless of author.
 
@@ -86,13 +87,17 @@ Show counts and a one-line summary per item. Let the maintainer pick.
      - **Rejected (enhancement)** — write to `.out-of-scope/`, link to it from a comment, then close ([OUT-OF-SCOPE.md](OUT-OF-SCOPE.md)).
    - `needs-triage` — apply the role. Optional comment if there's partial progress.
 
+For the rejected-enhancement sequence, follow [OUT-OF-SCOPE.md](OUT-OF-SCOPE.md)'s confirmed-write flow; if any write fails, stop and report exactly which writes completed so a later run performs only the remainder.
+
 ## Quick state override
 
-If the maintainer says "move #42 to ready-for-agent", trust them and apply the role directly. Confirm what you're about to do (role changes, comment, close), then act. Skip grilling. If moving to `ready-for-agent` without a grilling session, ask whether they want to write an agent brief.
+If the maintainer says "move #42 to ready-for-agent", trust them and apply the role directly. Confirm what you're about to do (role changes, comment, close), then act. Read the item back after applying the override; if it does not carry exactly one category role and one state role, report that result and stop. Skip grilling. If moving to `ready-for-agent` without a grilling session, ask whether they want to write an agent brief.
 
 ## Needs-info template
 
 ```markdown
+> *This was generated by AI during triage.*
+
 ## Triage Notes
 
 **What we've established so far:**

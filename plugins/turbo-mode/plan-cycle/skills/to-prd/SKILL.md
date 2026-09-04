@@ -7,7 +7,7 @@ description: "Use when the user wants to turn the current conversation and repo 
 
 This skill takes the current conversation context and codebase understanding and produces a PRD. Do NOT interview the user — just synthesize what you already know.
 
-The issue tracker and triage label vocabulary should have been provided to you. If they are missing, use `/setup-matt-pocock-skills` or `$setup-matt-pocock-skills` when that skill is available; otherwise ask the smallest setup question needed before publishing.
+The issue tracker and triage label vocabulary should have been provided to you. If they are missing, ask the user to run `/setup-matt-pocock-skills` where that user-invoked skill is available; otherwise ask the smallest setup question needed before publishing.
 
 ## Side Effects And Proof Boundary
 
@@ -25,7 +25,7 @@ Check with the user that these seams match their expectations.
 
 3. Write the PRD using the template below. Once the user has approved publishing it (see Side Effects And Proof Boundary), publish it to the project issue tracker and apply the `needs-triage` label. A PRD is a source artifact still to be sliced into implementation issues, not work that is ready for an autonomous agent — do not apply `ready-for-agent`, and do not skip triage.
 
-After publishing, name the next lane and stop: `to-issues` slices this PRD into independently grabbable implementation issues, and the `needs-triage` items it produces are `triage`'s work. Do not run those lanes yourself unless the user asks.
+After publishing, name the next lane and stop: `to-issues` slices this PRD into independently grabbable implementation issues, publishing each approved slice as `ready-for-agent` or `ready-for-human`; those roles route the slice to `implement-issue` or a human. Only the PRD itself is `needs-triage`. Do not run those lanes yourself unless the user asks.
 
 <prd-template>
 

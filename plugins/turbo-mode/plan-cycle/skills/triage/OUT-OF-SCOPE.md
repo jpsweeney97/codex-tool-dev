@@ -96,6 +96,8 @@ The flow:
 5. Post a comment on the issue explaining the decision and mentioning the `.out-of-scope/` file
 6. Close the issue with the `wontfix` label
 
+Treat the local record creation or update, the tracker comment, and the tracker close as three separate writes. Confirm each immediately after it completes. If any write fails or the run is interrupted, stop and report completed writes separately from the remainder; on a later run, perform only the remaining writes.
+
 ## Updating or removing out-of-scope files
 
 If the maintainer changes their mind about a previously rejected concept:

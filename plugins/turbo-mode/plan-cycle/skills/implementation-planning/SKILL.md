@@ -47,4 +47,4 @@ Close honestly. The reference class is one you drew, and a base rate is a prior,
 
 ## Artifact And Handoff
 
-Save the plan to `docs/plans/YYYY-MM-DD-<topic>.md` unless the user or repo convention names another location; state the path. Commit only per repo convention or user request. Then name the executor: `execute-plan` for in-session execution, or `to-issues` when the user wants tracker slices instead of a plan run.
+Save the plan to `docs/plans/YYYY-MM-DD-<topic>.md` unless the user or repo convention names another location; state the path. Open the plan with the source path or issue reference it was derived from and, when an acceptance map exists for that source, the map's path. Commit only per repo convention or user request. Then name the executor: `execute-plan` for in-session execution, or `to-issues` when the user wants tracker slices instead of a plan run.
