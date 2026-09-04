@@ -4,6 +4,12 @@ All notable changes to the Decide plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.3.0 - 2026-09-04
+
+### Changed
+
+- `deliberate`'s Close writes the full close to `06-close.md` in the run directory (the Recommend stage's close as written, the cut ledger as a compact table, the exclusion-check line) and gives the chat a short summary: the call in one or two sentences, the runner-up and what would flip the call, the exclusion-check line, the file path, the re-run line, and what the run did not do. Before, the whole close and the cut table were delivered in the chat; on the skill's first interactive run (`docs/plans/2026-09-04-deliberate-dispatch-rule-run/` in the source repo) that was about 1,800 words in one reply, against a user reply contract that puts long analysis in a file with a summary in the chat. Minor, not patch: what the user sees in the chat changes and the run directory gains a seventh file. The close's content, the six stage files, the cut record format, and the re-run mechanism are unchanged. Forward-tested with three headless Sonnet runs on the real run's files, old text against new (`docs/smoke-tests/2026-09-04_deliberate-2.3.0-close-to-file-forward-test.md` in the source repo).
+
 ## 2.2.1 - 2026-09-03
 
 ### Fixed

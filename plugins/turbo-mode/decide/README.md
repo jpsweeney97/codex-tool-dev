@@ -38,7 +38,7 @@ Each skill writes only where its own contract says:
 | `option-shaping` | Nothing. The comparison surface is delivered in the response. |
 | `making-recommendations` | Nothing. The close is delivered in the response. |
 | `design-exploration` | A design document only when the user asks or approves, placed per repo convention; never committed automatically. |
-| `deliberate` | Six Markdown files (`00-setup.md` through `05-contest.md`) in a fresh directory under the runtime's scratch or temp root, left in place so the user can read them and re-run from any stage. Nothing under the working tree. |
+| `deliberate` | Seven Markdown files (`00-setup.md` through `06-close.md`) in a fresh directory under the runtime's scratch or temp root, left in place so the user can read them and re-run from any stage. Nothing under the working tree. |
 | `scope-cut` | Nothing itself. The deferred-not-dropped ledger is routed to `triage` (in the `plan-cycle` plugin where available), one item per finding, where every tracker mutation waits for approval; an inline list is the fallback when no tracker is reachable. |
 | `decision-record` | `docs/adr/NNNN-slug.md` at the next number, created lazily; on a supersession, a `Status` line on the older record; on a narrowing that leaves the older record in force, a cross-reference in the new record's prose plus, where the repo's ADR convention carries dated amendment sections, one such section on the older record where that convention places it, its existing text unedited; then a local commit of only those files (`docs(adr): record NNNN <slug>`), skipped on a protected branch or amid unrelated dirty state. Never pushes, opens a PR, or publishes. |
 

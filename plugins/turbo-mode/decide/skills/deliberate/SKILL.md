@@ -82,9 +82,9 @@ Write `05-contest.md` as exactly one line:
 
 ## Close
 
-Deliver in this order: the Recommend stage's close, as written; the cut ledger as a compact table (option, cut, revive if); the exclusion-check line; the run directory path; and one line: "To re-run, tell me which cut to revive, which constraint to change, or which survivor to develop further, and I will restart from the stage that changes." A re-run edits the affected file and runs the stages after it; the earlier files stand.
+Write `06-close.md` in the run directory, in this order: the Recommend stage's close, as written; the cut ledger as a compact table (option, cut, revive if); the exclusion-check line. In the chat, give the call in one or two sentences, the runner-up and what would flip the call in a few lines, the exclusion-check line as written, the path of `06-close.md`, and one line: "To re-run, tell me which cut to revive, which constraint to change, or which survivor to develop further, and I will restart from the stage that changes." A re-run edits the affected file and runs the stages after it; the earlier files stand.
 
-Say plainly what the run did not do: it did not verify facts the stages marked as assumptions, and it did not develop the excluded options.
+Say plainly, in the chat, what the run did not do: it did not verify facts the stages marked as assumptions, and it did not develop the excluded options.
 
 ## Boundaries
 
