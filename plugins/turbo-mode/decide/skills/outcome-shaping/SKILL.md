@@ -5,7 +5,7 @@ description: "Use when the user has a still-muddy idea, plan, design, or decisio
 
 # Outcome Shaping
 
-Help the user build a want they can stand behind — before plans, mechanics, or critique take over.
+Help the user build a want they can stand behind — before plans, mechanics, or critique take over. Invocation: `/decide:outcome-shaping` on Claude Code or `$outcome-shaping` on Codex.
 
 In genuinely muddy territory there is usually no finished want waiting to be excavated; articulation constructs it. That makes this lane joint authorship, and it makes you a hazard: your read is a draft the user may sign because it is fluent, not because it is theirs. The method exists to keep the user the author — their words, their trades, their restatement — while you supply structure, contrast, and honest evidence.
 
@@ -19,7 +19,7 @@ These are the load-bearing invariants; the sections below add depth rather than 
 - The engine is the read, not the questions: one compact, evolving statement of the want, offered for correction, usually opened "My read so far:". Rewrite it as understanding improves; never append a ledger.
 - Keep the user's load-bearing words, and never transpose the want into a different register than the one it lives in (see The Read).
 - Pace by contingency: serialize questions only when the next depends on the answer to the last; batch independent ones in a single turn (see The Read).
-- Nothing is settled until it has survived at least one priced trade (see Load-Testing the Want).
+- Nothing negotiable is settled until it has survived at least one priced trade; preserve a constraint the user explicitly holds fixed and price the flexibility that remains (see Load-Testing the Want).
 - Convergence is the user restating the want in their own words; assent to your text is weak evidence (see Settled, Dissolved, or Routed).
 - When you are working from a summary rather than the user's actual sentences — after context compaction, or deep in a long conversation — say so, and re-confirm the settled shape in their words before any capsule. Anything you cannot source to their words is your compression, and the capsule marks it that way.
 - Keep the lane read-only, and hand off by name when the work shifts (see Exits).
@@ -59,7 +59,7 @@ Inspection serves the shaping — and artifacts are witnesses, not just backgrou
 
 ## Load-Testing the Want
 
-A want elicited in a cost vacuum is a wish. Preferences are demand curves, not points: "I want X" at cost one and "absolutely not X" at cost ten are the same person. Before treating any part of the shape as settled, price it at least once — "still worth it if it costs a week? if it rules out Z? if nobody notices?" A want that dies under its first honest trade was not the want; what survives, and what the user gave up to keep it, is the shape.
+A want elicited in a cost vacuum is a wish. Preferences are demand curves, not points: "I want X" at cost one and "absolutely not X" at cost ten are the same person. Before treating a negotiable part of the shape as settled, price it at least once — "still worth it if it costs a week? if it rules out Z? if nobody notices?" When the user explicitly holds an obligation or constraint fixed, preserve it and price only the flexibility that remains; if it is unclear what can move, ask. When nothing can move, record the fixed constraint and let the other settlement or parking rules decide the close rather than asking the user to surrender it for the method's sake. A negotiable want that dies under its first honest trade was not the want; what survives, and what the user gave up to keep it, is the shape.
 
 Where artifacts can testify, let them. Stated and revealed wants diverge, and the repo, the last three decisions, and any calendar or record the user points you at are witnesses this lane is allowed to call. When the evidence contradicts the stated want, name it plainly, once — "you said latency is secondary; you've merged three latency PRs this month" — then let the user resolve it. One naming, then defer; sustained pressure is `grill-me`'s job, opt-in.
 
@@ -67,7 +67,7 @@ Where artifacts can testify, let them. Stated and revealed wants diverge, and th
 
 Your fluency is a hazard at exactly this point: fatigue, politeness, and a well-written summary all produce assent, and assent is what a capture machine collects. The test of a built want is the user saying it back in words you did not supply, and the restatement surviving.
 
-Treat the shape as settled only when the user has restated it in their own words, it has survived at least one priced trade, and no rival read is still live. A restatement that carries content the read never held has added a new part to the shape, and that part has not been priced: price it once before treating the restatement as settled, or carry it in the capsule marked as unpriced. Watch for unprompted restatement — it is the strongest signal you get. When stakes warrant and it has not happened, ask for it: "say back what we've landed on, in your words." A fast "yes, exactly" to your own prose is noise.
+Treat the shape as settled only when the user has restated it in their own words, every negotiable part has survived at least one priced trade, every explicitly fixed constraint is preserved, and no rival read is still live. A restatement that carries content the read never held has added a new part to the shape: price it when it is negotiable, or confirm and preserve it when the user holds it fixed, before treating the restatement as settled; otherwise carry it in the capsule marked as unpriced or unconfirmed. Watch for unprompted restatement — it is the strongest signal you get. When stakes warrant and it has not happened, ask for it: "say back what we've landed on, in your words." A fast "yes, exactly" to your own prose is noise.
 
 Three other endings are successes, not failures:
 
@@ -92,6 +92,8 @@ This lane prepares; it does not design, decide, critique, or implement. When the
 | The user wants sustained pressure on weak answers                    | `grill-me`                          |
 | The user asks for a complete critique, report, review, or audit      | the relevant review skill           |
 | The want dissolved, parked, or needs no downstream lane              | conversational closure (no handoff) |
+
+Destinations outside the Decide plugin are optional. When an external receiver is available and model-invocable, name the handoff normally. When it is user-invoked, give the human its supported token after the capsule — for `to-questionnaire`, `/to-questionnaire` on Claude Code or `$to-questionnaire` on Codex — and do not treat the route as an operative invocation. When the receiver is unavailable, say so, return the short capsule with the kind of work that remains, and stop; do not perform the missing skill's work in this lane.
 
 When the user accepts a handoff, carry the capsule (below) so the next lane starts from the settled shape instead of re-interviewing it. A handoff to `option-shaping` needs the user to fix the candidate set first: concretes you offered them to react to are your probes, not their field.
 

@@ -58,6 +58,19 @@ two weeks of tuning, still worth it? If not, we've found the real bar — how mu
 trust is worth buying.
 ```
 
+## Fixed Constraint, Remaining Flexibility
+
+User: "The contract deadline is Friday. It cannot move. I need to work out what a responsible release looks like."
+
+```markdown
+My read so far: Friday is fixed; I won't ask whether missing it is worth the
+trade. What can still move is scope against confidence. If the full scope means
+only a cursory verification pass, would you rather cut scope or accept that
+level of confidence?
+```
+
+Preserve the constraint the user declared fixed. Price the remaining flexibility rather than asking them to trade away the obligation.
+
 ## Testimony, Named Once
 
 ```markdown

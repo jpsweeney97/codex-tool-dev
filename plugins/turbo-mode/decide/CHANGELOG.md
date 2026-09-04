@@ -4,6 +4,19 @@ All notable changes to the Decide plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.4.0 - 2026-09-04
+
+### Changed
+
+- `outcome-shaping` now preserves an obligation or constraint the user explicitly holds fixed and prices only the flexibility that remains. If nothing can move, the ordinary settlement or parking rules decide the close; the skill no longer needs to ask the user to surrender the constraint merely to satisfy its priced-trade rule. The settle rule and a calibration example carry the same distinction.
+- Handoffs from `outcome-shaping` to skills outside Decide now depend on receiver availability. A user-invoked receiver gets an actionable token; an unavailable receiver gets a short capsule naming the work that remains, and outcome-shaping stops instead of performing the missing skill's work.
+
+### Fixed
+
+- `outcome-shaping`'s body now names its documented Claude Code and Codex invocation forms, matching the dual-runtime skill-text convention already followed by its sibling skills and documented in the Decide README.
+
+Minor, not patch: the skill can now complete fixed-constraint and unavailable-receiver situations whose behavior was previously undefined. The invocation sentence documents an existing path.
+
 ## 2.3.1 - 2026-09-04
 
 ### Fixed
