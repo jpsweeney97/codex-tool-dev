@@ -40,7 +40,7 @@ Mutation boundary: a settled record's body — its reasoning — is never rewrit
 
 Write to `docs/adr/NNNN-slug.md`, created lazily. Default to the repo-root `docs/adr/`; in a `CONTEXT-MAP.md` repo, reuse grill-with-docs's documented layout (system-wide `docs/adr/` versus a context's `src/<ctx>/docs/adr/`) and place a plainly context-scoped decision in that context's directory, asking one placement question only when genuinely ambiguous. Numbering is per-directory: scan that `docs/adr/` for the highest number and increment. Defer to an ADR home set in `AGENTS.md` / `CLAUDE.md` if one exists — and match any existing ADR convention (location, markup, numbering, headings) per the detection rule in `ADR-FORMAT.md` before applying these defaults. grill-with-docs writes the same `NNNN-slug.md` files into the same directory, so the two share the corpus and the numbering namespace natively — read the existing files, whoever wrote them, for both numbering and supersession detection.
 
-Re-run is non-destructive: the same decision already recorded → extend or correct it in place, do not duplicate; a genuine change to it → the supersession path; a new decision → a new number. A dirty target file or a slug collision → ask one path question; never ask on a clean re-run.
+Re-run is non-destructive: if the same decision is already recorded, report the existing ADR without creating a duplicate. Change it only under the mutation boundary above; if no permitted change applies, leave it unchanged. A genuine change to the decision follows the supersession path; a new decision gets a new number. A dirty target file or a slug collision → ask one path question; never ask on a clean re-run.
 
 ## Write safety and commit
 

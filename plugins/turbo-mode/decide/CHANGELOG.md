@@ -4,6 +4,14 @@ All notable changes to the Decide plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.3.1 - 2026-09-04
+
+### Fixed
+
+- The privacy notice now lists all seven `deliberate` run files, including `06-close.md`, and removes the obsolete validator/uv download statement left after the validator was removed in 2.0.0.
+- The README, manifest description, and privacy notice qualify `deliberate`'s fresh-agent behavior: fresh contexts when supported, otherwise the existing same-context fallback with disclosure in the close. The fallback itself is unchanged.
+- `decision-record`'s same-decision rerun instruction now explicitly follows its existing mutation boundary and leaves the record unchanged when no permitted edit applies. This replaces the unqualified instruction to extend the record in place; it adds no edit permission. The README storage description names the same boundary.
+
 ## 2.3.0 - 2026-09-04
 
 ### Changed
