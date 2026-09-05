@@ -166,7 +166,7 @@ Use one label, rendered exactly as written here — backticked lowercase:
 - `underpowered`: misses important risks, lacks evidence, or avoids necessary verification.
 - `under-evidenced`: target resolution or access failed, or the evidence base is too thin for a reliability judgment.
 
-Add a short rationale covering framing, severity calibration, and coverage. The judgment is a fact about this adjudication's bounded search at this snapshot, not a durable property of the review: it expires when the target or the review moves, and `reliable` does not certify that nothing was missed. The label follows the findings: a review with a confirmed materially missed issue or a wrong load-bearing claim is at most `partially reliable`.
+Add a short rationale covering framing, severity calibration, and coverage. The judgment is a fact about this adjudication's bounded search at this snapshot, not a durable property of the review: it expires when the target or the review moves, and `reliable` does not certify that nothing was missed. The label follows the findings: a review with a confirmed materially missed issue or a wrong load-bearing claim is at most `partially reliable`. "At most `partially reliable`" excludes only `reliable`: `overreaching` or `underpowered` still applies when it fits. When `overreaching` and `underpowered` both fit, use `partially reliable` and name both kinds in the rationale. `under-evidenced` has its own triggers — the access-failure rule in Failure Modes, or an evidence base too thin for a reliability judgment — and is not weighed against the others.
 
 ### Recommended Next Step
 

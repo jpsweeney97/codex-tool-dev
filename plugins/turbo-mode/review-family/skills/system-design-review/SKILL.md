@@ -13,7 +13,7 @@ Explicit review-family invocation (including namespaced forms such as `review-fa
 
 - Completed code or artifacts against a plan/spec → `implementation-review`; execution-readiness review before implementation → `scrutinize`.
 - Agent skill or skill-support target → `scrutinize-skill`.
-- Supplied-review adjudication or pasted-claim checks → `review-reviewer`.
+- Explicit supplied-review adjudication or pasted-claim checks → `review-reviewer`.
 - Otherwise-wrong lane: name the better skill; if invocation rules bar switching, ask one routing question.
 
 ## Workflow

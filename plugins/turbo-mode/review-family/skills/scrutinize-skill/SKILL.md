@@ -39,7 +39,7 @@ Out of scope: routine skill editing, implementation, source sync, installed runt
 
 Inspect the exact target before judging it.
 
-If the target is a file inside a skill bundle, such as `SKILL.md`, `agents/*.yaml`, `agents/*.md`, `references/*`, `examples/*`, or another behavior-shaping file, treat the containing skill directory as the target unless the user explicitly narrows the request to that file only.
+If the target is a file inside a skill bundle, such as `SKILL.md`, `agents/*.yaml`, `agents/*.md`, `references/*`, `examples/*`, or another behavior-shaping file, treat the containing skill directory as the target; when the user explicitly narrows the request to that file only, inspect only that file and run the pass as a bounded review of the skill (see Output), not a clearance of the bundle.
 
 For an existing skill bundle, inspect:
 
@@ -69,7 +69,7 @@ Do not claim runtime installation, activation, hook behavior, marketplace sync, 
 4. **UX Review** - Review user friction, clarity, pacing, question shape, user effort, challenge level, and closure.
 5. **Composability And Overlap** - Identify overlapping skills and classify each material overlap as `target wins`, `other skill wins`, `routing clarification needed`, `merge candidate`, `split candidate`, or `no material overlap`.
 6. **Validation And Proof** - Separate structural checks from behavior proof and name any false-confidence claims.
-7. **Verdict** - Use `Reject`, `Major revision`, `Minor revision`, or `Defensible`. The verdict grades the behavior contract as written — execution altitude. It does not certify that the skill's underlying method or premise is true: a contract can execute cleanly on a false premise, and structure can pass the provoke test while claiming knowledge the method cannot produce. When the premise itself is the doubt, raise it as a finding and route to `methodology-check` (which escalates to `methodology-critique` when the crux is behavioral); do not clear it from a contract pass. `Defensible` is a clearance verdict, and a clearance verdict claims serious search was exhausted without a disqualifying find — it does not certify soundness, and it expires when the artifact changes.
+7. **Verdict** - Use exactly one of `Reject`, `Major revision`, `Partial review only`, `Minor revision`, or `Defensible`. `Partial review only` means bounded review mode was used: the reviewed subset was judged, the full target was not. If more than one verdict could apply, choose the first matching in this order: `Reject`, `Major revision`, `Partial review only`, `Minor revision`, `Defensible` — a disqualifying finding in the reviewed slice renders its verdict, scoped to the slice, and is never hidden behind an incomplete-pass label. The verdict grades the behavior contract as written — execution altitude. It does not certify that the skill's underlying method or premise is true: a contract can execute cleanly on a false premise, and structure can pass the provoke test while claiming knowledge the method cannot produce. When the premise itself is the doubt, raise it as a finding and route to `methodology-check` (which escalates to `methodology-critique` when the crux is behavioral); do not clear it from a contract pass. `Defensible` is a clearance verdict, and a clearance verdict claims serious search was exhausted without a disqualifying find — it does not certify soundness, and it expires when the artifact changes.
 
 ## Output
 
@@ -98,11 +98,12 @@ Findings are argued hypotheses until something independent of the arguing tests 
 
 When the review's required changes have been applied and the open claim becomes "the changed contract is now followed," proving that is `behavior-smoke-test`'s job (`/behavior-smoke-test` or `$behavior-smoke-test` where available), not a re-review.
 
-Use `Bounded Review Scope` before `Target And Surface` when the target or skill set comparison is too large to inspect completely in one pass. In bounded mode, state the reviewed subset before findings, review the highest-risk surface first, mark omitted areas `unverified`, give the next slice needed for a complete review, and do not issue a full-clearance verdict for the full target (do not use `Defensible`).
+Use `Bounded Review Scope` before `Target And Surface` when the target or skill set comparison is too large to inspect completely in one pass. In bounded mode, state the reviewed subset before findings, review the highest-risk surface first, mark omitted areas `unverified`, give the next slice needed for a complete review, and do not issue a full-clearance verdict for the full target (do not use `Defensible`; choose the verdict by the precedence order in Workflow step 7 — `Partial review only` unless a disqualifying in-slice finding renders `Reject` or `Major revision`, scoped to the slice). A review whose scope was narrowed externally — a caller-restricted scope, an assigned lens or panel seat, or sampled coverage — is also a bounded review: state the subset, scope the verdict to it, and leave `Defensible` unissued.
 
 ## Guardrails
 
 - Stay read-only: do not edit files, stage, commit, push, delete, sync, publish, or implement fixes unless the user explicitly asks for that separate action after the review; the same gate covers installing, refreshing plugin caches, and mutating runtime state.
 - Do not mentally repair weak instructions. Review the behavior contract that exists, not the one the author probably intended.
+- Self-authored target: if you authored the target — this session or otherwise — disclose it in `Target And Surface`, and treat your own absence claims (`None found`, `no material overlap`, a `Defensible` clearance) with declared extra skepticism.
 - Do not pad with generic writing advice. Every finding must identify a concrete failure path or user-visible weakness.
 - If overlap with a non-review-family skill matters, read enough of that skill to justify the routing or merge/split recommendation before making it verdict-driving.

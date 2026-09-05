@@ -58,7 +58,7 @@ Emit the `Adversarial Perspectives` section only under the materiality gate in S
 
 The verdict enum and severity scale restate the authoritative inline definition in SKILL.md (Workflow), which also governs verdict precedence, verdict scope, and the scoping-gloss form.
 
-If the user asks for a shorter answer, keep the same section order and compress the content rather than dropping sections.
+Shorter-answer handling follows SKILL.md (Output): keep the section order and compress the content rather than dropping sections.
 
 ## Execution-Readiness Review
 

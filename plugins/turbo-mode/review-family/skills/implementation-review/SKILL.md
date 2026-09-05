@@ -13,7 +13,7 @@ Explicit review-family invocation (including namespaced forms such as `review-fa
 
 - Architecture tradeoffs before implementation → `system-design-review`; broad adversarial critique or execution-readiness review before implementation → `scrutinize`.
 - Agent skill or skill-support target → `scrutinize-skill`.
-- Supplied-review adjudication or pasted-claim checks → `review-reviewer`.
+- Explicit supplied-review adjudication or pasted-claim checks → `review-reviewer`.
 - Otherwise-wrong lane: name the better skill; if invocation rules bar switching, ask one routing question.
 
 ## Preconditions And Boundaries
@@ -58,7 +58,7 @@ Higher-priority safety, destructive-action, and repo-instruction checkpoints sti
 
 Follow the steps in order. Do not jump to the verdict.
 
-Before building the ledgers, size and shape the target: an oversized or bundled diff may call for Bounded Review Mode or a `Split required` verdict (below) rather than a full pass.
+Before building the ledgers, size and shape the target: an oversized or bundled diff — or a pass the caller narrowed to part of the change — may call for Bounded Review Mode or a `Split required` verdict (below) rather than a full pass.
 
 ### 1. Build Ledgers
 
@@ -67,7 +67,7 @@ Create two inventories:
 - `Requirements ledger`: every explicit requirement from the plan or spec. When the spec is an `acceptance-map` artifact, each acceptance check is a ready-made requirement — carry its check ID into the ledger and treat its `Passes when` clause as the satisfaction criterion.
 - `Changed-area ledger`: every changed file, function, class, endpoint, command, or user flow.
 
-For each requirement, record an ID, spec source, status, code evidence, and falsification attempt. Use only `satisfied`, `violated`, `unverified`, or `not-applicable`. Mark `not-applicable` only when the requirement is truly outside scope, and explain why.
+For each requirement, record an ID, spec source, status, code evidence, and falsification attempt. Use only `satisfied`, `violated`, `unverified`, or `not-applicable`. Mark `not-applicable` only when the change under review — the whole change, not only the reviewed slice — does not reach the requirement, and explain why; a requirement the change implements or touches in files outside a caller-narrowed slice is `unverified`, not `not-applicable`.
 
 For each changed file or flow, record an ID, changed area, linked requirements, failure modes checked, evidence, and residual risk.
 
@@ -85,7 +85,7 @@ Burden of proof:
 - `satisfied`: spec evidence and code evidence exist, and the falsification attempt failed.
 - `violated`: code contradicts the requirement, omits it, or satisfies only a weaker version.
 - `unverified`: available evidence cannot prove correctness.
-- `not-applicable`: the requirement is real but outside the declared scope.
+- `not-applicable`: the requirement is real but the change under review — the whole change, not only the reviewed slice — does not reach it. A requirement the change implements or touches in files outside a caller-narrowed slice is `unverified`.
 
 Do not treat passing tests, naming, comments, or apparent intent as enough to mark `satisfied` without code evidence.
 
@@ -102,8 +102,10 @@ Then run the surface lenses wherever the change touches their surfaces. Read [re
 - `Performance`: the change adds per-row I/O, an unbounded fetch or materialization, or super-linear work under ordinary load.
 - `SQL and data access`: the change builds or alters a query, ORM call, raw SQL, or schema migration.
 - `Concurrency`: the change introduces or alters shared mutable state, locks, async coordination, or check-then-act.
+- `Retry-safety and idempotency`: the change adds or alters a state-changing endpoint or a side effect behind a retry.
 - `Accessibility`: the change adds or alters rendered UI.
 - `Supply-chain provenance`: an agent-authored diff introduces a new external dependency.
+- `Orphaned code`: the change replaces or removes a code path.
 
 Record the strongest failure story checked for each area, even when it does not produce a finding.
 
@@ -137,7 +139,7 @@ Each finding records its type (`implementation`, `plan`, or `unverified`) and se
 
 ## Bounded Review Mode
 
-Use bounded review mode when the spec, diff, or runtime surface is too large for one complete pass. In bounded mode, state the reviewed subset before findings, review the highest-risk surface first, mark omitted areas `unverified`, give the next slice needed for a complete review, and do not issue a full-clearance verdict for the full target (do not return `Ship` or a zero-findings verdict; here the omitted areas include requirements, files, flows, and runtime checks).
+Use bounded review mode when the spec, diff, or runtime surface is too large for one complete pass. In bounded mode, state the reviewed subset before findings, review the highest-risk surface first, mark omitted areas `unverified`, give the next slice needed for a complete review, and do not issue a full-clearance verdict for the full target (do not return `Ship` or a zero-findings verdict; here the omitted areas include requirements, files, flows, and runtime checks). A review whose scope was narrowed externally — a file set narrower than the change, an assigned lens or panel seat, or sampled coverage — is also a bounded review: state the subset, scope the verdict to it, and leave `Ship` unissued.
 
 When a target is too large for one pass, judge *why* before choosing the verdict. A coherent change that is merely large — reviewable in slices that each clear on their own — gets the highest-risk slice now and a `Partial review only` verdict naming the next slice. Reserve a `Split required` verdict (see Verdict Taxonomy) for a target that bundles genuinely independent concerns whose interleaving defeats reliable review as a unit — a diff mixing a refactor, a behavior change, and a migration, or one large only because several separable changes shipped together. Then decline full clearance and name the concrete seams that divide it into independently-reviewable units, each cut along a real boundary of concern, requirement, risk surface, or dependency layer — not an arbitrary size or file slice of one cohesive change. This judges shape, not a line count: a uniform codemod, a rename, or one cohesive feature is a single reviewable unit however large and stays `Partial review only`. Name seams only when you can find real ones; a too-large change you cannot cut along distinct concerns stays `Partial review only`. Verdict choice in bounded mode follows the precedence order under Verdict Taxonomy.
 
@@ -235,4 +237,4 @@ Stop and re-review if any of these happen:
 - You ran the surface lenses, found nothing, and wrote a clean verdict — without the open base-failure-mode attack and the bespoke-, business-logic-, or auth-bug hunt on the logic no lens names
 - You are tempted to say `LGTM`, `looks solid`, or `well implemented`
 
-If scope is too large, use bounded review mode. If the spec is ambiguous, record a plan finding and review against the conservative interpretation. If verification was not run, list the skipped check and mark affected claims `unverified`. If behavior depends on an uninspectable library, service, or runtime, mark the affected branch `unverified` unless the calling code handles bad behavior. If you wrote the original plan, spend extra attention on omitted edge cases and vague acceptance criteria.
+If scope is too large or the caller narrowed it to part of the change, use bounded review mode. If the spec is ambiguous, record a plan finding and review against the conservative interpretation. If verification was not run, list the skipped check and mark affected claims `unverified`. If behavior depends on an uninspectable library, service, or runtime, mark the affected branch `unverified` unless the calling code handles bad behavior. If you wrote the plan or the implementation, disclose it in `Review Scope` and spend extra attention on omitted edge cases and vague acceptance criteria.

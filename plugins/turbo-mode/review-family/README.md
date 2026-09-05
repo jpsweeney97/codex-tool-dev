@@ -24,7 +24,7 @@ No build step is required. The plugin ships skills only and has no runtime packa
 |------------|--------|-------------|
 | **Adversarial artifact review** | `scrutinize` | Challenge plans, designs, drafts, decisions, and broad artifacts with evidence-backed findings. Ask for a formal stress test when you want an explicit assumptions audit, pre-mortem, dimensional critique, and confidence boundary; ask for an execution-readiness review when you need to know whether a plan is ready to build from. |
 | **Skill behavior review** | `scrutinize-skill` | Review agent skills as behavior contracts for execution quality, UX, composability, overlap, and proof gaps. Skill targets route here even when the user says "scrutinize". |
-| **Implementation review** | `implementation-review` | Review completed work against a plan, spec, diff, or known intended behavior. |
+| **Implementation review** | `implementation-review` | Review completed work against a plan, spec, or known intended behavior. |
 | **System design review** | `system-design-review` | Review architecture and system design artifacts for scoped design-lens gaps and missing probes. |
 | **Review adjudication** | `review-reviewer` | Check supplied reviews and pasted review claims against target evidence before acting on them. |
 
