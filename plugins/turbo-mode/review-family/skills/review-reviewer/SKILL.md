@@ -90,14 +90,14 @@ Authority order:
 - When sources conflict, name the conflict and do not upgrade a claim past what inspected evidence supports.
 - Reviewer quotations can establish what the review claimed, but they cannot confirm target-dependent truth without independent artifact, authority, or live evidence.
 
-Each claim verdict needs a compact evidence pointer: file/path and line when available, PR/comment/commit/diff hunk when relevant, command output summary, or named doc/section for non-code artifacts. If no evidence pointer can be given, the claim should usually be `unverified`, unless it is challenged because the cited evidence is absent or inaccessible. For Current Claim Check, use its `Unverified` classification.
+Each claim verdict needs a compact evidence pointer: file/path and line when available, PR/comment/commit/diff hunk when relevant, command output summary, or named doc/section for non-code artifacts. If no evidence pointer can be given, keep the claim `unverified` and name the missing check or access. Inaccessible evidence does not establish absence or justify `challenged`; a challenge based on absence or contradiction requires inspected evidence at the claim’s proper snapshot. For Current Claim Check, use its `Unverified` classification.
 
 ## Verdicts And Dispositions
 
 Truth verdict says whether the review claim held at its proper evidence boundary, usually the original review snapshot for PR comments:
 
 - `confirmed`: the material claim and implied consequence both hold on inspected evidence.
-- `challenged`: the core fact is wrong, the severity is materially inflated, the recommendation does not follow at the truth boundary, or the cited evidence is absent or contradicted.
+- `challenged`: the core fact is wrong, the severity is materially inflated, the recommendation does not follow at the truth boundary, or inspection establishes that the cited evidence is absent or contradicted at that boundary.
 - `unverified`: available evidence cannot settle the claim; name the exact check or artifact access that would.
 
 Staleness is not itself a truth verdict. If a claim was true at the review snapshot but no longer applies at current head, keep the truth verdict `confirmed` and use disposition such as `reject` or `defer` with a stale/current note. If the review snapshot is unavailable and only current state is known, use `unverified` for historical truth and let current evidence inform only the disposition.
@@ -207,4 +207,4 @@ Claims classified `Unverified`, with the specific check required.
 
 ### Deferred
 
-True or partially true claims intentionally outside current scope.
+Claims with a `defer` disposition, including real issues outside the current scope or not urgent here.

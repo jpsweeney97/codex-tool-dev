@@ -4,6 +4,14 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.18.1 - 2026-09-08
+
+### Fixed
+
+- `implementation-review` requires evidence of an index’s purpose, constraint obligations, and representative workload before recommending removal; an unchanged query plan alone is insufficient.
+- `review-reviewer` keeps inaccessible evidence `unverified` and requires inspected evidence at the proper snapshot to challenge a claim on absence or contradiction. Its default prompt reinforces inspected evidence and complete accounting of next actions.
+- `review-reviewer` includes every claim assigned `defer` in the Current Claim Check’s `Deferred` section, including in-scope but nonurgent issues.
+
 ## 0.18.0 - 2026-09-05
 
 ### Changed
