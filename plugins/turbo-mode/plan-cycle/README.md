@@ -6,7 +6,7 @@ Turn a settled spec into published issues, executor-ready plans, and executed wo
 - `to-issues` — slice an existing plan, spec, PRD, or approved design into independently grabbable tracer-bullet issues and, on approval, publish them in dependency order with native parent and blocked-by links where the tracker supports them, or `Parent` / `Blocked by` text otherwise.
 - `acceptance-map` — turn a settled PRD, plan, issue, design, or review finding into a durable Markdown map of observable acceptance checks, each with a source basis, before implementation starts.
 - `implementation-planning` — write a dated implementation plan an executor with no codebase context could follow exactly, then run a reference-class completeness pass over it.
-- `execute-plan` — work an existing plan document task by task, inline or through per-task subagents with spec-compliance review before quality review.
+- `execute-plan` — work an existing plan document task by task, inline or through per-task subagents with spec-compliance review before quality review, keeping an execution record: a timed coordinator log, task packets, reviewer instructions, and rulings on every finding.
 - `implement-issue` — consume one agent-ready tracker issue or triaged pull request per invocation: verify its blockers are closed, implement exactly its scope, prove each acceptance criterion by behavior, and hand off to the appropriate landing or pull-request lane.
 - `triage` — move issues, and inbound external PRs where the repo treats them as requests, through the triage role state machine: labels, comments, agent briefs, ready-for-human work, and wontfix handling.
 - `plan-queue` — sweep a repo for its highest-leverage work, write the keepers as `PLAN-<rank>-<slug>.md` at the repo root, and burn the queue down one authorized plan at a time, each ending in a local fast-forward merge.
@@ -44,7 +44,7 @@ Each skill writes only where its own contract says:
 | `to-issues` | Implementation issues in the tracker with one category and one state label, plus native links where supported or `Parent` / `Blocked by` text otherwise, on approval. Never closes or edits the parent. Nothing on disk. |
 | `acceptance-map` | `<source-stem>.acceptance-map.md` beside the source, or the repo's acceptance-doc convention; committed locally by default; a link added to a local Markdown source. |
 | `implementation-planning` | `docs/plans/YYYY-MM-DD-<topic>.md` unless the repo names another location; committed only per repo convention or user request. |
-| `execute-plan` | Code changes and per-task commits on a working branch. No merge, push, or PR. |
+| `execute-plan` | Code changes and per-task commits on a working branch, plus an execution record folder committed at the end of the run. No merge, push, or PR. |
 | `implement-issue` | Code changes and commits on a working branch; a proposed closing or status comment posted only on approval. Never closes the parent. |
 | `triage` | Tracker labels, comments, created issues, and closures, on approval; `.out-of-scope/*.md` records for rejected requests. Never deletes. |
 | `plan-queue` | `PLAN-<rank>-<slug>.md` at the repo root; on an authorized `execute plan #N`, code on a branch and a local fast-forward merge; the plan files are trashed at queue end on approval. |
