@@ -4,6 +4,15 @@ All notable changes to the Plan Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.3.1 - 2026-09-24
+
+### Fixed
+
+- `implementation-planning` gap rule: when the settled source leaves a detail undecided, the planner decides it only if the choice is small, local, and easy to reverse, and lists every such choice under a `Planner decisions` heading near the top of the plan; a gap that would change user-visible behavior or an interface, or cross a scope line the source drew, is asked about before the dependent tasks are written. The closing reply names the planner decisions, or says there were none.
+- `implementation-planning` acceptance-map coverage: the planner reads the source's acceptance map when one exists, and Self-Review checks that every map check is run by some task's verification step. Before, the map's path was cited in the plan header but its checks were never required.
+- `implementation-planning` Outside-View close: the plan now says where the reference-class comparison came from — the past plans, PRs, or changes read, by name, or general knowledge only when the repo had no comparable record.
+- `implementation-planning` links to skills outside this plugin (`design-exploration`, `tdd`, `premortem`, `/next-steps`) are now marked "where available"; without `design-exploration`, the split rule falls back to a one-line test (split only when the dependencies between the parts run one way).
+
 ## 1.3.0 - 2026-09-24
 
 ### Added
