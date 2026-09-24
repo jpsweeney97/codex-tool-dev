@@ -11,6 +11,7 @@ Turn a clear-enough outcome into an approved design through collaborative explor
 
 - Use when the desired outcome is clear enough to design against and the user wants approaches explored or a design shaped.
 - If the outcome itself is still muddy, name `outcome-shaping` and ask before switching.
+- When the outcome arrives as a shaping capsule or a handoff that marks a seam (what the user said in their own words, what is the previous lane's compression, what is unpriced or unconfirmed), read the seam before designing: the compressed and unpriced parts are still open, not settled premises, so put them to the user in the first clarification round and carry any that stay unconfirmed forward marked, never as inputs the user chose. A handoff that says only "settled" with no seam is itself a compression; ask what the user said.
 - If serious comparable options already exist and the user wants a choice, name `making-recommendations`.
 - If the user wants an adversarial stress test of an existing design, name `grill-me` or the relevant review lane.
 - If a design question is genuinely uncertain in a way only running code can answer, offer `prototype` for that question and fold its answer back into the design. The tell is your own sentence "only real data, a real run, or the actual files can answer this" — that sentence is the offer moment, not a note to move past.

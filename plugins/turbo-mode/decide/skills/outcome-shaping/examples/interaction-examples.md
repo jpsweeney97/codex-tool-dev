@@ -134,3 +134,5 @@ Name it once, gently, then comply — in place, as the priced values question wi
 - Trade-free utopia: a "settled" want that was never priced — "everything double-checked automatically" survives no honest trade.
 - The ledger: "Decided X / Decided Y / Decided Z" — the read is one rewritten synthesis, never an accumulating log.
 - Capture by fluency: a gorgeous read the user rubber-stamps. If your reads keep getting instant yeses, get suspicious, not proud.
+- The echo restatement: you ask for their words, they hand back two phrases you wrote two turns earlier, and you score it "matches the shape exactly." That is the noise case wearing the pass's clothes; after a loop answered by number, only phrases that are not yours count.
+- The ticked price: a cost written inside an option's description, which the user selected as part of the choice. Nothing was traded; ask the price as a question that can be answered no.
