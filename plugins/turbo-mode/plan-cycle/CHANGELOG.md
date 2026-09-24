@@ -4,6 +4,17 @@ All notable changes to the Plan Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.3.0 - 2026-09-24
+
+### Added
+
+- `implement-issue` batch mode (`references/batch-mode.md`): when the user asks for several ready issues in an attended top-level session with subagent tooling that gives each implementer its own worktree, the coordinator tests pairwise independence (closed blockers, no cross-dependency, no shared file region; shared files with disjoint regions get pinned placements, overlapping ones are serialized), records the integration branch's verified tip, and dispatches one subagent per issue with a self-contained brief (run this skill on one reference; the branch and the commit to cut it from; the identifier-scan conclusion and any resume decision; the trailer shape; the stop rule; the report shape with `execute-plan`'s status words). Each implementer runs the unchanged single-issue contract and stops at one commit.
+- `implement-issue` batch landing: the coordinator lands each branch locally (descent and clean-worktree checks, three-dot diff read against the implementer's claims, rebase inside the implementer's own worktree, strictly-ahead count after the rebase, `--ff-only` from the primary checkout, containment check) and runs the proving command once on the combined tip; a failure is bisected from fresh `git archive` builds starting at the recorded tip, with no reset by the coordinator. Then one batched question covers push (with the exact commit list per upstream case), issue closures with the full comment, worktree and isolation-branch removal (`-d` and no `--force`), routing of collected out-of-scope findings to `triage` or fix-now, and route-backs for issues that left the batch; only approved items run, fix-now before push.
+
+### Changed
+
+- `implement-issue` selection: a plural ask ("the ready issues", several references) with more than one unblocked candidate enters batch mode without asking whether to parallelize; a single reference, a batch of one, a pull request, a repo that requires a particular worktree lifecycle, or a session without worktree-isolating subagent tooling runs one issue exactly as before and names the rest as further single-issue invocations. "One issue per invocation" is now "one issue per implementer", and an implementer whose brief states the identifier-scan conclusion (and the resume decision, when prior work exists) acts on it instead of asking. The landing hand-off rule gains the batch coordinator's local-landing exception; publication there is gated on the user's explicit approval.
+
 ## 1.2.0 - 2026-09-22
 
 ### Added

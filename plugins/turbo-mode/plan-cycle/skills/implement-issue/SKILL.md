@@ -1,11 +1,11 @@
 ---
 name: implement-issue
-description: "Use when the user asks to implement or pick up one agent-ready tracker issue or triaged pull request, including `implement #42` or `work the next ready issue`; verify blockers first. Do not use for plan execution (`execute-plan`), issue slicing (`to-issues`), triage labels or briefs (`triage`), PR review loops, or merge/closeout work."
+description: "Use when the user asks to implement or pick up agent-ready tracker issues or triaged pull requests, including `implement #42`, `work the next ready issue`, or `work the ready issues`; verify blockers first. Do not use for plan execution (`execute-plan`), issue slicing (`to-issues`), triage labels or briefs (`triage`), PR review loops, or requests to merge, land, or close out existing branches."
 ---
 
 # Implement Issue
 
-Consume one agent-ready tracker issue or triaged pull request end to end: verify it is workable, implement exactly what its contract specifies, prove the acceptance criteria by behavior, and hand the result to the appropriate landing or pull-request lane. This is the execution link between the producers (`to-issues`, `triage`) and the lanes that publish the result.
+Consume one agent-ready tracker issue or triaged pull request end to end: verify it is workable, implement exactly what its contract specifies, prove the acceptance criteria by behavior, and hand the result to the appropriate landing or pull-request lane. This is the execution link between the producers (`to-issues`, `triage`) and the lanes that publish the result. When a plural ask meets the conditions in Select One Issue, `references/batch-mode.md` runs this single-issue contract once per issue, one subagent each, and lands the results locally.
 
 Before any tracker-dependent read, confirm that the issue tracker and triage label vocabulary are configured. If either is missing, ask the user to run `/setup-matt-pocock-skills` where that user-invoked skill is available; otherwise ask the smallest setup question needed to read the item safely.
 
@@ -13,9 +13,10 @@ Before any tracker-dependent read, confirm that the issue tracker and triage lab
 
 - Given an issue reference (number, URL, or path), fetch its full body and comments from the tracker.
 - Given "the next ready issue": list the issues carrying the agent-ready triage role, exclude any whose blockers are not all closed, and pick the oldest unblocked one — naming the pick and the candidates skipped. If two candidates are equally eligible and materially different, ask rather than guess.
+- Given "the ready issues" (plural), "the next ready issues", or several references at once: when more than one unblocked candidate exists, you are in an attended top-level session, and subagent tooling that creates each implementer's own worktree is available, this is a batch — read `references/batch-mode.md` and follow it, without asking whether to parallelize. Otherwise there is no batch: work the oldest unblocked candidate as a single issue and name the rest as further single-issue invocations, each in a fresh context.
 - Never take a ready-for-human issue: its role says the work needs a human. Say so and stop.
-- One issue per invocation. The next issue is a fresh invocation in a fresh context — slices are sized for exactly that. Do not chain into a second issue because the first went quickly.
-- Before starting work on an issue, inspect local branches and commits whose names or messages carry its identifier. If any exist, report that evidence and ask whether to resume the existing branch or start fresh; never re-implement silently.
+- One issue per implementer — this session, or one subagent dispatched under batch mode. The next issue is a fresh invocation in a fresh context, or a sibling subagent in the same batch — slices are sized for exactly that. Do not chain into a second issue because the first went quickly.
+- Before starting work on an issue, inspect local branches and commits whose names or messages carry its identifier. If any exist, report that evidence and ask whether to resume the existing branch or start fresh; never re-implement silently. An implementer whose brief states this scan's conclusion, and the user's resume-or-fresh decision when the scan found prior work beyond a triage annotation, follows it instead of asking.
 
 ## Verify It Is Workable
 
@@ -38,5 +39,5 @@ When the reference resolves to a pull request — a PR URL, or a bare number tha
 
 - Walk the acceptance criteria one by one: each gets fresh behavioral evidence (the command run and its output) or an honest `not verified` with the reason. A passing suite alone does not satisfy a criterion the suite does not exercise.
 - Report: issue reference, branch, per-criterion evidence, deviations, and surfaced out-of-scope items.
-- Landing is the next lane, not this one: route to the repo's closeout, merge, or PR lanes where available; otherwise report the proof boundary and stop before landing.
+- Landing is the next lane, not this one: route to the repo's closeout, merge, or PR lanes where available; otherwise report the proof boundary and stop before landing. Exception: a batch coordinator lands its implementers' branches locally itself, as `references/batch-mode.md` specifies; publication there (push, issue closure, cleanup) is not a hand-off to another lane but stays gated on the user's explicit approval, after which the coordinator performs it.
 - Tracker mutations are approval-gated: propose the closing or status comment with the evidence summary, and post or close only on the user's approval. Never close or modify the parent issue.
