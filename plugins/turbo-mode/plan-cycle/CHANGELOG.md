@@ -4,6 +4,14 @@ All notable changes to the Plan Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.4.0 - 2026-09-24
+
+### Changed
+
+- `implementation-planning` now reads the seams of its source: a design or shaping capsule that marks parts as the previous lane's compression, unpriced, unconfirmed, deferred, or accepted as offered has said those parts are not settled, so each is handled as a gap under the existing gap rule (small and local: decide and list under `Planner decisions`; user-visible or interface-changing: ask first), never as a premise. A source that says only "settled" with no seam is read as accepted-as-offered throughout, stated under `Planner decisions`. Before, the skill read the source in full and treated what it said as settled; on 2026-08-31 a plan was written on three compressions the shaping capsule had marked as unconfirmed (methodology-critique brief for `outcome-shaping`, section 5, in the source repo). `design-exploration` gets the matching receipt rule in decide 2.6.0.
+
+Minor, not patch: receiving a seam-marked source was a situation with no defined behavior. No new heading or field; the rule routes into the gap rule and `Planner decisions` the skill already has.
+
 ## 1.3.2 - 2026-09-24
 
 ### Fixed
