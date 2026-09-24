@@ -4,6 +4,14 @@ All notable changes to the Plan Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.3.2 - 2026-09-24
+
+### Fixed
+
+- `acceptance-map` check labels: one label set (`source-backed`, `inferred`, `decision needed`). The undefined `proposed` and `blocked by source ambiguity` markings are gone. The map's header now carries a `Binding:` line saying that `decision needed` checks are not acceptance requirements until the source resolves them or the user promotes them, and the artifact checks confirm the line is present. Before, downstream readers such as `implementation-review`, which turns every map check into a requirement, had no way to tell an open question from a requirement; a dry run on 2026-09-24 left this unstated in 2 of 3 maps.
+- `acceptance-map` stop hand-offs: the protected-branch stop offers to create a working branch instead of pointing to `git-hygiene` or `merge-branch`, neither of which creates one. The stop for an unsettled source names who settles it: the source's owner, `outcome-shaping`, or `design-exploration` (where available).
+- `acceptance-map` routing: the description and the Trigger Boundaries now exclude acceptance criteria written into a tracker issue's body or an agent brief, which belong to `to-issues` or `triage`.
+
 ## 1.3.1 - 2026-09-24
 
 ### Fixed

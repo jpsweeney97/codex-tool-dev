@@ -1,6 +1,6 @@
 ---
 name: acceptance-map
-description: "Use when the user wants to turn an already-settled PRD, plan, issue, design, or concrete review finding into a durable map of observable acceptance checks before implementation, with a default local artifact and commit lifecycle. Do not use for implementation, issue/PRD creation, broad review/status, test execution, or final closeout."
+description: "Use when the user wants to turn an already-settled PRD, plan, issue, design, or concrete review finding into a durable map of observable acceptance checks before implementation, with a default local artifact and commit lifecycle. Do not use for implementation, issue/PRD creation, acceptance criteria written into a tracker issue's body or agent brief (`to-issues`, `triage`), broad review/status, test execution, or final closeout."
 ---
 
 # Acceptance Map
@@ -34,6 +34,7 @@ Do not use this skill for:
 
 - creating PRDs; use `to-prd`
 - creating implementation issues; use `to-issues`
+- writing acceptance criteria into a tracker issue's body or an agent brief; use `to-issues` for new issues or `triage` for a ready-for-agent brief
 - sequencing existing findings into a strategic plan; suggest the user run `/next-steps` or `$next-steps` (explicit-invoke only)
 - implementation, tests-first development, or debugging
 - final verification or commit closeout after implementation; use `closeout-check`
@@ -54,9 +55,9 @@ Valid source inputs include:
 
 If one primary local source file controls the map, use that as the source. If the map combines multiple sources and no repo convention gives it a home, ask one path question before writing.
 
-If source material has bounded ambiguity, write the map and mark affected checks as `decision needed`, `proposed`, or `blocked by source ambiguity`.
+If source material has bounded ambiguity, write the map and label the affected checks `decision needed`.
 
-Stop before writing when ambiguity controls the core outcome, audience, success meaning, acceptance authority, or implementation boundary enough that most of the map would be speculative or the intended outcome could invert.
+Stop before writing when ambiguity controls the core outcome, audience, success meaning, acceptance authority, or implementation boundary enough that most of the map would be speculative or the intended outcome could invert. Report the ambiguity and name who or what settles it: the source's owner, `outcome-shaping` when the goal itself is unclear, or `design-exploration` when the design is unsettled (both where available).
 
 Do not silently resolve product, policy, compatibility, ownership, or scope decisions.
 
@@ -69,6 +70,8 @@ Use these basis labels:
 - `source-backed`: explicitly stated by the source
 - `inferred`: necessary to prove an explicit source outcome
 - `decision needed`: plausible, but source ambiguity or human judgment blocks acceptance authority
+
+A `decision needed` check stays in the map so the open question is visible, but it is not an acceptance requirement: it can neither pass nor fail until the source resolves it or the user promotes it. Agents that later read the map do not read this skill, so the map's header carries this rule in its `Binding:` line.
 
 An inferred check still needs a source pointer to the material it interprets and a short reason why the inference is necessary to prove the source outcome.
 
@@ -87,6 +90,7 @@ Default shape:
 
 Source: <path, issue, PRD, design, or review finding set>
 Authority: Derived companion unless explicitly promoted
+Binding: `source-backed` and `inferred` checks are acceptance requirements; `decision needed` checks are not, until the source resolves them or the user promotes them
 Outcome: <plain-language outcome>
 
 ## Check Index
@@ -169,7 +173,7 @@ Automatic local commit is part of the default lifecycle.
 
 Before writing, confirm the output path and any source-backlink path belong to one Git worktree where a local commit can be created. If no Git repository is available, or if the commit lifecycle is not safe for the target path, stop and ask before creating an uncommitted artifact.
 
-Also confirm the worktree is on a non-protected working branch before writing. Treat repo-defined protected branches first; if the repo defines none, treat `main`, `master`, `develop`, and `release/*` as protected. If the checked-out branch is protected or the repo's default branch, stop and ask whether to branch first (or hand off to `git-hygiene` or `merge-branch`) — do not write an artifact that the default commit lifecycle cannot then commit.
+Also confirm the worktree is on a non-protected working branch before writing. Treat repo-defined protected branches first; if the repo defines none, treat `main`, `master`, `develop`, and `release/*` as protected. If the checked-out branch is protected or the repo's default branch, stop and offer to create a working branch from the current tip, named by the repo's branch convention or `docs/acceptance-map-<source-stem>` when it has none; continue there once the user agrees. Do not write an artifact that the default commit lifecycle cannot then commit.
 
 A dirty worktree does not automatically block the skill. Proceed only when:
 
@@ -201,6 +205,7 @@ Before the automatic local commit, verify the artifact lifecycle only:
 
 - acceptance map file exists at the chosen path
 - source path or source reference is recorded
+- the header carries the `Binding:` line
 - every core acceptance check has a source basis
 - local Markdown source backlink was added when applicable
 - backlink target resolves for local Markdown sources
@@ -223,4 +228,4 @@ Report:
 - proof boundary: artifact lifecycle verified, implementation not verified
 - next useful workflow: `to-issues`, `tdd`, or implementation planning to build against the map, then `review-family:implementation-review` (when available) to verify the result against it; `closeout-check` later for done-ness
 
-If the skill stops before writing or committing, report the exact ambiguity, dirty-path conflict, artifact-check failure, or path decision needed.
+If the skill stops before writing or committing, report the exact ambiguity, dirty-path conflict, artifact-check failure, or path decision needed, and the next step the stop names.
