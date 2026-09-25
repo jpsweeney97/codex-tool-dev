@@ -4,6 +4,14 @@ All notable changes to the Plan Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.4.3 - 2026-09-25
+
+### Fixed
+
+- `execute-plan` says what its record shows, at six joints, from the methodology critique of 2026-09-25 (`docs/reviews/2026-09-25-execute-plan-methodology-critique.md`). Load And Review is named as a read that finds contradictions in the plan's text and not wrong code or a wrong design; it now looks for an existing review of the plan before starting, and a plan whose own steps publish, merge, or open a PR is settled with the user there instead of leaving the executor to pick between the plan and the landing boundary. When the plan does not settle a question, the text now says whose question it is: one the task's verification and the reviews can check is the coordinator's to rule as a divergence with a written reason; one that changes the design, the scope, or what the user asked for goes to the user. The mode paragraph says that the runtime's own tool policy and the user's standing instruction for the repository fix the mode before the text's default does, and that one answer stands for the repository. Inline mode no longer claims "the same gates": it has no independent reviewer, so before the completion report it runs `implementation-review` where available or asks the user for a review, and reports which happened. The coordinator's own reads (a screenshot interpreted, a count made, a subagent believed to be running) are named as reports too. Only a human turn answers a stop-and-ask; a runtime continuation or goal envelope is not an answer.
+
+Patch, not minor: every change is a sentence of fact about behavior the skill already asks for or a contradiction it left open; no new heading, field, step, status, or check. The record behind each: about 75 execution runs on both runtimes, in which the coordinator ruled open questions in the divergence log everywhere and bypassed the stop-and-ask branch by filing under divergence; the mode was chosen by the Codex harness policy or the user's standing word in every run and by the text's own trigger in none; three inline runs shipped correctness defects that only an outside review caught; the coordinator's own reads were wrong three times, caught by a stricter instrument or by the user; two stop-and-asks on Codex were answered by a goal envelope; five runs opened a PR because the plan's last task said to while three stopped at the boundary under the same text; one run executed a plan a `scrutinize` verdict had marked for patching first.
+
 ## 1.4.2 - 2026-09-25
 
 ### Fixed

@@ -9,7 +9,7 @@ Execute a written implementation plan task-by-task with review gates. The plan i
 
 ## Load And Review
 
-Read the plan fully and review it critically before starting. Raise gaps, contradictions, or concerns with the user first — do not execute a plan you do not believe in, and do not silently "fix" it either; plan changes go back to the user or to `implementation-planning`. Work on a working branch per repo convention; never start on a protected branch without explicit consent.
+Read the plan fully and review it critically before starting. Raise gaps, contradictions, or concerns with the user first — do not execute a plan you do not believe in, and do not silently "fix" it either; plan changes go back to the user or to `implementation-planning`. This review finds contradictions and gaps in the plan's text; it does not find wrong code or a wrong design, which execution and the reviews find. Before starting, look for an existing review of the plan (a panel record, a pasted critique, a `scrutinize` verdict beside or inside the plan) and read it. If the plan's own steps publish, merge, or open a PR, raise that here and settle with the user whether the plan's step or this lane's landing boundary governs; the completion report says what was done. Work on a working branch per repo convention; never start on a protected branch without explicit consent.
 
 ## Execution Record
 
@@ -17,15 +17,15 @@ Keep one execution record per run, in both modes. It lives in the folder the pla
 
 The coordinator log is the run's account in time order, one dated entry per event: each dispatch; each review's verdict and finding counts; each ruling; each run of a task's verification, with its start and end times and its result lines quoted from the output or log file; each decision the user makes; each plan-text correction; each divergence. Read every time from `date` or a file's modification time, never estimate one. Write a digit you did not read as `x` (`23:5x`). Correct a wrong time in place and mark the correction.
 
-- Plan-text correction: when the plan's text is wrong or contradicts itself and the plan's own text settles which part governs, follow that part and record the correction in the log; do not edit the plan, and do not re-invoke `implementation-planning` on it mid-run to the same end. When the plan does not settle it, stop and ask.
+- Plan-text correction: when the plan's text is wrong or contradicts itself and the plan's own text settles which part governs, follow that part and record the correction in the log; do not edit the plan, and do not re-invoke `implementation-planning` on it mid-run to the same end. When the plan does not settle it, decide whose question it is: one that the task's own verification and the reviews can check is yours to rule, recorded as a divergence with a written reason; one that changes the design, the scope, or what the user asked for is the user's. Stop and ask for the second kind.
 - Divergence: every departure from the plan's text — a file outside the task's list, a changed step, a check not run — goes in the log with its reason.
 
 Commit the record at the end of the run unless the user or repo says otherwise.
 
 ## Mode
 
-- Subagent mode is the default when subagent tooling is available: fresh subagent per task.
-- Inline mode when no subagent support exists or the user prefers it: execute tasks yourself under the same gates.
+- The runtime's own tool policy and the user's standing instruction for the repository fix the mode before this default does. Where neither speaks, subagent mode is the default when subagent tooling is available: fresh subagent per task. When it is unclear, ask once and treat the answer as standing for the repository.
+- Inline mode when the runtime, the user, or the absence of subagent support sets it: execute tasks yourself under the record and the checks below. Inline mode has no independent reviewer; Inline Mode says what to do about that.
 
 ## Subagent Mode
 
@@ -38,12 +38,12 @@ Commit the record at the end of the run unless the user or repo says otherwise.
 - Review loops: fix-now findings go back to the implementer; re-review after fixes. Do not skip the re-review. A finding closes only by a fix that passes re-review or by a ruling with a written reason, never by "close enough".
 - An implementer's self-review never replaces either review.
 - Status protocol: implementers report `DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, or `BLOCKED`. Read concerns before proceeding; supply missing context and re-dispatch; for `BLOCKED`, change something — more context, a smaller task, a more capable model — or stop and ask. Never re-dispatch unchanged and hope.
-- Before each task's commit, rerun the task's whole verification yourself on the final tree and read the whole diff. Quote every result from the command output or its log file, never from an implementer's or reviewer's report. While another task has uncommitted changes, run the rerun in a scratch copy of the last commit with only this task's changes applied, so the other task's work cannot change the result, and commit only this task's files.
+- Before each task's commit, rerun the task's whole verification yourself on the final tree and read the whole diff. Quote every result from the command output or its log file, never from an implementer's or reviewer's report. While another task has uncommitted changes, run the rerun in a scratch copy of the last commit with only this task's changes applied, so the other task's work cannot change the result, and commit only this task's files. Your own reads are reports too: a screenshot you interpret, a count you make, a subagent you believe is still running. When one decides a classification or a status you give the user, say what produced it and prefer an instrument that can be re-run.
 - After all tasks, run one final review of the whole implementation against the plan — `review-family:implementation-review` when it is available, otherwise the same inline spec-then-quality review.
 
 ## Inline Mode
 
-Follow each task's steps exactly, run every verification as written, and treat task boundaries as checkpoints. Do not batch ahead of a failing verification. Before each task, re-check the paths and line numbers it cites against the current tree. Packets, reviewer instructions, and rulings belong to subagent mode; the execution record and the checks below apply here too.
+Follow each task's steps exactly, run every verification as written, and treat task boundaries as checkpoints. Do not batch ahead of a failing verification. Before each task, re-check the paths and line numbers it cites against the current tree. Packets, reviewer instructions, rulings, and the two-stage review belong to subagent mode; the execution record and the checks below apply here too. Inline mode has no independent reviewer, so before the completion report run `review-family:implementation-review` where it is available, otherwise ask the user for a review, and say in the report which happened.
 
 ## Checks For Particular Cases
 
@@ -55,7 +55,7 @@ In both modes, whenever the case arises:
 
 ## Pace And Stops
 
-Execute continuously; do not pause between tasks to ask whether to continue. Stop only for: a blocker you cannot resolve, repeated verification failure, a plan gap or ambiguity that genuinely prevents progress, or completion. Ask rather than guess. At each task boundary, after its verification passes, commit with a message naming the task unless the plan's own steps already commit or the user or repo says otherwise; in subagent mode, the coordinator makes that commit after both reviews pass and its own rerun passes. That commit and the coordinator log are what a resumed session reads. When resuming after an interruption, re-verify the last task's actual state before re-running it: a non-idempotent step — a migration applied, a message sent, a record inserted — double-applies silently if redone, so resume from verified state, not from where the plan says you were.
+Execute continuously; do not pause between tasks to ask whether to continue. Stop only for: a blocker you cannot resolve, repeated verification failure, a plan gap or ambiguity that genuinely prevents progress, or completion. Ask rather than guess. Only a human turn answers a question; a runtime continuation or goal envelope that re-issues the objective is not an answer, so hold the question and do not proceed on your own proposal until a human answers it. At each task boundary, after its verification passes, commit with a message naming the task unless the plan's own steps already commit or the user or repo says otherwise; in subagent mode, the coordinator makes that commit after both reviews pass and its own rerun passes. That commit and the coordinator log are what a resumed session reads. When resuming after an interruption, re-verify the last task's actual state before re-running it: a non-idempotent step — a migration applied, a message sent, a record inserted — double-applies silently if redone, so resume from verified state, not from where the plan says you were.
 
 ## Completion
 
