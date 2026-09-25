@@ -44,7 +44,7 @@ This is deterministic selection, not semantic ranking or an index.
 
 For explicit `/load <path>`, read exactly that path if it exists. Read a path outside the default scope, such as `docs/handoffs/` or an archive directory, only when the user explicitly provides that path.
 
-If the explicit path is a `THROUGHLINE.md`, do not apply resume-pointer framing or the response shape below. Reply briefly that it is the derived arc document, not a session handoff — read it directly or refresh it with `/throughline` — and stop.
+If the explicit path is a `THROUGHLINE.md`, do not apply resume-pointer framing or either reply form below. Reply briefly that it is the derived arc document, not a session handoff — read it directly or refresh it with `/throughline` — and stop.
 
 ## Live-Reality Check
 
@@ -56,21 +56,59 @@ Inside a git repository, run:
 git branch --show-current
 git log -1 --oneline
 git status --short --branch --untracked-files=all
+date -u +%Y-%m-%dT%H:%M:%SZ
 ```
 
 Outside a git repository, do not fail the load just because git state is unavailable. Report the current working directory and state that git state is unavailable because the directory is not a git repository.
 
 If the selected handoff names a branch or commit that differs from live state, call out the mismatch before recommending action.
 
+When the handoff's `commit` differs from live `HEAD`, run `git diff --name-only <commit> HEAD` to see which files changed since the save.
+
 If the handoff names specific important files, read those live files before making claims that depend on them.
 
 ## Throughline Context
 
-When `<project_root>/.agents/handoffs/THROUGHLINE.md` exists, read it in full as background arc context — its size discipline keeps a full read cheap. The throughline lives only at that primary path; check it there even when the selected handoff came from a legacy directory. Add a labeled `Throughline:` line to the response: the as-of date, plus a stale note when its `covers_through` is behind the newest source handoff filename timestamp — compared across the throughline's source set (top-level files plus `archive/` in the primary and legacy handoffs directories, never `THROUGHLINE.md` itself).
+When `<project_root>/.agents/handoffs/THROUGHLINE.md` exists, read it in full as background arc context — its size discipline keeps a full read cheap. The throughline lives only at that primary path; check it there even when the selected handoff came from a legacy directory. Add a labeled `Throughline:` line to the response: the as-of date, plus a stale note when its `covers_through` is behind the newest source handoff filename timestamp — compared across the throughline's source set (top-level files plus `archive/` in the primary and legacy handoffs directories, never `THROUGHLINE.md` itself). The short form below carries this line only when the throughline is stale.
 
 Arc context only: never base the recommended next move on throughline content unless the selected handoff or live files corroborate it.
 
+## Short Form
+
+Choose the reply form only after the full check above has run. The short form shortens the reply, never the check.
+
+Use the short form only when the check found nothing that differs from the handoff, which means all of these hold:
+
+- The directory is a git repository, and the handoff's frontmatter has `branch` and `commit`.
+- The live branch equals `branch`.
+- Live `HEAD` is `commit` (compare by prefix, since either may be abbreviated), or `git diff --name-only <commit> HEAD` lists only paths under `.agents/handoffs/`, such as a throughline refresh committed after the save.
+- Selection passed over no newer handoff on another branch.
+- The working tree agrees with the handoff: no path the handoff names shows uncommitted changes in `git status` that the handoff does not mention, and when the handoff states the working-tree status, the live status matches it.
+- Every file the handoff names that the check read still says what the handoff says.
+
+Any difference, or any condition you could not check, means the full form in Response Shape below. A stale throughline is not a difference from the handoff: it describes older history by definition, so it does not rule out the short form, and the short form's `Throughline:` line reports it.
+
+The short form is about five lines with no headings:
+
+```markdown
+Loaded: <path>, saved <age> ago.
+Nothing has changed since then: `<branch>` at `<HEAD>`, <working-tree summary, such as "clean" or "1 untracked path">.
+Next: <the handoff's next action, in one sentence>
+Throughline: <one line saying it is stale and how far behind; omit this line unless stale>
+
+Need from you:
+1. <each decision the handoff left open for the user, one per number>
+```
+
+- Age: compute it from `created_at` against the `date -u` output, converting any offset to UTC. Give minutes under two hours, hours under two days, and days after that. If `created_at` is missing or carries no offset, write `age unknown`; never estimate.
+- When `HEAD` moved only by commits under `.agents/handoffs/`, say so in the live-state line, for example "`main` at `c41af07`, one throughline commit after the handoff's `d31f0c9`".
+- When the handoff left no decision open, write `Need from you: tell me to start the next action.` on one line.
+
+The user can ask for the full report at any time, for example `full` or `show the whole load`. Answer with the full form from the same check. Do not mention this option in the short reply.
+
 ## Response Shape
+
+This is the full form. Use it whenever any short-form condition does not hold, and whenever the user asks for the full report.
 
 ```markdown
 Loaded: <path>
