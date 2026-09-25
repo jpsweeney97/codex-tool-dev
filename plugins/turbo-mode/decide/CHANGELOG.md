@@ -4,6 +4,16 @@ All notable changes to the Decide plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.7.0 - 2026-09-24
+
+### Changed
+
+- `design-exploration` now offers one round of pressure before settling on any design whose premises come from the assistant's own grounding, which is nearly every design, instead of only on a design the assistant judges hard to reverse. The record since the July repairs shows that reversibility call spoken aloud seven times and wrong twice in the direction that skips pressure, and it shows pressure correcting a settled premise in every cycle where a round ran, including designs the assistant had called cheap to reverse; where none ran, the same class of defect arrived in the first real run or a later review. The approval ask now also says, when no pressure ran, that the premises get their first test downstream.
+- The warm-handoff capsule's settledness beat now defaults to "accepted as offered" and reserves "contested and corrected" for a decision the user, a review, or a run actually changed; a patch the assistant adopted on its own is still accepted as offered. The capsule also says whose words approved the design, the user's own or a relayed session's or model's. Before, the beat was written in three cycles of about fifty and wrong once ("all decisions JP-ruled" after two assistant-adopted patches), and seven cycles closed on a relayed model's "Approved" with nothing marking it.
+- The prototype tell names the words it actually arrives in: "untested", "unverified", "not yet proven", "cannot guarantee", "only a run can settle this", beside the original sentence. Its written form appeared in no fire; its substance appeared in about ten, was moved past in six, and three of those returned as defects.
+
+Minor, not patch: the pressure offer's condition changed, so a situation the text previously left ungated (a design the assistant calls cheap to reverse) now gets the offer. Source: the endorsed methodology-critique brief, `docs/reviews/2026-09-24-design-exploration-methodology-critique.md` in the source repo. Not changed: the check-in placement sentence, the single-design honesty sentence, the scope check, and the seam receipt are watch items in the source repo's lifecycle notes.
+
 ## 2.6.0 - 2026-09-24
 
 ### Changed
