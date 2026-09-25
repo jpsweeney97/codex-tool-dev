@@ -4,6 +4,14 @@ All notable changes to the Decide plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.7.1 - 2026-09-25
+
+### Fixed
+
+- `making-recommendations` says at the close what a close is: a pick with its case, not a design, and when the pick is something to build it names `design-exploration` as the next lane. `design-exploration` reads a recommendation close as the chosen approach and not the design: the pick answers the approaches step, the case's assumptions stay open until grounding confirms them, and the workflow runs to an approval. Five fires in one venue took a recommendation verdict as settled source for `implementation-planning` with no design and no ask; that lane's trigger already asks the question and the fires did not raise it, so the seam is now named on both sides of it. Transfer from `docs/reviews/2026-09-24-implementation-planning-methodology-critique.md` §11.
+
+Patch, not minor: sentences of fact on the seam between two lanes; no new step, field, or check.
+
 ## 2.7.0 - 2026-09-24
 
 ### Changed

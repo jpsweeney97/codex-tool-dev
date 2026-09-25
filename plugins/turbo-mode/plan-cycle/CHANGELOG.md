@@ -4,6 +4,14 @@ All notable changes to the Plan Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.4.2 - 2026-09-25
+
+### Fixed
+
+- `execute-plan` settles the plan's afterlife, the joint `implementation-planning` 1.4.1 named from its side. During the run the plan is not edited and not re-planned mid-run through `implementation-planning`; corrections and divergences live in the execution record. After the run the plan says what was planned and the record says what was built, and a rewrite of the plan to match the code happens only on the user's ask, as a Markdown-only change that says at its top it is a record of the run and not a contract, keeps the original tasks readable, and points at the record. The field ran two conventions side by side (log and leave; rewrite the plan as history, with one plan carrying its own rule for it) and two executors patched the plan mid-run by re-invoking the planning skill; this entry chooses log-and-leave during the run and a marked record after it. Transfer from `docs/reviews/2026-09-24-implementation-planning-methodology-critique.md` §11.
+
+Patch, not minor: sentences settling a convention the text left open; no new step, field, or check.
+
 ## 1.4.1 - 2026-09-24
 
 ### Fixed

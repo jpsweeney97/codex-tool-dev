@@ -17,7 +17,7 @@ Keep one execution record per run, in both modes. It lives in the folder the pla
 
 The coordinator log is the run's account in time order, one dated entry per event: each dispatch; each review's verdict and finding counts; each ruling; each run of a task's verification, with its start and end times and its result lines quoted from the output or log file; each decision the user makes; each plan-text correction; each divergence. Read every time from `date` or a file's modification time, never estimate one. Write a digit you did not read as `x` (`23:5x`). Correct a wrong time in place and mark the correction.
 
-- Plan-text correction: when the plan's text is wrong or contradicts itself and the plan's own text settles which part governs, follow that part and record the correction in the log; do not edit the plan. When the plan does not settle it, stop and ask.
+- Plan-text correction: when the plan's text is wrong or contradicts itself and the plan's own text settles which part governs, follow that part and record the correction in the log; do not edit the plan, and do not re-invoke `implementation-planning` on it mid-run to the same end. When the plan does not settle it, stop and ask.
 - Divergence: every departure from the plan's text — a file outside the task's list, a changed step, a check not run — goes in the log with its reason.
 
 Commit the record at the end of the run unless the user or repo says otherwise.
@@ -60,3 +60,5 @@ Execute continuously; do not pause between tasks to ask whether to continue. Sto
 ## Completion
 
 Report tasks completed, verification evidence, every divergence and plan-text correction, the after-plan list, and the execution record's path. Where available, closing out, merging, and PR creation belong to `closeout-check`, `merge-branch`, or the repository's PR lane. If the needed lane is unavailable, report the proof boundary and stop before landing.
+
+The plan's authority as the contract ends with the run. After this report the plan says what was planned and the execution record says what was built, and the two are allowed to differ: the record is where the difference lives. Do not rewrite the plan to match the code during the run. A rewrite after the run happens only on the user's ask, as a Markdown-only change that says at its top that it is a record of this run and not a contract, keeps the original tasks readable, and points at the execution record rather than replacing it; `implementation-planning` asks the same of a plan rewritten after execution.

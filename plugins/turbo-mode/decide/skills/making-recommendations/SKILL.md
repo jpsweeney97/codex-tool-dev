@@ -127,6 +127,8 @@ A full close, for genuine trades, one-way doors, or when the user asks for depth
 
 Never claim the option space is complete or a ranking verified. The strongest honest close is a clear call with its flip conditions attached — its job is to be contestable, not impressive: a crisp packet with a ranking inside gets accepted, not audited.
 
+A close is a pick with its case, not a design. It settles which option and nothing about how the option is built, and its `Why` premises are assumptions the next lane has to ground. When the pick is something to build, say so at the close and name `design-exploration` as the next lane: it takes the pick as its chosen approach and develops it to a design the user approves. A plan written straight from a recommendation is a plan whose design nobody approved.
+
 ## Examples
 
 Read [examples/behavior-examples.md](examples/behavior-examples.md) when routing, door depth, lean handling, exits, or close shape is unclear — the examples are calibration, not extra required fields.
