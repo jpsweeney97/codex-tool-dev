@@ -4,6 +4,14 @@ All notable changes to the Plan Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.4.4 - 2026-09-25
+
+### Fixed
+
+- Two transfers from the execute-plan methodology critique (`docs/reviews/2026-09-25-execute-plan-methodology-critique.md` §11). `implementation-planning`: a push, a merge, or a pull request is not a task; landing belongs to the landing lane and `execute-plan` stops at a reviewed, committed branch, so a run that should end in a PR or a merge says so in one line at the top of the plan for the executor to settle at Load And Review. The record: three July plans wrote `gh pr create` into their last task, and under one text five runs opened the PR while three stopped at the boundary. `implement-issue`: a question the skill asks is answered only by a human turn, never by a runtime continuation or goal envelope (two execute-plan stop-and-asks on Codex were consumed that way); and on a runtime whose tool policy allows subagents only on the user's explicit request for delegation, a plural ask alone does not make batch tooling available, so the skill names the policy and asks once (the Codex policy set inline mode in every execute-plan run there before the text's default spoke).
+
+Patch, not minor: sentences of fact on behavior the skills already ask for; no new heading, field, step, or check.
+
 ## 1.4.3 - 2026-09-25
 
 ### Fixed

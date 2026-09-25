@@ -4,6 +4,14 @@ All notable changes to the Decide plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.7.2 - 2026-09-25
+
+### Fixed
+
+- `deliberate` reads the runtime's tool policy before falling back to non-isolated stages: a runtime that allows dispatch only on the user's explicit request for delegation cannot dispatch until the user makes that request, so the skill names the policy and asks once before running the five stages in one context. Transfer from the execute-plan methodology critique (`docs/reviews/2026-09-25-execute-plan-methodology-critique.md` §11): on Codex that policy set inline mode in every execute-plan run before the text's default spoke, and a one-turn Sonnet proxy of the 2.7.1 text ran the stages non-isolated without asking.
+
+Patch, not minor: one sentence of fact on a fallback the skill already has; no new heading, field, step, or check.
+
 ## 2.7.1 - 2026-09-25
 
 ### Fixed
