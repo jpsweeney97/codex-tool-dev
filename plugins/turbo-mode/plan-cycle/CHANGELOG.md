@@ -4,6 +4,14 @@ All notable changes to the Plan Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.4.1 - 2026-09-24
+
+### Fixed
+
+- `implementation-planning` says what its standards claim, at six joints, from the methodology critique of 2026-09-24 (`docs/reviews/2026-09-24-implementation-planning-methodology-critique.md`). The zero-context engineer is named as the standard the plan is written to, and the executor that actually reads it as `execute-plan` or another executor with the repository in front of it, running tasks in order and handing each task alone to an implementer that has the repo but not the conversation; the repeat-not-cross-reference rule now rests on that reader. Complete code and expected output are named as predictions until they run: where a command can run during planning, run it in a scratch copy (never on the target tree) and report what it produced; otherwise say the output is predicted. Self-Review is named as the author's own pass, catching placeholders, drifting names, and contradictions, and not an independent review; the plan's own sentence reporting the placeholder scan is not a scan hit. The Outside-View close credits only what the outside view added, not what grounding or a later review found. The plan opens with the commit the repo was inspected at, stated as what the paths were verified against and never as a freshness gate; once `execute-plan` runs the plan, corrections live in that run's record, and a plan rewritten after execution says so at the top. A test may reference only what an earlier or the same task defines (toolchains that compile the whole test target fail to build on a forward reference), a failing test is a failing assertion and not a failing build, and tasks that change prose, configuration, or documents get the check that can run instead of a faked red-green shape.
+
+Patch, not minor: every change is a sentence of fact or honesty on behavior the skill already asks for; no new heading, field, step, or check. The record behind each: about two dozen execution episodes with no human executor and `execute-plan`'s per-task packet reader; compile-breaking code inside "complete code" in at least four plans and a wrong predicted count in one, against five field-invented ways of measuring instead; Self-Review catching shape defects in about half of fires and no compile or design defect in any; three plans crediting the outside view with catches grounding or a panel made; four stale plans and three self-invalidating "source HEAD equals current HEAD" proofs; three Swift plans broken by a forward symbol reference in a test.
+
 ## 1.4.0 - 2026-09-24
 
 ### Changed
