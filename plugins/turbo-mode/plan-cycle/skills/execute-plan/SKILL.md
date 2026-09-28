@@ -30,6 +30,7 @@ Commit the record at the end of the run unless the user or repo says otherwise.
 ## Subagent Mode
 
 - Before each dispatch, re-check every path and line number the task cites against the current tree. Write the task's packet to `tasks/`: the full task text, the live paths and line numbers, exactly the context the task needs, and each case from Checks For Particular Cases that the task meets. Point the implementer at its packet; do not make it read the plan file or inherit session history. Curated context keeps it focused and preserves your own context for coordination.
+- On Claude Code, dispatch each implementer on Sonnet (`model: sonnet`, which always means the newest Sonnet) and set no model for reviewers, so they run on the session model; a model the user names for the run governs instead. For a `BLOCKED` implementer, the more capable model is the session model.
 - Answer a subagent's questions before letting it proceed.
 - Tasks may run at the same time when neither depends on the other and they change no file in common. While they do, only one runs build or test commands at a time: its implementer asks you before starting them, waits for your go, and tells you when they finish.
 - Two-stage review per task, in order: spec-compliance review first (the change matches the task — nothing missing, nothing extra), then code-quality review. Do not start quality review until spec compliance passes; quality polish on non-compliant work is wasted.

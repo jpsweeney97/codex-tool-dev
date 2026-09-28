@@ -4,6 +4,14 @@ All notable changes to the Plan Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.5.0 - 2026-09-28
+
+### Changed
+
+- `execute-plan` Subagent Mode names the implementer model. On Claude Code, each implementer is dispatched on Sonnet (the `sonnet` alias, which always means the newest Sonnet), reviewers get no model setting and so run on the session model, and a model the user names for the run governs instead. For a `BLOCKED` implementer, the "more capable model" the status protocol already offers is the session model. Before this, the text named no model and implementers ran on the session model. The split puts plan-following implementation on the cheaper model and keeps the reviews and the coordinator's rulings, which are judgment, on the session model. First evidence: the cross-model follow-ups run of 2026-09-28 used Sonnet implementers and Opus reviewers at JP's instruction, and through Task 3 every review finding was in the plan's own code and none in an implementer's work; that plan was heavily scripted, so the evidence is thin for plans that leave the implementer more to decide. Codex behavior is unchanged: the sentence applies on Claude Code only.
+
+Minor, not patch: it changes which model a subagent-mode run dispatches implementers on by default.
+
 ## 1.4.4 - 2026-09-25
 
 ### Fixed
