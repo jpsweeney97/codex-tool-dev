@@ -47,15 +47,26 @@ Use a short lowercase slug from the requested title or session topic. Replace sp
 
 Users may manually move old handoffs into `<project_root>/.agents/handoffs/archive/` — flat, one named level — to relieve a large pile (see `../../references/handoff-format.md`). This skill never moves files.
 
+## Check Before Writing
+
+The session that loads this handoff compares it with the live project and cannot ask what you meant. A fact written from memory of earlier output is the usual way a handoff is already wrong when it is saved. Right before writing the file, check these three kinds of statement with ordinary commands:
+
+- Numbers. Every count or number the handoff states about the current project comes from a command you run now, and the handoff carries the number that command printed: commits ahead or behind, open issues, test totals, line counts, line numbers, hashes. A total stated beside a list matches that list. When the command cannot run now, such as a long test suite or an unreachable remote, leave the number out, or say where it came from and that it was not re-checked.
+- Awaited and held items. Everything the handoff calls awaited, pending, held, not pushed, not merged, or not existing gets one more look now: list the folder, compare the branch with its remote, read the tracker. Write what is true at this moment; another session or the user may have acted since you last looked.
+- Paths. Every file or folder the handoff names exists as written, either absolute or relative to the project root, unless the handoff says it does not exist yet.
+
+These checks change what the handoff says, not its shape: they add no field, marker, or section.
+
 ## Direct Write Procedure
 
 1. Gather current context, current working directory, and git branch/commit when available.
 2. Create `<project_root>/.agents/handoffs/` if needed.
 3. Choose the timestamp path.
-4. Write the Markdown file without overwriting an existing path: use an exclusive-create write when the runtime offers one, otherwise confirm the path does not exist immediately before writing.
-5. If the path exists, append `-2`, `-3`, and so on before `.md` until a free path is found.
-6. If the direct write fails for any other reason, stop and report the file write failure plainly.
-7. Reply with:
+4. Run the checks in Check Before Writing, and correct what you are about to write wherever a command shows something different.
+5. Write the Markdown file without overwriting an existing path: use an exclusive-create write when the runtime offers one, otherwise confirm the path does not exist immediately before writing.
+6. If the path exists, append `-2`, `-3`, and so on before `.md` until a free path is found.
+7. If the direct write fails for any other reason, stop and report the file write failure plainly.
+8. Reply with:
 
 ```text
 Handoff saved: <absolute path>

@@ -20,7 +20,7 @@ Claude Code loads the same source in place as a skills-directory plugin via a sy
 
 | Skill | Purpose |
 | --- | --- |
-| `/save` (`$save`) | Writes a Markdown handoff with session context and project-arc context. |
+| `/save` (`$save`) | Writes a Markdown handoff with session context and project-arc context. Right before writing, it checks the numbers, the awaited or held items, and the paths it is about to state against the live project. |
 | `/load` (`$load`) | Reads a handoff as context, then checks live repository or working-directory state before recommending action. |
 | `/search` (`$search`) | Searches project handoffs with `rg`. Literal search is the default; regex is used only when requested. |
 | `/throughline` (`$throughline`) | Maintains `THROUGHLINE.md`, a rolling, regenerable condensation of the project's handoff pile: narrative, decisions that hold, abandoned paths, frontier. Never mutates handoffs. |

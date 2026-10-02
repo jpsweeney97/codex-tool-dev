@@ -4,6 +4,12 @@ All notable changes to the Handoff plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This changelog begins at 3.2.1; earlier versions predate the file and are not reconstructed here.
 
+## 3.5.0 - 2026-10-01
+
+### Added
+
+- `save-handoff`: a `Check Before Writing` section and a matching step in the write procedure. Right before writing the file, the saving session checks three kinds of statement with ordinary commands. Numbers: every count or number about the current project comes from a command run at that moment (commits ahead or behind, open issues, test totals, line counts, line numbers, hashes), a total matches the list beside it, and a number whose command cannot run now is left out or written with its source and a note that it was not re-checked. Awaited and held items: everything the handoff calls awaited, pending, held, not pushed, not merged, or not existing gets one more look. Paths: every named file or folder exists as written, absolute or relative to the project root, unless the handoff says it does not exist yet. The checks add no field, marker, or section to the handoff, and the skill still calls no helper script. Motivation: a reading of 842 load replies from 2026-06-09 to 2026-10-01, across Claude Code and Codex, found 28 loads where the handoff was already wrong when it was saved. 13 were a wrong count or number, 5 of them "N commits ahead". 7 were an event from the minutes before the save that the handoff did not have. 6 were a wrong file name, path, or pointer. None said work was done that was not done. Two were in this plugin's source repository: one handoff said "nine commits ahead of local main" when the branch was 15 ahead, and one said a push and a mirror sync were held when both had happened about 90 seconds earlier. Forward test: in a disposable repository where five remembered facts had gone stale, 3 of 3 Claude Sonnet runs under the 3.4.1 text wrote all five stale facts into the handoff, and 3 of 3 runs under the 3.5.0 text corrected all five, at a cost of 2 more turns. Codex corrected all five under both texts, 2 of 2 runs each, so the forward test shows the new wording followed on Codex and shows no change there.
+
 ## 3.4.1 - 2026-09-25
 
 ### Fixed
