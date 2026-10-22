@@ -4,6 +4,13 @@ All notable changes to the Relay plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.1.0 - 2026-10-21
+
+### Changed
+
+- `stage-prompt` copies the staged prompt file to the clipboard with `pbcopy` every time, without asking, and reports the copy in a new `Copied:` output line, so the user pastes it into the fresh session without opening `~/prompts`.
+- `stage-prompt` writes the commission body only: the title line, paste instruction, and `---` separator are gone, because the whole file is pasted straight into the fresh session and the filename already records the date, target, and subject.
+
 ## 1.0.0 - 2026-09-02
 
 ### Added
