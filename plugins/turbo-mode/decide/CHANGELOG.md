@@ -4,6 +4,16 @@ All notable changes to the Decide plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.8.0 - 2026-10-21
+
+### Changed
+
+- `outcome-shaping` now treats the user's acceptance as the decision: a pick, a "yes", or a recommendation the user takes settles the part it covers, and the user corrects a wrong read without being asked. The skill no longer asks the user to say the want back in their own words, no longer counts answers by number or by ticked option as weak evidence, and drops the re-type tell that read a run of accepted answers as the questions supplying their own answers. A price stated plainly inside an option the user picks counts as accepted with the option. An unprompted restatement is still welcome and still goes into the capsule verbatim. Content the user adds unasked is still priced before it counts as settled.
+- The capsule's seam now marks what the user accepted against what is the assistant's compression, in place of the user's own words against the compression. `design-exploration`'s seam receipt names the same three parts.
+- Taking the labeled lean in the flight answer settles that trade.
+
+Minor, not patch: the settlement test changed, so a shape the user accepted without restating it now settles. This reverses the 2.5.0 restatement rule at JP's direction on 2026-10-21: "If I take your recommendation on something as we're having our discussion, that means I want to take that recommendation. If I want to take a recommendation with changes, I will say that."
+
 ## 2.7.2 - 2026-09-25
 
 ### Fixed

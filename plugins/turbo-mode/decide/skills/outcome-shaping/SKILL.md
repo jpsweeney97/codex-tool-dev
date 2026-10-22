@@ -7,7 +7,7 @@ description: "Use when the user has a still-muddy idea, plan, design, or decisio
 
 Help the user build a want they can stand behind — before plans, mechanics, or critique take over. Invocation: `/decide:outcome-shaping` on Claude Code or `$outcome-shaping` on Codex.
 
-In genuinely muddy territory there is usually no finished want waiting to be excavated; articulation constructs it. That makes this lane joint authorship, and it makes you a hazard: your read is a draft the user may sign because it is fluent, not because it is theirs. The method exists to keep the user the author — their words, their trades, their restatement — while you supply structure, contrast, and honest evidence.
+In genuinely muddy territory there is usually no finished want waiting to be excavated; articulation constructs it. That makes this lane joint authorship: you draft the read, and the user decides by correcting it, choosing, or accepting it. The method keeps the user the author — their words, their trades, their choices — while you supply structure, contrast, and honest evidence.
 
 This is a shaping lane, not a review, audit, design, ranking, or implementation workflow. It can prepare a handoff, end in "gather evidence first," or end with the want dissolving. That last one is a success, not a failure.
 
@@ -20,8 +20,8 @@ These are the load-bearing invariants; the sections below add depth rather than 
 - Keep the user's load-bearing words, and never transpose the want into a different register than the one it lives in (see The Read).
 - Pace by contingency: serialize questions only when the next depends on the answer to the last; batch independent ones in a single turn (see The Read).
 - Nothing negotiable is settled until it has survived at least one priced trade; preserve a constraint the user explicitly holds fixed and price the flexibility that remains (see Load-Testing the Want).
-- Convergence is the user restating the want in their own words; assent to your text is weak evidence (see Settled, Dissolved, or Routed).
-- When you are working from a summary rather than the user's actual sentences — after context compaction, or deep in a long conversation — say so, and re-confirm the settled shape in their words before any capsule. Anything you cannot source to their words is your compression, and the capsule marks it that way.
+- The user's acceptance settles: a pick, a "yes", or a recommendation the user takes is a real decision, and the user corrects what is wrong without being asked. Never ask the user to restate the want in their own words to prove it (see Settled, Dissolved, or Routed).
+- When you are working from a summary rather than the user's actual sentences — after context compaction, or deep in a long conversation — say so, and show the settled shape for the user to accept or correct before any capsule. Anything the user never saw and accepted is your compression, and the capsule marks it that way.
 - Keep the lane read-only, and hand off by name when the work shifts (see Exits).
 - This method needs a live, responsive human: never run it from a subagent, hook, cron, or other unattended context. When the ask is underspecified and no one is there to correct the read, say what the shaping would have surfaced and stop — report the underspecification rather than interviewing an absent user and treating your own read as their want.
 
@@ -36,7 +36,7 @@ Four shapes to listen for, not a label to declare:
 - **Missing information** — the answer lives in reality, not introspection: would it be fast enough, do users care, does the approach even work. Name the evidence that would settle it and route toward it — a throwaway `prototype`, an experiment, a measurement — instead of asking questions the user can only answer by guessing.
 - **Colliding wants** — two real wants pull apart, or the answer is known and unwelcome. Name the collision plainly, hold both sides in the read (see The Read), and offer `grill-me` when the user wants pressure rather than mirroring.
 
-Re-type as you go. Mud changes shape mid-conversation, and an interview that keeps producing confident answers that die under trades is usually missing-information mud wearing missing-words clothing. The commoner tell runs the other way: a run of answers that all pass — bare yeses, verbatim echoes of your options, text you offered pasted back — means the questions are supplying their own answers. Stop and re-type; the mud is probably not missing-words, or you have started drafting with the user's consent.
+Re-type as you go. Mud changes shape mid-conversation, and an interview that keeps producing confident answers that die under trades is usually missing-information mud wearing missing-words clothing.
 
 ## The Read
 
@@ -59,15 +59,15 @@ Inspection serves the shaping — and artifacts are witnesses, not just backgrou
 
 ## Load-Testing the Want
 
-A want elicited in a cost vacuum is a wish. Preferences are demand curves, not points: "I want X" at cost one and "absolutely not X" at cost ten are the same person. Before treating a negotiable part of the shape as settled, price it at least once — a cost ("still worth it if it costs a week? if it rules out Z? if nobody notices?") or a forced choice between two named shapes ("which matters more, A or B?"). A price the user ticked as an attribute of an option has not been answered as a trade; put it as a question that can be answered no. When the user explicitly holds an obligation or constraint fixed, preserve it and price only the flexibility that remains; if it is unclear what can move, ask. When nothing can move, record the fixed constraint and let the other settlement or parking rules decide the close rather than asking the user to surrender it for the method's sake. Trades narrow, bound, and force a choice; the trade answer is where the user most often adds a part unasked, so read it for content, not for yes. What survives, and what the user gave up to keep it, is the shape.
+A want elicited in a cost vacuum is a wish. Preferences are demand curves, not points: "I want X" at cost one and "absolutely not X" at cost ten are the same person. Before treating a negotiable part of the shape as settled, price it at least once — a cost ("still worth it if it costs a week? if it rules out Z? if nobody notices?") or a forced choice between two named shapes ("which matters more, A or B?"). A price stated plainly inside an option the user picks counts as accepted with the option. When the user explicitly holds an obligation or constraint fixed, preserve it and price only the flexibility that remains; if it is unclear what can move, ask. When nothing can move, record the fixed constraint and let the other settlement or parking rules decide the close rather than asking the user to surrender it for the method's sake. Trades narrow, bound, and force a choice; the trade answer is where the user most often adds a part unasked, so read it for content, not for yes. What survives, and what the user gave up to keep it, is the shape.
 
 Where artifacts can testify, let them. Stated and revealed wants diverge, and the repo, the last three decisions, and any calendar or record the user points you at are witnesses this lane is allowed to call. When the evidence contradicts the stated want, name it plainly, once — "you said latency is secondary; you've merged three latency PRs this month" — then let the user resolve it. One naming, then defer; sustained pressure is `grill-me`'s job, opt-in.
 
 ## Settled, Dissolved, or Routed
 
-Your fluency is a hazard at exactly this point: fatigue, politeness, and a well-written summary all produce assent, and assent is what a capture machine collects. The test of a built want is the user saying it back in words you did not supply, and the restatement surviving.
+The user decides what is settled. A pick, a "yes", or a recommendation the user takes is a real decision, not weak evidence: the user corrects a wrong read without being asked, and takes a recommendation with changes by saying so. Never ask the user to say the want back in their own words, and never discount an answer because it came by number, by ticking an option, or by accepting text you offered.
 
-Treat the shape as settled only when the user has restated it in their own words, every negotiable part has survived at least one priced trade, every explicitly fixed constraint is preserved, and no rival read is still live. A restatement that carries content the read never held has added a new part to the shape: price it when it is negotiable, or confirm and preserve it when the user holds it fixed, before treating the restatement as settled; otherwise carry it in the capsule marked as unpriced or unconfirmed. Watch for unprompted restatement — it is the strongest signal you get. When stakes warrant and it has not happened, ask for it: "say back what we've landed on, in your words." A fast "yes, exactly" to your own prose is noise. When the user has been answering by number, by ticking options, or by pasting back text you offered, every answer so far is assent to your prose, however many there were; the restatement is then the only place their words can appear, so ask for it whatever the stakes, and read what comes back for phrases that are not yours. A restatement assembled from your own phrases is the noise case, not the pass.
+Treat the shape as settled when the user has accepted it, every negotiable part has survived at least one priced trade, every explicitly fixed constraint is preserved, and no rival read is still live. When the user adds content the read never held — in a trade answer, a correction, or an unprompted restatement — that is a new part of the shape: price it when it is negotiable, or confirm and preserve it when the user holds it fixed, before treating the shape as settled; otherwise carry it in the capsule marked as unpriced or unconfirmed. An unprompted restatement in the user's own words is welcome and goes into the capsule verbatim; it is never required.
 
 Three other endings are successes, not failures:
 
@@ -75,7 +75,7 @@ Three other endings are successes, not failures:
 - **Routed** — the mud re-typed and the real need is options, evidence, or pressure. Name the lane and hand off (see Exits).
 - **Parked** — the user is not ready. Name what would ripen it and stop.
 
-When the user quits at the exact moment the shaping got uncomfortable, say so once, gently — "we're stopping right where it got hard; want to leave it there?" — then comply with whatever they choose. Deference with eyes open. Most departures are not flight but redirection — the user asks for the next thing, switches lanes, or pauses the session before the shape is restated. Comply, and mark whatever travels — a capsule, a one-line handoff, a session note — as your compression rather than as settled, naming the trade left unanswered if there is one. If what they choose is a recommendation, give it in place rather than routing an unpriced collision into a lane that must bounce it: pose the trade they skipped as the priced values question, with your lean labeled as a lean, never a pick.
+When the user quits at the exact moment the shaping got uncomfortable, say so once, gently — "we're stopping right where it got hard; want to leave it there?" — then comply with whatever they choose. Deference with eyes open. Most departures are not flight but redirection — the user asks for the next thing, switches lanes, or pauses the session before the shape is settled. Comply, and mark whatever travels — a capsule, a one-line handoff, a session note — as your compression rather than as settled, naming the trade left unanswered if there is one. If what they choose is a recommendation, give it in place rather than routing an unpriced collision into a lane that must bounce it: pose the trade they skipped as the priced values question, with your lean labeled as a lean, never a pick. If the user takes the lean, that settles the trade.
 
 ## Exits
 
@@ -97,13 +97,13 @@ Some settled wants have no lane to go to: the next move is a small artifact — 
 
 Destinations outside the Decide plugin are optional. When an external receiver is available and model-invocable, name the handoff normally. When it is user-invoked, give the human its supported token after the capsule — for `to-questionnaire`, `/to-questionnaire` on Claude Code or `$to-questionnaire` on Codex — and do not treat the route as an operative invocation. When the receiver is unavailable, say so, return the short capsule with the kind of work that remains, and stop; do not perform the missing skill's work in this lane.
 
-When the user accepts a handoff, carry the capsule (below) so the next lane starts from the settled shape instead of re-interviewing it, and carry its seam with it — what was the user's words, what is your compression, what is unpriced — since a handoff that says only "settled" claims authority the shaping never earned. A handoff to `option-shaping` needs the user to fix the candidate set first: concretes you offered them to react to are your probes, not their field.
+When the user accepts a handoff, carry the capsule (below) so the next lane starts from the settled shape instead of re-interviewing it, and carry its seam with it — what the user accepted, what is your compression, what is unpriced — since a handoff that says only "settled" claims authority the shaping never earned. A handoff to `option-shaping` needs the user to fix the candidate set first: concretes you offered them to react to are your probes, not their field.
 
 ## The Capsule
 
 At a handoff point, or when the user asks to summarize, close with a short prose capsule — the closing read, not a decision log:
 
-- what is settled, marking the seam honestly: what the user confirmed in their own words versus what is still your compression
+- what is settled, marking the seam honestly: what the user accepted, by choosing, saying yes, or saying it themselves, versus what is still your compression the user never saw and accepted
 - what is still open, to be treated as live rather than decided
 - the direction the user is leaning, only if one actually emerged
 - the binding constraints and the trades the user already accepted
@@ -131,7 +131,7 @@ These are not epistemology; they are controls on what a language model over-prod
 - No findings reports, audit ledgers, file inventories, decision logs, or unrequested specs — the model's strongest gravitational pull is dumping structure on mud.
 - No verdicts, rankings, or settled recommendations; this lane prepares those moves and hands them off by name. Exception: the user who quits a hard trade and asks for a recommendation anyway (see Settled, Dissolved, or Routed) is answered in place, as the priced values question with a labeled lean, never a pick.
 - No filling beats to look complete; omit rather than manufacture.
-- Fluency is a hazard, not an asset. A crisp wrong read is more convincing than a true muddy one; prefer the user's clumsy sentence over your elegant one.
+- Keep reads plain. A crisp wrong read is harder to spot than a true muddy one; prefer the user's clumsy sentence over your elegant one.
 
 ## Examples
 

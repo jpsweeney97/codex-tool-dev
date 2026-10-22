@@ -81,18 +81,19 @@ you: which one is the real priority?
 
 One naming, then defer. Sustained pressure belongs in `grill-me`.
 
-## Own-Words Close
+## Accepted Close
 
 ```markdown
-Before I call this settled — say back what we've landed on, in your words? If it
-comes out different from my version, yours wins.
+My read so far: you want cutting a release to be boring enough to do on a
+Friday, and you kept that when it cost a week of runbook work. That's the
+settled shape. Next move is `design-exploration` — want to go there?
 ```
 
-User: "I want cutting a release to be so boring I'd do it on a Friday."
+User: "Yes."
 
-That sentence — theirs, not yours — is the settled shape, and it goes into the capsule verbatim.
+The yes settles it. Do not ask the user to say it back in their own words.
 
-When the restatement adds something the read never held, the new part is unpriced. User: "I want releases boring enough for a Friday — and I want a new hire to be able to run one without me."
+When the user's answer adds something the read never held, the new part is unpriced. User: "Yes — and I want a new hire to be able to run one without me."
 
 ```markdown
 The Friday part is what we priced. "Without me" is new — that's a runbook and
@@ -101,7 +102,7 @@ yes, both go into the capsule as settled; if not, the new part rides along
 marked unpriced.
 ```
 
-Price the new part once; do not let a restatement carry unpriced content downstream as settled.
+Price the new part once; do not let an answer carry unpriced content downstream as settled.
 
 ## Dissolution (success)
 
@@ -130,9 +131,7 @@ Name it once, gently, then comply — in place, as the priced values question wi
 ## Anti-Patterns
 
 - Transposing registers: rendering "fastest in its class" as "users stop worrying about latency" — a different want in your vocabulary.
-- Assent-chaining: "Is that right?" → "yes" → "Is that right?" → "yes" — collecting agreement with your prose instead of the user's restatement.
+- The own-words demand: "say back what we've landed on, in your words" after the user already chose or said yes. Their acceptance is the decision; asking again is friction, not rigor.
+- Confirmation-chaining: "Is that right?" after every read. Offer the read; the user corrects what is wrong without being asked.
 - Trade-free utopia: a "settled" want that was never priced — "everything double-checked automatically" survives no honest trade.
 - The ledger: "Decided X / Decided Y / Decided Z" — the read is one rewritten synthesis, never an accumulating log.
-- Capture by fluency: a gorgeous read the user rubber-stamps. If your reads keep getting instant yeses, get suspicious, not proud.
-- The echo restatement: you ask for their words, they hand back two phrases you wrote two turns earlier, and you score it "matches the shape exactly." That is the noise case wearing the pass's clothes; after a loop answered by number, only phrases that are not yours count.
-- The ticked price: a cost written inside an option's description, which the user selected as part of the choice. Nothing was traded; ask the price as a question that can be answered no.
