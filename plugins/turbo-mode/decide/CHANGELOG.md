@@ -4,6 +4,22 @@ All notable changes to the Decide plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.10.0 - 2026-10-22
+
+### Changed
+
+- `outcome-shaping` asks the user to pick one of several readings, concretes, or shapes only when picking one rules the others out. A want under construction often holds several of them, so when the user could want two at once, or one contains another, the skill asks which fit, offers the combination, or asks about the extra part on its own. The Missing options rule drops "two or three" and names the concretes as probes, not rivals. Load-Testing the Want adds that a forced choice is a trade only when the two shapes collide: the skill names what makes them collide, and when the user could have both, prices each on its own cost instead. The examples gain a "Readings That Combine" case and a "false trade" anti-pattern. This is the twin of the 2.9.0 `design-exploration` repair, found when JP asked whether `outcome-shaping` had the same problem: in 41 sessions from 2026-09-24 to 2026-10-22 on both runtimes, JP broke out of a pick-one 8 times in 7 sessions with answers such as "1 and 4", "all three of those", "Both", and "Why can't there be two skills?". Forward test, eight headless runs: the old text showed the defect in 2 of 4 cells even with the 2026-10-21 contract clause loaded, and the new text applied the test in 4 of 4. Record: `docs/reviews/2026-10-22-outcome-shaping-exclusivity-census.md`.
+
+Minor, not patch: two ask steps gained a test that changes what gets asked and how, and a count target was removed.
+
+## 2.9.0 - 2026-10-21
+
+### Changed
+
+- `design-exploration` finds the decisions a design turns on before it proposes approaches, and offers approaches as a pick-one only when they are rival answers to the same decision. The test is whether choosing one rules the others out: options the user could take both of, or one of which contains another, are sorted first into separate decisions, one design with a part to leave out, one dial with priced ends, or a sequence whose decision is the order, and asked in that shape. The approaches step now names the axis the approaches differ on in one sentence and drops the "usually 2-3" count; the count is however many serious answers the decision has, and a cut-down version of the recommended approach is named as the usual filler. JP reported the defect from real use on 2026-10-21: the skill offered options that were not mutually exclusive and asked him to choose between them. A census of ten approach fields in nine post-2.7.2 transcripts on both runtimes (2026-09-28 to 2026-10-21) confirms it: eight fields held at least one option that was not a rival of the others, and the two fields that were real choices each named their axis in a sentence the old text never asked for. Record: `docs/reviews/2026-10-21-design-exploration-exclusivity-census.md`.
+
+Minor, not patch: the approaches step gained a decision test that changes what gets asked and how; one step was added and the count target removed.
+
 ## 2.8.0 - 2026-10-21
 
 ### Changed

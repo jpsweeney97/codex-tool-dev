@@ -58,6 +58,26 @@ two weeks of tuning, still worth it? If not, we've found the real bar — how mu
 trust is worth buying.
 ```
 
+## Readings That Combine
+
+User: "The mods all work now. I want to polish them."
+
+Avoid (a pick-one over readings the user could want together):
+
+```markdown
+"Polish" could mean 3 jobs: less on screen, tidier edges, or one look across
+mods. Which is closest to what you mean?
+```
+
+Prefer:
+
+```markdown
+"Polish" could mean 3 jobs: less on screen, tidier edges, and one look across
+mods. They can all be done, so which of them do you want: one, some, or all 3?
+```
+
+A real user answered the first version "all three of those". Readings of a want under construction are probes; ask for a pick-one only when picking one rules the others out.
+
 ## Fixed Constraint, Remaining Flexibility
 
 User: "The contract deadline is Friday. It cannot move. I need to work out what a responsible release looks like."
@@ -134,4 +154,5 @@ Name it once, gently, then comply — in place, as the priced values question wi
 - The own-words demand: "say back what we've landed on, in your words" after the user already chose or said yes. Their acceptance is the decision; asking again is friction, not rigor.
 - Confirmation-chaining: "Is that right?" after every read. Offer the read; the user corrects what is wrong without being asked.
 - Trade-free utopia: a "settled" want that was never priced — "everything double-checked automatically" survives no honest trade.
+- The false trade: a forced choice between two shapes that do not collide — "should the skill change what you do, or lower the cost of what you do?" when two skills could do both. A real user answered: "Why can't there be two skills?" Name what makes the two collide, or price each on its own cost.
 - The ledger: "Decided X / Decided Y / Decided Z" — the read is one rewritten synthesis, never an accumulating log.
