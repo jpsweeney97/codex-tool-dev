@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bug Epidemiology"
+  short_description: "Find other instances of a confirmed bug"
+  default_prompt: "Use $bug-epidemiology to search for other instances of this confirmed bug and report which instances are verified or ruled out."

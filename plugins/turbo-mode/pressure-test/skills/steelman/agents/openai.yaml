@@ -1,0 +1,4 @@
+interface:
+  display_name: "Steelman"
+  short_description: "Build the strongest case for one position"
+  default_prompt: "Use $steelman to make the strongest case for this position, name its assumptions, and acknowledge the strongest remaining objection."

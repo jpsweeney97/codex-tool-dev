@@ -1,0 +1,4 @@
+interface:
+  display_name: "Test Trust Audit"
+  short_description: "Check whether passing tests provide useful evidence"
+  default_prompt: "Use $test-trust-audit to inspect whether this passing test suite meaningfully checks behavior and report evidence-backed weaknesses without editing files."

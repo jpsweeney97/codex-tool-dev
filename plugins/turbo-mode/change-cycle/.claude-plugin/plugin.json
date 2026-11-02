@@ -1,0 +1,41 @@
+{
+  "name": "change-cycle",
+  "version": "1.0.0",
+  "description": "One code change from radar to every site: mine a file's co-change partners before an edit, derive the touchpoints for a new instance from its siblings, map which consumers an interface change breaks, and apply a decided change uniformly across many sites",
+  "author": {
+    "name": "JP"
+  },
+  "license": "MIT",
+  "keywords": [
+    "co-change",
+    "touchpoints",
+    "interface",
+    "consumers",
+    "migration",
+    "codemod"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Change Cycle",
+    "shortDescription": "Find what a code change touches before you make it, then apply it everywhere it must land",
+    "longDescription": "Four skills for one chain. co-change-radar runs before a non-trivial edit and mines the file's own commit history for the partners that habitually change with it, forcing a disposition for each one the diff does not touch. add-an-x-by-example runs when the edit adds another instance of a category the repo already has, deriving the touchpoint checklist from the commits that added the last few siblings. contract-change-propagation runs when the edit changes a shared interface, classifying each delta and enumerating the consumers before it lands. migration-campaign applies a decided mechanical change uniformly across many sites: shards, a pilot on the riskiest shard, a durable burndown, and verification per shard.",
+    "developerName": "JP",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Before I edit this file, what usually changes with it?",
+      "Add another endpoint like the existing ones",
+      "Map what this signature change breaks",
+      "Apply this rename across every call site"
+    ],
+    "websiteURL": "https://github.com/jpsweeney97/codex-tool-dev/tree/main/plugins/turbo-mode/change-cycle",
+    "privacyPolicyURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/change-cycle/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/change-cycle/TERMS.md",
+    "brandColor": "#D97706",
+    "screenshots": []
+  }
+}

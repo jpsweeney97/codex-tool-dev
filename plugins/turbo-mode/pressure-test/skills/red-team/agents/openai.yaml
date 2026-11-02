@@ -1,0 +1,4 @@
+interface:
+  display_name: "Red Team"
+  short_description: "Model intentional attacks and ways to prevent them"
+  default_prompt: "Use $red-team to identify adversaries, trace plausible attacks on this system, and propose ways to make those attacks harder."

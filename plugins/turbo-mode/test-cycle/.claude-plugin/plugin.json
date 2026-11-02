@@ -1,0 +1,43 @@
+{
+  "name": "test-cycle",
+  "version": "1.0.0",
+  "description": "From failing behavior to trusted green: diagnose an unclear cause, lock the fix test-first, hunt the defect's twins, drive a broken change back to green, and build or audit the test net before a refactor",
+  "author": {
+    "name": "JP"
+  },
+  "license": "MIT",
+  "keywords": [
+    "tdd",
+    "diagnose",
+    "tests",
+    "debugging",
+    "characterization",
+    "regression"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Test Cycle",
+    "shortDescription": "Tests as the proof instrument, from an unclear failure to a green suite you can trust",
+    "longDescription": "Six skills for one chain. diagnose finds a cause whose location is unclear, intermittent, or spread across components, and stops at cause-known. tdd locks the fix or the new behavior in test-first, red-green-refactor. bug-epidemiology hunts the confirmed defect's twins across the codebase before closeout. keep-green drives a change that broke lint or tests back to green with bounded attempts and oscillation detection. Before a refactor of untested code, characterization-tests pins what the code does now and proves the net with a deliberate mutation, and test-trust-audit says whether a green suite can be trusted at all.",
+    "developerName": "JP",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Diagnose this intermittent failure",
+      "Build this feature test-first",
+      "The cause is confirmed; hunt its twins",
+      "Tests broke after my change; get them back to green",
+      "Pin this untested module before I refactor it",
+      "Can this green suite be trusted?"
+    ],
+    "websiteURL": "https://github.com/jpsweeney97/codex-tool-dev/tree/main/plugins/turbo-mode/test-cycle",
+    "privacyPolicyURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/test-cycle/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/test-cycle/TERMS.md",
+    "brandColor": "#059669",
+    "screenshots": []
+  }
+}

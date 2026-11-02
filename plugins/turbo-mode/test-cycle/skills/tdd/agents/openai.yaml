@@ -1,0 +1,4 @@
+interface:
+  display_name: "Test-Driven Development"
+  short_description: "Build behavior through tests before implementation"
+  default_prompt: "Use $tdd to implement this change through failing behavior tests, the code that makes them pass, and refactoring."

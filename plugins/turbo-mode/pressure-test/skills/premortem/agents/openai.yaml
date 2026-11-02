@@ -1,0 +1,4 @@
+interface:
+  display_name: "Premortem"
+  short_description: "Imagine why a committed plan could fail"
+  default_prompt: "Use $premortem to imagine this plan has failed and work backward to plausible causes, preventive actions, and early warning signs."

@@ -1,0 +1,41 @@
+{
+  "name": "pressure-test",
+  "version": "1.0.0",
+  "description": "Challenge a settled position before committing to it: one-question-at-a-time interrogation, a ranked assumption register with confirm-or-kill probes, a past-tense premortem, attacker modeling from the defender's chair, and the strongest case for the side about to be dismissed",
+  "author": {
+    "name": "JP"
+  },
+  "license": "MIT",
+  "keywords": [
+    "grill",
+    "assumptions",
+    "premortem",
+    "red-team",
+    "steelman",
+    "pressure-test"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Pressure Test",
+    "shortDescription": "Five ways to challenge a plan, design, or decision before you commit, none of which renders a verdict",
+    "longDescription": "Five skills for one job: the user holds a plan, design, decision, or position that is settled or nearly settled and wants it challenged before committing. grill-me interrogates it one question at a time until it stops changing. assumption-check lists what must be true, ranks each assumption by weight and uncertainty, and attaches the cheapest confirm-or-kill probe. premortem imagines the accidental failure in the past tense and attaches pre-mitigations and dated tripwires. red-team models the intentional adversary: entry, steps, payoff, ranked by ease times payoff. steelman builds the strongest committed case for the side the user is about to dismiss. None of the five picks a winner or renders a verdict.",
+    "developerName": "JP",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Grill me on this plan",
+      "What am I assuming here, and how would I check each one?",
+      "Premortem this: it is six months later and it failed. Why?",
+      "How would someone abuse this?",
+      "Make the strongest case for the option I am about to reject"
+    ],
+    "websiteURL": "https://github.com/jpsweeney97/codex-tool-dev/tree/main/plugins/turbo-mode/pressure-test",
+    "privacyPolicyURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/pressure-test/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/jpsweeney97/codex-tool-dev/blob/main/plugins/turbo-mode/pressure-test/TERMS.md",
+    "brandColor": "#DC2626",
+    "screenshots": []
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Add an X by Example"
+  short_description: "Find required files from similar additions in Git"
+  default_prompt: "Use $add-an-x-by-example to trace similar additions in Git history and identify every file this addition needs to update."

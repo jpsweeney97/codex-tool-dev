@@ -1,0 +1,4 @@
+interface:
+  display_name: "Characterization Tests"
+  short_description: "Capture current behavior before changing code"
+  default_prompt: "Use $characterization-tests to capture this untested code's current behavior before the refactor and prove the tests detect a behavior change."

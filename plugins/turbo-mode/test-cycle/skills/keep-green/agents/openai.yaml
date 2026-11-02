@@ -1,0 +1,4 @@
+interface:
+  display_name: "Keep Green"
+  short_description: "Repair lint and test failures caused by a change"
+  default_prompt: "Use $keep-green to repair lint or test failures caused by this change and rerun the relevant checks until they pass."

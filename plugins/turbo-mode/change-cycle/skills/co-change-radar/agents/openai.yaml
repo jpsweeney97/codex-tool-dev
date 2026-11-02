@@ -1,0 +1,4 @@
+interface:
+  display_name: "Co-Change Radar"
+  short_description: "Find related files through shared commit history"
+  default_prompt: "Use $co-change-radar to find files that frequently changed with the files in this change, and account for each one missing from the diff, including any needed updates that remain unresolved."

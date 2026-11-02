@@ -1,0 +1,4 @@
+interface:
+  display_name: "Contract Change Propagation"
+  short_description: "Map affected consumers of an interface change"
+  default_prompt: "Use $contract-change-propagation to identify consumers affected by this interface change and recommend a compatible rollout order."

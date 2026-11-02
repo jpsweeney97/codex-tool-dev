@@ -1,0 +1,4 @@
+interface:
+  display_name: "Migration Campaign"
+  short_description: "Apply a defined change consistently across files"
+  default_prompt: "Use $migration-campaign to apply this defined mechanical change across all relevant sites and verify each group before marking it complete."

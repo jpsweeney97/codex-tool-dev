@@ -1,0 +1,4 @@
+interface:
+  display_name: "Diagnose"
+  short_description: "Diagnose unclear, intermittent, or stubborn problems — software bugs or hands-on targets"
+  default_prompt: "Use $diagnose to investigate this problem, test competing explanations, and identify its cause from evidence."

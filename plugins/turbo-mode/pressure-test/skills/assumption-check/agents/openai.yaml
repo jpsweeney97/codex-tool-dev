@@ -1,0 +1,4 @@
+interface:
+  display_name: "Assumption Check"
+  short_description: "Identify assumptions and ways to test them"
+  default_prompt: "Use $assumption-check to identify the assumptions this plan depends on and propose the cheapest way to test each one."
