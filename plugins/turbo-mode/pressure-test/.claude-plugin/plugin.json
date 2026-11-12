@@ -1,6 +1,6 @@
 {
   "name": "pressure-test",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Challenge a settled position before committing to it: one-question-at-a-time interrogation, a ranked assumption register with confirm-or-kill probes, a past-tense premortem, attacker modeling from the defender's chair, and the strongest case for the side about to be dismissed",
   "author": {
     "name": "JP"

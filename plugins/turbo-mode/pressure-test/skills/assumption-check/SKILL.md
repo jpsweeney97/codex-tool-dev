@@ -25,7 +25,7 @@ In a git repo, write the register to the consuming project's planning-docs conve
 The run ends when the artifact is written and every ranked assumption has a probe. Then:
 
 - **Render no verdict.** assumption-check never concludes the plan is safe, ready, de-risked, low-risk, or approved — and it gates nothing: no "do not proceed until" language, ever. Readiness calls belong to the scrutiny lanes when available; the deliverable here is the register, and "three load-bearing assumptions, none yet confirmed" is a complete, honest output.
-- **Offer probe execution; run probes only on ask.** Many probes are the human's to run (a question to a colleague, a check against prod access the agent doesn't have). Executing any probe — even a cheap local command — is a follow-up the user opts into, not part of the run.
+- **Run a cheap probe; offer the rest.** When a probe is a cheap, read-only local check, run it and report what it showed. Many probes are the human's to run (a question to a colleague, a check against prod access the agent doesn't have): offer those and leave them.
 - **Close with one honest line reporting what was enumerated and what remains unprobed.** Never certify coverage: the assumptions most likely to sink a plan are the ones nobody listed, and a register that looks exhaustive is blindest exactly where its author was.
 
 ## When not to use

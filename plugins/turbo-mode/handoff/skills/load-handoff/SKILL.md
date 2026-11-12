@@ -32,7 +32,7 @@ Default search scope for implicit `/load`:
 Project root resolution:
 
 1. Use the main working tree of the repository when the current directory is inside a git repository: the first path listed by `git worktree list`. This equals `git rev-parse --show-toplevel` except inside a linked worktree, where the main tree is used so all worktrees of one repository share one handoff location. If the first listed entry is a bare repository, use `git rev-parse --show-toplevel` instead.
-2. Otherwise use the current working directory.
+2. Otherwise use the nearest directory that already holds `.agents/handoffs/`, starting at the current working directory and walking up, never as far as the home directory. When none does, use the current working directory.
 
 For implicit `/load`, first determine the current branch when inside a git repository. Then choose the newest handoff whose frontmatter `branch` matches the current branch when both values are available. If no branch-matching handoff exists, choose the newest handoff overall.
 
@@ -69,7 +69,7 @@ If the handoff names specific important files, read those live files before maki
 
 ## Throughline Context
 
-When `<project_root>/.agents/handoffs/THROUGHLINE.md` exists, read it in full as background arc context — its size discipline keeps a full read cheap. The throughline lives only at that primary path; check it there even when the selected handoff came from a legacy directory. Add a labeled `Throughline:` line to the response: the as-of date, plus a stale note when its `covers_through` is behind the newest source handoff filename timestamp — compared across the throughline's source set (top-level files plus `archive/` in the primary and legacy handoffs directories, never `THROUGHLINE.md` itself). The short form below carries this line only when the throughline is stale.
+When `<project_root>/.agents/handoffs/THROUGHLINE.md` exists, read its frontmatter for the as-of date and `covers_through`. Read the body only when the selected handoff does not carry enough of the project's history for its next action, or when the user asks for the arc; the handoff is the resume pointer and usually carries what the next step needs. The throughline lives only at that primary path; check it there even when the selected handoff came from a legacy directory. Add a labeled `Throughline:` line to the response: the as-of date, plus a stale note when its `covers_through` is behind a source handoff other than the one being loaded — compared by filename timestamp across the throughline's source set (top-level files plus `archive/` in the primary and legacy handoffs directories, never `THROUGHLINE.md` itself). A throughline that lacks only the loaded handoff is not stale: the load itself supplies that content. The short form below carries this line only when the throughline is stale.
 
 Arc context only: never base the recommended next move on throughline content unless the selected handoff or live files corroborate it.
 
@@ -77,16 +77,17 @@ Arc context only: never base the recommended next move on throughline content un
 
 Choose the reply form only after the full check above has run. The short form shortens the reply, never the check.
 
-Use the short form only when the check found nothing that differs from the handoff, which means all of these hold:
+Use the short form when the check found no change that the handoff's next action depends on. Inside a git repository that means all of these hold:
 
-- The directory is a git repository, and the handoff's frontmatter has `branch` and `commit`.
-- The live branch equals `branch`.
+- The handoff's frontmatter has `branch` and `commit`, and the live branch equals `branch`.
 - Live `HEAD` is `commit` (compare by prefix, since either may be abbreviated), or `git diff --name-only <commit> HEAD` lists only paths under `.agents/handoffs/`, such as a throughline refresh committed after the save.
 - Selection passed over no newer handoff on another branch.
 - The working tree agrees with the handoff: no path the handoff names shows uncommitted changes in `git status` that the handoff does not mention, and when the handoff states the working-tree status, the live status matches it.
 - Every file the handoff names that the check read still says what the handoff says.
 
-Any difference, or any condition you could not check, means the full form in Response Shape below. A stale throughline is not a difference from the handoff: it describes older history by definition, so it does not rule out the short form, and the short form's `Throughline:` line reports it.
+Outside a git repository only the last condition applies, and the live-state line says `not a git repository` in place of the branch and commit.
+
+The full form in Response Shape below is for a difference the next action depends on, a branch or commit that differs in a way the handoff does not explain, or a newer handoff that selection passed over. Any other difference, and any condition you could not check, stays in the short form as one added line. A stale throughline is not a difference from the handoff: it describes older history by definition, so it does not rule out the short form, and the short form's `Throughline:` line reports it.
 
 The short form is about five lines with no headings:
 
@@ -102,6 +103,7 @@ Need from you:
 
 - Age: compute it from `created_at` against the `date -u` output, converting any offset to UTC. Give minutes under two hours, hours under two days, and days after that. If `created_at` is missing or carries no offset, write `age unknown`; never estimate.
 - When `HEAD` moved only by commits under `.agents/handoffs/`, say so in the live-state line, for example "`main` at `c41af07`, one throughline commit after the handoff's `d31f0c9`".
+- When a difference or an unchecked condition stays in the short form, the second line opens `Nothing has changed since then that the next action depends on:`, and one line after it opens `Also different:` or `Not checked:` and names it.
 - When the handoff left no decision open, write `Need from you: tell me to start the next action.` on one line.
 
 The user can ask for the full report at any time, for example `full` or `show the whole load`. Answer with the full form from the same check. Do not mention this option in the short reply.

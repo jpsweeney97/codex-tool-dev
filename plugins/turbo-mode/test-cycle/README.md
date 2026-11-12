@@ -38,7 +38,7 @@ Every write is an ordinary edit in the working repository, under the skill's own
 
 ## Companions
 
-`tdd` ships five reference documents read on demand: `tests.md`, `mocking.md`, `refactoring.md`, `interface-design.md`, `deep-modules.md`. `diagnose` ships `references/hands-on-probes.md` and `scripts/hitl-loop.template.sh`, a human-in-the-loop probe loop template. Every skill ships `agents/openai.yaml` for Codex. No hooks are registered and nothing runs unattended.
+`diagnose` ships `references/hands-on-probes.md` and `scripts/hitl-loop.template.sh`, a human-in-the-loop probe loop template. Every skill ships `agents/openai.yaml` for Codex. No hooks are registered and nothing runs unattended.
 
 ## Provenance
 

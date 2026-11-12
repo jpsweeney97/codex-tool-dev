@@ -1,6 +1,6 @@
 ---
 name: co-change-radar
-description: "Use before a non-trivial edit to a tracked file, and again before declaring a multi-file change complete: mines the file's own commit history for habitual co-change partners and forces a one-line disposition for every flagged partner the diff does not touch — the docs table, fixture, or parallel enum that grep, imports, and LSP cannot see. Do not use when adding a new instance of an existing category from sibling add-commits (`add-an-x-by-example`), or to map consumers of a declared interface change (`contract-change-propagation`)."
+description: "Use before a non-trivial edit to a tracked file, and again before declaring a multi-file change complete: mines the file's own commit history for habitual co-change partners and forces a one-line disposition for every flagged partner the diff does not touch — the docs table, fixture, or parallel enum that grep, imports, and LSP cannot see. Do not use when adding a new instance of an existing category, or to map consumers of a declared interface change (`contract-change-propagation`)."
 ---
 
 # Co-Change Radar
@@ -31,6 +31,6 @@ Before declaring a multi-file change complete, re-run the check against the full
 
 ## Boundaries
 
-- Edit-time, not add-time: adding another instance of a category the repo already has draws on the siblings' add-commits — that is `add-an-x-by-example`. Same evidence source, different question: it asks what adding an X requires; this asks what moves with a file you are changing.
+- Edit-time, not add-time: this skill asks what moves with a file you are changing. What adding a new instance of a category requires is a different question, answered from the commits that added its siblings.
 - No interface required: mapping the consumers of a declared interface change — API, function signature, schema, config key, event payload — is `contract-change-propagation`. This fires on ordinary edits and finds the coupling that has no interface at all.
 - A radar, not a verdict: the output is the partner table and its dispositions. It neither authorizes additional edits nor decides whether the overall task is complete. Reporting a needed but unresolved partner satisfies this check's disclosure requirement without resolving that work.

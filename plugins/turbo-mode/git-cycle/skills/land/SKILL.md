@@ -46,7 +46,7 @@ Plan: commit 4 files → merge chore/x into main (ff) → push main to origin (5
 
 | Observed state | Sequence |
 |---|---|
-| A git operation is in progress | stop → `resolve-conflicts` |
+| A git operation is in progress | stop → finish it first (`merge-branch`, Conflicts) |
 | The branch was cut in a persistent, locked satellite worktree | stop → `worktree-task-cycle` |
 | Dirty tree, every path in scope, branch not protected | commit, then continue |
 | Dirty tree, any path unrelated or unclear | stop |
@@ -81,7 +81,7 @@ The gate collapses certain-yes steps only. Stop, and run no later step, when:
 
 - a check the session established as governing this work is known failing
 - the remote has diverged, or the push is rejected for any reason
-- a merge, rebase, cherry-pick, revert, or bisect is in progress — `resolve-conflicts` owns finishing it
+- a merge, rebase, cherry-pick, revert, or bisect is in progress — `merge-branch` (Conflicts) owns finishing it
 - the push target would be a protected branch that is not this run's own
 - the dirty tree holds files outside the work being landed, or the branch is protected and dirty
 - any constituent skill stops — surface its finding as that skill stated it

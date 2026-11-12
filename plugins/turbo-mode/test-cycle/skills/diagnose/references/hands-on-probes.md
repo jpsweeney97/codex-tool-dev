@@ -1,6 +1,6 @@
 # Hands-on probes for non-software targets
 
-Load this when the target is a household, hardware, appliance, tool, workflow, or AI-behavior problem and the user is the one running every probe. It replaces the software loop list in Phase 1, the tool-preference list in Phase 4, and the software cause-class table; the phases themselves, the one-variable rule, and the hard gates stand.
+Load this when the target is a household, hardware, appliance, tool, workflow, or AI-behavior problem and the user is the one running every probe. It gives the probes and cause-classes for a target the user's hands must reach; the reproduce-first rule, the one-variable rule, and the stop after about three failed fixes stand.
 
 ## The probe ladder — rank by cost, spend the cheap rungs freely
 

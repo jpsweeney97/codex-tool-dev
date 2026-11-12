@@ -62,9 +62,9 @@ Before building the ledgers, size and shape the target: an oversized or bundled 
 
 ### 1. Build Ledgers
 
-Create two inventories:
+For a small change — about 10 or fewer explicit requirements and 10 or fewer changed files — skip the written ledgers: check every requirement and every changed area the same way, and report the verdict, the findings, and what was not verified. Write the two ledgers for a larger change, or when the caller asks for them:
 
-- `Requirements ledger`: every explicit requirement from the plan or spec. When the spec is an `acceptance-map` artifact, each acceptance check is a ready-made requirement — carry its check ID into the ledger and treat its `Passes when` clause as the satisfaction criterion.
+- `Requirements ledger`: every explicit requirement from the plan or spec. When the plan carries an `Acceptance checks` section, or the spec is an older acceptance-map file, each check is a ready-made requirement — carry its check ID and treat its `Passes when` clause as the satisfaction criterion.
 - `Changed-area ledger`: every changed file, function, class, endpoint, command, or user flow.
 
 For each requirement, record an ID, spec source, status, code evidence, and falsification attempt. Use only `satisfied`, `violated`, `unverified`, or `not-applicable`. Mark `not-applicable` only when the change under review — the whole change, not only the reviewed slice — does not reach the requirement, and explain why; a requirement the change implements or touches in files outside a caller-narrowed slice is `unverified`, not `not-applicable`.
@@ -133,7 +133,7 @@ Record commands, manual checks, probes, skipped verification, skip reasons, and 
 
 ### 6. Write Findings
 
-Write findings only after ledgers, failure-mode checks, plan challenge, and verification record exist.
+Write findings only after the requirement and changed-area checks, the plan challenge, and the verification record exist.
 
 Each finding records its type (`implementation`, `plan`, or `unverified`) and severity, plus the full field set defined under Output Format.
 
@@ -190,17 +190,16 @@ Return findings first, then evidence.
 Required sections:
 
 1. `Implementation Review: [target]`
-2. `Findings` — implementation, plan, and unverified findings, severity-ordered. If none, say `No findings`.
-3. `Review Scope` — spec/plan, code, and boundary reviewed.
-4. `Requirements Ledger` — ID, requirement, status, spec source, code evidence, falsification attempt.
-5. `Changed-Area Ledger` — ID, area, linked requirements, failure modes, evidence, residual risk.
+2. `Verdict` — blocker count, verdict, highest-risk area, strongest failed attack attempt, plan gaps. When the verdict is `Split required`, list the named split seams.
+3. `Findings` — implementation, plan, and unverified findings, severity-ordered. If none, say `No findings`.
+4. `Review Scope` — spec/plan, code, and boundary reviewed.
+5. `Requirements Ledger` and `Changed-Area Ledger`, only when step 1 calls for written ledgers — requirement rows carry ID, requirement, status, spec source, code evidence, and falsification attempt; changed-area rows carry ID, area, linked requirements, failure modes, evidence, and residual risk.
 6. `Verification Performed / Not Performed`
 7. `Unverified Areas`
-8. `Verdict` — blocker count, verdict, highest-risk area, strongest failed attack attempt, plan gaps. When the verdict is `Split required`, list the named split seams.
 
 Each finding must include location, finding type (`implementation`, `plan`, or `unverified`), severity, spec expectation, observed behavior, evidence, consequence, and fix or investigation.
 
-If using bounded review mode, add `Bounded Review Scope` before `Findings` and choose the verdict by the precedence order — `Verdict: Partial review only` unless an in-slice `blocker` renders `Blocked`, scoped to the reviewed slice, or the target is mis-shaped for review and you named the split seams (`Verdict: Split required`).
+If using bounded review mode, add `Bounded Review Scope` before `Verdict` and choose the verdict by the precedence order — `Verdict: Partial review only` unless an in-slice `blocker` renders `Blocked`, scoped to the reviewed slice, or the target is mis-shaped for review and you named the split seams (`Verdict: Split required`).
 
 Read [examples](examples/review-findings.md) only when you need a concrete findings-first template or examples of strong and weak findings.
 
@@ -210,7 +209,7 @@ When a `note`, `should-fix`, or `blocker` finding should become a tracked issue 
 
 Do not issue a final verdict until every item passes. Each item names the section that owns it; the owning section's full rule governs:
 
-- [ ] Ledgers complete per step 1: every explicit requirement listed with a status, every changed file or flow accounted for
+- [ ] Every explicit requirement checked and given a status, and every changed file or flow accounted for — in the written ledgers when step 1 calls for them
 - [ ] Every `satisfied` status carries the spec-plus-code evidence step 2's burden of proof demands — carried-forward rows re-earned against the live artifact per Re-Review
 - [ ] Every changed area records a falsification attempt — step 3's strongest failure story
 - [ ] Verification performed and not performed recorded per step 5

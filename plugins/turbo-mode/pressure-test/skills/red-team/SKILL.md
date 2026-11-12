@@ -7,7 +7,7 @@ description: "Use when a system, feature, plan, or asset could be attacked by a 
 
 Become the adversary who wants this to fail, and find the cheapest path to their payoff — so the abuse surface invisible from the builder's chair gets named while it can still be hardened. Invocation: `/red-team` or `$red-team`.
 
-You built it, so you reason from intended use and cannot see the goal-directed attacker; red-team forces the optimizing-adversary posture and asks not "is this boundary well-placed" but "here is the adversary, and here is the cheapest path through it to a payoff." Its product is a ranked field of attack paths, each turned toward a raise-cost mitigation, handed off without a verdict. It is **not a scan**: it reasons about adversary intent and attack economics; it never greps secrets or inspects a repo.
+You built it, so you reason from intended use and cannot see the goal-directed attacker; red-team forces the optimizing-adversary posture and asks not "is this boundary well-placed" but "here is the adversary, and here is the cheapest path through it to a payoff." Its product is a ranked field of attack paths, each turned toward a raise-cost mitigation, handed off without a verdict. It is **not a scan**: it reasons about adversary intent and attack economics. When the target is a repository, read the code the attack paths run through; do not sweep it for secrets.
 
 ## The moves — a rhythm, not a fill-in template
 
@@ -24,7 +24,7 @@ Stop when another pass over the in-scope adversaries yields nothing mechanism-di
 - **Render no verdict.** red-team never concludes "the system is secure" or "this is safe." **Finding no path is not proof of safety** — it is the absence of a found path within a declared scope, nothing more.
 - **Close with the residual, anchored to the declared scope.** Name the adversary capability you assumed bounded and what falls outside the threat scope you declared up front — never a self-drawn coverage map presented as exhaustive. The member of this lane most tempted to stamp "attack surface fully enumerated"; that stamp is forbidden.
 - **Route durable hardening items** (owner + date) to `/triage` (or `$triage`), one per finding, by reference. Keep them inline as the weaker fallback if no tracker is reachable. Chat-first: no artifact beyond these routed items by default.
-- **Compose forward when paths land on a designable surface.** Hand attack paths to `/authorization-design` (or `$authorization-design`) as must-deny rows and to `/injection-safe-inputs` (or `$injection-safe-inputs`) as must-block rows — one or both as the findings warrant, sequentially or concurrently; composition is not a license for subagent fan-out.
+- **Shape paths for the defender.** When a path lands on a designable surface, state it as a must-deny row for access control or a must-block row for input handling, so the defender can test it.
 - **Residual check for LLM surfaces.** When the declared scope included an LLM or agent surface, glance at the OWASP Top 10 for LLM Applications while naming the residual — a checklist for spotting adversary classes the declaration missed, never a sweep to run in the moves and never a coverage map to present.
 - **Stay non-scan.** If the work actually needed is grepping for secrets, scanning dependencies, or auditing a diff, that is `/security-review` or the `security-audit` park — name it and stop; do not improvise a scan.
 

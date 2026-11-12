@@ -1,6 +1,6 @@
 ---
 name: merge-branch
-description: "Use when the user explicitly asks to locally land or merge a completed non-protected git branch into a verified base/default branch. Do not use for PRs, pushes, remote merges, status checks, branch cleanup alone, ambiguous done phrasing, protected branches, active git operations, or unclear merge targets."
+description: "Use when the user explicitly asks to locally land or merge a completed non-protected git branch into a verified base/default branch, or to resolve the conflicts of an in-progress merge, rebase, cherry-pick, or revert and finish it. Do not use for PRs, pushes, remote merges, status checks, branch cleanup alone, ambiguous done phrasing, protected branches, or unclear merge targets."
 ---
 
 # Merge Branch
@@ -22,10 +22,9 @@ Branch deletion is a separate cleanup step. Treat "merge and clean up", "delete 
 - The user asks to push, publish, open a PR, merge a PR, or update a remote.
 - The user asks only for status, review, audit, branch cleanup, or git hygiene.
 - The current branch is the target branch, a protected branch, or detached HEAD.
-- A rebase, merge, cherry-pick, revert, or bisect is in progress. To resolve conflicts from an in-progress merge or rebase and finish it, use `resolve-conflicts`.
+- A bisect is in progress, or a rebase, merge, cherry-pick, or revert is in progress and the user did not ask to finish it. Finishing one follows Conflicts below, not the landing procedure.
 - The merge target is unclear after the preflight checks.
-- Pending changes include unrelated or ambiguous user work.
-- The source branch is checked out in another worktree.
+- Pending changes include a path Step 3 cannot place.
 - The source branch was cut in a persistent, locked satellite worktree (a parked skill workspace). Where `worktree-task-cycle` is available, that lifecycle — including its landing — belongs to it.
 
 ## Procedure
@@ -53,10 +52,9 @@ Treat repo-defined protected branches first; if the repo defines none, treat `ma
 Stop if any precondition fails:
 
 - Current branch is empty, detached, protected, or already the target branch.
-- A git operation is in progress.
-- The source branch is checked out in another worktree.
+- A git operation is in progress. To finish one, see Conflicts below.
 - The target branch cannot be determined confidently.
-- The working tree contains unrelated or ambiguous changes.
+- The working tree holds a path Step 3 cannot place.
 
 ### 2. Determine The Target Branch
 
@@ -71,7 +69,7 @@ If multiple candidates remain, ask the user which branch to merge into. Do not d
 
 Before merging, verify the target branch exists locally. If it does not, stop and report the missing branch rather than fetching or creating it unless the user explicitly asked for that.
 
-Also confirm the target branch is not checked out in another worktree (inspect the `git worktree list --porcelain` output from preflight). If it is, `git switch <target-branch>` in Step 4 will fail — stop now and report that the target is checked out elsewhere. Checking this before Step 3 means you do not commit work to the source branch only to discover you cannot land it. If the target is held by the repo's primary checkout and the source branch lives in a persistent, locked satellite worktree, this is the satellite lifecycle, not this fast path — route to `worktree-task-cycle` where available.
+Also check whether the target branch is checked out in another worktree (inspect the `git worktree list --porcelain` output from preflight). A session inside a linked worktree, such as a Claude Code worktree, always finds the target checked out in the main checkout. In that case Step 4 does not switch branches: it runs the fast-forward merge in the worktree that holds the target, with `git -C <target-worktree-path>`. Require that worktree to show no staged or unstaged tracked changes (`git -C <target-worktree-path> status --porcelain`); if it shows any, stop and report them before Step 3 commits anything. If the target is held by the repo's primary checkout and the source branch lives in a persistent, locked satellite worktree, this is the satellite lifecycle, not this fast path — route to `worktree-task-cycle` where available.
 
 For this fast path, require the target to be an ancestor of the source branch:
 
@@ -94,9 +92,9 @@ This reads the remote-tracking ref already on disk: it runs no `git fetch` and c
 If the worktree has staged, unstaged, or untracked changes:
 
 1. Inspect the changed paths and relevant diffs.
-2. Classify each path as part of the branch work, unrelated user work, generated local artifact, or unclear.
-3. Stop if any path is unrelated or unclear. Ask for a file decision instead of staging broadly.
-4. Stage only approved branch-work paths. Prefer exact pathspecs over `git add -A`.
+2. Classify each path as part of the branch work, other work of the user's, a private or generated local file, or unclear.
+3. When the user's ask covers the pending changes, such as "commit my changes and merge", commit other work of the user's as its own commit, separate from the branch work, and say so in the result. Leave private and generated files uncommitted and name them. Stop and ask for a file decision only for a path that is unclear, or for other work that the ask does not cover.
+4. Stage only the paths being committed. Prefer exact pathspecs over `git add -A`.
 5. Draft a commit message from the diff and match the repo's commit style.
 6. Commit after reviewing the staged diff.
 
@@ -118,7 +116,7 @@ Then confirm the worktree is clean — no staged or unstaged tracked changes:
 git status --porcelain
 ```
 
-If this shows any staged or unstaged tracked entry (any line not prefixed `??`), stop and report the dirty tree rather than switching: `git switch` does not fail on a dirty tree and silently carries staged changes onto the target branch. Untracked files (`??`) that Step 3 already classified as approved generated artifacts are acceptable and may remain; any other dirty state is a stop.
+If this shows any staged or unstaged tracked entry (any line not prefixed `??`), stop and report the dirty tree rather than switching: `git switch` does not fail on a dirty tree and silently carries staged changes onto the target branch. Untracked files (`??`) that Step 3 already classified as private or generated are acceptable and may remain; any other dirty state is a stop.
 
 Switch to the verified target branch and fast-forward merge the source:
 
@@ -127,9 +125,15 @@ git switch <target-branch>
 git merge --ff-only <source-branch>
 ```
 
-If `git switch <target-branch>` fails (for example, the target is checked out in another worktree), stop before merging: any commit you made in Step 3 is safe and intact on the source branch — it is simply not yet landed. Report that and the unblock needed.
+When the target is checked out in another worktree (Step 2), do not switch. Run the merge there instead:
 
-If the fast-forward merge fails, stop. Report that the branch was not merged and name the next decision: rebase the source, perform an explicit merge commit, or abort the local landing. If you take the rebase or explicit-merge path and it conflicts, `resolve-conflicts` owns resolving the conflict and finishing the operation. As above, the Step 3 commit remains intact on the source branch; nothing is lost.
+```bash
+git -C <target-worktree-path> merge --ff-only <source-branch>
+```
+
+If `git switch <target-branch>` fails, stop before merging: any commit you made in Step 3 is safe and intact on the source branch — it is simply not yet landed. Report that and the unblock needed.
+
+If the fast-forward merge fails, stop. Report that the branch was not merged and name the next decision: rebase the source, perform an explicit merge commit, or abort the local landing. If you take the rebase or explicit-merge path and it conflicts, follow Conflicts below. As above, the Step 3 commit remains intact on the source branch; nothing is lost.
 
 Once the merge succeeds, confirm the source's commits actually landed on the target — while the source ref still exists, before any cleanup:
 
@@ -163,3 +167,11 @@ Report one concise result line:
 - If the source branch was deleted (cleanup approved and `git branch -d` succeeded): "Merged `<source>` into `<target>` and deleted the source branch."
 - If cleanup was approved but deletion failed: "Merged `<source>` into `<target>`; could not delete the source branch — <exact failure>."
 - If cleanup was not approved: "Merged `<source>` into `<target>` and kept the source branch."
+
+## Conflicts
+
+The landing procedure above is fast-forward only and cannot conflict. When a rebase or explicit merge the user chose stops on conflicts, or the user asks to finish a merge, rebase, cherry-pick, or revert already in progress, resolve the conflicts and finish the operation under three rules:
+
+- Resolve the conflict; do not `--abort` to escape a hard hunk. Abort only when the user asks or the operation itself was a mistake.
+- Never get the checks to pass by deleting or loosening a test that the merge made fail.
+- Before the commit that finishes the operation, check where it lands. If it would put a commit directly on a protected branch, say so and confirm before committing.

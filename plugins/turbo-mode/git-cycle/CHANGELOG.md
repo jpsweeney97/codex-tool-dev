@@ -4,6 +4,24 @@ All notable changes to the Git Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.0.0 - 2026-11-12
+
+Applies the 2026-11 skill library audit (`/Users/jp/skill-audit-2026-11/VERDICTS.md`, plugin `git-cycle`). JP chose to apply every action on 2026-11-12.
+
+### Removed
+
+- `resolve-conflicts`: the skill is gone. Its 3 standing choices moved into `merge-branch` as a `Conflicts` section: resolve a hard hunk and do not abort to escape it, never delete or loosen a test that the merge made fail, and confirm before a finishing commit lands on a protected branch. The rest of the text was general practice. The usage ledger shows 0 Claude rows and 2 Codex reads. `land`, `worktree-task-cycle`, and the README now point to `merge-branch`.
+- `merge-branch`: 2 stop conditions that cannot occur (the source branch checked out in another worktree; the source is the current branch).
+
+### Changed
+
+- `merge-branch`: when the user's ask covers the pending changes, other work of the user's is committed as its own commit and named in the result, and private or generated files stay uncommitted and are named. Before, any unrelated path stopped the run. In the audit's test run 06 the skill stopped and asked 2 questions whose recommended answers were what a session without the skill did.
+- `merge-branch`: a target branch checked out in another worktree no longer stops the run. The fast-forward merge runs in that worktree with `git -C`, after a check that it has no staged or unstaged tracked changes. This gives a session inside a Claude Code worktree a way to land. A persistent satellite still routes to `worktree-task-cycle`.
+- `merge-branch`: the description now also covers finishing an in-progress merge, rebase, cherry-pick, or revert.
+- `git-hygiene`: the preview rule has 1 exception. When the user says not to ask, local branches already merged into the default branch are deleted with `git branch -d` at once and reported. File deletion, protected branches, and any branch `git branch -d` refuses still get the preview. In the audit's test run 22 the old rule refused "Just do it, no need to ask."
+- `exiting-worktrees`: reduced from about 2,160 words to about 540. It keeps the stop for parked satellites, the question before discarding uncommitted changes, the landed-work check, the facts about the `ExitWorktree` tool, the rule to run removal from the main checkout, and the `-D` rule after a squash merge. It no longer fetches, pulls, or rebases the target branch, no longer asks a second time before removal, and no longer carries its own inline merge: work that still needs landing goes to `merge-branch`.
+- `pr-description`: reduced to 3 choices: draft and stop, open or update a PR only on explicit authority, and never assume `main` as the base.
+
 ## 1.7.0 - 2026-09-02
 
 ### Added

@@ -43,5 +43,5 @@ Routing is part of the contract, in both directions:
 ## Boundaries
 
 - Upstream seam: `diagnose` ends when the cause is known; this begins there and never hunts the original cause.
-- Not verification of the original fix and not its regression test — those belong to the fix's own flow (`tdd`, or `diagnose` Phase 5).
+- Not verification of the original fix and not its regression test — those belong to the fix's own flow (`tdd`, or `diagnose`'s Fix section).
 - Not a repo-wide health sweep: every probe stays scoped to this signature's plausible population. A scored debt audit is `tech-debt-scan`.

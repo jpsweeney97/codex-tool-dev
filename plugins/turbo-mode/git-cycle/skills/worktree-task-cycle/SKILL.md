@@ -46,7 +46,7 @@ Run `inspect` and route on `STATE:`:
 
 | STATE | route |
 |---|---|
-| ACTIVE-CONFLICT | `resolve-conflicts`, then full revalidation |
+| ACTIVE-CONFLICT | resolve the conflicts under `merge-branch`'s Conflicts rules, then full revalidation |
 | IN-FLIGHT | uncommitted work; adjudicate with the user — never park or delete a dirty tree |
 | READY | resume at land |
 | READY-INVALID | fix (or `keep-green` where available), revalidate; barred from land |
@@ -71,5 +71,5 @@ Not in the table: `STATE: PARKED` is the nominal healthy state — nothing to re
 
 - Ordinary branch landing in a single checkout → `merge-branch`.
 - Disposable worktree exit after landing → `exiting-worktrees`.
-- In-progress merge/rebase conflicts → `resolve-conflicts`.
+- In-progress merge/rebase conflicts → `merge-branch` (Conflicts).
 - Done-judgment and final-commit shaping → `closeout-check`.

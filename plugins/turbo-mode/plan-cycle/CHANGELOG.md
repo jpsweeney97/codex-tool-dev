@@ -4,6 +4,24 @@ All notable changes to the Plan Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.0.0 - 2026-11-12
+
+Applies the 2026-11 skill library audit (`/Users/jp/skill-audit-2026-11/VERDICTS.md`, plugin `plan-cycle`). JP chose to apply every action on 2026-11-12.
+
+### Removed
+
+- `acceptance-map`: the skill is gone. Its checks are now an optional `Acceptance checks` section that `implementation-planning` writes into the plan: stable IDs, a `Passes when` clause, and the 3 basis labels `source-backed`, `inferred`, and `decision needed`. The usage ledger shows 0 Claude rows, and the 3 real plans the audit read all said "No acceptance map exists". An older `<source-stem>.acceptance-map.md` file stays readable as part of its source. `spec-drift-reconcile`, the manifest, the README, and `PRIVACY.md` no longer name the skill.
+- `implementation-planning`: the Self-Review section (1 sentence remains), the Outside-View Pass, the task-size tells, the placeholder list, and the rule to split a multi-subsystem source into several plans.
+
+### Changed
+
+- `execute-plan`: the default is to work in the session. A subagent is for a task that is large, or for tasks that are independent and can run at the same time. Before, a fresh subagent per task was the default. In the audit's test run 15 the old default took 2,977 seconds against 131 for the same 8-task plan, with the same 13 of 13 hidden checks passing.
+- `execute-plan`: no dispatch names a model, so implementers and reviewers run on the session model. Before, implementers ran on Sonnet. This removes the skill's own model choice that the 2026-09-04 dispatch-rule park recorded.
+- `execute-plan`: the 2 reviews per task are replaced by 1 independent review of the whole implementation at the end. A task gets its own review only where the plan marks it as risky. The coordinator checks each fix against its finding and asks for a re-review only when a fix changes more than the finding named.
+- `implementation-planning`: reduced from about 1,800 words to about 950. A plan holds complete code only where the exact text matters. It keeps the source line and inspected commit, the `Planner decisions` list, the measured-against-predicted rule, the reading of a source's unsettled parts, the plan folder, and the rule that landing is not a task.
+- `to-prd`: the user-story list is no longer required to be "extremely extensive".
+- `implement-issue` batch mode: a rebase conflict follows `merge-branch`'s Conflicts rules, because `resolve-conflicts` was removed in git-cycle 2.0.0.
+
 ## 1.5.0 - 2026-09-28
 
 ### Changed

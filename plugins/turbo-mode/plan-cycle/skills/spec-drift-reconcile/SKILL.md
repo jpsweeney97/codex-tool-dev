@@ -7,7 +7,7 @@ description: "Use when intent changed mid-stream and the artifacts it flowed int
 
 When intent changed mid-stream and the artifacts it flowed into — PRD, acceptance map, plan, issues, code — have gone stale against the true current intent, reconcile them: surface each drift, take the human's direction decision, then drive the fix through the owning skills. Invocation: `/spec-drift-reconcile` or `$spec-drift-reconcile`.
 
-The forward chain (`outcome-shaping → to-prd → acceptance-map → implementation-planning`, then either `execute-plan` or `to-issues → implement-issue`) is generate-once and one-directional. When intent moves, the agent tends to patch the leaf — the code, or one artifact — while everything upstream silently rots. This skill is the reconciliation path that chain lacks.
+The forward chain (`outcome-shaping → to-prd → implementation-planning`, then either `execute-plan` or `to-issues → implement-issue`) is generate-once and one-directional. When intent moves, the agent tends to patch the leaf — the code, or one artifact — while everything upstream silently rots. This skill is the reconciliation path that chain lacks.
 
 ## The cardinal invariant
 
@@ -48,7 +48,7 @@ Standing authority over a claim → `baseline`, consumed at step 3; reimplement 
 
 Artifact changes are dispatched to an owner where one exists; the reconciler applies the recorded repair mode where none does. The skill also writes its own direction record. The chain was built forward-only, so be honest about where revision is owned and where it is not:
 
-- **In-place owners — dispatch cleanly.** `acceptance-map` updates its artifact in place. Code goes through `tdd` then `keep-green` where available; without them, test first inline and stop when the checks pass. Run an interface delta through `contract-change-propagation` before the plan is finalized where available; without it, list the consumers found and mark the map unverified.
+- **In-place owners — dispatch cleanly.** A plan's `Acceptance checks` section, or an older acceptance-map file, is updated in place. Code goes through `tdd` then `keep-green` where available; without them, test first inline and stop when the checks pass. Run an interface delta through `contract-change-propagation` before the plan is finalized where available; without it, list the consumers found and mark the map unverified.
 - **Forward-create-only nodes — no revision owner exists.** `to-prd` synthesizes a *new* PRD (no in-place mode), `to-issues` only forward-creates, `implementation-planning` writes a *fresh dated* plan, and `/triage` cannot rewrite a stale issue body. At these nodes, supersede by default: create the corrected artifact, mark the old one superseded, and route tracker state through `/triage` where available. Apply a surgical edit in the owner's format only when the direction record's per-artifact target explicitly selects that repair mode. Flag that the forward-only chain lacks revision modes, and do not grow a general revision engine.
 
 Each owner keeps its own downstream gate, and they stack with this one: this gate approves the *direction*; the owners still gate their own publication, commit, or plan approval.

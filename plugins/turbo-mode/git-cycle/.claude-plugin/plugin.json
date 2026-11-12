@@ -1,6 +1,6 @@
 {
   "name": "git-cycle",
-  "version": "1.7.0",
+  "version": "2.0.0",
   "description": "Coherent local-to-shared git lifecycle: hygiene, closeout, landing, the one-authorization post-endorsement ritual, persistent-satellite task cycles, release cutting, worktree exit, PR-body authoring, and PR review response",
   "author": {
     "name": "JP"

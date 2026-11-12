@@ -4,6 +4,25 @@ All notable changes to the Handoff plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This changelog begins at 3.2.1; earlier versions predate the file and are not reconstructed here.
 
+## 4.0.0 - 2026-11-12
+
+Applies the 2026-11 skill library audit (`/Users/jp/skill-audit-2026-11/VERDICTS.md`, plugin `handoff`). JP chose to apply every action on 2026-11-12.
+
+### Removed
+
+- `search-handoffs`: the skill and its `/search` (`$search`) token are gone. `load-handoff` names the 3 handoff folders, and a session searches a named folder without a skill. The usage ledger shows 0 Claude rows and 25 Codex reads, the last on 2026-07-28.
+- `save-handoff`: the boundary line that listed parts of a retired design (transaction state, reservations, consumed markers, and so on).
+
+### Changed
+
+- Project root, in all 3 skills, the README, and `scripts/check-handoff-paths.sh`: outside a git repository the root is now the nearest directory that already holds `.agents/handoffs/`, walking up from the current directory and never as far as the home directory. Before, the root was the current directory, so a save from a subfolder of a project that is not a git repository started a second pile.
+- `load-handoff`: a load reads the throughline's frontmatter and reads its body only when the handoff does not carry enough history for its next action, or the user asks. Before, every load read the whole document.
+- `load-handoff`: the throughline counts as stale only when it is behind a handoff other than the one being loaded.
+- `load-handoff`: the short form is allowed outside a git repository, and a difference that the next action does not depend on stays in the short form as one added line. The full form is for a difference the next action depends on, an unexplained branch or commit difference, or a newer handoff that selection passed over.
+- `save-handoff`: the `Check Before Writing` section is now 1 step in the write procedure. In the audit's test run 26 the current model corrected 5 of 5 stale facts without the section.
+- `throughline`: a coverage-count mismatch no longer forces a full rebuild. The refresh reports the mismatch with the drift line, leaves `sources_folded` as a count of files read, and rebuilds when the user asks or when the pile is small.
+- `throughline`: a refresh updates the sections the new handoffs change and compresses older material when the document nears its size budget. Before, every refresh rewrote the whole document.
+
 ## 3.5.0 - 2026-10-01
 
 ### Added

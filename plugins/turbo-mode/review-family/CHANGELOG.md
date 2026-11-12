@@ -4,6 +4,23 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.0.0 - 2026-11-12
+
+Applies the 2026-11 skill library audit (`/Users/jp/skill-audit-2026-11/VERDICTS.md`, plugin `review-family`). JP chose to apply every action on 2026-11-12. In the audit's 4 review test runs a session without the skill found every planted defect the skill session found, and the skill session wrote 1.7 to 2.8 times as much. The major version marks removed parts of 3 output contracts.
+
+### Removed
+
+- `scrutinize`: the 9 fixed sections and the rule that forbade dropping or reordering them, the numbered workflow with its 2 passes, the lens list, and `references/review-format.md`. The repo canary `scripts/check-review-family.sh` no longer checks template headings.
+- `scrutinize-skill`: the 8 fixed sections, the numbered workflow, and the rule to write `None found` in an empty section.
+- `review-reviewer`: the separate Current Claim Check packet, the pull-request snapshot recovery rules, the 4 failure words, the Review Judgment labels, the fixed packet sections, and the guards against model triggering. The frontmatter still makes the skill start only on the user's explicit token.
+
+### Changed
+
+- `scrutinize`: the reply leads with the verdict, then the findings that carry it. It keeps both verdict sets with their precedence orders, the clearance and expiry wording, the re-scrutiny rule, the review-only stop, bounded review mode, the evidence and citation rules, and a 1-paragraph formal stress test. About 1,780 words became about 1,190.
+- `scrutinize-skill`: the reply leads with the verdict. It keeps the scope list, the evidence floor with its 4 proof classes and the rule to name the cheapest check behind a reasoned claim, the overlap check with its 6 words, the verdict words with their precedence, bounded review mode, and the guardrails.
+- `review-reviewer`: about 2,970 words became about 750. It keeps the 3 truth verdicts, the 5 dispositions, the 3 severities, the step that looks for issues the review missed, and the 2 closing lists `Act On Now` and `Do Not Act On`. A single claim or a few pasted claims get the same treatment, which takes over the job of the removed standalone `claim-check` skill. The skill stops after the adjudication unless the user also asked for the fixes.
+- `implementation-review`: the verdict comes first in the output. The 2 written ledgers are for a change with more than about 10 explicit requirements or more than about 10 changed files, or when the caller asks; a smaller change gets the same checks without the written ledgers. It keeps the lens index and the verdict words that `execute-plan` reports. A plan's `Acceptance checks` section replaces the removed `acceptance-map` skill as the source of ready-made requirements.
+
 ## 0.18.1 - 2026-09-08
 
 ### Fixed

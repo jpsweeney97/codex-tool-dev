@@ -1,6 +1,6 @@
 ---
 name: throughline
-description: "Use when the user runs `/throughline` or `$throughline`, or asks to create, refresh, or rebuild the project's derived `.agents/handoffs/THROUGHLINE.md` from saved handoffs. Do not use for loading, saving, or searching individual handoffs, ad hoc Markdown synthesis, or treating the throughline as authoritative current truth."
+description: "Use when the user runs `/throughline` or `$throughline`, or asks to create, refresh, or rebuild the project's derived `.agents/handoffs/THROUGHLINE.md` from saved handoffs. Do not use for loading or saving individual handoffs, ad hoc Markdown synthesis, or treating the throughline as authoritative current truth."
 ---
 
 # Throughline
@@ -24,9 +24,9 @@ One document per project:
 Project root resolution:
 
 1. Use the main working tree of the repository when the current directory is inside a git repository: the first path listed by `git worktree list`. This equals `git rev-parse --show-toplevel` except inside a linked worktree, where the main tree is used so all worktrees of one repository share one handoff location. If the first listed entry is a bare repository, use `git rev-parse --show-toplevel` instead.
-2. Otherwise use the current working directory.
+2. Otherwise use the nearest directory that already holds `.agents/handoffs/`, starting at the current working directory and walking up, never as far as the home directory. When none does, use the current working directory.
 
-Frontmatter and section prompts live in `../../references/throughline-format.md`. The frontmatter coverage pair — `covers_through` (basename of the newest source handoff folded in) and `sources_folded` (total count of source files folded) — is the only machinery. It is a high-water mark of what was folded, not proof of complete coverage, and never truth: when it conflicts with the listed source set or live reality, rebuild rather than trust it.
+Frontmatter and section prompts live in `../../references/throughline-format.md`. The frontmatter coverage pair — `covers_through` (basename of the newest source handoff folded in) and `sources_folded` (total count of source files folded) — is the only machinery. It is a high-water mark of what was folded, not proof of complete coverage, and never truth: when it conflicts with the listed source set or live reality, say so in the reply.
 
 ## Source Set
 
@@ -47,7 +47,7 @@ Ordering: compare by the parsed timestamp portion of the basename, never raw str
 ## Refresh Behavior
 
 - **First run** (no `THROUGHLINE.md`): read the full source set, synthesize, write the document — creating `<project_root>/.agents/handoffs/` first if it does not exist (a legacy-only pile has sources but no primary directory). If the source set is empty, report plainly that no handoffs exist and write nothing.
-- **Subsequent runs**: read the existing document, then list the full source set — listing is cheap; reading is the cost. Check for drift: if the count of source files at or below `covers_through` does not match `sources_folded`, older files have appeared or vanished below the water line (restored archive, copied legacy handoffs, branch switch, deleted sources) — fall back to a full rebuild. When the count went down, sources have vanished and the rebuilt document will no longer represent their condensed history — the only remaining record if they were deleted rather than moved. Never absorb that silently: report the count delta with the drift line in the Reply section. Otherwise read only source handoffs newer than `covers_through`, then rewrite the whole document, folding in new material and compressing older material as needed. Rewrite, not append — that is what keeps the document concise forever.
+- **Subsequent runs**: read the existing document, then list the full source set — listing is cheap; reading is the cost. Check for drift: if the count of source files at or below `covers_through` does not match `sources_folded`, older files have appeared or vanished below the water line (restored archive, copied legacy handoffs, branch switch, deleted sources). Never absorb that silently: report the count delta with the drift line in the Reply section, and leave `sources_folded` as a count of files actually read, so the difference stays visible until a rebuild. Rebuild in full when the user asks, or unasked when the pile is small enough to read in one session; otherwise carry on with the refresh. Then read only source handoffs newer than `covers_through` and update the document: add what the new handoffs bring, revise the entries they change, and move what they close out of the frontier. Compress older material when the document nears its size budget; a refresh need not rewrite sections the new handoffs do not touch.
 - **Recovery**: coverage frontmatter missing or malformed, document inconsistent with reality, or user asks for a rebuild → re-read the full source set and regenerate.
 - **Coverage honesty**: advance `covers_through` and `sources_folded` only over handoffs actually read in full. If the source set cannot be fully read (size, unreadable files), either fold a bounded batch or stop and report the blocked rebuild. A bounded batch folds the oldest unfolded sources first, so the coverage pair stays a true claim about everything at or below the water line. Never claim coverage past what was read.
 
@@ -55,7 +55,7 @@ Ordering: compare by the parsed timestamp portion of the basename, never raw str
 
 - Preserve branch and project qualifiers from handoff frontmatter: a decision made on a side branch is recorded as branch-scoped unless it demonstrably governs the project. Only truly project-level settled choices belong under "Decisions That Hold".
 - Weigh concrete session and evidence sections over broad "Project Arc" restatements: handoffs saved after the throughline exists may echo the throughline itself, and an echo is not independent confirmation.
-- Size budget: keep the document under ~64KB (~16k tokens) — load-handoff reads it in full every session, so every byte here is a recurring per-session cost. When a refresh would exceed the budget, compress oldest-first: pre-frontier eras collapse to era-cluster summaries (their detail already lives in the source handoffs — losing it here loses nothing), while "Decisions That Hold" and the frontier keep the most detail. Settled do-not entries keep their one-line decision plus pointer, not their full rationale. What to compress and how is judgment; the budget itself is not.
+- Size budget: keep the document under ~64KB (~16k tokens) — a session that reads it pays for every byte. When a refresh would exceed the budget, compress oldest-first: pre-frontier eras collapse to era-cluster summaries (their detail already lives in the source handoffs — losing it here loses nothing), while "Decisions That Hold" and the frontier keep the most detail. Settled do-not entries keep their one-line decision plus pointer, not their full rationale. What to compress and how is judgment; the budget itself is not.
 
 ## Boundaries
 
@@ -70,10 +70,10 @@ Ordering: compare by the parsed timestamp portion of the basename, never raw str
 Throughline updated: <absolute path> (folded N handoffs, covers through <newest folded handoff>)
 ```
 
-When the rebuild was triggered by a source count that went down, append one drift line:
+When the count of sources at or below `covers_through` does not match `sources_folded`, append one drift line:
 
 ```text
-Drift: sources below covers_through went from <old count> to <new count>; vanished sources are no longer represented.
+Drift: sources at or below covers_through number <live count>, and sources_folded says <folded count>; run a rebuild to reconcile.
 ```
 
 For a bounded-batch fold, use the partial wording instead — never the normal reply:

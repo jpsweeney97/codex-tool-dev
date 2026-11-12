@@ -4,6 +4,21 @@ All notable changes to the Decide plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 3.0.0 - 2026-11-12
+
+Applies the 2026-11 skill library audit (`/Users/jp/skill-audit-2026-11/VERDICTS.md`, plugin `decide`). JP chose to apply every action on 2026-11-12. The major version marks 3 reversed stops: `ideate` may pick, `option-shaping` recommends, and `making-recommendations` no longer stops on an uneven field.
+
+### Changed
+
+- `ideate`: when the same message that asks for the field also asks which one to pick, the reply gives the whole un-ranked field first and then the pick with its reason. Before, the skill stopped "even when the same message asks 'so which?'". In the audit's test run 08 that stop produced "I did not pick 1." The hand-off to `option-shaping` no longer requires the user to fix the candidate set when they already named the candidates.
+- `option-shaping`: the reply closes with one labelled recommended option unless the user asks for none; the comparison above it stays un-ranked. The reply has a length aim: shorter than 400 words, or shorter than 600 for more than 3 options. Before, 4 of 7 real replies ran over 1,100 words. The words "comparison surface" are gone from the skill.
+- `option-shaping`: the rules for a field fixed by a composition workflow moved out of the skill and into `deliberate`'s brief for its Shape stage, which now tells that stage to give no recommended option, to ask the user nothing, to keep every candidate, and to return `field collision unresolved` when a collision blocks option identity.
+- `making-recommendations`: reduced from about 2,370 words to about 1,390. The Field Readiness stop and its hand-off to `option-shaping` are gone: a less developed option is compared on stated assumptions. The handoff rule "name the lane, ask, and stop" is gone: the skill names a neighboring lane in one line and still gives its recommendation unless an honest exit applies. The rule to register both leans before any comparison and the rule to credit "the case, not the ceremony" are gone. It keeps the runner-up's case, the conditions that would reverse the pick, the check on agreeing with the user's lean, the ban on numeric scoring, the 4 close shapes, and the 3 honest exits.
+- `outcome-shaping`: reduced from about 2,910 words to about 2,040. The Core Behavior list, the list of 7 registers, and the clauses added by past repairs are gone, with their rules kept in the sections. When the skill offers options it labels the one it recommends. A part of the shape is priced where it has a real cost; a part with no real cost settles by the user's acceptance. It keeps acceptance as settlement, the rival test before a pick-one ask, fixed constraints, and the capsule's account of what the user accepted.
+- `design-exploration`: step 4, the approval paragraph, and the handoff capsule paragraph are reduced to their rules, about 140 fewer words. It keeps the approval stop, the offer of a review before approval, the rival test, and no automatic commit.
+- `deliberate`: no stage dispatch names a model, so each stage runs on the session model. Before, every stage ran on Opus.
+- `scope-cut`: no longer names `deploy-plan`, which was removed from the library.
+
 ## 2.10.0 - 2026-10-22
 
 ### Changed

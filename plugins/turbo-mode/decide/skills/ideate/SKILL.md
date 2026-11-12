@@ -1,13 +1,13 @@
 ---
 name: ideate
-description: "Use when the user wants to GENERATE a wide field of genuinely different options before any narrowing: brainstorm broadly, widen the solution space, get unstuck from one idea, see what is possible. Produces a deliberately un-ranked field and stops there. Do not use to develop a fixed sketch-level field to comparable depth (`option-shaping`), pick among options already on the table (`making-recommendations`), shape or approve one design (`design-exploration`), clarify a still-muddy goal (`outcome-shaping`), or stress-test a settled plan (`grill-me`)."
+description: "Use when the user wants to GENERATE a wide field of genuinely different options before any narrowing: brainstorm broadly, widen the solution space, get unstuck from one idea, see what is possible. Produces a deliberately un-ranked field, and adds a pick only when the same message asks for one. Do not use to develop a fixed sketch-level field to comparable depth (`option-shaping`), pick among options already on the table (`making-recommendations`), shape or approve one design (`design-exploration`), clarify a still-muddy goal (`outcome-shaping`), or stress-test a settled plan (`grill-me`)."
 ---
 
 # Ideate
 
 Widen a clear-enough prompt into a deliberately un-narrowed field of genuinely different options, then stop before any ranking. Invocation: `/ideate` or `$ideate`.
 
-ideate widens the solution space itself and hands the field off un-narrowed. It never ranks, scores, picks, or develops one option into a design.
+ideate widens the solution space itself and hands the field off un-narrowed. It never ranks or scores the field or develops one option into a design, and it picks only when asked (see Stop and handoff).
 
 ## The moves — a rhythm, not a fill-in template
 
@@ -25,11 +25,11 @@ Close with **one honest line naming which of the prompt's own fixed points the f
 
 **Never certify coverage over a frame you chose.** A coverage ledger, a per-option provenance tag, a gap-map, or a "stop at N" box-count all manufacture false confidence worse than honest ignorance — the field looks complete relative to a map you drew, exactly where that map is blindest. The two honest coverage signals are both externally anchored: the prompt-anchored frame-break, and the untouched-fixed-points line.
 
-## Hard stop and handoff
+## Stop and handoff
 
-Stop the instant a stable field exists — even when the same message asks "so which?" Crossing into evaluation is the failure this skill exists to prevent. Hand off by naming the lane and stopping, never silently continuing:
+Stop when a stable field exists. One exception: when the same message that asked for the field also asks which one you would pick, give the whole field first, un-ranked, then your pick and its reason as a separate closing part. The pick never trims or reorders the field. Otherwise name the lane that fits and stop:
 
-- **`option-shaping`** — the user wants generated options developed to comparable depth without a pick. Ask them to fix the candidate set before handoff; do not select a promising subset, carry the whole divergent field by default, or predefine its comparison questions.
+- **`option-shaping`** — the user wants generated options developed to comparable depth. Carry the candidates the user names; when they name none, ask which to carry rather than choosing a subset yourself.
 - **`making-recommendations`** — the user wants to pick and the options are already serious enough to compare.
 - **`design-exploration`** — the user wants a few approaches shaped and developed toward an approved design.
 - **`outcome-shaping`** — generating revealed the goal itself is too muddy to know what counts as an option.

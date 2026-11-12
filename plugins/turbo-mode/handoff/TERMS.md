@@ -1,6 +1,6 @@
 # Handoff Terms of Service
 
-Handoff is a local Codex plugin for saving, loading, and searching Markdown handoffs.
+Handoff is a local Codex plugin for saving and loading Markdown handoffs.
 
 The plugin manifest declares the Handoff plugin under the MIT license. The plugin is provided without warranty.
 

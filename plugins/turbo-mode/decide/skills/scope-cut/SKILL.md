@@ -21,7 +21,7 @@ scope-cut does not rank rival options, critique a design, or widen anything — 
 
 Stop once the slice is coherent and every cut item is on the ledger. Then:
 
-- **Render no build/no-build verdict.** scope-cut decides what belongs in the minimal slice, not whether to commit to it — that commitment is the human's, or a downstream `making-recommendations` / `deploy-plan` call. The deliverable is the kept slice plus the deferred ledger. Chat-first: both are delivered in the response — no artifact beyond the routed `/triage` items by default.
+- **Render no build/no-build verdict.** scope-cut decides what belongs in the minimal slice, not whether to commit to it — that commitment is the human's, or a downstream `making-recommendations` call. The deliverable is the kept slice plus the deferred ledger. Chat-first: both are delivered in the response — no artifact beyond the routed `/triage` items by default.
 - **Close with one honest line naming what the slice gives up** — the capability or guarantee, anchored to the original scope's *own* stated goals, that the user will notice is missing. Never certify the cut as safe or complete: a slice that looks whole relative to a line you drew is blindest exactly where you drew it. The honest signal is the named tradeoff, not "nothing important was lost."
 
 ## When not to scope-cut

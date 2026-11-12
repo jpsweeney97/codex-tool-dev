@@ -32,7 +32,7 @@ The committed net — tests, any golden files, the capture harness — plus a sh
 - New behavior, with expectations from an independent source of truth → `tdd`. Characterization deliberately inverts that rule for existing behavior: the running code is the only authority, and the net asserts "unchanged", never "correct" — execution-derived expectations are the point here, not the tautology `tdd` forbids.
 - Auditing an existing suite's honesty → `test-trust-audit` where available; once this net lands, that audit is how a later reader checks it hasn't rotted.
 - Proving one change once → `verify` / `behavior-smoke-test` where available; this leaves a durable net.
-- Mapping INTENDED behavior from a settled spec → `acceptance-map`; this pins ACTUAL behavior from execution, bugs included.
+- Mapping INTENDED behavior from a settled spec → the `Acceptance checks` section of `implementation-planning`; this pins ACTUAL behavior from execution, bugs included.
 
 ## Done when
 

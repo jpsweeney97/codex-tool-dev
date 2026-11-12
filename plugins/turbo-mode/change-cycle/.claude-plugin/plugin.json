@@ -1,7 +1,7 @@
 {
   "name": "change-cycle",
-  "version": "1.0.0",
-  "description": "One code change from radar to every site: mine a file's co-change partners before an edit, derive the touchpoints for a new instance from its siblings, map which consumers an interface change breaks, and apply a decided change uniformly across many sites",
+  "version": "2.0.0",
+  "description": "One code change from radar to every site: mine a file's co-change partners before an edit, map which consumers an interface change breaks, and apply a decided change uniformly across many sites",
   "author": {
     "name": "JP"
   },
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "Change Cycle",
     "shortDescription": "Find what a code change touches before you make it, then apply it everywhere it must land",
-    "longDescription": "Four skills for one chain. co-change-radar runs before a non-trivial edit and mines the file's own commit history for the partners that habitually change with it, forcing a disposition for each one the diff does not touch. add-an-x-by-example runs when the edit adds another instance of a category the repo already has, deriving the touchpoint checklist from the commits that added the last few siblings. contract-change-propagation runs when the edit changes a shared interface, classifying each delta and enumerating the consumers before it lands. migration-campaign applies a decided mechanical change uniformly across many sites: shards, a pilot on the riskiest shard, a durable burndown, and verification per shard.",
+    "longDescription": "Three skills for one chain. co-change-radar runs before a non-trivial edit and mines the file's own commit history for the partners that habitually change with it, forcing a disposition for each one the diff does not touch. contract-change-propagation runs when the edit changes a shared interface, classifying each delta and enumerating the consumers before it lands. migration-campaign applies a decided mechanical change uniformly across many sites: shards, a pilot on the riskiest shard, a durable burndown, and verification per shard.",
     "developerName": "JP",
     "category": "Productivity",
     "capabilities": [

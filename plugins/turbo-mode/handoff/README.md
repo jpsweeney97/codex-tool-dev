@@ -1,6 +1,6 @@
 # Handoff
 
-Handoff is a skill-only plugin for session continuity in Claude Code and Codex. It helps the agent save, load, and search Markdown handoffs under the current project's `.agents/handoffs/` directory, which both runtimes share.
+Handoff is a skill-only plugin for session continuity in Claude Code and Codex. It helps the agent save and load Markdown handoffs under the current project's `.agents/handoffs/` directory, which both runtimes share.
 
 Handoffs are resume pointers, not live truth. A future session should read the handoff, check the live repository or working directory, and then continue from what still matches reality.
 
@@ -20,9 +20,8 @@ Claude Code loads the same source in place as a skills-directory plugin via a sy
 
 | Skill | Purpose |
 | --- | --- |
-| `/save` (`$save`) | Writes a Markdown handoff with session context and project-arc context. Right before writing, it checks the numbers, the awaited or held items, and the paths it is about to state against the live project. |
+| `/save` (`$save`) | Writes a Markdown handoff with session context and project-arc context. Right before writing, it re-checks the numbers, the awaited or held items, and the paths it is about to state. |
 | `/load` (`$load`) | Reads a handoff as context, then checks live repository or working-directory state before recommending action. |
-| `/search` (`$search`) | Searches project handoffs with `rg`. Literal search is the default; regex is used only when requested. |
 | `/throughline` (`$throughline`) | Maintains `THROUGHLINE.md`, a rolling, regenerable condensation of the project's handoff pile: narrative, decisions that hold, abandoned paths, frontier. Never mutates handoffs. |
 
 Handoff does not ship runtime modules, helper scripts, command hooks, validators, transaction state, chain state, archive-on-load behavior, or recovery protocols. The only derived document is the throughline: a rolling, regenerable arc summary that never mutates handoffs and is always rebuildable from them.
@@ -37,12 +36,12 @@ Primary storage is:
 <project_root>/.agents/handoffs/
 ```
 
-This directory is shared by Claude Code and Codex sessions. Legacy handoffs under `.claude/handoffs/` and `.codex/handoffs/` remain readable by `/load` and `/search`, are folded by `/throughline` as source material, and are never written to.
+This directory is shared by Claude Code and Codex sessions. Legacy handoffs under `.claude/handoffs/` and `.codex/handoffs/` remain readable by `/load`, are folded by `/throughline` as source material, and are never written to.
 
 Project root resolution:
 
 1. Use the main working tree of the repository when the current directory is inside a git repository: the first path listed by `git worktree list`. This equals `git rev-parse --show-toplevel` except inside a linked worktree, where the main tree is used so all worktrees of one repository share one handoff location. If the first listed entry is a bare repository, use `git rev-parse --show-toplevel` instead.
-2. Otherwise use the current working directory.
+2. Otherwise use the nearest directory that already holds `.agents/handoffs/`, starting at the current working directory and walking up, never as far as the home directory. When none does, use the current working directory.
 
 Handoff filenames use:
 
@@ -60,7 +59,7 @@ Writes use direct path selection with no hidden state:
 
 The plugin does not add gitignore rules, stage files, commit files, auto-prune files, or manage cross-machine continuity. Whether `.agents/handoffs/` is tracked or ignored remains host-repository policy.
 
-Users may manually move old handoffs into `<project_root>/.agents/handoffs/archive/` to relieve a large pile — flat, one named level. Archived handoffs stay searchable, remain `/throughline` source material, and are loadable by explicit path. See `references/handoff-format.md`. No skill performs the move.
+Users may manually move old handoffs into `<project_root>/.agents/handoffs/archive/` to relieve a large pile — flat, one named level. Archived handoffs remain `/throughline` source material and are loadable by explicit path. See `references/handoff-format.md`. No skill performs the move.
 
 ## Handoff Format
 
@@ -102,7 +101,6 @@ These headings are prompts, not a schema. The quality bar is the resumption test
 ## Boundaries
 
 - `/save` is the only skill that writes session handoffs. `/throughline` writes only the derived `THROUGHLINE.md` and never mutates handoffs.
-- `/load` and `/search` are read-only.
+- `/load` is read-only.
 - Loading never archives, moves, copies, edits, deletes, marks consumed, or writes recovery metadata.
-- Searching does not parse a custom schema, build an index, rank semantically, deduplicate, or mutate files.
 - Source shape does not prove installed runtime behavior. Plugin install, local cache refresh, marketplace update, or current-thread runtime reload require separate explicit proof.

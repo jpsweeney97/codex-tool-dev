@@ -2,10 +2,10 @@
 
 Shape a want, widen the field, develop the options, choose honestly, and record the decision when it deserves a record. Eight skills covering one arc, from a still-muddy want to a defensible choice or an approved design, with optional capture of the decision made:
 
-- `outcome-shaping` — help the user build a want they can stand behind through an interview-style shaping conversation: type why they cannot say it yet, keep their words in an evolving read, price at least one trade, and treat a dissolved want as a success.
-- `ideate` — widen a clear-enough prompt into a deliberately un-ranked field of genuinely different options, de-clustered on mechanism, and stop before any ranking.
-- `option-shaping` — develop a fixed field of sketch-level options to comparable resolution, question by question across every option, without ranking or choosing.
-- `making-recommendations` — choose among serious, comparable options like an honest advisor: register the leans, filter on hard constraints, check dominance, compare genuine trades in words, pose the priced values question when the ranking turns on it, and give the runner-up its strongest case.
+- `outcome-shaping` — help the user build a want they can stand behind through an interview-style shaping conversation: type why they cannot say it yet, keep their words in an evolving read, price the parts that have a real cost, and treat a dissolved want as a success.
+- `ideate` — widen a clear-enough prompt into a deliberately un-ranked field of genuinely different options, de-clustered on mechanism, and add a pick only when the same message asks for one.
+- `option-shaping` — develop a fixed field of sketch-level options to comparable resolution, question by question across every option, then close with one labelled recommended option unless the user asks for none.
+- `making-recommendations` — choose among options like an honest advisor: check agreement with the user's lean, filter on hard constraints, check dominance, compare genuine trades in words, pose the priced values question when the ranking turns on it, and give the runner-up its strongest case.
 - `design-exploration` — turn a clear-enough outcome into compared approaches and an approved design before any implementation lane takes over.
 - `deliberate` — run Generate, Prune, Shape, Recommend, and Contest on one decision without stopping to ask, and return the recommendation, a ledger of every cut with its revival condition, and a check of the cuts against the recommendation. Each stage uses a fresh agent when supported; otherwise the stages run in the current context and the close discloses that they were not isolated.
 - `scope-cut` — partition an already-shaped scope into keep, defer, and cut under a binding constraint, keeping the slice coherent and preserving every removed item with a re-entry condition.
@@ -35,7 +35,7 @@ Each skill writes only where its own contract says:
 | --- | --- |
 | `outcome-shaping` | Nothing by default. Chat-only; a shaping brief (the capsule) only when the user explicitly asks, placed per repo convention and left uncommitted; a ticket or other durable artifact likewise only on an explicit ask. |
 | `ideate` | Nothing. The un-ranked field is delivered in the response. |
-| `option-shaping` | Nothing. The comparison surface is delivered in the response. |
+| `option-shaping` | Nothing. The comparison and its recommended option are delivered in the response. |
 | `making-recommendations` | Nothing. The close is delivered in the response. |
 | `design-exploration` | A design document only when the user asks or approves, placed per repo convention; never committed automatically. |
 | `deliberate` | Seven Markdown files (`00-setup.md` through `06-close.md`) in a fresh directory under the runtime's scratch or temp root, left in place so the user can read them and re-run from any stage. Nothing under the working tree. |

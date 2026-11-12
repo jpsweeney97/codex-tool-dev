@@ -1,6 +1,6 @@
 {
   "name": "test-cycle",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "From failing behavior to trusted green: diagnose an unclear cause, lock the fix test-first, hunt the defect's twins, drive a broken change back to green, and build or audit the test net before a refactor",
   "author": {
     "name": "JP"
