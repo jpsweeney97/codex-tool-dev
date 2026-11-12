@@ -60,6 +60,7 @@ Separate proof classes:
 - `runtime`: installed plugin or loaded skill state observed through the active runtime
 
 Do not claim runtime installation, activation, hook behavior, marketplace sync, or loaded-skill state from source files, cache files, or marketplace metadata alone.
+
 ## The Review
 
 Lead the reply with the verdict, then the findings that carry it, most severe first. Lead each finding with the user-visible behavior: wrong amount of friction, unclear first move, poor handoff, generic output, missing stop condition, false proof, or ambiguous overlap. Name the exact target, the anchor the verdict binds to (commit, version, or date; state when none is determinable), what you inspected, and what you left unread that could change the review. Give the review no fixed section list, and leave out a part that has no finding.
@@ -74,7 +75,7 @@ These judgment failure modes are examples, not a checklist to complete. Do not a
 
 Each finding must include a compact evidence pointer: file/line, command output, observed behavior, or `unverified` with the exact missing check. Do not make location-free findings when the target is file-backed.
 
-Findings are argued hypotheses until something independent of the arguing tests them; the recorded failures run both directions — raw findings over-claim under independent verification, and a review re-refuting its own finding has killed a real defect. Re-arguing, for a finding or against it, is not verification. Present `Required Changes` as what the findings warrant if they hold, and when one finding carries the verdict, prefer the cheapest disconfirming check over more argument.
+Findings are argued hypotheses until something independent of the arguing tests them; the recorded failures run both directions — raw findings over-claim under independent verification, and a review re-refuting its own finding has killed a real defect. Re-arguing, for a finding or against it, is not verification. Present the required changes as what the findings warrant if they hold, and when one finding carries the verdict, prefer the cheapest disconfirming check over more argument.
 
 When the review's required changes have been applied and the open claim becomes "the changed contract is now followed," proving that is `behavior-smoke-test`'s job (`/behavior-smoke-test` or `$behavior-smoke-test` where available), not a re-review.
 

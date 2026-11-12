@@ -11,7 +11,7 @@ Stance: reject until evidence earns a better verdict. Review the exact target; r
 
 Explicit review-family invocation (including namespaced forms such as `review-family:scrutinize`) wins, but a generic invocation does not override target-type handoff to `scrutinize-skill`, `implementation-review`, or `system-design-review`. This skill wins natural-language adversarial requests — "scrutinize", "be brutal", "tear this apart", "reject until proven otherwise" — and execution-readiness reviews, when no narrower target-type lane applies:
 
-- Agent skill or skill-support target → `scrutinize-skill`, even when the user said "scrutinize" (target shapes listed in the Workflow).
+- Agent skill or skill-support target (a skill directory, `SKILL.md`, `agents/openai.yaml`, a skill reference or example, or a proposed skill contract) → `scrutinize-skill`, even when the user said "scrutinize".
 - Completed code or artifact against a plan/spec → `implementation-review`, even for an adversarial implementation pass.
 - Architecture or system-design lens → `system-design-review`.
 - Supplied-review adjudication or pasted-claim checks → `review-reviewer`.

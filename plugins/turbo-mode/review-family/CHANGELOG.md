@@ -4,6 +4,13 @@ All notable changes to the Review Family plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.0.1 - 2026-11-12
+
+### Fixed
+
+- `scrutinize`: the routing line for skill targets pointed at a Workflow section that 1.0.0 removed. The line now lists the target shapes itself.
+- `scrutinize-skill`: a sentence named a `Required Changes` section that 1.0.0 removed; it now says "the required changes". A blank line is restored before the `## The Review` heading.
+
 ## 1.0.0 - 2026-11-12
 
 Applies the 2026-11 skill library audit (`/Users/jp/skill-audit-2026-11/VERDICTS.md`, plugin `review-family`). JP chose to apply every action on 2026-11-12. In the audit's 4 review test runs a session without the skill found every planted defect the skill session found, and the skill session wrote 1.7 to 2.8 times as much. The major version marks removed parts of 3 output contracts.
