@@ -1290,12 +1290,23 @@ def cmd_land(args: argparse.Namespace) -> int:
         primary_status = git_must(
             "status", "--porcelain", cwd=topo.primary.path, what="primary status"
         )
-        if primary_status:
-            refuse(
-                "primary tree is not clean: "
-                + "; ".join(primary_status.splitlines()[:10])
+        status_lines = primary_status.splitlines()
+        untracked = [line[3:] for line in status_lines if line.startswith("?? ")]
+        tracked = [line for line in status_lines if not line.startswith("?? ")]
+        if tracked:
+            refuse("primary tree is not clean: " + "; ".join(tracked[:10]))
+        if untracked:
+            # Untracked paths do not block landing: the fast-forward merge below
+            # leaves them alone, and git itself refuses the merge when it would
+            # overwrite one. Report them so the session sees what the primary holds.
+            policy(
+                "primary untracked paths (report-and-record): "
+                + ", ".join(untracked[:10])
+                + (f" (+{len(untracked) - 10} more)" if len(untracked) > 10 else "")
             )
-        proof("primary clean (status --porcelain empty)")
+            proof("primary has no tracked changes (untracked paths reported)")
+        else:
+            proof("primary clean (status --porcelain empty)")
         markers = primary_op_markers(topo)
         if markers:
             refuse(f"operation in progress in primary: {markers}")

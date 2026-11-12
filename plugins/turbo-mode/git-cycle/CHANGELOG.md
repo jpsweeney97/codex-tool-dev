@@ -4,6 +4,15 @@ All notable changes to the Git Cycle plugin are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.1.0 - 2026-11-12
+
+Two changes the 2026-11 skill library audit named outside its 59 actions. JP approved both on 2026-11-12.
+
+### Changed
+
+- `land`: the push is the last step. The order is commit, merge, `save-handoff`, `throughline`, push, so 1 push carries any commit the handoff pair leaves on the branch. Before, the push came first, and a repository that tracks `THROUGHLINE.md` ended each run with 1 commit that was not pushed. The handoff is written before the push and says the push is the next step. A stop in `save-handoff` or `throughline` no longer holds the push. The result packet lists `Pushed` last.
+- `worktree-task-cycle`: the helper's `land` verb refuses only when the primary checkout has changes to tracked files. Untracked paths are reported on a `POLICY:` line and no longer stop the landing. Git still refuses the fast-forward merge when it would overwrite an untracked file, and the helper reports that refusal with nothing changed. Before, any untracked file in the primary stopped the landing, and sessions moved files aside to get past it.
+
 ## 2.0.0 - 2026-11-12
 
 Applies the 2026-11 skill library audit (`/Users/jp/skill-audit-2026-11/VERDICTS.md`, plugin `git-cycle`). JP chose to apply every action on 2026-11-12.
